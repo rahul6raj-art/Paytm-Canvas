@@ -77,10 +77,26 @@ export function filterFontCatalog(
     .filter((g) => g.fonts.length > 0);
 }
 
-/** First family name in a CSS font-family stack. */
+/** First usable family name in a CSS stack (skips `var(...)` tokens). */
 export function primaryFontName(fontFamily: string): string {
-  const first = fontFamily.split(",")[0]?.trim() ?? "";
-  return first.replace(/^['"]|['"]$/g, "").replace(/^var\([^)]+\),\s*/i, "").trim() || "sans-serif";
+  const parts = fontFamily.split(",").map((p) => p.trim().replace(/^['"]|['"]$/g, ""));
+  for (const part of parts) {
+    if (!part || /^var\s*\(/i.test(part)) continue;
+    return part;
+  }
+  return "sans-serif";
+}
+
+/** Font stack for Canvas 2D `ctx.font` (no CSS variables). */
+export function canvasFontFamilyStack(fontFamily: string): string {
+  const names: string[] = [];
+  const parts = fontFamily.split(",").map((p) => p.trim().replace(/^['"]|['"]$/g, ""));
+  for (const part of parts) {
+    if (!part || /^var\s*\(/i.test(part)) continue;
+    names.push(part.includes(" ") ? `"${part}"` : part);
+  }
+  if (names.length === 0) return "sans-serif";
+  return names.join(", ");
 }
 
 export function fontFamilyLabel(value: string, catalog?: FontFamilyOption[]): string {

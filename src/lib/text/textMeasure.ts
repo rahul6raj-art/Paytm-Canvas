@@ -1,3 +1,4 @@
+import { canvasFontFamilyStack } from "@/lib/fonts/fontCatalog";
 import type { ResolvedTextTypo } from "@/lib/textTypography";
 import type { TextAlign } from "./textNodeModel";
 
@@ -32,7 +33,7 @@ export function getTextMeasureContext(): CanvasRenderingContext2D {
 }
 
 export function buildFontString(typo: ResolvedTextTypo): string {
-  return `${typo.fontWeight} ${typo.fontSize}px ${typo.fontFamily}`;
+  return `${typo.fontWeight} ${typo.fontSize}px ${canvasFontFamilyStack(typo.fontFamily)}`;
 }
 
 /** Measure a string width including per-character letter-spacing. */

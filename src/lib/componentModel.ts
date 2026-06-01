@@ -93,6 +93,92 @@ export function listComponentMasters(nodes: Record<string, EditorNode>): EditorN
   );
 }
 
+export function componentMatchesSearchQuery(node: EditorNode, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  if (node.name.toLowerCase().includes(q)) return true;
+  if (node.componentId?.toLowerCase().includes(q)) return true;
+  const vp = node.variantProperties;
+  if (vp) {
+    for (const [key, val] of Object.entries(vp)) {
+      if (key.toLowerCase().includes(q) || String(val).toLowerCase().includes(q)) return true;
+    }
+  }
+  return false;
+}
+
+export type ComponentLibraryGroup = {
+  id: string;
+  label: string;
+  variants: EditorNode[];
+};
+
+/** Group variant siblings; standalone masters become single-item groups. */
+export function groupComponentMasters(masters: EditorNode[]): ComponentLibraryGroup[] {
+  const byVariantGroup = new Map<string, EditorNode[]>();
+  const standalone: EditorNode[] = [];
+
+  for (const m of masters) {
+    if (m.variantGroupId) {
+      const list = byVariantGroup.get(m.variantGroupId) ?? [];
+      list.push(m);
+      byVariantGroup.set(m.variantGroupId, list);
+    } else {
+      standalone.push(m);
+    }
+  }
+
+  const groups: ComponentLibraryGroup[] = [];
+
+  for (const [vgId, variants] of byVariantGroup) {
+    const sortedVariants = [...variants].sort((a, b) =>
+      variantSortKey(a).localeCompare(variantSortKey(b)),
+    );
+    const label = masterGroupLabel(sortedVariants);
+    groups.push({ id: vgId, label, variants: sortedVariants });
+  }
+
+  for (const m of standalone) {
+    groups.push({ id: m.id, label: m.name, variants: [m] });
+  }
+
+  return groups.sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function variantSortKey(node: EditorNode): string {
+  const vp = node.variantProperties;
+  if (vp?.Variant != null) return String(vp.Variant);
+  return node.name;
+}
+
+function masterGroupLabel(variants: EditorNode[]): string {
+  if (variants.length === 0) return "Component";
+  const first = variants[0]!;
+  const base = first.name.replace(/\s*·\s*variant$/i, "").trim();
+  return base || first.name;
+}
+
+export function filterComponentLibraryGroups(
+  groups: ComponentLibraryGroup[],
+  query: string,
+): ComponentLibraryGroup[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return groups;
+  return groups
+    .map((g) => {
+      const labelMatch = g.label.toLowerCase().includes(q);
+      const variants = labelMatch
+        ? g.variants
+        : g.variants.filter((m) => componentMatchesSearchQuery(m, q));
+      return { ...g, variants };
+    })
+    .filter((g) => g.variants.length > 0);
+}
+
+export function flattenComponentLibraryGroups(groups: ComponentLibraryGroup[]): EditorNode[] {
+  return groups.flatMap((g) => g.variants);
+}
+
 function parentListKey(parentId: string | null): string {
   return parentId ?? EDITOR_ROOT_KEY;
 }

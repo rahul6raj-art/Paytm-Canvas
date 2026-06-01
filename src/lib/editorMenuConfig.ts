@@ -156,6 +156,7 @@ export const EDITOR_MENUS: EditorMenuDef[] = [
       ),
       cmd("create-typography-style"),
       cmd("open-styles-panel"),
+      cmd("open-components-panel"),
     ],
   },
   {

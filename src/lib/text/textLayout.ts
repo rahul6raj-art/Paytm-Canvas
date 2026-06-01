@@ -31,8 +31,9 @@ export function computeTextBoxSize(
     };
   }
   if (mode === "auto-height") {
+    const contentWidth = layout.width + TEXT_BOX_PAD_X * 2;
     return {
-      width: Math.max(MIN_TEXT_BOX, currentWidth),
+      width: Math.max(MIN_TEXT_BOX, currentWidth, contentWidth),
       height: Math.max(MIN_TEXT_BOX, layout.height + TEXT_BOX_PAD_Y * 2),
     };
   }
@@ -48,9 +49,38 @@ export function textLayoutPatchForNode(
 ): Partial<EditorNode> | null {
   if (node.type !== "text") return null;
   const typo = resolveTextTypo(node);
-  const mode = node.textResizeMode ?? "auto-height";
+  const mode = node.textResizeMode ?? "auto-width";
   if (mode === "fixed") return null;
   const size = computeTextBoxSize(text, typo, mode, node.width, node.height);
   if (size.width === node.width && size.height === node.height) return null;
   return { width: size.width, height: size.height };
+}
+
+/** Node fields that can change measured text bounds. */
+export const TEXT_LAYOUT_AFFECTING_KEYS = new Set<keyof EditorNode>([
+  "content",
+  "fontFamily",
+  "fontSize",
+  "fontWeight",
+  "lineHeight",
+  "letterSpacing",
+  "textResizeMode",
+  "width",
+]);
+
+export function patchAffectsTextLayout(patch: Partial<EditorNode>): boolean {
+  return Object.keys(patch).some((k) =>
+    TEXT_LAYOUT_AFFECTING_KEYS.has(k as keyof EditorNode),
+  );
+}
+
+/** Merge width/height updates when typography or content changes (Figma auto-height / auto-width). */
+export function withTextLayoutPatch(
+  node: EditorNode,
+  patch: Partial<EditorNode>,
+): Partial<EditorNode> {
+  if (node.type !== "text" || !patchAffectsTextLayout(patch)) return patch;
+  const merged = { ...node, ...patch };
+  const layoutPatch = textLayoutPatchForNode(merged, merged.content ?? "");
+  return layoutPatch ? { ...patch, ...layoutPatch } : patch;
 }

@@ -310,6 +310,15 @@ export function EditorKeyboardShortcuts() {
         return;
       }
 
+      if (!mod && e.altKey && e.code === "Digit2") {
+        e.preventDefault();
+        const stComp = useEditorStore.getState();
+        if (stComp.editorMode === "design") {
+          stComp.setLeftTab("components");
+        }
+        return;
+      }
+
       if (mod && e.code === "KeyG") {
         e.preventDefault();
         if (e.shiftKey) useEditorStore.getState().ungroupSelection();

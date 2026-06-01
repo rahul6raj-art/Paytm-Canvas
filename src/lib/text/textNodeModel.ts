@@ -27,7 +27,11 @@ export type TextNodeModel = {
   isEditing: boolean;
 };
 
-export const DEFAULT_TEXT_RESIZE_MODE: TextResizeMode = "auto-height";
+/** New point text hugs content horizontally (Figma default). */
+export const DEFAULT_TEXT_RESIZE_MODE: TextResizeMode = "auto-width";
+
+/** Minimum width for an empty text layer so the caret is easy to click. */
+export const EMPTY_TEXT_PLACEHOLDER_WIDTH = 40;
 export const DEFAULT_TEXT_ALIGN: TextAlign = "left";
 export const MIN_TEXT_BOX = 8;
 
@@ -57,8 +61,8 @@ export function normalizeTextAlign(value: unknown): TextAlign {
 }
 
 export function normalizeTextResizeMode(value: unknown): TextResizeMode {
-  if (value === "auto-width" || value === "fixed") return value;
-  return "auto-height";
+  if (value === "auto-width" || value === "auto-height" || value === "fixed") return value;
+  return DEFAULT_TEXT_RESIZE_MODE;
 }
 
 /** Build a normalized text model from an editor node + edit flag. */

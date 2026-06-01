@@ -8,6 +8,7 @@ import {
   wrapWidthForResizeMode,
 } from "@/lib/text/textNodeModel";
 import { ensureFontFamilyLoaded } from "@/lib/fonts";
+import { textLayoutPatchForNode } from "@/lib/text/textLayout";
 import { renderTextToCanvas } from "@/lib/text/textCanvasRender";
 import { getCursorPositionFromPoint } from "@/lib/text/textCursor";
 import {
@@ -66,6 +67,16 @@ export function TextCanvasView({
         caretIndex: isEditing ? caretIndex : null,
         caretVisible: isEditing && caretVisible,
       });
+      const fresh = useEditorStore.getState().nodes[node.id];
+      if (fresh?.type === "text") {
+        const layoutPatch = textLayoutPatchForNode(fresh, fresh.content ?? "");
+        if (
+          layoutPatch &&
+          (layoutPatch.width !== fresh.width || layoutPatch.height !== fresh.height)
+        ) {
+          useEditorStore.getState().updateNodeStyle(node.id, layoutPatch, { skipHistory: true });
+        }
+      }
     });
 
     return () => {

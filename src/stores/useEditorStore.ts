@@ -91,7 +91,13 @@ import {
   shouldProportionalFrameScale,
 } from "@/lib/resizeContent";
 import { convertFigBytesToPaytmCraft, isFigmaFigFile } from "@/lib/figImport";
-import { computeTextBoxSize, textLayoutPatchForNode } from "@/lib/text/textLayout";
+import {
+  computeTextBoxSize,
+  patchAffectsTextLayout,
+  textLayoutPatchForNode,
+  withTextLayoutPatch,
+} from "@/lib/text/textLayout";
+import { EMPTY_TEXT_PLACEHOLDER_WIDTH, MIN_TEXT_BOX } from "@/lib/text/textNodeModel";
 import { resolveTextTypo } from "@/lib/textTypography";
 import { createShapeNode } from "@/lib/shapes/shapeCreation";
 import type { ShapeType } from "@/lib/shapes/shapeModel";
@@ -2517,14 +2523,22 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const instRoot = findInstanceRoot(s.nodes, id);
       let nodes = { ...s.nodes };
       const stylePart: Partial<EditorNode> = {};
-      const directPart: Partial<EditorNode> = { ...patch };
+      const directPart: Partial<EditorNode> = {};
+
+      const layoutBase =
+        n.type === "text" && instRoot && instRoot !== id
+          ? mergeInstanceOverrides(n, s.nodes)
+          : n;
+      const layoutAwarePatch =
+        n.type === "text" ? withTextLayoutPatch(layoutBase, patch) : patch;
 
       if (instRoot && instRoot !== id) {
-        for (const k of Object.keys(patch)) {
+        for (const k of Object.keys(layoutAwarePatch)) {
+          const v = layoutAwarePatch[k as keyof typeof layoutAwarePatch];
           if (INSTANCE_STYLE_KEYS.has(k)) {
-            const v = patch[k as keyof typeof patch];
             (stylePart as Record<string, unknown>)[k] = v;
-            delete (directPart as Record<string, unknown>)[k];
+          } else {
+            (directPart as Record<string, unknown>)[k] = v;
           }
         }
         if (Object.keys(stylePart).length > 0) {
@@ -2537,6 +2551,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
           io[id] = { ...prev, ...stylePart };
           nodes[instRoot] = { ...root, instanceOverrides: io };
         }
+      } else {
+        Object.assign(directPart, layoutAwarePatch);
       }
 
       if (Object.keys(directPart).length > 0) {
@@ -2544,7 +2560,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }
 
       const merged = nodes[id]!;
-      const keys = Object.keys(patch);
+      const keys = Object.keys(layoutAwarePatch);
       const layoutSelf =
         (merged.type === "frame" || merged.type === "group") &&
         keys.some((k) => LAYOUT_FIELD_KEYS.has(k));
@@ -2556,6 +2572,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
         if ((merged.type === "frame" || merged.type === "group") && (merged.layoutMode ?? "none") !== "none") {
           refresh.add(id);
         }
+      }
+      if (
+        n.type === "text" &&
+        patchAffectsTextLayout(patch) &&
+        (layoutAwarePatch.width != null || layoutAwarePatch.height != null) &&
+        n.parentId
+      ) {
+        refresh.add(n.parentId);
       }
       nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
       if (geom) {
@@ -2574,18 +2598,35 @@ export const useEditorStore = create<EditorState>((set, get) => {
     set((s) => {
       const n = s.nodes[id];
       if (!n || n.locked) return s;
-      const root = findInstanceRoot(s.nodes, id);
-      if (root && root !== id) {
-        const rn = s.nodes[root]!;
+      const instRoot = findInstanceRoot(s.nodes, id);
+      const layoutBase =
+        n.type === "text" && instRoot && instRoot !== id
+          ? mergeInstanceOverrides(n, s.nodes)
+          : n;
+      const finalPatch =
+        n.type === "text" ? withTextLayoutPatch(layoutBase, patch) : patch;
+
+      let nodes: Record<string, EditorNode>;
+      if (instRoot && instRoot !== id) {
+        const rn = s.nodes[instRoot]!;
         const io: Record<string, Record<string, unknown>> = { ...(rn.instanceOverrides ?? {}) };
         const prev =
           io[id] && typeof io[id] === "object" && !Array.isArray(io[id])
             ? { ...(io[id] as Record<string, unknown>) }
             : {};
-        io[id] = { ...prev, ...patch };
-        return { nodes: { ...s.nodes, [root]: { ...rn, instanceOverrides: io } } };
+        io[id] = { ...prev, ...finalPatch };
+        nodes = { ...s.nodes, [instRoot]: { ...rn, instanceOverrides: io } };
+      } else {
+        nodes = { ...s.nodes, [id]: { ...n, ...finalPatch } };
       }
-      return { nodes: { ...s.nodes, [id]: { ...n, ...patch } } };
+
+      if (n.type === "text" && patchAffectsTextLayout(patch) && n.parentId) {
+        const fp = finalPatch as Partial<EditorNode>;
+        if (fp.width != null || fp.height != null) {
+          nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId]);
+        }
+      }
+      return { nodes };
     });
   },
 
@@ -2707,9 +2748,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const { width: tw, height: th } = computeTextBoxSize(
         content,
         typo,
-        "auto-height",
-        220,
-        36,
+        "auto-width",
+        MIN_TEXT_BOX,
+        MIN_TEXT_BOX,
       );
       const id = `text-${Date.now()}`;
       const roots = [...(s.childOrder[ROOT] ?? [])];
@@ -2728,7 +2769,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         locked: false,
         expanded: true,
         content,
-        textResizeMode: "auto-height",
+        textResizeMode: "auto-width",
         ...ts,
         fillEnabled: true,
         fillOpacity: 1,
@@ -2784,15 +2825,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
     set((s) => {
       const ts = textStyleFromSelection(s);
       const typo = resolveTextTypo(ts);
-      const seedWidth = 200;
       const { width: tw, height: th } = computeTextBoxSize(
         "",
         typo,
-        "auto-height",
-        seedWidth,
-        1,
+        "auto-width",
+        MIN_TEXT_BOX,
+        MIN_TEXT_BOX,
       );
-      const { x, y } = worldCenteredRootPoint(worldX, worldY, tw, th);
+      const boxW = Math.max(tw, EMPTY_TEXT_PLACEHOLDER_WIDTH);
+      const { x, y } = worldCenteredRootPoint(worldX, worldY, boxW, th);
       const id = `text-${Date.now()}`;
       const roots = [...(s.childOrder[ROOT] ?? [])];
       roots.push(id);
@@ -2803,14 +2844,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
         name: "Text",
         x,
         y,
-        width: tw,
+        width: boxW,
         height: th,
         rotation: 0,
         visible: true,
         locked: false,
         expanded: true,
         content: "",
-        textResizeMode: "auto-height",
+        textResizeMode: "auto-width",
         textAlign: "left",
         ...ts,
         fillEnabled: true,

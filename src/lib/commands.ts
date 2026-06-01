@@ -518,6 +518,19 @@ export const ALL_COMMANDS: CommandDefinition[] = [
     },
   },
   {
+    id: "open-components-panel",
+    title: "Open components panel",
+    subtitle: "Search and place reusable components",
+    category: "View",
+    shortcut: "⌥2",
+    keywords: ["components", "comp", "library", "search", "instances", "master"],
+    enabled: (s) => s.editorMode === "design",
+    run: (s) => {
+      s.setCommandMenuOpen(false);
+      s.setLeftTab("components");
+    },
+  },
+  {
     id: "mode-design",
     title: "Enter design mode",
     subtitle: "Canvas editing",
