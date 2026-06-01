@@ -1,0 +1,6486 @@
+import { create } from "zustand";
+import {
+  centeredLocalPointInParent,
+  frameParentAtWorldPoint,
+  pickDeepestFrameAtWorldPoint,
+  pickDeepestVisibleNodeAtWorldPoint,
+  targetFrameForInsert,
+  worldCenteredRootPoint,
+  worldPointToParentLocal,
+  worldRect,
+} from "@/lib/tree";
+import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
+import { clampCanvasZoom } from "@/lib/canvasZoom";
+import { normalizeHex } from "@/lib/color";
+import {
+  createEmptyDocumentFields,
+  isWorkspaceEmpty,
+  mergeSampleDocumentFields,
+  readInitialDocumentFields,
+} from "@/lib/editorBootstrap";
+import {
+  computeAutoLayoutPatches,
+  constraintResizeChildPatches,
+  type ConstraintHorizontal,
+  type ConstraintVertical,
+  type ConstraintsPatch,
+  type CrossAxisAlign,
+  type LayoutMode,
+  type LayoutNode,
+  type LayoutPatch,
+  type PrimaryAxisAlign,
+} from "@/lib/autoLayout";
+import {
+  computeResizedBounds,
+  RESIZE_MIN_DIMENSION,
+  type Bounds,
+  type ResizeHandle,
+  type ResizeKind,
+  type ResizeModifiers,
+} from "@/lib/resize";
+import { warnInvalidNodeGeometry } from "@/lib/canvasGeometryDev";
+import {
+  collectSubtreeIds,
+  isAncestorOf,
+  nextDuplicateName,
+  nextFrameName,
+  topLevelSelectedIds,
+} from "@/lib/editorGraph";
+import {
+  cloneEditorSubtree,
+  detachInstanceTree,
+  findInstanceRoot,
+  mergeInstanceOverrides,
+  newComponentId,
+  newVariantGroupId,
+  resolveMasterRootId,
+  stripComponentFields,
+  canCreateComponentFromSelection,
+  groupNodesForComponent,
+  wrapNodeInFrameForComponent,
+  markNodeAsComponent,
+  type InstanceOverridePatch,
+} from "@/lib/componentModel";
+import {
+  defaultPrototypeLink,
+  findPrototypeLinkOwner,
+  newPrototypeLinkId,
+  type PrototypeLink,
+} from "@/lib/prototype";
+import type { EditorAsset, EditorPersistSlice, PaytmCraftDocument } from "@/lib/documentPersistence";
+import type { DesignToken, DetachableTokenKind, EffectTokenValue } from "@/lib/designTokens";
+import {
+  newDesignTokenId,
+  designTokenTimestamp,
+  resolveNodeWithDesignTokens,
+  isColorValue,
+  isTypographyValue,
+  isSpacingValue,
+  isEffectValue,
+} from "@/lib/designTokens";
+import { defaultNodeEffect, newNodeEffectId, type NodeEffectType } from "@/lib/nodeEffects";
+import { effectiveFillType, normalizeFillGradient } from "@/lib/fillGradient";
+import {
+  buildResizeContentPatches,
+  scaleSubtreeContentPatches,
+  shouldProportionalFrameScale,
+} from "@/lib/resizeContent";
+import { convertFigBytesToPaytmCraft, isFigmaFigFile } from "@/lib/figImport";
+import { computeTextBoxSize, textLayoutPatchForNode } from "@/lib/text/textLayout";
+import { resolveTextTypo } from "@/lib/textTypography";
+import { createShapeNode } from "@/lib/shapes/shapeCreation";
+import type { ShapeType } from "@/lib/shapes/shapeModel";
+import {
+  BOOLEAN_OPERATION_LABELS,
+  booleanResultToPathNode,
+  flattenBooleanGroup,
+  getBooleanEligibleSelection,
+  isBooleanEligibleNode,
+  isMaskGroup,
+  topmostAmongSiblings,
+  type BooleanOperation,
+} from "@/lib/booleanGeometry";
+import { getResizeAnchorLocal, solveNodeXYForAnchorWorld } from "@/lib/resizeTransform";
+import { hasRotation, getNodeWorldOrigin } from "@/lib/transformMath";
+import { buildEditorAssetFromFile, validateImageImportFile } from "@/lib/editorAssets";
+import {
+  documentToEditorPatch,
+  downloadJsonFile,
+  editorStateToDocument,
+  parsePaytmCraftDocumentJson,
+  sanitizeDocumentFilename,
+  serializePersistStable,
+  validatePaytmCraftDocument,
+} from "@/lib/documentPersistence";
+import { getSyncProvider } from "@/lib/syncProviderSingleton";
+import { getPaytmCraftPublicEnv } from "@/lib/env";
+import { apiClient, type CraftFileVersionSummary } from "@/lib/apiClient";
+import { getActiveMockWorkspace } from "@/lib/mockAuth";
+
+import {
+  clonePersistedEditorSnapshot,
+  editorStateToHistorySnapshot,
+  historySnapshotToEditorPatch,
+  type PersistedEditorSnapshot,
+} from "@/lib/editorHistory";
+
+export type { PersistedEditorSnapshot };
+
+import {
+  defaultCommentAuthor,
+  editorCommentFromCraftApi,
+  isNonEmptyCommentBody,
+  newCommentId,
+  newReplyId,
+  type EditorComment,
+  type EditorCommentReply,
+} from "@/lib/comments";
+import {
+  newPathPointId,
+  normalizePathNode,
+  rekeyPathPoints,
+  type PathPoint,
+} from "@/lib/pathGeometry";
+import { getPluginById, readInstalledPluginIds, writeInstalledPluginIds } from "@/lib/plugins";
+import { getEditorClipboardJson, setEditorClipboardJson } from "@/lib/editorClipboardBuffer";
+import { parseEditorClipboardPayload, type EditorClipboardPayloadV1 } from "@/lib/editorClipboardPayload";
+import type { PresenceActivityEntry, PresenceUser } from "@/lib/presence";
+import {
+  DEFAULT_FRAME_PRESET_ID,
+  resolveFramePresetSize,
+} from "@/lib/framePresets";
+import {
+  captureActivePage,
+  createEmptyPage,
+  editorPatchFromPage,
+  initialPagesFromCanvas,
+  nextPageName,
+  pagesWithActiveCaptured,
+  type EditorPage,
+} from "@/lib/editorPages";
+
+export type { EditorComment, EditorCommentReply };
+export type { PathPoint };
+export type { PresenceUser, PresenceActivityEntry } from "@/lib/presence";
+
+export type ApiCommentsStatus = "idle" | "loading" | "synced" | "failed";
+
+export type ApiVersionsStatus = "idle" | "loading" | "synced" | "failed";
+
+/** API file version row from `/api/v1/files/.../versions` (re-export). */
+export type ApiFileVersion = CraftFileVersionSummary;
+
+const pendingCommentCreateByLocalId = new Map<string, Promise<string>>();
+const abortedCommentCreates = new Set<string>();
+
+function resolveCommentServerId(localOrServerId: string): Promise<string> {
+  const pending = pendingCommentCreateByLocalId.get(localOrServerId);
+  if (pending) return pending;
+  return Promise.resolve(localOrServerId);
+}
+
+export type Tool =
+  | "move"
+  | "frame"
+  | "rect"
+  | "ellipse"
+  | "line"
+  | "arrow"
+  | "polygon"
+  | "star"
+  | "triangle"
+  | "pen"
+  | "text"
+  | "comment"
+  | "hand";
+
+export type EditorMode = "design" | "prototype" | "inspect";
+/** @deprecated Use EditorMode */
+export type RightTab = EditorMode;
+
+export type DocumentSaveStatus = "saved" | "unsaved" | "saving" | "saved-api" | "api-save-failed";
+
+export type LeftTab = "layers" | "components" | "assets" | "styles";
+
+export type AlignDirection = "left" | "center-h" | "right" | "top" | "center-v" | "bottom";
+
+export type NodeKind = "frame" | "group" | "rectangle" | "ellipse" | "line" | "path" | "text" | "image";
+
+/** How image pixels map to the layer box (canvas uses CSS `object-fit`; export uses best-effort equivalents). */
+export type ImageFitMode = "fill" | "fit" | "crop";
+
+export type StrokePosition = "inside" | "center" | "outside";
+
+export type { LayoutMode, PrimaryAxisAlign, CrossAxisAlign, ConstraintHorizontal, ConstraintVertical };
+
+export type { InstanceOverridePatch } from "@/lib/componentModel";
+
+export interface EditorNode {
+  id: string;
+  parentId: string | null;
+  type: NodeKind;
+  name: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  visible: boolean;
+  locked: boolean;
+  expanded: boolean;
+  content?: string;
+  fill?: string;
+  /** Solid fill (default) or linear gradient */
+  fillType?: import("@/lib/fillGradient").FillType;
+  fillGradient?: import("@/lib/fillGradient").FillGradient;
+  /** 0–1, default 1 */
+  fillOpacity?: number;
+  /** default true */
+  fillEnabled?: boolean;
+  strokeColor?: string;
+  strokeWidth?: number;
+  strokePosition?: StrokePosition;
+  cornerRadius?: number;
+  /** Text color; falls back to `fill` when unset */
+  textColor?: string;
+  fontFamily?: string;
+  fontSize?: number;
+  fontWeight?: number;
+  /** Unitless multiplier, e.g. 1.25 */
+  lineHeight?: number;
+  /** px */
+  letterSpacing?: number;
+  /** Stroke dash pattern */
+  strokeStyle?: "solid" | "dashed" | "dotted";
+  /** Regular polygon side count (path nodes) */
+  polygonSides?: number;
+  /** Star point count (path nodes) */
+  starPoints?: number;
+  /** Star inner radius ratio 0–1 (path nodes) */
+  starInnerRadius?: number;
+  /** Line with arrowhead (line nodes) */
+  arrowHead?: boolean;
+  /** Horizontal alignment */
+  textAlign?: "left" | "center" | "right";
+  /** How the text box resizes with content */
+  textResizeMode?: "auto-width" | "auto-height" | "fixed";
+
+  /** Vector path (Pen tool); points are local to the node's bounds origin. */
+  pathPoints?: PathPoint[];
+  pathClosed?: boolean;
+
+  /** Embedded image layer; pixels come from `imageSrc` (and optionally `assets[assetId]`). */
+  assetId?: string;
+  imageSrc?: string;
+  imageName?: string;
+  imageMimeType?: string;
+  imageFitMode?: ImageFitMode;
+
+  /** Auto layout (frame/group only). Omitted or `"none"` = manual layout. */
+  layoutMode?: LayoutMode;
+  layoutGap?: number;
+  paddingTop?: number;
+  paddingRight?: number;
+  paddingBottom?: number;
+  paddingLeft?: number;
+  primaryAxisAlign?: PrimaryAxisAlign;
+  counterAxisAlign?: CrossAxisAlign;
+  /** Resizing a non-auto-layout parent can adjust children with these constraints. */
+  constraintsHorizontal?: ConstraintHorizontal;
+  constraintsVertical?: ConstraintVertical;
+
+  /** Component master (frame/group): reusable definition */
+  isComponent?: boolean;
+  /** Stable id for this component definition (master + instances share family id) */
+  componentId?: string;
+  /** Instance root only: master frame/group node id this instance was created from */
+  sourceComponentId?: string;
+  /** Instance root: keyed by descendant node id → style/content overrides */
+  instanceOverrides?: Record<string, Record<string, unknown>>;
+  /** Shared by variant masters in the same set */
+  variantGroupId?: string;
+  /** Variant dimension values (e.g. { State: "Hover" }) */
+  variantProperties?: Record<string, string>;
+
+  /** Prototype interactions originating from this node (source = this id). */
+  prototypeLinks?: PrototypeLink[];
+
+  /** Linked design tokens (resolved at render; update token to refresh all usages). */
+  fillTokenId?: string;
+  textStyleTokenId?: string;
+  effectTokenId?: string;
+
+  /** Layer opacity 0–1 (default 1). Separate from fill opacity. */
+  opacity?: number;
+  /** Ordered layer effects (shadows, blurs). */
+  effects?: import("@/lib/nodeEffects").NodeEffect[];
+
+  /** Boolean group metadata */
+  booleanOperation?: BooleanOperation;
+  isBooleanGroup?: boolean;
+  /** Mask shape inside a mask group */
+  isMask?: boolean;
+  /** Mask group: id of the child used as clip mask */
+  maskId?: string;
+  /** Content node clipped by a mask group */
+  maskedBy?: string;
+  /** Figma mask mode (OUTLINE ≈ vector clip; LUMINANCE rendered as outline in v1). */
+  figMaskType?: string;
+  /** Frame clips children to bounds when true (Figma `frameMaskDisabled` inverse). */
+  clipChildren?: boolean;
+  /** SVG path `d` for flattened boolean result */
+  flattenedPathData?: string;
+}
+
+export type NodeStylePatch = Partial<
+  Pick<
+    EditorNode,
+    | "fill"
+    | "fillType"
+    | "fillGradient"
+    | "fillOpacity"
+    | "fillEnabled"
+    | "strokeColor"
+    | "strokeWidth"
+    | "strokePosition"
+    | "strokeStyle"
+    | "cornerRadius"
+    | "polygonSides"
+    | "starPoints"
+    | "starInnerRadius"
+    | "pathPoints"
+    | "textColor"
+    | "fontFamily"
+    | "fontSize"
+    | "fontWeight"
+    | "lineHeight"
+    | "letterSpacing"
+    | "textAlign"
+    | "textResizeMode"
+    | "content"
+    | "imageFitMode"
+    | "opacity"
+  >
+>;
+
+export interface GuideLine {
+  axis: "v" | "h";
+  pos: number;
+}
+
+export interface EditorState {
+  tool: Tool;
+  /** Selected device preset for the frame tool (see `lib/framePresets`). */
+  framePresetId: string;
+  editorMode: EditorMode;
+  leftTab: LeftTab;
+  selectedIds: string[];
+  zoom: number;
+  pan: { x: number; y: number };
+  nodes: Record<string, EditorNode>;
+  childOrder: Record<string, string[]>;
+  assets: Record<string, EditorAsset>;
+  designTokens: Record<string, DesignToken>;
+  guides: GuideLine[];
+  fileName: string;
+  pages: Record<string, EditorPage>;
+  pageOrder: string[];
+  activePageId: string;
+  showGrid: boolean;
+  canvasBackgroundColor: string;
+  comments: EditorComment[];
+  commentsPanelOpen: boolean;
+  activeCommentId: string | null;
+  isPlacingComment: boolean;
+  /** In-progress pen path node id, or null. */
+  penDrawingNodeId: string | null;
+  /** Point-edit mode for a finished path (Backspace deletes selected anchor). */
+  pathEditModeNodeId: string | null;
+  /** Edit children inside a boolean group (Figma-style). */
+  objectEditModeNodeId: string | null;
+  selectedPathPointId: string | null;
+  editingTextId: string | null;
+  textEditSelection: { anchor: number; focus: number } | null;
+
+  prototypeWireDrag: null | {
+    sourceNodeId: string;
+    pointerId: number;
+    curWX: number;
+    curWY: number;
+  };
+  selectedPrototypeLinkId: string | null;
+  prototypePreview: null | {
+    mainFrameId: string;
+    history: string[];
+    overlayFrameId: string | null;
+  };
+
+  /** Live responsive preview (temporary geometry); Apply commits with one undo step. */
+  responsivePreview: null | {
+    frameId: string;
+    geomBackup: Record<string, { x: number; y: number; width: number; height: number }>;
+    draftWidth: number;
+    draftHeight: number;
+  };
+
+  documentSaveStatus: DocumentSaveStatus;
+  /** True until the first local/API document load finishes in the editor shell. */
+  documentHydrating: boolean;
+  documentHydrationRevision: number;
+
+  /** When set (api mode), document is also saved to `/api/v1/files/:id`. Not serialized in `.paytmcraft.json`. */
+  apiFileId: string | undefined;
+  apiWorkspaceId: string | undefined;
+  isApiBackedFile: boolean;
+  /** Mock API comment sync; not persisted in `.paytmcraft.json`. */
+  apiCommentsStatus: ApiCommentsStatus;
+
+  /** Version history side panel (API-backed files only). Not persisted. */
+  versionHistoryOpen: boolean;
+  apiVersionsStatus: ApiVersionsStatus;
+  apiFileVersions: ApiFileVersion[];
+
+  historyPast: PersistedEditorSnapshot[];
+  historyFuture: PersistedEditorSnapshot[];
+  isApplyingHistory: boolean;
+  pushHistory: (label?: string) => void;
+  undo: () => void;
+  redo: () => void;
+  clearHistory: () => void;
+
+  setEditingTextId: (id: string | null) => void;
+  setTextEditSelection: (anchor: number, focus: number) => void;
+  setTool: (t: Tool) => void;
+  setFramePresetId: (id: string) => void;
+  setEditorMode: (t: EditorMode) => void;
+  /** @deprecated Use setEditorMode */
+  setRightTab: (t: EditorMode) => void;
+  setLeftTab: (t: LeftTab) => void;
+
+  startPrototypeConnection: (sourceNodeId: string, pointerId: number, curWX: number, curWY: number) => void;
+  updatePrototypeWirePointer: (curWX: number, curWY: number) => void;
+  finishPrototypeConnection: (targetFrameId: string | null) => void;
+  cancelPrototypeConnection: () => void;
+  updatePrototypeLink: (linkId: string, patch: Partial<Omit<PrototypeLink, "id" | "sourceNodeId">>) => void;
+  deletePrototypeLink: (linkId: string) => void;
+  setSelectedPrototypeLinkId: (id: string | null) => void;
+  openPrototypePreview: (startFrameId?: string) => void;
+  closePrototypePreview: () => void;
+  navigatePrototype: (targetFrameId: string, asOverlay?: boolean) => void;
+  prototypePreviewBack: () => void;
+  select: (id: string | null, additive?: boolean) => void;
+  clearSelection: () => void;
+  setZoom: (z: number) => void;
+  setPan: (p: { x: number; y: number }) => void;
+  patchPan: (d: { x: number; y: number }) => void;
+  updateNode: (id: string, patch: Partial<EditorNode>, opts?: { skipHistory?: boolean }) => void;
+  updateNodeStyle: (id: string, patch: NodeStylePatch, opts?: { skipHistory?: boolean }) => void;
+  toggleVisible: (id: string) => void;
+  toggleLock: (id: string) => void;
+  setNodeVisible: (id: string, visible: boolean) => void;
+  setNodeLocked: (id: string, locked: boolean) => void;
+  toggleExpanded: (id: string) => void;
+  renameNode: (id: string, name: string) => void;
+  addRectangle: () => void;
+  addText: () => void;
+  addRectangleAt: (worldX: number, worldY: number) => void;
+  addEllipseAt: (worldX: number, worldY: number) => void;
+  addLineAt: (worldX: number, worldY: number) => void;
+  addTriangleAt: (worldX: number, worldY: number) => void;
+  createShapeFromDrag: (
+    shapeType: ShapeType,
+    start: { x: number; y: number },
+    end: { x: number; y: number },
+    modifiers: { shiftKey: boolean; altKey: boolean },
+    style?: Partial<Pick<EditorNode, "polygonSides" | "starPoints" | "starInnerRadius">>,
+  ) => void;
+  booleanUnionSelection: () => void;
+  createBooleanGroup: (operation: BooleanOperation) => void;
+  updateBooleanOperation: (groupId: string, operation: BooleanOperation) => void;
+  flattenSelection: () => void;
+  enterObjectEditMode: (nodeId: string) => void;
+  exitObjectEditMode: () => void;
+  useSelectionAsMask: () => void;
+  releaseMask: (maskGroupId: string) => void;
+  setNodeAsMask: (nodeId: string, isMask: boolean) => void;
+  addTextAt: (worldX: number, worldY: number) => void;
+  /** Reads file into `assets`, returns new asset id or null on validation/read error (alerts user). */
+  importImageAsset: (file: File) => Promise<string | null>;
+  /** Places an image node for `assetId`. Uses frame center when `worldX` / `worldY` omitted. */
+  addImageNodeAt: (assetId: string, worldX?: number, worldY?: number) => void;
+  replaceImageAsset: (nodeId: string, file: File) => Promise<void>;
+  deleteAsset: (assetId: string) => void;
+  createColorTokenFromSelection: (name?: string) => void;
+  createGradientTokenFromSelection: (name?: string) => void;
+  createTypographyTokenFromSelection: (name?: string) => void;
+  createSpacingToken: (name: string, value: number) => void;
+  updateDesignToken: (id: string, patch: Partial<Omit<DesignToken, "id" | "createdAt">>) => void;
+  deleteDesignToken: (id: string) => void;
+  applyTokenToSelection: (tokenId: string) => void;
+  detachTokenFromSelection: (tokenType: DetachableTokenKind) => void;
+  addEffect: (nodeId: string, type: import("@/lib/nodeEffects").NodeEffectType) => void;
+  updateEffect: (nodeId: string, effectId: string, patch: Partial<import("@/lib/nodeEffects").NodeEffect>) => void;
+  deleteEffect: (nodeId: string, effectId: string) => void;
+  toggleEffect: (nodeId: string, effectId: string) => void;
+  createEffectTokenFromSelection: (name?: string) => void;
+  applyEffectTokenToSelection: (tokenId: string) => void;
+  detachEffectTokenFromSelection: () => void;
+  createFrameAt: (
+    worldX: number,
+    worldY: number,
+    opts?: { presetId?: string; width?: number; height?: number; name?: string },
+  ) => void;
+  createFrameWithBounds: (
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    opts?: { presetId?: string; name?: string },
+  ) => void;
+  duplicateSelection: () => void;
+  deleteSelection: (opts?: { skipHistory?: boolean }) => void;
+  alignSelection: (direction: AlignDirection) => void;
+  distributeSelection: (axis: "horizontal" | "vertical") => void;
+  selectAllEditable: () => void;
+  toggleLockSelection: () => void;
+  toggleVisibleSelection: () => void;
+  copySelection: () => void;
+  cutSelection: () => void;
+  pasteSelection: (opts?: { inPlace?: boolean }) => void;
+  bringForward: () => void;
+  sendBackward: () => void;
+  bringToFront: () => void;
+  sendToBack: () => void;
+  /** Nudge selected layers by delta in parent-local px (design mode). */
+  nudgeSelection: (dx: number, dy: number) => void;
+  groupSelection: () => void;
+  ungroupSelection: () => void;
+  toggleSelectNode: (id: string) => void;
+  setSelection: (ids: string[]) => void;
+  setGuides: (g: GuideLine[]) => void;
+  toggleGrid: () => void;
+  setCanvasBackgroundColor: (hex: string) => void;
+
+  startPlacingComment: () => void;
+  cancelPlacingComment: () => void;
+  addComment: (point: { x: number; y: number }, parentNodeId?: string) => void;
+  updateComment: (id: string, body: string) => void;
+  addCommentReply: (commentId: string, body: string) => void;
+  resolveComment: (id: string) => void;
+  reopenComment: (id: string) => void;
+  deleteComment: (id: string, opts?: { skipHistory?: boolean; pendingBody?: string }) => void;
+  setActiveCommentId: (id: string | null) => void;
+  toggleCommentsPanel: () => void;
+  focusComment: (id: string) => void;
+  startPathAt: (point: { x: number; y: number }) => void;
+  addPathPoint: (point: { x: number; y: number }) => void;
+  /** Finish pen drawing. `true` = close path (click on first point); `false`/omit = open path. */
+  finishPath: (asClosed?: boolean) => void;
+  cancelPath: () => void;
+  updatePathPoint: (
+    nodeId: string,
+    pointId: string,
+    patch: Partial<PathPoint>,
+    opts?: { skipHistory?: boolean },
+  ) => void;
+  deletePathPoint: (nodeId: string, pointId: string) => void;
+  togglePathClosed: (nodeId: string) => void;
+  setPathEditMode: (nodeId: string | null) => void;
+  setSelectedPathPointId: (id: string | null) => void;
+  resizeNode: (
+    id: string,
+    handle: ResizeHandle,
+    startBounds: Bounds,
+    currentPoint: { x: number; y: number },
+    modifiers: ResizeModifiers,
+    opts?: { skipHistory?: boolean; fixedWorld?: { x: number; y: number } | null },
+  ) => void;
+  resizeFrameWithConstraints: (
+    frameId: string,
+    newBounds: { x?: number; y?: number; width: number; height: number },
+    opts?: { skipHistory?: boolean; skipParentRelayout?: boolean },
+  ) => void;
+
+  openResponsivePreview: (frameId: string) => void;
+  updateResponsivePreviewBounds: (width: number, height: number) => void;
+  resetResponsivePreview: () => void;
+  cancelResponsivePreview: () => void;
+  applyResponsivePreview: () => void;
+
+  reorderNode: (id: string, targetParentId: string, targetIndex: number) => void;
+  moveNodeToParent: (id: string, newParentId: string, index: number) => void;
+  updateLayout: (id: string, patch: LayoutPatch) => void;
+  updateConstraints: (id: string, patch: ConstraintsPatch) => void;
+  applyAutoLayout: (parentId: string) => void;
+
+  hoveredCanvasId: string | null;
+  setHoveredCanvasId: (id: string | null) => void;
+
+  contextMenu: null | { clientX: number; clientY: number; nodeId: string };
+  openContextMenu: (nodeId: string, clientX: number, clientY: number) => void;
+  closeContextMenu: () => void;
+
+  layerRenameId: string | null;
+  setLayerRenameId: (id: string | null) => void;
+
+  saveToLocal: () => void;
+  setApiFileSession: (fileId: string, workspaceId?: string) => void;
+  clearApiFileSession: () => void;
+  saveCurrentDocumentAsApiFile: () => Promise<void>;
+  loadApiComments: () => Promise<void>;
+  syncCommentToApi: (commentId: string) => void;
+  deleteApiComment: (commentId: string) => void;
+  openVersionHistory: () => void;
+  closeVersionHistory: () => void;
+  /** Close the highest-priority open overlay (modals, menus). Returns true if one was closed. */
+  closeTopmostOverlay: () => boolean;
+  openHelpDemoChecklist: () => void;
+  loadApiFileVersions: () => Promise<void>;
+  createApiFileVersion: (name?: string) => Promise<void>;
+  restoreApiFileVersion: (versionId: string) => Promise<void>;
+  loadFromLocal: () => Promise<boolean>;
+  /** Fills the sample exploration document when the workspace is still empty (first visit). */
+  applySampleDocumentIfEmpty: () => void;
+  /** Apply storage document when tab is clean (saved) and content differs; used for cross-tab sync. */
+  applyPersistedDocumentIfClean: (doc: PaytmCraftDocument | null) => boolean;
+  exportDocument: () => void;
+  importDocument: (file: File) => Promise<void>;
+  /** Import a Figma `.fig` archive into the editor. */
+  importFigmaFile: (file: File) => Promise<void>;
+  /** Import `.paytmcraft.json` or `.fig` based on file extension. */
+  importWorkspaceFile: (file: File) => Promise<void>;
+  resetDocument: () => void;
+  setDocumentName: (name: string) => void;
+  setActivePage: (pageId: string) => void;
+  addPage: () => void;
+  duplicatePage: (pageId?: string) => void;
+  deletePage: (pageId: string) => void;
+  renamePage: (pageId: string, name: string) => void;
+  cycleActivePage: (delta: -1 | 1) => void;
+  /** Replace editor document from a persist slice (dashboard templates, imports, blank). Writes localStorage. */
+  loadWorkspaceFromPersist: (
+    slice: EditorPersistSlice,
+    apiSession?: { apiFileId: string; apiWorkspaceId?: string },
+  ) => Promise<void>;
+
+  duplicateSingle: (id: string) => void;
+  deleteSingle: (id: string) => void;
+
+  placingComponentMasterId: string | null;
+  setPlacingComponentMasterId: (id: string | null) => void;
+  createComponentFromSelection: () => void;
+  createInstance: (componentKey: string, worldX: number, worldY: number) => void;
+  detachInstance: (instanceRootId: string) => void;
+  updateInstanceOverride: (
+    instanceRootId: string,
+    targetNodeId: string,
+    patch: InstanceOverridePatch,
+  ) => void;
+  createVariantFromComponent: (componentKey: string) => void;
+  updateVariantProperties: (componentKey: string, properties: Record<string, string>) => void;
+
+  presenceUsers: PresenceUser[];
+  showPresence: boolean;
+  presenceActivityLog: PresenceActivityEntry[];
+  togglePresence: () => void;
+  updateMockPresence: (users: PresenceUser[]) => void;
+  setPresenceUsers: (users: PresenceUser[]) => void;
+  clearPresence: () => void;
+  appendPresenceActivity: (text: string) => void;
+
+  commandMenuOpen: boolean;
+  shortcutOverlayOpen: boolean;
+  /** Left/right panels, top toolbar, and footer (Figma-style hide UI). */
+  uiChromeVisible: boolean;
+  setCommandMenuOpen: (open: boolean) => void;
+  setShortcutOverlayOpen: (open: boolean) => void;
+  toggleUiChrome: () => void;
+  setUiChromeVisible: (visible: boolean) => void;
+
+  aiModalOpen: boolean;
+  aiModalSource: "dashboard" | "editor" | null;
+  openAIModal: (source: "dashboard" | "editor") => void;
+  closeAIModal: () => void;
+  applyGeneratedDesign: (
+    slice: EditorPersistSlice,
+    mode: "replace" | "append",
+    opts?: { recordHistory?: boolean },
+  ) => void;
+
+  pluginMarketplaceOpen: boolean;
+  installedPluginIds: string[];
+  activePluginId: string | undefined;
+  /** Mock SaaS share dialog (local only). */
+  shareModalOpen: boolean;
+  openShareModal: () => void;
+  closeShareModal: () => void;
+  /** Mock workspace switcher from the editor (localStorage-backed). */
+  workspacePickerOpen: boolean;
+  openWorkspacePicker: () => void;
+  closeWorkspacePicker: () => void;
+  /** Mock invite teammate dialog (local only). */
+  teamInviteModalOpen: boolean;
+  openTeamInviteModal: () => void;
+  closeTeamInviteModal: () => void;
+  openPluginMarketplace: () => void;
+  closePluginMarketplace: () => void;
+  installPlugin: (id: string) => void;
+  uninstallPlugin: (id: string) => void;
+  runPlugin: (id: string) => void;
+  closeActivePlugin: () => void;
+  applyPluginLoremIpsumToSelection: () => void;
+  applyPluginRenameSelection: () => void;
+  applyPluginIconInSelection: () => void;
+}
+
+export const ROOT = EDITOR_ROOT_KEY;
+
+function remapNodeTreeIds(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  selectedIds: string[],
+): Pick<EditorPersistSlice, "nodes" | "childOrder" | "selectedIds"> {
+  const prefix = `gen-${Date.now().toString(36)}-`;
+  const oldIds = Object.keys(nodes);
+  const idMap = new Map(oldIds.map((id, i) => [id, `${prefix}${i}`]));
+  const remappedNodes: Record<string, EditorNode> = {};
+  for (const oid of oldIds) {
+    const n = nodes[oid]!;
+    const nid = idMap.get(oid)!;
+    const pid = n.parentId ? idMap.get(n.parentId) ?? null : null;
+    remappedNodes[nid] = { ...n, id: nid, parentId: pid };
+  }
+  const remappedChildOrder: Record<string, string[]> = {};
+  for (const [k, arr] of Object.entries(childOrder)) {
+    const nk = k === ROOT ? ROOT : idMap.get(k) ?? k;
+    remappedChildOrder[nk] = arr.map((cid) => idMap.get(cid) ?? cid);
+  }
+  const newRoots = (childOrder[ROOT] ?? []).map((cid) => idMap.get(cid)!);
+  const remappedSelectedIds = selectedIds
+    .map((cid) => idMap.get(cid) ?? cid)
+    .filter((cid) => remappedNodes[cid]);
+  return {
+    nodes: remappedNodes,
+    childOrder: remappedChildOrder,
+    selectedIds: remappedSelectedIds.length > 0 ? remappedSelectedIds : newRoots,
+  };
+}
+
+function remapPersistSliceIds(slice: EditorPersistSlice): EditorPersistSlice {
+  const activeRemapped = remapNodeTreeIds(slice.nodes, slice.childOrder, slice.selectedIds);
+  const pages: Record<string, EditorPage> = {};
+  for (const pageId of slice.pageOrder) {
+    const page = slice.pages[pageId]!;
+    if (pageId === slice.activePageId) {
+      pages[pageId] = {
+        ...page,
+        nodes: activeRemapped.nodes,
+        childOrder: activeRemapped.childOrder,
+        selectedIds: activeRemapped.selectedIds,
+      };
+      continue;
+    }
+    const remapped = remapNodeTreeIds(page.nodes, page.childOrder, page.selectedIds);
+    pages[pageId] = {
+      ...page,
+      nodes: remapped.nodes,
+      childOrder: remapped.childOrder,
+      selectedIds: remapped.selectedIds,
+    };
+  }
+  return {
+    ...slice,
+    ...activeRemapped,
+    pages,
+  };
+}
+
+function syncActivePageRecord(
+  state: Pick<
+    EditorState,
+    | "pages"
+    | "pageOrder"
+    | "activePageId"
+    | "nodes"
+    | "childOrder"
+    | "zoom"
+    | "pan"
+    | "showGrid"
+    | "canvasBackgroundColor"
+    | "selectedIds"
+  >,
+): Pick<EditorState, "pages"> {
+  const active = captureActivePage(state);
+  return { pages: { ...state.pages, [state.activePageId]: active } };
+}
+
+function clonePageCanvas(page: EditorPage): Pick<EditorPage, "nodes" | "childOrder" | "selectedIds"> {
+  return remapNodeTreeIds(page.nodes, page.childOrder, page.selectedIds);
+}
+
+function applyMoveNodeToParent(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  id: string,
+  newParentKey: string,
+  insertBeforeIndex: number,
+): { nodes: Record<string, EditorNode>; childOrder: Record<string, string[]> } | null {
+  const n = s.nodes[id];
+  if (!n || n.locked) return null;
+  const oldKey = n.parentId ?? ROOT;
+  if (newParentKey !== ROOT) {
+    const p = s.nodes[newParentKey];
+    if (!p || (p.type !== "frame" && p.type !== "group")) return null;
+  }
+  if (id === newParentKey) return null;
+  if (newParentKey !== ROOT && isAncestorOf(s.nodes, id, newParentKey)) return null;
+
+  const world = worldRect(id, s.nodes);
+  const co: Record<string, string[]> = { ...s.childOrder };
+  const oldList = [...(co[oldKey] ?? [])];
+  const oldIdx = oldList.indexOf(id);
+  if (oldIdx < 0) return null;
+  oldList.splice(oldIdx, 1);
+  co[oldKey] = oldList;
+
+  const newList = [...(co[newParentKey] ?? [])].filter((x) => x !== id);
+  let insert = insertBeforeIndex;
+  if (oldKey === newParentKey && oldIdx >= 0 && oldIdx < insertBeforeIndex) {
+    insert -= 1;
+  }
+  insert = Math.max(0, Math.min(insert, newList.length));
+  newList.splice(insert, 0, id);
+  co[newParentKey] = newList;
+
+  const newParentNodeId = newParentKey === ROOT ? null : newParentKey;
+  const parentChanged = (n.parentId ?? ROOT) !== newParentKey;
+
+  const nodes: Record<string, EditorNode> = { ...s.nodes };
+  const next: EditorNode = { ...n, parentId: newParentNodeId };
+
+  if (parentChanged) {
+    if (newParentNodeId) {
+      const pw = worldRect(newParentNodeId, s.nodes);
+      next.x = world.x - pw.x;
+      next.y = world.y - pw.y;
+    } else {
+      next.x = world.x;
+      next.y = world.y;
+    }
+  }
+
+  nodes[id] = next;
+  return { nodes, childOrder: co };
+}
+
+function buildMock(): Pick<EditorState, "nodes" | "childOrder"> {
+  const nodes: Record<string, EditorNode> = {};
+  const childOrder: Record<string, string[]> = { [ROOT]: ["ab-mobile", "ab-web", "ab-dash"] };
+
+  const mk = (n: EditorNode) => {
+    nodes[n.id] = n;
+  };
+
+  mk({
+    id: "ab-mobile",
+    parentId: null,
+    type: "frame",
+    name: "Mobile — Paytm",
+    x: 80,
+    y: 80,
+    width: 390,
+    height: 844,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    fill: "#ffffff",
+    strokeColor: "#e5e5e5",
+    strokeWidth: 1,
+    cornerRadius: 32,
+  });
+  childOrder["ab-mobile"] = ["m-status", "m-header", "m-hero", "m-card1", "m-nav"];
+
+  mk({
+    id: "m-status",
+    parentId: "ab-mobile",
+    type: "rectangle",
+    name: "Status bar",
+    x: 0,
+    y: 0,
+    width: 390,
+    height: 44,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    fill: "#0f172a",
+    cornerRadius: 32,
+  });
+  mk({
+    id: "m-header",
+    parentId: "ab-mobile",
+    type: "group",
+    name: "Header",
+    x: 20,
+    y: 60,
+    width: 350,
+    height: 48,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+  });
+  childOrder["m-header"] = ["m-logo", "m-title"];
+  mk({
+    id: "m-logo",
+    parentId: "m-header",
+    type: "rectangle",
+    name: "Logo mark",
+    x: 0,
+    y: 6,
+    width: 36,
+    height: 36,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    fill: "#0d99ff",
+    cornerRadius: 8,
+  });
+  mk({
+    id: "m-title",
+    parentId: "m-header",
+    type: "text",
+    name: "Title",
+    x: 48,
+    y: 10,
+    width: 200,
+    height: 28,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    content: "Paytm Craft",
+    fill: "#0f172a",
+  });
+
+  mk({
+    id: "m-hero",
+    parentId: "ab-mobile",
+    type: "rectangle",
+    name: "Hero",
+    x: 20,
+    y: 130,
+    width: 350,
+    height: 180,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    fill: "#e0f2fe",
+    cornerRadius: 16,
+  });
+  mk({
+    id: "m-card1",
+    parentId: "ab-mobile",
+    type: "rectangle",
+    name: "Primary card",
+    x: 20,
+    y: 330,
+    width: 350,
+    height: 120,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    fill: "#ffffff",
+    strokeColor: "#e2e8f0",
+    strokeWidth: 1,
+    cornerRadius: 12,
+  });
+  mk({
+    id: "m-nav",
+    parentId: "ab-mobile",
+    type: "rectangle",
+    name: "Tab bar",
+    x: 0,
+    y: 760,
+    width: 390,
+    height: 84,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    fill: "#fafafa",
+    strokeColor: "#e5e5e5",
+    strokeWidth: 1,
+    cornerRadius: 0,
+  });
+
+  mk({
+    id: "ab-web",
+    parentId: null,
+    type: "frame",
+    name: "Marketing site",
+    x: 520,
+    y: 80,
+    width: 1280,
+    height: 720,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    fill: "#ffffff",
+    strokeColor: "#e5e5e5",
+    strokeWidth: 1,
+    cornerRadius: 0,
+  });
+  childOrder["ab-web"] = ["w-nav", "w-hero", "w-grid"];
+
+  mk({
+    id: "w-nav",
+    parentId: "ab-web",
+    type: "rectangle",
+    name: "Nav bar",
+    x: 0,
+    y: 0,
+    width: 1280,
+    height: 72,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    fill: "#ffffff",
+    strokeColor: "#e5e5e5",
+    strokeWidth: 1,
+    cornerRadius: 0,
+  });
+  mk({
+    id: "w-hero",
+    parentId: "ab-web",
+    type: "group",
+    name: "Hero section",
+    x: 80,
+    y: 120,
+    width: 1120,
+    height: 280,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+  });
+  childOrder["w-hero"] = ["w-hero-copy", "w-hero-visual"];
+  mk({
+    id: "w-hero-copy",
+    parentId: "w-hero",
+    type: "text",
+    name: "Headline",
+    x: 0,
+    y: 40,
+    width: 520,
+    height: 120,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    content: "Design systems, shipped.",
+    fill: "#0f172a",
+  });
+  mk({
+    id: "w-hero-visual",
+    parentId: "w-hero",
+    type: "rectangle",
+    name: "Hero visual",
+    x: 560,
+    y: 0,
+    width: 560,
+    height: 280,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    fill: "#f1f5f9",
+    cornerRadius: 12,
+  });
+
+  mk({
+    id: "w-grid",
+    parentId: "ab-web",
+    type: "group",
+    name: "Feature cards",
+    x: 80,
+    y: 440,
+    width: 1120,
+    height: 220,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+  });
+  childOrder["w-grid"] = ["w-c1", "w-c2", "w-c3"];
+  for (let i = 0; i < 3; i++) {
+    const id = `w-c${i + 1}`;
+    mk({
+      id,
+      parentId: "w-grid",
+      type: "rectangle",
+      name: `Card ${i + 1}`,
+      x: i * 380,
+      y: 0,
+      width: 360,
+      height: 200,
+      rotation: 0,
+      visible: true,
+      locked: false,
+      expanded: true,
+      fill: "#fafafa",
+      strokeColor: "#e2e8f0",
+      strokeWidth: 1,
+      cornerRadius: 8,
+    });
+  }
+
+  mk({
+    id: "ab-dash",
+    parentId: null,
+    type: "frame",
+    name: "Dashboard card",
+    x: 1900,
+    y: 120,
+    width: 480,
+    height: 600,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    fill: "#f8fafc",
+    strokeColor: "#e2e8f0",
+    strokeWidth: 1,
+    cornerRadius: 12,
+  });
+  childOrder["ab-dash"] = ["d-title", "d-chart", "d-rows"];
+  mk({
+    id: "d-title",
+    parentId: "ab-dash",
+    type: "text",
+    name: "Card title",
+    x: 24,
+    y: 24,
+    width: 300,
+    height: 28,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    content: "Weekly revenue",
+    fill: "#0f172a",
+  });
+  mk({
+    id: "d-chart",
+    parentId: "ab-dash",
+    type: "rectangle",
+    name: "Chart area",
+    x: 24,
+    y: 72,
+    width: 432,
+    height: 200,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    fill: "#ffffff",
+    strokeColor: "#e2e8f0",
+    strokeWidth: 1,
+    cornerRadius: 8,
+  });
+  mk({
+    id: "d-rows",
+    parentId: "ab-dash",
+    type: "group",
+    name: "Metric rows",
+    x: 24,
+    y: 300,
+    width: 432,
+    height: 260,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+  });
+  childOrder["d-rows"] = ["d-r1", "d-r2", "d-r3"];
+  [0, 1, 2].forEach((i) => {
+    mk({
+      id: `d-r${i + 1}`,
+      parentId: "d-rows",
+      type: "rectangle",
+      name: `Row ${i + 1}`,
+      x: 0,
+      y: i * 84,
+      width: 432,
+      height: 72,
+      rotation: 0,
+      visible: true,
+      locked: false,
+      expanded: true,
+      fill: i % 2 === 0 ? "#ffffff" : "#f1f5f9",
+      strokeColor: "#e2e8f0",
+      strokeWidth: 1,
+      cornerRadius: 6,
+    });
+  });
+
+  return { nodes, childOrder };
+}
+
+function resolveFrameParentForPlugin(state: Pick<EditorState, "nodes" | "childOrder" | "selectedIds">): string | null {
+  for (const sid of state.selectedIds) {
+    const n = state.nodes[sid];
+    if (n?.type === "frame" && !n.locked && n.visible) return sid;
+  }
+  for (const sid of state.selectedIds) {
+    let walk: string | null = sid;
+    const seen = new Set<string>();
+    while (walk && !seen.has(walk)) {
+      seen.add(walk);
+      const node: EditorNode | undefined = state.nodes[walk];
+      if (!node) break;
+      if (node.type === "frame" && !node.locked && node.visible) return walk;
+      walk = node.parentId;
+    }
+  }
+  const pid = targetFrameForInsert(state);
+  const p = state.nodes[pid];
+  if (p?.type === "frame" && !p.locked && p.visible) return pid;
+  return null;
+}
+
+function insertParentFrame(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds">,
+  worldX: number,
+  worldY: number,
+): { pid: string; frame: EditorNode } | null {
+  const pid = targetFrameForInsert(s, { x: worldX, y: worldY });
+  const p = s.nodes[pid];
+  if (!p || p.type !== "frame" || p.locked || !p.visible) return null;
+  return { pid, frame: p };
+}
+
+/** Ensures a frame exists to insert into; creates a root artboard at the click when none exist. */
+function ensureInsertParentFrame(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds">,
+  worldX: number,
+  worldY: number,
+): {
+  nodes: Record<string, EditorNode>;
+  childOrder: Record<string, string[]>;
+  parent: { pid: string; frame: EditorNode };
+} | null {
+  const direct = insertParentFrame(s, worldX, worldY);
+  if (direct) return { nodes: s.nodes, childOrder: s.childOrder, parent: direct };
+
+  const roots = s.childOrder[ROOT] ?? [];
+  const hasFrame = roots.some((id) => s.nodes[id]?.type === "frame");
+  if (hasFrame) return null;
+
+  const id = `frame-${Date.now()}`;
+  const W = 390;
+  const H = 844;
+  const node: EditorNode = {
+    id,
+    parentId: null,
+    type: "frame",
+    name: nextFrameName(s.nodes),
+    x: worldX - W / 2,
+    y: worldY - H / 2,
+    width: W,
+    height: H,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    fill: "#ffffff",
+    fillEnabled: true,
+    fillOpacity: 1,
+    strokePosition: "center",
+  };
+  const nodes = { ...s.nodes, [id]: node };
+  const childOrder = { ...s.childOrder, [ROOT]: [...roots, id], [id]: [] };
+  const parent = insertParentFrame({ nodes, childOrder, selectedIds: s.selectedIds }, worldX, worldY);
+  if (!parent) return null;
+  return { nodes, childOrder, parent };
+}
+
+function parentListKey(parentId: string | null): string {
+  return parentId ?? ROOT;
+}
+
+function removeNodeAndDescendants(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  rootId: string,
+): { nodes: Record<string, EditorNode>; childOrder: Record<string, string[]> } {
+  const toRemove = new Set(collectSubtreeIds(rootId, s.childOrder));
+  const nodes = { ...s.nodes };
+  const childOrder: Record<string, string[]> = {};
+  for (const [k, arr] of Object.entries(s.childOrder)) {
+    childOrder[k] = arr.filter((id) => !toRemove.has(id));
+  }
+  for (const id of toRemove) {
+    delete nodes[id];
+    delete childOrder[id];
+  }
+  return { nodes, childOrder };
+}
+
+const LAYOUT_FIELD_KEYS = new Set<string>([
+  "layoutMode",
+  "layoutGap",
+  "paddingTop",
+  "paddingRight",
+  "paddingBottom",
+  "paddingLeft",
+  "primaryAxisAlign",
+  "counterAxisAlign",
+]);
+const GEOM_KEYS = new Set<string>(["x", "y", "width", "height"]);
+const INSTANCE_STYLE_KEYS = new Set<string>([
+  "fill",
+  "fillType",
+  "fillGradient",
+  "fillOpacity",
+  "fillEnabled",
+  "strokeColor",
+  "strokeWidth",
+  "strokePosition",
+  "cornerRadius",
+  "textColor",
+  "fontFamily",
+  "fontSize",
+  "fontWeight",
+  "lineHeight",
+  "letterSpacing",
+  "content",
+  "opacity",
+  "effects",
+  "fillTokenId",
+  "textStyleTokenId",
+  "effectTokenId",
+]);
+
+function toLayoutNode(n: EditorNode): LayoutNode {
+  return {
+    id: n.id,
+    type: n.type,
+    parentId: n.parentId,
+    x: n.x,
+    y: n.y,
+    width: n.width,
+    height: n.height,
+    visible: n.visible,
+    locked: n.locked,
+    layoutMode: n.layoutMode,
+    layoutGap: n.layoutGap,
+    paddingTop: n.paddingTop,
+    paddingRight: n.paddingRight,
+    paddingBottom: n.paddingBottom,
+    paddingLeft: n.paddingLeft,
+    primaryAxisAlign: n.primaryAxisAlign,
+    counterAxisAlign: n.counterAxisAlign,
+    constraintsHorizontal: n.constraintsHorizontal,
+    constraintsVertical: n.constraintsVertical,
+  };
+}
+
+function toLayoutMap(nodes: Record<string, EditorNode>): Record<string, LayoutNode> {
+  const m: Record<string, LayoutNode> = {};
+  for (const id of Object.keys(nodes)) {
+    m[id] = toLayoutNode(nodes[id]!);
+  }
+  return m;
+}
+
+function applyAutoLayoutMerge(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  parentId: string,
+): Record<string, EditorNode> {
+  const patches = computeAutoLayoutPatches(parentId, toLayoutMap(nodes), childOrder);
+  if (Object.keys(patches).length === 0) return nodes;
+  const next = { ...nodes };
+  for (const [cid, p] of Object.entries(patches)) {
+    const cn = next[cid];
+    if (!cn || cn.locked) continue;
+    next[cid] = { ...cn, ...p };
+  }
+  return next;
+}
+
+function deepAutoLayout(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  parentId: string,
+): Record<string, EditorNode> {
+  let next = applyAutoLayoutMerge(nodes, childOrder, parentId);
+  const p = next[parentId];
+  if (!p || (p.layoutMode ?? "none") === "none") return next;
+  for (const cid of childOrder[parentId] ?? []) {
+    const c = next[cid];
+    if (c && (c.type === "frame" || c.type === "group") && (c.layoutMode ?? "none") !== "none") {
+      next = deepAutoLayout(next, childOrder, cid);
+    }
+  }
+  return next;
+}
+
+function relayoutParentsWithAutoLayout(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  parentKeys: Iterable<string>,
+): Record<string, EditorNode> {
+  let next = nodes;
+  for (const pk of parentKeys) {
+    if (pk === ROOT) continue;
+    const p = next[pk];
+    if (p && (p.type === "frame" || p.type === "group") && (p.layoutMode ?? "none") !== "none") {
+      next = deepAutoLayout(next, childOrder, pk);
+    }
+  }
+  return next;
+}
+
+function textStyleFromSelection(s: Pick<EditorState, "nodes" | "selectedIds">) {
+  for (const id of s.selectedIds) {
+    const n = s.nodes[id];
+    if (n?.type === "text") {
+      return {
+        fontFamily: n.fontFamily ?? "Inter, system-ui, sans-serif",
+        fontSize: n.fontSize ?? 13,
+        fontWeight: n.fontWeight ?? 500,
+        lineHeight: n.lineHeight ?? 1.25,
+        letterSpacing: n.letterSpacing ?? 0,
+        fill: n.fill ?? "#0f172a",
+        textColor: n.textColor ?? n.fill ?? "#0f172a",
+      };
+    }
+  }
+  return {
+    fontFamily: "Inter, system-ui, sans-serif",
+    fontSize: 13,
+    fontWeight: 500,
+    lineHeight: 1.25,
+    letterSpacing: 0,
+    fill: "#0f172a",
+    textColor: "#0f172a",
+  };
+}
+
+/** Document fields written to `.paytmcraft.json` / API — excludes UI overlays, modals, history, and transient tool state. */
+export function toPersistSlice(s: EditorState): EditorPersistSlice {
+  const { pages, pageOrder } = pagesWithActiveCaptured(s);
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    assets: s.assets,
+    designTokens: s.designTokens,
+    fileName: s.fileName,
+    selectedIds: s.selectedIds,
+    zoom: s.zoom,
+    pan: s.pan,
+    showGrid: s.showGrid,
+    canvasBackgroundColor: s.canvasBackgroundColor,
+    comments: s.comments,
+    pages,
+    pageOrder,
+    activePageId: s.activePageId,
+  };
+}
+
+function editorStateAfterDocumentImport(
+  doc: PaytmCraftDocument,
+  s: EditorState,
+): Partial<EditorState> {
+  return {
+    ...documentToEditorPatch(doc),
+    guides: [],
+    editingTextId: null,
+    hoveredCanvasId: null,
+    contextMenu: null,
+    layerRenameId: null,
+    placingComponentMasterId: null,
+    prototypeWireDrag: null,
+    selectedPrototypeLinkId: null,
+    prototypePreview: null,
+    responsivePreview: null,
+    activeCommentId: null,
+    isPlacingComment: false,
+    commentsPanelOpen: false,
+    penDrawingNodeId: null,
+    pathEditModeNodeId: null,
+    objectEditModeNodeId: null,
+    selectedPathPointId: null,
+    presenceUsers: [],
+    showPresence: false,
+    presenceActivityLog: [],
+    commandMenuOpen: false,
+    shortcutOverlayOpen: false,
+    aiModalOpen: false,
+    aiModalSource: null,
+    pluginMarketplaceOpen: false,
+    activePluginId: undefined,
+    shareModalOpen: false,
+    workspacePickerOpen: false,
+    teamInviteModalOpen: false,
+    apiFileId: undefined,
+    apiWorkspaceId: undefined,
+    isApiBackedFile: false,
+    apiCommentsStatus: "idle" as ApiCommentsStatus,
+    versionHistoryOpen: false,
+    apiVersionsStatus: "idle" as ApiVersionsStatus,
+    apiFileVersions: [],
+    editorMode: "design",
+    tool: "move",
+    leftTab: "layers",
+    documentSaveStatus: "saved",
+    documentHydrationRevision: s.documentHydrationRevision + 1,
+    historyPast: [],
+    historyFuture: [],
+  };
+}
+
+function editorPartialFromPaytmCraftDocument(doc: PaytmCraftDocument, s: EditorState): Partial<EditorState> {
+  const patch = documentToEditorPatch(doc);
+  return {
+    ...patch,
+    guides: [],
+    editingTextId: null,
+    hoveredCanvasId: null,
+    contextMenu: null,
+    layerRenameId: null,
+    placingComponentMasterId: null,
+    prototypeWireDrag: null,
+    selectedPrototypeLinkId: null,
+    prototypePreview: null,
+    responsivePreview: null,
+    activeCommentId: null,
+    isPlacingComment: false,
+    commentsPanelOpen: false,
+    penDrawingNodeId: null,
+    pathEditModeNodeId: null,
+  objectEditModeNodeId: null,
+    selectedPathPointId: null,
+    presenceUsers: [],
+    showPresence: false,
+    presenceActivityLog: [],
+    commandMenuOpen: false,
+    shortcutOverlayOpen: false,
+    aiModalOpen: false,
+    aiModalSource: null,
+    pluginMarketplaceOpen: false,
+    activePluginId: undefined,
+    shareModalOpen: false,
+    workspacePickerOpen: false,
+    teamInviteModalOpen: false,
+    apiFileId: s.apiFileId,
+    apiWorkspaceId: s.apiWorkspaceId,
+    isApiBackedFile: s.isApiBackedFile,
+    apiCommentsStatus: s.apiCommentsStatus,
+    versionHistoryOpen: false,
+    apiVersionsStatus: "idle" as ApiVersionsStatus,
+    apiFileVersions: [],
+    documentSaveStatus: "saved",
+    documentHydrationRevision: s.documentHydrationRevision + 1,
+    historyPast: [],
+    historyFuture: [],
+  };
+}
+
+function buildClipboardPayloadFromState(
+  s: Pick<EditorState, "nodes" | "childOrder" | "assets">,
+  tops: string[],
+): EditorClipboardPayloadV1 | null {
+  if (!tops.length) return null;
+  const nodeIds = new Set<string>();
+  for (const r of tops) {
+    for (const id of collectSubtreeIds(r, s.childOrder)) nodeIds.add(id);
+  }
+  const nodes: Record<string, EditorNode> = {};
+  const childOrder: Record<string, string[]> = {};
+  for (const id of nodeIds) {
+    const n = s.nodes[id];
+    if (!n) continue;
+    nodes[id] = JSON.parse(JSON.stringify(n)) as EditorNode;
+    childOrder[id] = [...(s.childOrder[id] ?? [])];
+  }
+  const assets: Record<string, EditorAsset> = {};
+  for (const id of nodeIds) {
+    const n = s.nodes[id];
+    if (n?.type === "image" && n.assetId) {
+      const a = s.assets[n.assetId];
+      if (a) assets[n.assetId] = JSON.parse(JSON.stringify(a)) as EditorAsset;
+    }
+  }
+  return {
+    version: 1,
+    rootIds: tops,
+    nodes,
+    childOrder,
+    assets: Object.keys(assets).length ? assets : undefined,
+  };
+}
+
+function firstVisibleUnlockedRootFrameId(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): string | null {
+  for (const id of childOrder[ROOT] ?? []) {
+    const n = nodes[id];
+    if (n?.type === "frame" && n.visible && !n.locked) return id;
+  }
+  return null;
+}
+
+/** Single selected frame → paste inside it; otherwise canvas root. */
+function resolvePasteParentId(s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds">): string | null {
+  const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+    const n = s.nodes[id];
+    return n && !n.locked && n.visible;
+  });
+  if (tops.length === 1) {
+    const n = s.nodes[tops[0]!];
+    if (n?.type === "frame") return tops[0]!;
+  }
+  return null;
+}
+
+function pageSwitchUiReset(): Partial<EditorState> {
+  return {
+    guides: [],
+    editingTextId: null,
+    hoveredCanvasId: null,
+    contextMenu: null,
+    layerRenameId: null,
+    placingComponentMasterId: null,
+    prototypeWireDrag: null,
+    selectedPrototypeLinkId: null,
+    prototypePreview: null,
+    responsivePreview: null,
+    activeCommentId: null,
+    isPlacingComment: false,
+    penDrawingNodeId: null,
+    pathEditModeNodeId: null,
+  objectEditModeNodeId: null,
+    selectedPathPointId: null,
+    historyPast: [],
+    historyFuture: [],
+  };
+}
+
+export const useEditorStore = create<EditorState>((set, get) => {
+  // Always seed empty on first paint so SSR and client markup match; local doc loads in EditorDocumentPersistence.
+  const initialDoc = createEmptyDocumentFields();
+
+  return {
+  tool: "move",
+  framePresetId: DEFAULT_FRAME_PRESET_ID,
+  editorMode: "design",
+  leftTab: "layers",
+  selectedIds: initialDoc.selectedIds,
+  zoom: initialDoc.zoom,
+  pan: initialDoc.pan,
+  nodes: initialDoc.nodes,
+  childOrder: initialDoc.childOrder,
+  pages: initialDoc.pages,
+  pageOrder: initialDoc.pageOrder,
+  activePageId: initialDoc.activePageId,
+  assets: initialDoc.assets,
+  designTokens: initialDoc.designTokens,
+  guides: [],
+  fileName: initialDoc.fileName,
+  showGrid: initialDoc.showGrid,
+  canvasBackgroundColor: initialDoc.canvasBackgroundColor,
+  comments: initialDoc.comments,
+  commentsPanelOpen: false,
+  activeCommentId: null,
+  isPlacingComment: false,
+  penDrawingNodeId: null,
+  pathEditModeNodeId: null,
+  objectEditModeNodeId: null,
+  selectedPathPointId: null,
+  editingTextId: null,
+  textEditSelection: null,
+  hoveredCanvasId: null,
+  contextMenu: null,
+  layerRenameId: null,
+  placingComponentMasterId: null,
+  prototypeWireDrag: null,
+  selectedPrototypeLinkId: null,
+  prototypePreview: null,
+  responsivePreview: null,
+  documentSaveStatus: "saved",
+  documentHydrating: true,
+  documentHydrationRevision: 0,
+  apiFileId: undefined,
+  apiWorkspaceId: undefined,
+  isApiBackedFile: false,
+  apiCommentsStatus: "idle" as ApiCommentsStatus,
+  versionHistoryOpen: false,
+  apiVersionsStatus: "idle" as ApiVersionsStatus,
+  apiFileVersions: [],
+  historyPast: [],
+  historyFuture: [],
+  isApplyingHistory: false,
+
+  presenceUsers: [],
+  showPresence: false,
+  presenceActivityLog: [],
+
+  togglePresence: () =>
+    set((s) => {
+      const next = !s.showPresence;
+      if (next) {
+        return { showPresence: true, presenceUsers: [], presenceActivityLog: [] };
+      }
+      return { showPresence: false, presenceUsers: [], presenceActivityLog: [] };
+    }),
+
+  updateMockPresence: (users) => set({ presenceUsers: users }),
+
+  setPresenceUsers: (users) => set({ presenceUsers: users }),
+
+  clearPresence: () => set({ presenceUsers: [], presenceActivityLog: [] }),
+
+  appendPresenceActivity: (text) =>
+    set((s) => ({
+      presenceActivityLog: [
+        {
+          id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          text,
+          at: new Date().toISOString(),
+        },
+        ...s.presenceActivityLog,
+      ].slice(0, 48),
+    })),
+
+  commandMenuOpen: false,
+  shortcutOverlayOpen: false,
+  uiChromeVisible: true,
+  setCommandMenuOpen: (open) =>
+    set(() => ({
+      commandMenuOpen: open,
+      ...(open
+        ? {
+            shortcutOverlayOpen: false,
+            pluginMarketplaceOpen: false,
+            activePluginId: undefined,
+            shareModalOpen: false,
+            workspacePickerOpen: false,
+            teamInviteModalOpen: false,
+          }
+        : {}),
+    })),
+  setShortcutOverlayOpen: (open) =>
+    set(() => ({
+      shortcutOverlayOpen: open,
+      ...(open
+        ? {
+            commandMenuOpen: false,
+            pluginMarketplaceOpen: false,
+            activePluginId: undefined,
+            shareModalOpen: false,
+            workspacePickerOpen: false,
+            teamInviteModalOpen: false,
+          }
+        : {}),
+    })),
+
+  toggleUiChrome: () => set((s) => ({ uiChromeVisible: !s.uiChromeVisible })),
+  setUiChromeVisible: (visible) => set({ uiChromeVisible: visible }),
+
+  aiModalOpen: false,
+  aiModalSource: null,
+  openAIModal: (source) =>
+    set(() => ({
+      aiModalOpen: true,
+      aiModalSource: source,
+      commandMenuOpen: false,
+      shortcutOverlayOpen: false,
+      pluginMarketplaceOpen: false,
+      activePluginId: undefined,
+      shareModalOpen: false,
+      workspacePickerOpen: false,
+      teamInviteModalOpen: false,
+    })),
+  closeAIModal: () => set({ aiModalOpen: false, aiModalSource: null }),
+
+  pluginMarketplaceOpen: false,
+  installedPluginIds: readInstalledPluginIds(),
+  activePluginId: undefined,
+  shareModalOpen: false,
+  workspacePickerOpen: false,
+  teamInviteModalOpen: false,
+
+  openShareModal: () =>
+    set(() => ({
+      shareModalOpen: true,
+      workspacePickerOpen: false,
+      teamInviteModalOpen: false,
+      commandMenuOpen: false,
+      shortcutOverlayOpen: false,
+      aiModalOpen: false,
+      aiModalSource: null,
+      pluginMarketplaceOpen: false,
+      activePluginId: undefined,
+    })),
+  closeShareModal: () => set({ shareModalOpen: false }),
+
+  openWorkspacePicker: () =>
+    set(() => ({
+      workspacePickerOpen: true,
+      shareModalOpen: false,
+      teamInviteModalOpen: false,
+      commandMenuOpen: false,
+      shortcutOverlayOpen: false,
+      aiModalOpen: false,
+      aiModalSource: null,
+      pluginMarketplaceOpen: false,
+      activePluginId: undefined,
+    })),
+  closeWorkspacePicker: () => set({ workspacePickerOpen: false }),
+
+  openTeamInviteModal: () =>
+    set(() => ({
+      teamInviteModalOpen: true,
+      shareModalOpen: false,
+      workspacePickerOpen: false,
+      commandMenuOpen: false,
+      shortcutOverlayOpen: false,
+      aiModalOpen: false,
+      aiModalSource: null,
+      pluginMarketplaceOpen: false,
+      activePluginId: undefined,
+    })),
+  closeTeamInviteModal: () => set({ teamInviteModalOpen: false }),
+
+  openPluginMarketplace: () =>
+    set(() => ({
+      pluginMarketplaceOpen: true,
+      activePluginId: undefined,
+      commandMenuOpen: false,
+      shortcutOverlayOpen: false,
+      shareModalOpen: false,
+      workspacePickerOpen: false,
+      teamInviteModalOpen: false,
+    })),
+  closePluginMarketplace: () => set({ pluginMarketplaceOpen: false }),
+
+  installPlugin: (id) => {
+    if (!getPluginById(id)) return;
+    set((s) => {
+      if (s.installedPluginIds.includes(id)) return s;
+      const next = [...s.installedPluginIds, id];
+      writeInstalledPluginIds(next);
+      return { installedPluginIds: next };
+    });
+  },
+
+  uninstallPlugin: (id) => {
+    set((s) => {
+      const next = s.installedPluginIds.filter((x) => x !== id);
+      writeInstalledPluginIds(next);
+      return {
+        installedPluginIds: next,
+        activePluginId: s.activePluginId === id ? undefined : s.activePluginId,
+      };
+    });
+  },
+
+  runPlugin: (id) => {
+    const s = get();
+    if (!s.installedPluginIds.includes(id) || !getPluginById(id)) return;
+    set({
+      activePluginId: id,
+      pluginMarketplaceOpen: false,
+      commandMenuOpen: false,
+      shortcutOverlayOpen: false,
+      aiModalOpen: false,
+      aiModalSource: null,
+      shareModalOpen: false,
+      workspacePickerOpen: false,
+      teamInviteModalOpen: false,
+    });
+  },
+
+  closeActivePlugin: () => set({ activePluginId: undefined }),
+
+  applyPluginLoremIpsumToSelection: () => {
+    const s0 = get();
+    const textIds = s0.selectedIds.filter((id) => {
+      const n = s0.nodes[id];
+      return n?.type === "text" && !n.locked;
+    });
+    if (textIds.length === 0) return;
+    const lorem =
+      "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation.";
+    get().pushHistory();
+    set((s) => {
+      const nodes = { ...s.nodes };
+      for (const id of textIds) {
+        const n = nodes[id];
+        if (!n || n.type !== "text" || n.locked) continue;
+        nodes[id] = { ...n, content: lorem };
+      }
+      return { nodes };
+    });
+  },
+
+  applyPluginRenameSelection: () => {
+    const s0 = get();
+    const tops = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
+      const n = s0.nodes[id];
+      return n && !n.locked;
+    });
+    if (tops.length === 0) return;
+    const label: Record<NodeKind, string> = {
+      frame: "Screen",
+      group: "Group",
+      rectangle: "Card",
+      ellipse: "Badge",
+      line: "Divider",
+      path: "Vector",
+      text: "Label",
+      image: "Image",
+    };
+    get().pushHistory();
+    set((s) => {
+      const tops2 = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+        const n = s.nodes[id];
+        return n && !n.locked;
+      });
+      if (tops2.length === 0) return s;
+      const counts = new Map<NodeKind, number>();
+      const nodes = { ...s.nodes };
+      for (const id of tops2) {
+        const n = nodes[id];
+        if (!n) continue;
+        const c = (counts.get(n.type) ?? 0) + 1;
+        counts.set(n.type, c);
+        const base = label[n.type] ?? "Layer";
+        const name = c > 1 ? `${base} ${c}` : base;
+        nodes[id] = { ...n, name };
+      }
+      return { nodes };
+    });
+  },
+
+  applyPluginIconInSelection: () => {
+    const s0 = get();
+    const frameId = resolveFrameParentForPlugin(s0);
+    if (!frameId) return;
+    const frame = s0.nodes[frameId];
+    if (!frame || frame.locked) return;
+    get().pushHistory();
+    set((s) => {
+      const frameId2 = resolveFrameParentForPlugin(s);
+      if (!frameId2) return s;
+      const frame2 = s.nodes[frameId2];
+      if (!frame2 || frame2.locked) return s;
+      const gid = `group-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const pathId = `path-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const pts: PathPoint[] = [
+        { id: newPathPointId(), x: 32, y: 4 },
+        { id: newPathPointId(), x: 56, y: 56 },
+        { id: newPathPointId(), x: 32, y: 40 },
+        { id: newPathPointId(), x: 8, y: 56 },
+      ];
+      let pathNode: EditorNode = {
+        id: pathId,
+        parentId: gid,
+        type: "path",
+        name: "Mark",
+        x: 0,
+        y: 0,
+        width: 64,
+        height: 64,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        expanded: true,
+        pathPoints: pts,
+        pathClosed: true,
+        fill: "#38bdf8",
+        fillEnabled: true,
+        fillOpacity: 1,
+        strokeColor: "#0f172a",
+        strokeWidth: 1.5,
+        strokePosition: "center",
+      };
+      pathNode = normalizePathNode(pathNode);
+      const nodes: Record<string, EditorNode> = { ...s.nodes };
+      nodes[pathId] = pathNode;
+      nodes[gid] = {
+        id: gid,
+        parentId: frameId2,
+        type: "group",
+        name: "Plugin icon",
+        x: 88,
+        y: 140,
+        width: pathNode.width,
+        height: pathNode.height,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        expanded: true,
+      };
+      const childOrder = { ...s.childOrder, [gid]: [pathId] };
+      const order = [...(childOrder[frameId2] ?? [])];
+      order.push(gid);
+      childOrder[frameId2] = order;
+      let nodesOut = nodes;
+      nodesOut = relayoutParentsWithAutoLayout(nodesOut, childOrder, [frameId2]);
+      return {
+        nodes: nodesOut,
+        childOrder,
+        selectedIds: [gid],
+        tool: "move",
+        editingTextId: null,
+      };
+    });
+  },
+
+  clearHistory: () => set({ historyPast: [], historyFuture: [] }),
+
+  pushHistory: (_label) => {
+    const s = get();
+    if (s.isApplyingHistory) return;
+    const snap = editorStateToHistorySnapshot({
+      fileName: s.fileName,
+      nodes: s.nodes,
+      childOrder: s.childOrder,
+      assets: s.assets,
+      designTokens: s.designTokens,
+      selectedIds: s.selectedIds,
+      zoom: s.zoom,
+      pan: s.pan,
+      showGrid: s.showGrid,
+      canvasBackgroundColor: s.canvasBackgroundColor,
+      comments: s.comments,
+    });
+    const MAX = 150;
+    const nextPast = [...s.historyPast, snap];
+    const trimmed = nextPast.length > MAX ? nextPast.slice(nextPast.length - MAX) : nextPast;
+    set({ historyPast: trimmed, historyFuture: [] });
+  },
+
+  undo: () => {
+    const s = get();
+    if (s.isApplyingHistory || s.historyPast.length === 0) return;
+    const prevSnap = s.historyPast[s.historyPast.length - 1]!;
+    const currentSnap = editorStateToHistorySnapshot({
+      fileName: s.fileName,
+      nodes: s.nodes,
+      childOrder: s.childOrder,
+      assets: s.assets,
+      designTokens: s.designTokens,
+      selectedIds: s.selectedIds,
+      zoom: s.zoom,
+      pan: s.pan,
+      showGrid: s.showGrid,
+      canvasBackgroundColor: s.canvasBackgroundColor,
+      comments: s.comments,
+    });
+    const patch = historySnapshotToEditorPatch(prevSnap);
+    set((s) => {
+      const merged = {
+        isApplyingHistory: true,
+        ...patch,
+        historyPast: s.historyPast.slice(0, -1),
+        historyFuture: [clonePersistedEditorSnapshot(currentSnap), ...s.historyFuture],
+        contextMenu: null,
+        editingTextId: null,
+        layerRenameId: null,
+        hoveredCanvasId: null,
+        prototypeWireDrag: null,
+        placingComponentMasterId: null,
+        selectedPrototypeLinkId: null,
+        guides: [],
+        activeCommentId: null,
+        isPlacingComment: false,
+        penDrawingNodeId: null,
+        pathEditModeNodeId: null,
+  objectEditModeNodeId: null,
+        selectedPathPointId: null,
+        responsivePreview: null,
+      };
+      return {
+        ...merged,
+        ...syncActivePageRecord({ ...s, ...merged }),
+      };
+    });
+    set({ isApplyingHistory: false });
+  },
+
+  redo: () => {
+    const s = get();
+    if (s.isApplyingHistory || s.historyFuture.length === 0) return;
+    const nextSnap = s.historyFuture[0]!;
+    const currentSnap = editorStateToHistorySnapshot({
+      fileName: s.fileName,
+      nodes: s.nodes,
+      childOrder: s.childOrder,
+      assets: s.assets,
+      designTokens: s.designTokens,
+      selectedIds: s.selectedIds,
+      zoom: s.zoom,
+      pan: s.pan,
+      showGrid: s.showGrid,
+      canvasBackgroundColor: s.canvasBackgroundColor,
+      comments: s.comments,
+    });
+    const patch = historySnapshotToEditorPatch(nextSnap);
+    set((s) => {
+      const merged = {
+        isApplyingHistory: true,
+        ...patch,
+        historyFuture: s.historyFuture.slice(1),
+        historyPast: [...s.historyPast, clonePersistedEditorSnapshot(currentSnap)],
+        contextMenu: null,
+        editingTextId: null,
+        layerRenameId: null,
+        hoveredCanvasId: null,
+        prototypeWireDrag: null,
+        placingComponentMasterId: null,
+        selectedPrototypeLinkId: null,
+        guides: [],
+        activeCommentId: null,
+        isPlacingComment: false,
+        penDrawingNodeId: null,
+        pathEditModeNodeId: null,
+  objectEditModeNodeId: null,
+        selectedPathPointId: null,
+        responsivePreview: null,
+      };
+      return {
+        ...merged,
+        ...syncActivePageRecord({ ...s, ...merged }),
+      };
+    });
+    set({ isApplyingHistory: false });
+  },
+
+  setEditingTextId: (editingTextId) => {
+    const prev = get().editingTextId;
+    if (editingTextId && !prev) get().pushHistory();
+    set((s) => {
+      if (!editingTextId) {
+        return { editingTextId: null, textEditSelection: null };
+      }
+      const node = s.nodes[editingTextId];
+      const len = node?.type === "text" ? (node.content?.length ?? 0) : 0;
+      return {
+        editingTextId,
+        textEditSelection: { anchor: len, focus: len },
+      };
+    });
+  },
+
+  setTextEditSelection: (anchor, focus) => set({ textEditSelection: { anchor, focus } }),
+  setHoveredCanvasId: (hoveredCanvasId) => set({ hoveredCanvasId }),
+  setPlacingComponentMasterId: (placingComponentMasterId) => set({ placingComponentMasterId }),
+  openContextMenu: (nodeId, clientX, clientY) =>
+    set((s) => {
+      const nextSel = s.selectedIds.includes(nodeId) ? s.selectedIds : [nodeId];
+      return {
+        contextMenu: { nodeId, clientX, clientY },
+        selectedIds: nextSel,
+        layerRenameId: null,
+      };
+    }),
+  closeContextMenu: () => set({ contextMenu: null }),
+  setLayerRenameId: (layerRenameId) => set({ layerRenameId }),
+
+  setTool: (tool) => {
+    const before = get();
+    if (before.tool === "pen" && tool !== "pen" && before.penDrawingNodeId) {
+      get().cancelPath();
+    }
+    set((s) => {
+      if (s.editorMode === "inspect" && tool !== "move" && tool !== "hand") return s;
+      if (tool === "comment") {
+        return {
+          tool: "comment",
+          placingComponentMasterId: null,
+          isPlacingComment: true,
+          activeCommentId: null,
+        };
+      }
+      return {
+        tool,
+        placingComponentMasterId: tool === "move" ? s.placingComponentMasterId : null,
+        isPlacingComment: false,
+        activeCommentId: null,
+      };
+    });
+  },
+  setFramePresetId: (framePresetId) => set({ framePresetId }),
+  setEditorMode: (editorMode) =>
+    set((s) => ({
+      editorMode,
+      tool: editorMode === "prototype" || editorMode === "inspect" ? "move" : s.tool,
+      placingComponentMasterId:
+        editorMode === "prototype" || editorMode === "inspect" ? null : s.placingComponentMasterId,
+      selectedPrototypeLinkId: editorMode === "prototype" ? s.selectedPrototypeLinkId : null,
+      isPlacingComment: false,
+      activeCommentId: null,
+      penDrawingNodeId:
+        editorMode === "prototype" || editorMode === "inspect" ? null : s.penDrawingNodeId,
+      pathEditModeNodeId:
+        editorMode === "prototype" || editorMode === "inspect" ? null : s.pathEditModeNodeId,
+      selectedPathPointId:
+        editorMode === "prototype" || editorMode === "inspect" ? null : s.selectedPathPointId,
+      commentsPanelOpen:
+        editorMode === "prototype" || editorMode === "inspect" ? false : s.commentsPanelOpen,
+    })),
+  setRightTab: (editorMode) => set({ editorMode }),
+  setLeftTab: (leftTab) => set({ leftTab }),
+
+  startPrototypeConnection: (sourceNodeId, pointerId, curWX, curWY) =>
+    set({ prototypeWireDrag: { sourceNodeId, pointerId, curWX, curWY }, selectedPrototypeLinkId: null }),
+
+  updatePrototypeWirePointer: (curWX, curWY) =>
+    set((s) => {
+      const w = s.prototypeWireDrag;
+      if (!w) return s;
+      return { prototypeWireDrag: { ...w, curWX, curWY } };
+    }),
+
+  finishPrototypeConnection: (targetFrameId) => {
+    const s0 = get();
+    const w = s0.prototypeWireDrag;
+    if (!w) return;
+    if (!targetFrameId) {
+      set({ prototypeWireDrag: null });
+      return;
+    }
+    const src = s0.nodes[w.sourceNodeId];
+    const tgt = s0.nodes[targetFrameId];
+    if (!src || !tgt || tgt.type !== "frame") {
+      set({ prototypeWireDrag: null });
+      return;
+    }
+    if (isAncestorOf(s0.nodes, w.sourceNodeId, targetFrameId)) {
+      set({ prototypeWireDrag: null });
+      return;
+    }
+    get().pushHistory();
+    set((s) => {
+      const w2 = s.prototypeWireDrag;
+      if (!w2) return { prototypeWireDrag: null };
+      const link = defaultPrototypeLink(w2.sourceNodeId, targetFrameId);
+      const srcNode = s.nodes[w2.sourceNodeId];
+      if (!srcNode) return { prototypeWireDrag: null };
+      const prevLinks = srcNode.prototypeLinks ?? [];
+      const nodes = {
+        ...s.nodes,
+        [w2.sourceNodeId]: { ...srcNode, prototypeLinks: [...prevLinks, link] },
+      };
+      return {
+        nodes,
+        prototypeWireDrag: null,
+        selectedPrototypeLinkId: link.id,
+        selectedIds: [w2.sourceNodeId],
+      };
+    });
+  },
+
+  cancelPrototypeConnection: () => set({ prototypeWireDrag: null }),
+
+  updatePrototypeLink: (linkId, patch) => {
+    const s0 = get();
+    const own = findPrototypeLinkOwner(s0.nodes, linkId);
+    if (!own) return;
+    get().pushHistory();
+    set((s) => {
+      const own2 = findPrototypeLinkOwner(s.nodes, linkId);
+      if (!own2) return s;
+      const node = s.nodes[own2.ownerId]!;
+      const arr = [...(node.prototypeLinks ?? [])];
+      const cur = arr[own2.index]!;
+      const next: PrototypeLink = { ...cur, ...patch, id: cur.id, sourceNodeId: cur.sourceNodeId };
+      arr[own2.index] = next;
+      return { nodes: { ...s.nodes, [own2.ownerId]: { ...node, prototypeLinks: arr } } };
+    });
+  },
+
+  deletePrototypeLink: (linkId) => {
+    const s0 = get();
+    const own = findPrototypeLinkOwner(s0.nodes, linkId);
+    if (!own) return;
+    get().pushHistory();
+    set((s) => {
+      const own2 = findPrototypeLinkOwner(s.nodes, linkId);
+      if (!own2) return s;
+      const node = s.nodes[own2.ownerId]!;
+      const arr = (node.prototypeLinks ?? []).filter((l) => l.id !== linkId);
+      const nextNode: EditorNode = { ...node, prototypeLinks: arr.length ? arr : undefined };
+      return {
+        nodes: { ...s.nodes, [own2.ownerId]: nextNode },
+        selectedPrototypeLinkId: s.selectedPrototypeLinkId === linkId ? null : s.selectedPrototypeLinkId,
+      };
+    });
+  },
+
+  setSelectedPrototypeLinkId: (selectedPrototypeLinkId) => set({ selectedPrototypeLinkId }),
+
+  openPrototypePreview: (startFrameId) =>
+    set((s) => {
+      let fid =
+        startFrameId && s.nodes[startFrameId]?.type === "frame" && s.nodes[startFrameId]?.visible
+          ? startFrameId
+          : null;
+      if (!fid && s.selectedIds.length) {
+        const sel = s.selectedIds.find((id) => s.nodes[id]?.type === "frame" && s.nodes[id]?.visible);
+        if (sel) fid = sel;
+      }
+      if (!fid) {
+        const roots = s.childOrder[ROOT] ?? [];
+        fid =
+          roots.map((id) => s.nodes[id]).find((n) => n?.type === "frame" && n.visible)?.id ?? null;
+      }
+      if (!fid) return s;
+      return {
+        prototypePreview: { mainFrameId: fid, history: [], overlayFrameId: null },
+      };
+    }),
+
+  closePrototypePreview: () => set({ prototypePreview: null }),
+
+  navigatePrototype: (targetFrameId, asOverlay) =>
+    set((s) => {
+      const pv = s.prototypePreview;
+      if (!pv || !s.nodes[targetFrameId] || s.nodes[targetFrameId]!.type !== "frame") return s;
+      if (asOverlay) {
+        return {
+          prototypePreview: {
+            ...pv,
+            overlayFrameId: targetFrameId,
+          },
+        };
+      }
+      return {
+        prototypePreview: {
+          mainFrameId: targetFrameId,
+          history: [...pv.history, pv.mainFrameId],
+          overlayFrameId: null,
+        },
+      };
+    }),
+
+  prototypePreviewBack: () =>
+    set((s) => {
+      const pv = s.prototypePreview;
+      if (!pv) return s;
+      if (pv.overlayFrameId) {
+        return { prototypePreview: { ...pv, overlayFrameId: null } };
+      }
+      const hist = [...pv.history];
+      const prev = hist.pop();
+      if (prev == null) return s;
+      return {
+        prototypePreview: {
+          ...pv,
+          mainFrameId: prev,
+          history: hist,
+        },
+      };
+    }),
+
+  select: (id, additive) =>
+    set((s) => {
+      if (!id)
+        return {
+          selectedIds: [],
+          selectedPrototypeLinkId: null,
+          pathEditModeNodeId: null,
+  objectEditModeNodeId: null,
+          selectedPathPointId: null,
+        };
+      if (additive) {
+        const has = s.selectedIds.includes(id);
+        return {
+          selectedIds: has ? s.selectedIds.filter((x) => x !== id) : [...s.selectedIds, id],
+          selectedPrototypeLinkId: null,
+          pathEditModeNodeId: null,
+  objectEditModeNodeId: null,
+          selectedPathPointId: null,
+        };
+      }
+      return {
+        selectedIds: [id],
+        selectedPrototypeLinkId: null,
+        pathEditModeNodeId: null,
+  objectEditModeNodeId: null,
+        selectedPathPointId: null,
+      };
+    }),
+
+  clearSelection: () =>
+    set({
+      selectedIds: [],
+      editingTextId: null,
+      hoveredCanvasId: null,
+      contextMenu: null,
+      layerRenameId: null,
+      placingComponentMasterId: null,
+      selectedPrototypeLinkId: null,
+      pathEditModeNodeId: null,
+  objectEditModeNodeId: null,
+      selectedPathPointId: null,
+    }),
+
+  setZoom: (zoom) => set({ zoom: clampCanvasZoom(zoom) }),
+  setPan: (pan) => set({ pan }),
+  patchPan: (d) => set((s) => ({ pan: { x: s.pan.x + d.x, y: s.pan.y + d.y } })),
+
+  updateNode: (id, patch, opts) => {
+    if (!opts?.skipHistory && !get().isApplyingHistory) {
+      const pre = get();
+      const n0 = pre.nodes[id];
+      if (n0 && !n0.locked) get().pushHistory();
+    }
+    set((s) => {
+      const n = s.nodes[id];
+      if (!n || n.locked) return s;
+      const instRoot = findInstanceRoot(s.nodes, id);
+      let nodes = { ...s.nodes };
+      const stylePart: Partial<EditorNode> = {};
+      const directPart: Partial<EditorNode> = { ...patch };
+
+      if (instRoot && instRoot !== id) {
+        for (const k of Object.keys(patch)) {
+          if (INSTANCE_STYLE_KEYS.has(k)) {
+            const v = patch[k as keyof typeof patch];
+            (stylePart as Record<string, unknown>)[k] = v;
+            delete (directPart as Record<string, unknown>)[k];
+          }
+        }
+        if (Object.keys(stylePart).length > 0) {
+          const root = nodes[instRoot]!;
+          const io: Record<string, Record<string, unknown>> = { ...(root.instanceOverrides ?? {}) };
+          const prev =
+            io[id] && typeof io[id] === "object" && !Array.isArray(io[id])
+              ? { ...(io[id] as Record<string, unknown>) }
+              : {};
+          io[id] = { ...prev, ...stylePart };
+          nodes[instRoot] = { ...root, instanceOverrides: io };
+        }
+      }
+
+      if (Object.keys(directPart).length > 0) {
+        nodes[id] = { ...n, ...directPart };
+      }
+
+      const merged = nodes[id]!;
+      const keys = Object.keys(patch);
+      const layoutSelf =
+        (merged.type === "frame" || merged.type === "group") &&
+        keys.some((k) => LAYOUT_FIELD_KEYS.has(k));
+      const geom = keys.some((k) => GEOM_KEYS.has(k) || k === "rotation");
+      const refresh = new Set<string>();
+      if (layoutSelf) refresh.add(id);
+      if (geom) {
+        if (merged.parentId) refresh.add(merged.parentId);
+        if ((merged.type === "frame" || merged.type === "group") && (merged.layoutMode ?? "none") !== "none") {
+          refresh.add(id);
+        }
+      }
+      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
+      if (geom) {
+        warnInvalidNodeGeometry("updateNode", id, merged, nodes);
+      }
+      return { nodes };
+    });
+  },
+
+  updateNodeStyle: (id, patch, opts) => {
+    if (!opts?.skipHistory && !get().isApplyingHistory) {
+      const pre = get();
+      const n0 = pre.nodes[id];
+      if (n0 && !n0.locked) get().pushHistory();
+    }
+    set((s) => {
+      const n = s.nodes[id];
+      if (!n || n.locked) return s;
+      const root = findInstanceRoot(s.nodes, id);
+      if (root && root !== id) {
+        const rn = s.nodes[root]!;
+        const io: Record<string, Record<string, unknown>> = { ...(rn.instanceOverrides ?? {}) };
+        const prev =
+          io[id] && typeof io[id] === "object" && !Array.isArray(io[id])
+            ? { ...(io[id] as Record<string, unknown>) }
+            : {};
+        io[id] = { ...prev, ...patch };
+        return { nodes: { ...s.nodes, [root]: { ...rn, instanceOverrides: io } } };
+      }
+      return { nodes: { ...s.nodes, [id]: { ...n, ...patch } } };
+    });
+  },
+
+  setNodeVisible: (id, visible) => {
+    get().pushHistory();
+    set((s) => {
+      const n = s.nodes[id];
+      if (!n) return s;
+      let nodes = { ...s.nodes, [id]: { ...n, visible } };
+      const par = nodes[id]!.parentId;
+      if (par) {
+        nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [par]);
+      }
+      return { nodes };
+    });
+  },
+
+  setNodeLocked: (id, locked) => {
+    get().pushHistory();
+    set((s) => {
+      const n = s.nodes[id];
+      if (!n) return s;
+      let nodes = { ...s.nodes, [id]: { ...n, locked } };
+      const par = nodes[id]!.parentId;
+      if (par) {
+        nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [par]);
+      }
+      return { nodes };
+    });
+  },
+
+  toggleVisible: (id) => {
+    get().pushHistory();
+    set((s) => {
+      const n = s.nodes[id];
+      if (!n) return s;
+      const visible = !n.visible;
+      let nodes = { ...s.nodes, [id]: { ...n, visible } };
+      const par = nodes[id]!.parentId;
+      if (par) {
+        nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [par]);
+      }
+      return { nodes };
+    });
+  },
+
+  toggleLock: (id) => {
+    get().pushHistory();
+    set((s) => {
+      const n = s.nodes[id];
+      if (!n) return s;
+      const locked = !n.locked;
+      let nodes = { ...s.nodes, [id]: { ...n, locked } };
+      const par = nodes[id]!.parentId;
+      if (par) {
+        nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [par]);
+      }
+      return { nodes };
+    });
+  },
+
+  toggleExpanded: (id) => {
+    get().pushHistory();
+    set((s) => {
+      const n = s.nodes[id];
+      if (!n) return s;
+      return { nodes: { ...s.nodes, [id]: { ...n, expanded: !n.expanded } } };
+    });
+  },
+
+  renameNode: (id, name) => {
+    get().pushHistory();
+    set((s) => {
+      const n = s.nodes[id];
+      if (!n) return s;
+      return { nodes: { ...s.nodes, [id]: { ...n, name } } };
+    });
+  },
+
+  addRectangle: () => {
+    get().pushHistory();
+    set((s) => {
+      const id = `rect-${Date.now()}`;
+      const roots = [...(s.childOrder[ROOT] ?? [])];
+      roots.push(id);
+      const node: EditorNode = {
+        id,
+        parentId: null,
+        type: "rectangle",
+        name: "Rectangle",
+        x: 120,
+        y: 120,
+        width: 160,
+        height: 100,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        expanded: true,
+        fill: "#0d99ff",
+        cornerRadius: 8,
+        fillEnabled: true,
+        fillOpacity: 1,
+        strokePosition: "center",
+      };
+      return {
+        nodes: { ...s.nodes, [id]: node },
+        childOrder: { ...s.childOrder, [ROOT]: roots },
+        selectedIds: [id],
+      };
+    });
+  },
+
+  addText: () => {
+    get().pushHistory();
+    set((s) => {
+      const ts = textStyleFromSelection(s);
+      const typo = resolveTextTypo(ts);
+      const content = "New text";
+      const { width: tw, height: th } = computeTextBoxSize(
+        content,
+        typo,
+        "auto-height",
+        220,
+        36,
+      );
+      const id = `text-${Date.now()}`;
+      const roots = [...(s.childOrder[ROOT] ?? [])];
+      roots.push(id);
+      const node: EditorNode = {
+        id,
+        parentId: null,
+        type: "text",
+        name: "Text",
+        x: 120,
+        y: 200,
+        width: tw,
+        height: th,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        expanded: true,
+        content,
+        textResizeMode: "auto-height",
+        ...ts,
+        fillEnabled: true,
+        fillOpacity: 1,
+      };
+      return {
+        nodes: { ...s.nodes, [id]: node },
+        childOrder: { ...s.childOrder, [ROOT]: roots },
+        selectedIds: [id],
+      };
+    });
+  },
+
+  addRectangleAt: (worldX, worldY) => {
+    get().pushHistory();
+    set((s) => {
+      const w = 120;
+      const h = 80;
+      const { x, y } = worldCenteredRootPoint(worldX, worldY, w, h);
+      const id = `rect-${Date.now()}`;
+      const roots = [...(s.childOrder[ROOT] ?? [])];
+      roots.push(id);
+      const node: EditorNode = {
+        id,
+        parentId: null,
+        type: "rectangle",
+        name: "Rectangle",
+        x,
+        y,
+        width: w,
+        height: h,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        expanded: true,
+        fill: "#0d99ff",
+        cornerRadius: 8,
+        fillEnabled: true,
+        fillOpacity: 1,
+        strokePosition: "center",
+      };
+      return {
+        nodes: { ...s.nodes, [id]: node },
+        childOrder: { ...s.childOrder, [ROOT]: roots },
+        selectedIds: [id],
+        tool: "move",
+        editingTextId: null,
+      };
+    });
+  },
+
+  addTextAt: (worldX, worldY) => {
+    get().pushHistory();
+    set((s) => {
+      const ts = textStyleFromSelection(s);
+      const typo = resolveTextTypo(ts);
+      const seedWidth = 200;
+      const { width: tw, height: th } = computeTextBoxSize(
+        "",
+        typo,
+        "auto-height",
+        seedWidth,
+        1,
+      );
+      const { x, y } = worldCenteredRootPoint(worldX, worldY, tw, th);
+      const id = `text-${Date.now()}`;
+      const roots = [...(s.childOrder[ROOT] ?? [])];
+      roots.push(id);
+      const node: EditorNode = {
+        id,
+        parentId: null,
+        type: "text",
+        name: "Text",
+        x,
+        y,
+        width: tw,
+        height: th,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        expanded: true,
+        content: "",
+        textResizeMode: "auto-height",
+        textAlign: "left",
+        ...ts,
+        fillEnabled: true,
+        fillOpacity: 1,
+      };
+      return {
+        nodes: { ...s.nodes, [id]: node },
+        childOrder: { ...s.childOrder, [ROOT]: roots },
+        selectedIds: [id],
+        tool: "move",
+        editingTextId: id,
+        textEditSelection: { anchor: 0, focus: 0 },
+      };
+    });
+    requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLTextAreaElement>(`[data-text-editor="${get().editingTextId}"]`);
+      el?.focus();
+    });
+  },
+
+  importImageAsset: async (file) => {
+    const msg = validateImageImportFile(file);
+    if (msg) {
+      window.alert(msg);
+      return null;
+    }
+    try {
+      const asset = await buildEditorAssetFromFile(file);
+      get().pushHistory();
+      set((s) => ({
+        assets: { ...s.assets, [asset.id]: asset },
+      }));
+      return asset.id;
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : "Could not import image.");
+      return null;
+    }
+  },
+
+  addImageNodeAt: (assetId, worldX, worldY) => {
+    get().pushHistory();
+    set((s) => {
+      const asset = s.assets[assetId];
+      if (!asset) return s;
+      const iw = asset.width && asset.width > 0 ? asset.width : 200;
+      const ih = asset.height && asset.height > 0 ? asset.height : 150;
+      const scale = Math.min(1, 480 / iw, 480 / ih);
+      const w = Math.max(16, Math.round(iw * scale));
+      const h = Math.max(16, Math.round(ih * scale));
+      const cx = worldX ?? 200;
+      const cy = worldY ?? 200;
+      const { x, y } = worldCenteredRootPoint(cx, cy, w, h);
+      const id = `image-${Date.now()}`;
+      const roots = [...(s.childOrder[ROOT] ?? [])];
+      roots.push(id);
+      const baseName = (asset.name || "Image").replace(/\.[^.]+$/, "") || "Image";
+      const node: EditorNode = {
+        id,
+        parentId: null,
+        type: "image",
+        name: baseName,
+        x,
+        y,
+        width: w,
+        height: h,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        expanded: true,
+        assetId,
+        imageSrc: asset.dataUrl,
+        imageName: asset.name,
+        imageMimeType: asset.mimeType,
+        imageFitMode: "fill",
+        fillOpacity: 1,
+        fillEnabled: true,
+      };
+      return {
+        nodes: { ...s.nodes, [id]: node },
+        childOrder: { ...s.childOrder, [ROOT]: roots },
+        selectedIds: [id],
+        tool: "move" as Tool,
+      };
+    });
+  },
+
+  replaceImageAsset: async (nodeId, file) => {
+    const msg = validateImageImportFile(file);
+    if (msg) {
+      window.alert(msg);
+      return;
+    }
+    const n0 = get().nodes[nodeId];
+    if (!n0 || n0.type !== "image") return;
+    try {
+      const asset = await buildEditorAssetFromFile(file);
+      get().pushHistory();
+      set((s) => {
+        const n = s.nodes[nodeId];
+        if (!n || n.type !== "image") return s;
+        const baseName = (asset.name || "Image").replace(/\.[^.]+$/, "") || "Image";
+        return {
+          assets: { ...s.assets, [asset.id]: asset },
+          nodes: {
+            ...s.nodes,
+            [nodeId]: {
+              ...n,
+              assetId: asset.id,
+              imageSrc: asset.dataUrl,
+              imageName: asset.name,
+              imageMimeType: asset.mimeType,
+              name: baseName,
+            },
+          },
+        };
+      });
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : "Could not replace image.");
+    }
+  },
+
+  deleteAsset: (assetId) => {
+    get().pushHistory();
+    set((s) => {
+      if (!s.assets[assetId]) return s;
+      const { [assetId]: _removed, ...rest } = s.assets;
+      const nodes = { ...s.nodes };
+      for (const nid of Object.keys(nodes)) {
+        const n = nodes[nid];
+        if (n?.type === "image" && n.assetId === assetId) {
+          nodes[nid] = { ...n, assetId: undefined };
+        }
+      }
+      return { assets: rest, nodes };
+    });
+  },
+
+  createColorTokenFromSelection: (name) => {
+    const s0 = get();
+    const colorTypes = new Set<NodeKind>(["frame", "rectangle", "ellipse", "path", "text"]);
+    let picked: EditorNode | null = null;
+    for (const id of s0.selectedIds) {
+      const raw = s0.nodes[id];
+      if (!raw || raw.locked || !raw.visible) continue;
+      if (!colorTypes.has(raw.type)) continue;
+      const merged = mergeInstanceOverrides(raw, s0.nodes);
+      const n = resolveNodeWithDesignTokens(merged, s0.designTokens);
+      if (effectiveFillType(n) === "gradient") continue;
+      const h = n.type === "text" ? (n.textColor ?? n.fill) : n.fill;
+      if (!h) continue;
+      picked = n;
+      break;
+    }
+    if (!picked) return;
+    const hex = picked.type === "text" ? (picked.textColor ?? picked.fill) : picked.fill;
+    if (!hex) return;
+    get().pushHistory();
+    set((s) => {
+      const colorCount = Object.values(s.designTokens).filter((t) => t.type === "color").length;
+      const tid = newDesignTokenId("color");
+      const nm =
+        name?.trim() ||
+        `Color / ${picked!.name || "Selection"}${colorCount > 0 ? ` ${colorCount + 1}` : ""}`;
+      const token: DesignToken = {
+        id: tid,
+        name: nm.slice(0, 64),
+        type: "color",
+        value: { hex, opacity: picked!.fillOpacity ?? 1 },
+        createdAt: designTokenTimestamp(),
+        updatedAt: designTokenTimestamp(),
+      };
+      return { designTokens: { ...s.designTokens, [tid]: token } };
+    });
+  },
+
+  createGradientTokenFromSelection: (name) => {
+    const s0 = get();
+    const shapeTypes = new Set<NodeKind>(["frame", "rectangle", "ellipse", "path"]);
+    let picked: EditorNode | null = null;
+    for (const id of s0.selectedIds) {
+      const raw = s0.nodes[id];
+      if (!raw || raw.locked || !raw.visible) continue;
+      if (!shapeTypes.has(raw.type)) continue;
+      const merged = mergeInstanceOverrides(raw, s0.nodes);
+      const n = resolveNodeWithDesignTokens(merged, s0.designTokens);
+      if (effectiveFillType(n) !== "gradient") continue;
+      picked = n;
+      break;
+    }
+    if (!picked) return;
+    const gradient = normalizeFillGradient(picked.fillGradient, picked.fill);
+    get().pushHistory();
+    set((s) => {
+      const gradCount = Object.values(s.designTokens).filter((t) => t.type === "gradient").length;
+      const tid = newDesignTokenId("grad");
+      const nm =
+        name?.trim() ||
+        `Gradient / ${picked!.name || "Selection"}${gradCount > 0 ? ` ${gradCount + 1}` : ""}`;
+      const token: DesignToken = {
+        id: tid,
+        name: nm.slice(0, 64),
+        type: "gradient",
+        value: gradient,
+        createdAt: designTokenTimestamp(),
+        updatedAt: designTokenTimestamp(),
+      };
+      return { designTokens: { ...s.designTokens, [tid]: token } };
+    });
+  },
+
+  createTypographyTokenFromSelection: (name) => {
+    const s0 = get();
+    let picked: EditorNode | null = null;
+    for (const id of s0.selectedIds) {
+      const raw = s0.nodes[id];
+      if (!raw || raw.locked || !raw.visible || raw.type !== "text") continue;
+      const merged = mergeInstanceOverrides(raw, s0.nodes);
+      picked = resolveNodeWithDesignTokens(merged, s0.designTokens);
+      break;
+    }
+    if (!picked) return;
+    get().pushHistory();
+    set((s) => {
+      const typoCount = Object.values(s.designTokens).filter((t) => t.type === "typography").length;
+      const tid = newDesignTokenId("type");
+      const nm =
+        name?.trim() ||
+        `Typography / ${picked!.name || "Text"}${typoCount > 0 ? ` ${typoCount + 1}` : ""}`;
+      const token: DesignToken = {
+        id: tid,
+        name: nm.slice(0, 64),
+        type: "typography",
+        value: {
+          fontFamily: picked!.fontFamily ?? "Inter, system-ui, sans-serif",
+          fontSize: picked!.fontSize ?? 13,
+          fontWeight: picked!.fontWeight ?? 500,
+          lineHeight: picked!.lineHeight ?? 1.25,
+          letterSpacing: picked!.letterSpacing ?? 0,
+        },
+        createdAt: designTokenTimestamp(),
+        updatedAt: designTokenTimestamp(),
+      };
+      return { designTokens: { ...s.designTokens, [tid]: token } };
+    });
+  },
+
+  createSpacingToken: (name, value) => {
+    if (!Number.isFinite(value)) return;
+    get().pushHistory();
+    set((s) => {
+      const tid = newDesignTokenId("space");
+      const token: DesignToken = {
+        id: tid,
+        name: name.trim() || "Spacing",
+        type: "spacing",
+        value: { value },
+        createdAt: designTokenTimestamp(),
+        updatedAt: designTokenTimestamp(),
+      };
+      return { designTokens: { ...s.designTokens, [tid]: token } };
+    });
+  },
+
+  updateDesignToken: (id, patch) => {
+    get().pushHistory();
+    set((s) => {
+      const t = s.designTokens[id];
+      if (!t) return s;
+      const next: DesignToken = {
+        ...t,
+        ...patch,
+        id: t.id,
+        createdAt: t.createdAt,
+        type: patch.type ?? t.type,
+        value: patch.value !== undefined ? (patch.value as DesignToken["value"]) : t.value,
+        updatedAt: designTokenTimestamp(),
+      };
+      return { designTokens: { ...s.designTokens, [id]: next } };
+    });
+  },
+
+  deleteDesignToken: (id) => {
+    get().pushHistory();
+    set((s) => {
+      if (!s.designTokens[id]) return s;
+      const { [id]: _removed, ...rest } = s.designTokens;
+      const nodes = { ...s.nodes };
+      for (const nid of Object.keys(nodes)) {
+        const n = nodes[nid];
+        if (!n) continue;
+        let next = n;
+        if (n.fillTokenId === id) next = { ...next, fillTokenId: undefined };
+        if (n.textStyleTokenId === id) next = { ...next, textStyleTokenId: undefined };
+        if (n.effectTokenId === id) next = { ...next, effectTokenId: undefined };
+        nodes[nid] = next;
+      }
+      return { designTokens: rest, nodes };
+    });
+  },
+
+  applyTokenToSelection: (tokenId) => {
+    const tok = get().designTokens[tokenId];
+    if (!tok) return;
+    get().pushHistory();
+    set((s) => {
+      const t = s.designTokens[tokenId];
+      if (!t) return s;
+      const nodes = { ...s.nodes };
+      for (const id of s.selectedIds) {
+        const raw = nodes[id];
+        if (!raw || raw.locked) continue;
+        if (t.type === "color") {
+          if (["frame", "rectangle", "ellipse", "path", "text"].includes(raw.type)) {
+            nodes[id] = { ...raw, fillTokenId: tokenId, fillType: "solid" };
+          }
+        } else if (t.type === "gradient") {
+          if (["frame", "rectangle", "ellipse", "path"].includes(raw.type)) {
+            nodes[id] = { ...raw, fillTokenId: tokenId, fillType: "gradient" };
+          }
+        } else if (t.type === "typography") {
+          if (raw.type === "text") nodes[id] = { ...raw, textStyleTokenId: tokenId };
+        } else if (t.type === "effect") {
+          nodes[id] = { ...raw, effectTokenId: tokenId };
+        } else if (t.type === "spacing" && isSpacingValue(t.value)) {
+          const v = Math.max(0, t.value.value);
+          if (raw.type === "frame" || raw.type === "group") {
+            nodes[id] = {
+              ...raw,
+              paddingTop: v,
+              paddingRight: v,
+              paddingBottom: v,
+              paddingLeft: v,
+              layoutGap: v,
+            };
+          }
+        }
+      }
+      return { nodes };
+    });
+  },
+
+  detachTokenFromSelection: (tokenType) => {
+    get().pushHistory();
+    set((s) => {
+      const nodes = { ...s.nodes };
+      for (const id of s.selectedIds) {
+        const raw = nodes[id];
+        if (!raw) continue;
+        if ((tokenType === "color" || tokenType === "gradient") && raw.fillTokenId) {
+          nodes[id] = { ...raw, fillTokenId: undefined };
+        } else if (tokenType === "typography" && raw.textStyleTokenId) {
+          nodes[id] = { ...raw, textStyleTokenId: undefined };
+        } else if (tokenType === "effect" && raw.effectTokenId) {
+          nodes[id] = { ...raw, effectTokenId: undefined };
+        }
+      }
+      return { nodes };
+    });
+  },
+
+  addEffect: (nodeId, type) => {
+    const s0 = get();
+    const n0 = s0.nodes[nodeId];
+    if (!n0 || n0.locked) return;
+    const tokId = n0.effectTokenId;
+    if (tokId && s0.designTokens[tokId]?.type === "effect") {
+      const tok = s0.designTokens[tokId]!;
+      if (!isEffectValue(tok.value)) return;
+      const v = tok.value as EffectTokenValue;
+      const ne = defaultNodeEffect(type);
+      const list = [...(v.effects ?? []), ne];
+      get().updateDesignToken(tokId, { value: { ...v, effects: list } });
+      return;
+    }
+    get().pushHistory();
+    set((s) => {
+      const n = s.nodes[nodeId];
+      if (!n || n.locked) return s;
+      const ne = defaultNodeEffect(type);
+      const list = [...(n.effects ?? []), ne];
+      return { nodes: { ...s.nodes, [nodeId]: { ...n, effects: list } } };
+    });
+  },
+
+  updateEffect: (nodeId, effectId, patch) => {
+    const s0 = get();
+    const n = s0.nodes[nodeId];
+    if (!n || n.locked) return;
+    const tokId = n.effectTokenId;
+    if (tokId && s0.designTokens[tokId]?.type === "effect") {
+      const tok = s0.designTokens[tokId]!;
+      if (!isEffectValue(tok.value)) return;
+      const v = tok.value as EffectTokenValue;
+      const effs = (v.effects ?? []).map((e) => (e.id === effectId ? { ...e, ...patch } : e));
+      get().updateDesignToken(tokId, { value: { ...v, effects: effs } });
+      return;
+    }
+    get().pushHistory();
+    set((s) => {
+      const nn = s.nodes[nodeId];
+      if (!nn || nn.locked) return s;
+      const list = (nn.effects ?? []).map((e) => (e.id === effectId ? { ...e, ...patch } : e));
+      return { nodes: { ...s.nodes, [nodeId]: { ...nn, effects: list } } };
+    });
+  },
+
+  deleteEffect: (nodeId, effectId) => {
+    const s0 = get();
+    const n = s0.nodes[nodeId];
+    if (!n || n.locked) return;
+    const tokId = n.effectTokenId;
+    if (tokId && s0.designTokens[tokId]?.type === "effect") {
+      const tok = s0.designTokens[tokId]!;
+      if (!isEffectValue(tok.value)) return;
+      const v = tok.value as EffectTokenValue;
+      const effs = (v.effects ?? []).filter((e) => e.id !== effectId);
+      get().updateDesignToken(tokId, { value: { ...v, effects: effs } });
+      return;
+    }
+    get().pushHistory();
+    set((s) => {
+      const nn = s.nodes[nodeId];
+      if (!nn || nn.locked) return s;
+      const list = (nn.effects ?? []).filter((e) => e.id !== effectId);
+      return { nodes: { ...s.nodes, [nodeId]: { ...nn, effects: list.length ? list : undefined } } };
+    });
+  },
+
+  toggleEffect: (nodeId, effectId) => {
+    const s0 = get();
+    const n = s0.nodes[nodeId];
+    if (!n || n.locked) return;
+    const tokId = n.effectTokenId;
+    if (tokId && s0.designTokens[tokId]?.type === "effect") {
+      const tok = s0.designTokens[tokId]!;
+      if (!isEffectValue(tok.value)) return;
+      const v = tok.value as EffectTokenValue;
+      const effs = (v.effects ?? []).map((e) => (e.id === effectId ? { ...e, visible: !e.visible } : e));
+      get().updateDesignToken(tokId, { value: { ...v, effects: effs } });
+      return;
+    }
+    get().pushHistory();
+    set((s) => {
+      const nn = s.nodes[nodeId];
+      if (!nn || nn.locked) return s;
+      const list = (nn.effects ?? []).map((e) => (e.id === effectId ? { ...e, visible: !e.visible } : e));
+      return { nodes: { ...s.nodes, [nodeId]: { ...nn, effects: list } } };
+    });
+  },
+
+  createEffectTokenFromSelection: (name) => {
+    const s0 = get();
+    let pickedId: string | null = null;
+    for (const id of s0.selectedIds) {
+      const raw = s0.nodes[id];
+      if (!raw || raw.locked || !raw.visible) continue;
+      pickedId = id;
+      break;
+    }
+    if (!pickedId) return;
+    const merged = mergeInstanceOverrides(s0.nodes[pickedId]!, s0.nodes);
+    const resolved = resolveNodeWithDesignTokens(merged, s0.designTokens);
+    const effList = resolved.effects?.length ? resolved.effects.map((e) => ({ ...e, id: newNodeEffectId() })) : undefined;
+    const value: EffectTokenValue =
+      effList && effList.length > 0
+        ? { effects: effList }
+        : { shadow: "0 4px 12px rgba(15, 23, 42, 0.2)", blur: 0 };
+    get().pushHistory();
+    set((s) => {
+      const n = s.nodes[pickedId!];
+      if (!n) return s;
+      const effectCount = Object.values(s.designTokens).filter((t) => t.type === "effect").length;
+      const tid = newDesignTokenId("effect");
+      const nm =
+        name?.trim() ||
+        `Effect / ${n.name || "Selection"}${effectCount > 0 ? ` ${effectCount + 1}` : ""}`;
+      const token: DesignToken = {
+        id: tid,
+        name: nm.slice(0, 64),
+        type: "effect",
+        value,
+        createdAt: designTokenTimestamp(),
+        updatedAt: designTokenTimestamp(),
+      };
+      return { designTokens: { ...s.designTokens, [tid]: token } };
+    });
+  },
+
+  applyEffectTokenToSelection: (tokenId) => {
+    get().applyTokenToSelection(tokenId);
+  },
+
+  detachEffectTokenFromSelection: () => {
+    get().detachTokenFromSelection("effect");
+  },
+
+  createFrameAt: (worldX, worldY, opts) => {
+    const presetId = opts?.presetId ?? get().framePresetId;
+    const resolved = resolveFramePresetSize(presetId);
+    const W = opts?.width ?? resolved.width;
+    const H = opts?.height ?? resolved.height;
+    const name = opts?.name ?? (presetId !== "custom" ? resolved.label : undefined);
+    get().createFrameWithBounds(worldX - W / 2, worldY - H / 2, W, H, { presetId, name });
+  },
+
+  createFrameWithBounds: (x, y, width, height, opts) => {
+    get().pushHistory();
+    set((s) => {
+      const id = `frame-${Date.now()}`;
+      const name = opts?.name ?? nextFrameName(s.nodes);
+      const W = Math.max(RESIZE_MIN_DIMENSION, Math.round(width));
+      const H = Math.max(RESIZE_MIN_DIMENSION, Math.round(height));
+      const node: EditorNode = {
+        id,
+        parentId: null,
+        type: "frame",
+        name,
+        x: Math.round(x),
+        y: Math.round(y),
+        width: W,
+        height: H,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        expanded: true,
+        fill: "#ffffff",
+        fillEnabled: true,
+        fillOpacity: 1,
+        strokePosition: "center",
+      };
+      const roots = [...(s.childOrder[ROOT] ?? [])];
+      roots.push(id);
+      return {
+        nodes: { ...s.nodes, [id]: node },
+        childOrder: { ...s.childOrder, [ROOT]: roots, [id]: [] },
+        selectedIds: [id],
+        tool: "move",
+        editingTextId: null,
+      };
+    });
+  },
+
+  addEllipseAt: (worldX, worldY) => {
+    get().pushHistory();
+    set((s) => {
+      const w = 120;
+      const h = 80;
+      const { x, y } = worldCenteredRootPoint(worldX, worldY, w, h);
+      const id = `ellipse-${Date.now()}`;
+      const roots = [...(s.childOrder[ROOT] ?? [])];
+      roots.push(id);
+      const node: EditorNode = {
+        id,
+        parentId: null,
+        type: "ellipse",
+        name: "Ellipse",
+        x,
+        y,
+        width: w,
+        height: h,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        expanded: true,
+        fill: "#0d99ff",
+        cornerRadius: 0,
+        fillEnabled: true,
+        fillOpacity: 1,
+        strokePosition: "center",
+      };
+      return {
+        nodes: { ...s.nodes, [id]: node },
+        childOrder: { ...s.childOrder, [ROOT]: roots },
+        selectedIds: [id],
+        tool: "move",
+      };
+    });
+  },
+
+  addLineAt: (worldX, worldY) => {
+    get().pushHistory();
+    set((s) => {
+      const w = 120;
+      const h = 8;
+      const { x, y } = worldCenteredRootPoint(worldX, worldY, w, h);
+      const id = `line-${Date.now()}`;
+      const roots = [...(s.childOrder[ROOT] ?? [])];
+      roots.push(id);
+      const node: EditorNode = {
+        id,
+        parentId: null,
+        type: "line",
+        name: "Line",
+        x,
+        y,
+        width: w,
+        height: h,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        expanded: true,
+        fill: "transparent",
+        fillEnabled: false,
+        fillOpacity: 0,
+        strokeColor: "#0d99ff",
+        strokeWidth: 3,
+        strokePosition: "center",
+      };
+      return {
+        nodes: { ...s.nodes, [id]: node },
+        childOrder: { ...s.childOrder, [ROOT]: roots },
+        selectedIds: [id],
+        tool: "move",
+      };
+    });
+  },
+
+  addTriangleAt: (worldX, worldY) => {
+    get().pushHistory();
+    set((s) => {
+      const w = 120;
+      const h = 104;
+      const { x, y } = worldCenteredRootPoint(worldX, worldY, w, h);
+      const id = `tri-${Date.now()}`;
+      const roots = [...(s.childOrder[ROOT] ?? [])];
+      roots.push(id);
+      const pts: PathPoint[] = [
+        { id: newPathPointId(), x: w / 2, y: 0 },
+        { id: newPathPointId(), x: w, y: h },
+        { id: newPathPointId(), x: 0, y: h },
+      ];
+      let node: EditorNode = {
+        id,
+        parentId: null,
+        type: "path",
+        name: "Triangle",
+        x,
+        y,
+        width: w,
+        height: h,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        expanded: true,
+        pathPoints: pts,
+        pathClosed: true,
+        fill: "#0d99ff",
+        fillEnabled: true,
+        fillOpacity: 1,
+        strokeColor: "#0f172a",
+        strokeWidth: 0,
+        strokePosition: "center",
+      };
+      node = normalizePathNode(node);
+      return {
+        nodes: { ...s.nodes, [id]: node },
+        childOrder: { ...s.childOrder, [ROOT]: roots },
+        selectedIds: [id],
+        tool: "move",
+      };
+    });
+  },
+
+  createShapeFromDrag: (shapeType, start, end, modifiers, style) => {
+    get().pushHistory();
+    set((s) => {
+      const draft = createShapeNode(shapeType, start, end, modifiers, style);
+      const id = `${draft.type}-${Date.now()}`;
+      const node: EditorNode = { ...draft, id };
+      const roots = [...(s.childOrder[ROOT] ?? [])];
+      roots.push(id);
+      return {
+        nodes: { ...s.nodes, [id]: node },
+        childOrder: { ...s.childOrder, [ROOT]: roots },
+        selectedIds: [id],
+        tool: "move",
+      };
+    });
+  },
+
+  booleanUnionSelection: () => {
+    get().createBooleanGroup("union");
+  },
+
+  createBooleanGroup: (operation) => {
+    const s0 = get();
+    const tops0 = getBooleanEligibleSelection(s0.selectedIds, s0.nodes);
+    if (tops0.length < 2) {
+      window.alert("Select at least two unlocked shape layers to apply a boolean operation.");
+      return;
+    }
+    const parentId0 = s0.nodes[tops0[0]!]!.parentId;
+    if (!tops0.every((id) => s0.nodes[id]!.parentId === parentId0)) {
+      window.alert("Boolean operations require shapes on the same level.");
+      return;
+    }
+    get().pushHistory();
+    set((s) => {
+      const tops = getBooleanEligibleSelection(s.selectedIds, s.nodes);
+      if (tops.length < 2) return s;
+      const parentId = s.nodes[tops[0]!]!.parentId;
+      if (!tops.every((id) => s.nodes[id]!.parentId === parentId)) return s;
+      const P = parentListKey(parentId);
+      const list = s.childOrder[P] ?? [];
+      let ordered = [...tops].sort((a, b) => list.indexOf(a) - list.indexOf(b));
+      if (operation === "subtract") {
+        const top = topmostAmongSiblings(tops, s.nodes, s.childOrder);
+        ordered = ordered.filter((id) => id !== top).concat(top);
+      }
+      const pw = parentId ? worldRect(parentId, s.nodes) : { x: 0, y: 0, width: 0, height: 0 };
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const id of ordered) {
+        const w = worldRect(id, s.nodes);
+        minX = Math.min(minX, w.x);
+        minY = Math.min(minY, w.y);
+        maxX = Math.max(maxX, w.x + w.width);
+        maxY = Math.max(maxY, w.y + w.height);
+      }
+      const gw = maxX - minX;
+      const gh = maxY - minY;
+      const gx = minX - pw.x;
+      const gy = minY - pw.y;
+      const gid = `group-bool-${Date.now()}`;
+      const nodes = { ...s.nodes };
+      const childOrder = { ...s.childOrder };
+      nodes[gid] = {
+        id: gid,
+        parentId,
+        type: "group",
+        name: BOOLEAN_OPERATION_LABELS[operation],
+        x: gx,
+        y: gy,
+        width: gw,
+        height: gh,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        expanded: true,
+        isBooleanGroup: true,
+        booleanOperation: operation,
+      };
+      for (const id of ordered) {
+        const o = getNodeWorldOrigin(id, nodes);
+        const n = nodes[id]!;
+        nodes[id] = {
+          ...n,
+          parentId: gid,
+          x: o.x - minX,
+          y: o.y - minY,
+        };
+      }
+      const parentList = [...(childOrder[P] ?? [])];
+      const ixs = ordered.map((id) => parentList.indexOf(id)).sort((a, b) => a - b);
+      const insertAt = ixs[0]!;
+      const newList = parentList.filter((id) => !ordered.includes(id));
+      newList.splice(insertAt, 0, gid);
+      childOrder[P] = newList;
+      childOrder[gid] = ordered;
+      const nodesOut = relayoutParentsWithAutoLayout(nodes, childOrder, [P]);
+      return {
+        nodes: nodesOut,
+        childOrder,
+        selectedIds: [gid],
+        tool: "move",
+        editingTextId: null,
+        objectEditModeNodeId: null,
+      };
+    });
+  },
+
+  updateBooleanOperation: (groupId, operation) => {
+    const g = get().nodes[groupId];
+    if (!g?.isBooleanGroup || g.locked) return;
+    get().pushHistory();
+    set((s) => {
+      const node = s.nodes[groupId];
+      if (!node?.isBooleanGroup) return s;
+      return {
+        nodes: {
+          ...s.nodes,
+          [groupId]: {
+            ...node,
+            booleanOperation: operation,
+            name: BOOLEAN_OPERATION_LABELS[operation],
+            flattenedPathData: undefined,
+          },
+        },
+      };
+    });
+  },
+
+  flattenSelection: () => {
+    const s0 = get();
+    if (s0.selectedIds.length !== 1) {
+      window.alert("Select a boolean group to flatten.");
+      return;
+    }
+    const gid = s0.selectedIds[0]!;
+    const group = s0.nodes[gid];
+    if (!group?.isBooleanGroup || group.locked) {
+      window.alert("Select a boolean group to flatten.");
+      return;
+    }
+    const kids = s0.childOrder[gid] ?? [];
+    const result = flattenBooleanGroup(group, kids, s0.nodes);
+    if (!result) {
+      window.alert("Could not flatten this boolean group.");
+      return;
+    }
+    get().pushHistory();
+    set((s) => {
+      const g2 = s.nodes[gid];
+      if (!g2?.isBooleanGroup) return s;
+      const parentId = g2.parentId;
+      const P = parentListKey(parentId);
+      const pw = parentId ? worldRect(parentId, s.nodes) : { x: 0, y: 0, width: 0, height: 0 };
+      const pathNode = booleanResultToPathNode(result, g2, parentId);
+      pathNode.x = result.x - pw.x;
+      pathNode.y = result.y - pw.y;
+      const nodes = { ...s.nodes, [pathNode.id]: pathNode };
+      const childOrder = { ...s.childOrder };
+      for (const cid of kids) {
+        delete nodes[cid];
+        delete childOrder[cid];
+      }
+      delete nodes[gid];
+      delete childOrder[gid];
+      const list = (childOrder[P] ?? []).filter((id) => id !== gid);
+      const idx = (s.childOrder[P] ?? []).indexOf(gid);
+      list.splice(Math.max(0, idx), 0, pathNode.id);
+      childOrder[P] = list;
+      return { nodes, childOrder, selectedIds: [pathNode.id], tool: "move" };
+    });
+  },
+
+  enterObjectEditMode: (nodeId) => {
+    const n = get().nodes[nodeId];
+    if (!n?.isBooleanGroup || n.locked) return;
+    set({ objectEditModeNodeId: nodeId, selectedIds: [nodeId], pathEditModeNodeId: null });
+  },
+
+  exitObjectEditMode: () => set({ objectEditModeNodeId: null }),
+
+  useSelectionAsMask: () => {
+    const s0 = get();
+    const tops0 = getBooleanEligibleSelection(s0.selectedIds, s0.nodes);
+    if (tops0.length < 2) {
+      window.alert("Select at least two shapes — the topmost becomes the mask.");
+      return;
+    }
+    const parentId0 = s0.nodes[tops0[0]!]!.parentId;
+    if (!tops0.every((id) => s0.nodes[id]!.parentId === parentId0)) {
+      window.alert("Mask requires shapes on the same level.");
+      return;
+    }
+    get().pushHistory();
+    set((s) => {
+      const tops = getBooleanEligibleSelection(s.selectedIds, s.nodes);
+      if (tops.length < 2) return s;
+      const parentId = s.nodes[tops[0]!]!.parentId;
+      const P = parentListKey(parentId);
+      const maskId = topmostAmongSiblings(tops, s.nodes, s.childOrder);
+      const contentIds = tops.filter((id) => id !== maskId);
+      const allIds = [...contentIds, maskId];
+      const pw = parentId ? worldRect(parentId, s.nodes) : { x: 0, y: 0, width: 0, height: 0 };
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const id of allIds) {
+        const w = worldRect(id, s.nodes);
+        minX = Math.min(minX, w.x);
+        minY = Math.min(minY, w.y);
+        maxX = Math.max(maxX, w.x + w.width);
+        maxY = Math.max(maxY, w.y + w.height);
+      }
+      const gid = `group-mask-${Date.now()}`;
+      const nodes = { ...s.nodes };
+      const childOrder = { ...s.childOrder };
+      nodes[gid] = {
+        id: gid,
+        parentId,
+        type: "group",
+        name: "Mask group",
+        x: minX - pw.x,
+        y: minY - pw.y,
+        width: maxX - minX,
+        height: maxY - minY,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        expanded: true,
+        maskId,
+      };
+      for (const id of contentIds) {
+        const o = getNodeWorldOrigin(id, nodes);
+        nodes[id] = {
+          ...nodes[id]!,
+          parentId: gid,
+          x: o.x - minX,
+          y: o.y - minY,
+          maskedBy: gid,
+          isMask: false,
+        };
+      }
+      const mo = getNodeWorldOrigin(maskId, nodes);
+      nodes[maskId] = {
+        ...nodes[maskId]!,
+        parentId: gid,
+        x: mo.x - minX,
+        y: mo.y - minY,
+        isMask: true,
+        name: "Mask",
+        maskedBy: undefined,
+      };
+      const parentList = [...(childOrder[P] ?? [])];
+      const insertAt = Math.min(...allIds.map((id) => parentList.indexOf(id)).filter((i) => i >= 0));
+      childOrder[P] = parentList.filter((id) => !allIds.includes(id));
+      childOrder[P]!.splice(Math.max(0, insertAt), 0, gid);
+      childOrder[gid] = [...contentIds, maskId];
+      return {
+        nodes: relayoutParentsWithAutoLayout(nodes, childOrder, [P]),
+        childOrder,
+        selectedIds: [gid],
+        tool: "move",
+      };
+    });
+  },
+
+  releaseMask: (maskGroupId) => {
+    const g0 = get().nodes[maskGroupId];
+    if (!g0 || !isMaskGroup(g0) || g0.locked) return;
+    get().pushHistory();
+    set((s) => {
+      const g = s.nodes[maskGroupId];
+      if (!g || !isMaskGroup(g)) return s;
+      const parentId = g.parentId;
+      const P = parentListKey(parentId);
+      const kids = [...(s.childOrder[maskGroupId] ?? [])];
+      const nodes = { ...s.nodes };
+      const childOrder = { ...s.childOrder };
+      const gw = worldRect(maskGroupId, s.nodes);
+      for (const kid of kids) {
+        const kn = nodes[kid];
+        if (!kn) continue;
+        const kw = worldRect(kid, s.nodes);
+        nodes[kid] = {
+          ...kn,
+          parentId,
+          x: kw.x - (parentId ? worldRect(parentId, s.nodes).x : 0),
+          y: kw.y - (parentId ? worldRect(parentId, s.nodes).y : 0),
+          isMask: undefined,
+          maskedBy: undefined,
+        };
+      }
+      const list = [...(childOrder[P] ?? [])];
+      const gi = list.indexOf(maskGroupId);
+      list.splice(gi, 1, ...kids);
+      childOrder[P] = list;
+      delete nodes[maskGroupId];
+      delete childOrder[maskGroupId];
+      return { nodes, childOrder, selectedIds: kids, tool: "move" };
+    });
+  },
+
+  setNodeAsMask: (nodeId, isMask) => {
+    const n = get().nodes[nodeId];
+    if (!n || n.locked) return;
+    get().pushHistory();
+    set((s) => ({
+      nodes: {
+        ...s.nodes,
+        [nodeId]: {
+          ...s.nodes[nodeId]!,
+          isMask,
+          name: isMask ? "Mask" : s.nodes[nodeId]!.name,
+        },
+      },
+    }));
+  },
+
+  duplicateSelection: () => {
+    const s0 = get();
+    const tops0 = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
+      const n = s0.nodes[id];
+      return n && !n.locked && n.visible;
+    });
+    if (tops0.length === 0) return;
+    get().pushHistory();
+    set((s) => {
+      const OFFSET = 24;
+      const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+        const n = s.nodes[id];
+        return n && !n.locked && n.visible;
+      });
+      if (tops.length === 0) return s;
+
+      const nodes: Record<string, EditorNode> = { ...s.nodes };
+      const childOrder: Record<string, string[]> = { ...s.childOrder };
+      const newRoots: string[] = [];
+
+      for (const rootId of tops) {
+        const rootOld = s.nodes[rootId];
+        if (!rootOld) continue;
+        const nameForRoot = nextDuplicateName(nodes);
+        const idMap = new Map<string, string>();
+
+        const cloneRecursive = (oldId: string, newParent: string | null): string => {
+          const old = s.nodes[oldId];
+          if (!old) return "";
+          const newId = `${old.type}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+          idMap.set(oldId, newId);
+          const base: EditorNode = {
+            ...old,
+            id: newId,
+            parentId: newParent,
+            name: oldId === rootId ? nameForRoot : old.name,
+            x: old.x + OFFSET,
+            y: old.y + OFFSET,
+          };
+          let next: EditorNode =
+            old.type === "path" && old.pathPoints?.length
+              ? { ...base, pathPoints: rekeyPathPoints(old.pathPoints) }
+              : base;
+          if (old.effects?.length) {
+            next = { ...next, effects: old.effects.map((e) => ({ ...e, id: newNodeEffectId() })) };
+          }
+          nodes[newId] = next;
+          const newKids: string[] = [];
+          for (const k of s.childOrder[oldId] ?? []) {
+            newKids.push(cloneRecursive(k, newId));
+          }
+          childOrder[newId] = newKids;
+          return newId;
+        };
+
+        const newRootId = cloneRecursive(rootId, rootOld.parentId);
+        for (const nid of collectSubtreeIds(newRootId, childOrder)) {
+          const n = nodes[nid]!;
+          if (!n.prototypeLinks?.length) continue;
+          nodes[nid] = {
+            ...n,
+            prototypeLinks: n.prototypeLinks.map((l) => ({
+              ...l,
+              id: newPrototypeLinkId(),
+              sourceNodeId: idMap.get(l.sourceNodeId) ?? l.sourceNodeId,
+              targetFrameId:
+                l.targetFrameId && idMap.has(l.targetFrameId)
+                  ? idMap.get(l.targetFrameId)!
+                  : l.targetFrameId,
+            })),
+          };
+        }
+        const P = parentListKey(rootOld.parentId);
+        const list = [...(childOrder[P] ?? [])];
+        const curIdx = list.indexOf(rootId);
+        const insertAt = curIdx >= 0 ? curIdx + 1 : list.length;
+        list.splice(insertAt, 0, newRootId);
+        childOrder[P] = list;
+        newRoots.push(newRootId);
+      }
+
+      let nodesOut = nodes;
+      const relayoutKeys = new Set<string>();
+      for (const rootId of tops) {
+        relayoutKeys.add(parentListKey(s.nodes[rootId]!.parentId));
+      }
+      nodesOut = relayoutParentsWithAutoLayout(nodesOut, childOrder, relayoutKeys);
+
+      return {
+        nodes: nodesOut,
+        childOrder,
+        selectedIds: newRoots,
+        tool: "move",
+        editingTextId: null,
+      };
+    });
+  },
+
+  alignSelection: (direction) => {
+    const s0 = get();
+    const tops0 = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
+      const n = s0.nodes[id];
+      return n && !n.locked && n.visible;
+    });
+    if (tops0.length < 2) return;
+    get().pushHistory();
+    set((s) => {
+      const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+        const n = s.nodes[id];
+        return n && !n.locked && n.visible;
+      });
+      if (tops.length < 2) return s;
+      let nodes: Record<string, EditorNode> = { ...s.nodes };
+      const rects = tops.map((id) => ({ id, wr: worldRect(id, nodes) }));
+
+      const applyDx = (id: string, d: number) => {
+        if (!d) return;
+        const n = nodes[id]!;
+        nodes[id] = { ...n, x: n.x + d };
+      };
+      const applyDy = (id: string, d: number) => {
+        if (!d) return;
+        const n = nodes[id]!;
+        nodes[id] = { ...n, y: n.y + d };
+      };
+
+      switch (direction) {
+        case "left": {
+          const t = Math.min(...rects.map((r) => r.wr.x));
+          for (const { id, wr } of rects) applyDx(id, t - wr.x);
+          break;
+        }
+        case "right": {
+          const t = Math.max(...rects.map((r) => r.wr.x + r.wr.width));
+          for (const { id, wr } of rects) applyDx(id, t - wr.x - wr.width);
+          break;
+        }
+        case "center-h": {
+          const minL = Math.min(...rects.map((r) => r.wr.x));
+          const maxR = Math.max(...rects.map((r) => r.wr.x + r.wr.width));
+          const c = (minL + maxR) / 2;
+          for (const { id, wr } of rects) applyDx(id, c - wr.x - wr.width / 2);
+          break;
+        }
+        case "top": {
+          const t = Math.min(...rects.map((r) => r.wr.y));
+          for (const { id, wr } of rects) applyDy(id, t - wr.y);
+          break;
+        }
+        case "bottom": {
+          const t = Math.max(...rects.map((r) => r.wr.y + r.wr.height));
+          for (const { id, wr } of rects) applyDy(id, t - wr.y - wr.height);
+          break;
+        }
+        case "center-v": {
+          const minT = Math.min(...rects.map((r) => r.wr.y));
+          const maxB = Math.max(...rects.map((r) => r.wr.y + r.wr.height));
+          const c = (minT + maxB) / 2;
+          for (const { id, wr } of rects) applyDy(id, c - wr.y - wr.height / 2);
+          break;
+        }
+        default:
+          break;
+      }
+
+      const relayoutKeys = new Set(tops.map((id) => parentListKey(nodes[id]!.parentId)));
+      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, relayoutKeys);
+      return { nodes };
+    });
+  },
+
+  distributeSelection: (axis) => {
+    const s0 = get();
+    const tops0 = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
+      const n = s0.nodes[id];
+      return n && !n.locked && n.visible;
+    });
+    if (tops0.length < 3) return;
+    get().pushHistory();
+    set((s) => {
+      const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+        const n = s.nodes[id];
+        return n && !n.locked && n.visible;
+      });
+      if (tops.length < 3) return s;
+      let nodes: Record<string, EditorNode> = { ...s.nodes };
+      const rects = tops.map((id) => ({ id, wr: worldRect(id, nodes) }));
+
+      if (axis === "horizontal") {
+        const sorted = [...rects].sort((a, b) => a.wr.x - b.wr.x);
+        const n = sorted.length;
+        const left0 = sorted[0]!.wr.x;
+        const rightLast = sorted[n - 1]!.wr.x + sorted[n - 1]!.wr.width;
+        const span = rightLast - left0;
+        const sumW = sorted.reduce((acc, r) => acc + r.wr.width, 0);
+        const gap = (span - sumW) / (n - 1);
+        let cur = left0;
+        for (let i = 0; i < n; i++) {
+          const { id, wr } = sorted[i]!;
+          const d = cur - wr.x;
+          const nn = nodes[id]!;
+          nodes[id] = { ...nn, x: nn.x + d };
+          cur += wr.width + gap;
+        }
+      } else {
+        const sorted = [...rects].sort((a, b) => a.wr.y - b.wr.y);
+        const n = sorted.length;
+        const top0 = sorted[0]!.wr.y;
+        const botLast = sorted[n - 1]!.wr.y + sorted[n - 1]!.wr.height;
+        const span = botLast - top0;
+        const sumH = sorted.reduce((acc, r) => acc + r.wr.height, 0);
+        const gap = (span - sumH) / (n - 1);
+        let cur = top0;
+        for (let i = 0; i < n; i++) {
+          const { id, wr } = sorted[i]!;
+          const d = cur - wr.y;
+          const nn = nodes[id]!;
+          nodes[id] = { ...nn, y: nn.y + d };
+          cur += wr.height + gap;
+        }
+      }
+
+      const relayoutKeys = new Set(tops.map((id) => parentListKey(nodes[id]!.parentId)));
+      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, relayoutKeys);
+      return { nodes };
+    });
+  },
+
+  selectAllEditable: () =>
+    set((s) => {
+      if (s.editorMode !== "design") return s;
+      const ids: string[] = [];
+      const walk = (parentKey: string) => {
+        for (const id of s.childOrder[parentKey] ?? []) {
+          const n = s.nodes[id];
+          if (n?.visible && !n.locked) ids.push(id);
+          walk(id);
+        }
+      };
+      walk(ROOT);
+      return {
+        selectedIds: ids,
+        editingTextId: null,
+        contextMenu: null,
+        selectedPrototypeLinkId: null,
+        pathEditModeNodeId: null,
+  objectEditModeNodeId: null,
+        selectedPathPointId: null,
+      };
+    }),
+
+  toggleLockSelection: () => {
+    const s0 = get();
+    if (!s0.selectedIds.length) return;
+    get().pushHistory();
+    set((s) => {
+      const nodes = { ...s.nodes };
+      for (const id of s.selectedIds) {
+        const n = nodes[id];
+        if (!n) continue;
+        nodes[id] = { ...n, locked: !n.locked };
+      }
+      return { nodes };
+    });
+  },
+
+  toggleVisibleSelection: () => {
+    const s0 = get();
+    if (!s0.selectedIds.length) return;
+    get().pushHistory();
+    set((s) => {
+      const nodes = { ...s.nodes };
+      for (const id of s.selectedIds) {
+        const n = nodes[id];
+        if (!n) continue;
+        nodes[id] = { ...n, visible: !n.visible };
+      }
+      return { nodes };
+    });
+  },
+
+  copySelection: () => {
+    const s = get();
+    const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+      const n = s.nodes[id];
+      return n && !n.locked && n.visible;
+    });
+    const payload = buildClipboardPayloadFromState(s, tops);
+    if (!payload) return;
+    setEditorClipboardJson(JSON.stringify(payload));
+  },
+
+  cutSelection: () => {
+    const s0 = get();
+    const tops0 = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
+      const n = s0.nodes[id];
+      return n && !n.locked && n.visible;
+    });
+    if (tops0.length === 0) return;
+    const payload = buildClipboardPayloadFromState(s0, tops0);
+    if (!payload) return;
+    setEditorClipboardJson(JSON.stringify(payload));
+    get().pushHistory();
+    get().deleteSelection({ skipHistory: true });
+  },
+
+  pasteSelection: (opts) => {
+    if (get().editorMode !== "design") return;
+    const raw = getEditorClipboardJson();
+    const payload = raw ? parseEditorClipboardPayload(raw) : null;
+    if (!payload?.rootIds?.length) return;
+    const OFFSET = opts?.inPlace ? 0 : 24;
+    get().pushHistory();
+    set((s) => {
+      const idMap = new Map<string, string>();
+      const newAssetIds = new Map<string, string>();
+      if (payload.assets) {
+        for (const aid of Object.keys(payload.assets)) {
+          newAssetIds.set(aid, `asset-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
+        }
+      }
+      let nodes: Record<string, EditorNode> = { ...s.nodes };
+      let childOrder: Record<string, string[]> = { ...s.childOrder };
+      const assets: Record<string, EditorAsset> = { ...s.assets };
+      if (payload.assets) {
+        for (const [oldAid, ast] of Object.entries(payload.assets)) {
+          const nid = newAssetIds.get(oldAid)!;
+          assets[nid] = { ...ast, id: nid };
+        }
+      }
+
+      const newRoots: string[] = [];
+      const pasteParentId = resolvePasteParentId(s);
+
+      for (const rootId of payload.rootIds) {
+        const rootOld = payload.nodes[rootId];
+        if (!rootOld) continue;
+        const rootLabel = newRoots.length === 0 ? nextDuplicateName(nodes) : rootOld.name;
+
+        const cloneRecursive = (oldId: string, newParent: string | null, treeRootOldId: string): string => {
+          const old = payload.nodes[oldId];
+          if (!old) return "";
+          const newId = `${old.type}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+          idMap.set(oldId, newId);
+          const isTreeRoot = oldId === treeRootOldId;
+          const worldR = worldRect(oldId, payload.nodes);
+          const wx = worldR.x + (isTreeRoot ? OFFSET : 0);
+          const wy = worldR.y + (isTreeRoot ? OFFSET : 0);
+          const pos = isTreeRoot
+            ? worldPointToParentLocal(wx, wy, newParent, s.nodes)
+            : { x: old.x, y: old.y };
+
+          let base: EditorNode = {
+            ...JSON.parse(JSON.stringify(old)) as EditorNode,
+            id: newId,
+            parentId: newParent,
+            name: oldId === rootId ? rootLabel : old.name,
+            x: pos.x,
+            y: pos.y,
+          };
+          if (base.type === "path" && base.pathPoints?.length) {
+            base = { ...base, pathPoints: rekeyPathPoints(base.pathPoints) };
+          }
+          if (old.effects?.length) {
+            base = { ...base, effects: old.effects.map((e) => ({ ...e, id: newNodeEffectId() })) };
+          }
+          if (base.type === "image" && base.assetId && newAssetIds.has(base.assetId)) {
+            const na = newAssetIds.get(base.assetId)!;
+            const assetRow = assets[na];
+            base = {
+              ...base,
+              assetId: na,
+              imageSrc: assetRow?.dataUrl ?? base.imageSrc,
+            };
+          }
+          nodes[newId] = base;
+          const newKids: string[] = [];
+          for (const k of payload.childOrder[oldId] ?? []) {
+            newKids.push(cloneRecursive(k, newId, treeRootOldId));
+          }
+          childOrder[newId] = newKids;
+          return newId;
+        };
+
+        const newRootId = cloneRecursive(rootId, pasteParentId, rootId);
+        newRoots.push(newRootId);
+        for (const nid of collectSubtreeIds(newRootId, childOrder)) {
+          const n = nodes[nid]!;
+          if (!n.prototypeLinks?.length) continue;
+          nodes[nid] = {
+            ...n,
+            prototypeLinks: n.prototypeLinks.map((l) => ({
+              ...l,
+              id: newPrototypeLinkId(),
+              sourceNodeId: idMap.get(l.sourceNodeId) ?? l.sourceNodeId,
+              targetFrameId:
+                l.targetFrameId && idMap.has(l.targetFrameId) ? idMap.get(l.targetFrameId)! : l.targetFrameId,
+            })),
+          };
+        }
+      }
+
+      for (const newId of idMap.values()) {
+        const n = nodes[newId];
+        if (!n?.instanceOverrides) continue;
+        const io: Record<string, Record<string, unknown>> = {};
+        for (const [k, v] of Object.entries(n.instanceOverrides)) {
+          const nk = idMap.has(k) ? (idMap.get(k) as string) : k;
+          io[nk] = v as Record<string, unknown>;
+        }
+        nodes[newId] = { ...n, instanceOverrides: io };
+      }
+
+      const topsSel = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+        const n = s.nodes[id];
+        return n && !n.locked && n.visible;
+      });
+      const anchor = topsSel.length ? topsSel[topsSel.length - 1]! : null;
+      const byParent = new Map<string, string[]>();
+      for (const newR of newRoots) {
+        const pk = parentListKey(nodes[newR]!.parentId);
+        if (!byParent.has(pk)) byParent.set(pk, []);
+        byParent.get(pk)!.push(newR);
+      }
+      for (const [pk, group] of byParent) {
+        let list = [...(childOrder[pk] ?? [])].filter((id) => !group.includes(id));
+        let ins = list.length;
+        if (anchor) {
+          const apk = parentListKey(s.nodes[anchor]!.parentId);
+          if (apk === pk) {
+            const idx = list.indexOf(anchor);
+            ins = idx >= 0 ? idx + 1 : list.length;
+          }
+        }
+        list = [...list.slice(0, ins), ...group, ...list.slice(ins)];
+        childOrder[pk] = list;
+      }
+
+      let nodesOut = nodes;
+      const relayoutKeys = new Set<string>();
+      for (const nr of newRoots) relayoutKeys.add(parentListKey(nodes[nr]!.parentId));
+      nodesOut = relayoutParentsWithAutoLayout(nodesOut, childOrder, relayoutKeys);
+
+      return {
+        nodes: nodesOut,
+        childOrder,
+        assets,
+        selectedIds: newRoots,
+        tool: "move" as Tool,
+        editingTextId: null,
+        contextMenu: null,
+      };
+    });
+  },
+
+  deleteSelection: (opts) => {
+    const s0 = get();
+    const tops0 = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
+      const n = s0.nodes[id];
+      return n && !n.locked && n.visible;
+    });
+    if (tops0.length === 0) return;
+    if (!opts?.skipHistory) get().pushHistory();
+    set((s) => {
+      const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+        const n = s.nodes[id];
+        return n && !n.locked && n.visible;
+      });
+      if (tops.length === 0) return s;
+      const parentsToRelayout = new Set<string>();
+      for (const root of tops) {
+        parentsToRelayout.add(parentListKey(s.nodes[root]!.parentId));
+      }
+      const toRemove = new Set<string>();
+      for (const root of tops) {
+        for (const id of collectSubtreeIds(root, s.childOrder)) {
+          toRemove.add(id);
+        }
+      }
+      let nodes = { ...s.nodes };
+      const childOrder: Record<string, string[]> = {};
+      for (const [k, arr] of Object.entries(s.childOrder)) {
+        childOrder[k] = arr.filter((id) => !toRemove.has(id));
+      }
+      for (const id of toRemove) {
+        delete nodes[id];
+        delete childOrder[id];
+      }
+      nodes = relayoutParentsWithAutoLayout(nodes, childOrder, parentsToRelayout);
+      return { nodes, childOrder, selectedIds: [], editingTextId: null, pathEditModeNodeId: null, selectedPathPointId: null };
+    });
+  },
+
+  bringForward: () => {
+    const s0 = get();
+    const tops0 = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
+      const n = s0.nodes[id];
+      return n && !n.locked && n.visible;
+    });
+    if (tops0.length === 0) return;
+    get().pushHistory();
+    set((s) => {
+      const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+        const n = s.nodes[id];
+        return n && !n.locked && n.visible;
+      });
+      if (tops.length === 0) return s;
+      const childOrder = { ...s.childOrder };
+      const byParent = new Map<string, string[]>();
+      for (const id of tops) {
+        const P = parentListKey(s.nodes[id]!.parentId);
+        if (!byParent.has(P)) byParent.set(P, []);
+        byParent.get(P)!.push(id);
+      }
+      for (const [P, ids] of byParent) {
+        const list = [...(childOrder[P] ?? [])];
+        const idxs = ids
+          .map((id) => list.indexOf(id))
+          .filter((i) => i >= 0)
+          .sort((a, b) => b - a);
+        for (const i of idxs) {
+          if (i < list.length - 1) {
+            const t = list[i + 1];
+            list[i + 1] = list[i]!;
+            list[i] = t!;
+          }
+        }
+        childOrder[P] = list;
+      }
+      let nodes = { ...s.nodes };
+      nodes = relayoutParentsWithAutoLayout(nodes, childOrder, byParent.keys());
+      return { childOrder, nodes };
+    });
+  },
+
+  sendBackward: () => {
+    const s0 = get();
+    const tops0 = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
+      const n = s0.nodes[id];
+      return n && !n.locked && n.visible;
+    });
+    if (tops0.length === 0) return;
+    get().pushHistory();
+    set((s) => {
+      const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+        const n = s.nodes[id];
+        return n && !n.locked && n.visible;
+      });
+      if (tops.length === 0) return s;
+      const childOrder = { ...s.childOrder };
+      const byParent = new Map<string, string[]>();
+      for (const id of tops) {
+        const P = parentListKey(s.nodes[id]!.parentId);
+        if (!byParent.has(P)) byParent.set(P, []);
+        byParent.get(P)!.push(id);
+      }
+      for (const [P, ids] of byParent) {
+        const list = [...(childOrder[P] ?? [])];
+        const idxs = ids
+          .map((id) => list.indexOf(id))
+          .filter((i) => i >= 0)
+          .sort((a, b) => a - b);
+        for (const i of idxs) {
+          if (i > 0) {
+            const t = list[i - 1];
+            list[i - 1] = list[i]!;
+            list[i] = t!;
+          }
+        }
+        childOrder[P] = list;
+      }
+      let nodes = { ...s.nodes };
+      nodes = relayoutParentsWithAutoLayout(nodes, childOrder, byParent.keys());
+      return { childOrder, nodes };
+    });
+  },
+
+  bringToFront: () => {
+    const s0 = get();
+    const tops0 = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
+      const n = s0.nodes[id];
+      return n && !n.locked && n.visible;
+    });
+    if (tops0.length === 0) return;
+    get().pushHistory();
+    set((s) => {
+      const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+        const n = s.nodes[id];
+        return n && !n.locked && n.visible;
+      });
+      if (tops.length === 0) return s;
+      const childOrder = { ...s.childOrder };
+      const byParent = new Map<string, string[]>();
+      for (const id of tops) {
+        const P = parentListKey(s.nodes[id]!.parentId);
+        if (!byParent.has(P)) byParent.set(P, []);
+        byParent.get(P)!.push(id);
+      }
+      for (const [P, ids] of byParent) {
+        const list = [...(childOrder[P] ?? [])];
+        const set = new Set(ids);
+        const rest = list.filter((id) => !set.has(id));
+        const stable = [...ids].sort((a, b) => list.indexOf(a) - list.indexOf(b));
+        childOrder[P] = [...rest, ...stable];
+      }
+      let nodes = { ...s.nodes };
+      nodes = relayoutParentsWithAutoLayout(nodes, childOrder, byParent.keys());
+      return { childOrder, nodes };
+    });
+  },
+
+  sendToBack: () => {
+    const s0 = get();
+    const tops0 = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
+      const n = s0.nodes[id];
+      return n && !n.locked && n.visible;
+    });
+    if (tops0.length === 0) return;
+    get().pushHistory();
+    set((s) => {
+      const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+        const n = s.nodes[id];
+        return n && !n.locked && n.visible;
+      });
+      if (tops.length === 0) return s;
+      const childOrder = { ...s.childOrder };
+      const byParent = new Map<string, string[]>();
+      for (const id of tops) {
+        const P = parentListKey(s.nodes[id]!.parentId);
+        if (!byParent.has(P)) byParent.set(P, []);
+        byParent.get(P)!.push(id);
+      }
+      for (const [P, ids] of byParent) {
+        const list = [...(childOrder[P] ?? [])];
+        const set = new Set(ids);
+        const rest = list.filter((id) => !set.has(id));
+        const stable = [...ids].sort((a, b) => list.indexOf(a) - list.indexOf(b));
+        childOrder[P] = [...stable, ...rest];
+      }
+      let nodes = { ...s.nodes };
+      nodes = relayoutParentsWithAutoLayout(nodes, childOrder, byParent.keys());
+      return { childOrder, nodes };
+    });
+  },
+
+  nudgeSelection: (dx, dy) => {
+    if (dx === 0 && dy === 0) return;
+    const s0 = get();
+    if (s0.editorMode !== "design") return;
+    const tops0 = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
+      const n = s0.nodes[id];
+      return n && !n.locked && n.visible;
+    });
+    if (tops0.length === 0) return;
+    get().pushHistory();
+    set((s) => {
+      const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+        const n = s.nodes[id];
+        return n && !n.locked && n.visible;
+      });
+      if (tops.length === 0) return s;
+      let nodes = { ...s.nodes };
+      const refresh = new Set<string>();
+      for (const id of tops) {
+        const n = nodes[id]!;
+        nodes[id] = { ...n, x: n.x + dx, y: n.y + dy };
+        if (n.parentId) refresh.add(n.parentId);
+        if ((n.type === "frame" || n.type === "group") && (n.layoutMode ?? "none") !== "none") {
+          refresh.add(id);
+        }
+      }
+      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
+      return { nodes };
+    });
+  },
+
+  groupSelection: () => {
+    const s0 = get();
+    const tops0 = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
+      const n = s0.nodes[id];
+      return n && !n.locked && n.visible;
+    });
+    if (tops0.length < 2) return;
+    const parentId0 = s0.nodes[tops0[0]!]!.parentId;
+    if (!tops0.every((id) => s0.nodes[id]!.parentId === parentId0)) return;
+    get().pushHistory();
+    set((s) => {
+      const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+        const n = s.nodes[id];
+        return n && !n.locked && n.visible;
+      });
+      if (tops.length < 2) return s;
+      const parentId = s.nodes[tops[0]!]!.parentId;
+      if (!tops.every((id) => s.nodes[id]!.parentId === parentId)) return s;
+      const P = parentListKey(parentId);
+      const pw = parentId ? worldRect(parentId, s.nodes) : { x: 0, y: 0, width: 0, height: 0 };
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const id of tops) {
+        const w = worldRect(id, s.nodes);
+        minX = Math.min(minX, w.x);
+        minY = Math.min(minY, w.y);
+        maxX = Math.max(maxX, w.x + w.width);
+        maxY = Math.max(maxY, w.y + w.height);
+      }
+      const gw = maxX - minX;
+      const gh = maxY - minY;
+      const gx = minX - pw.x;
+      const gy = minY - pw.y;
+      const gid = `group-${Date.now()}`;
+      const nodes = { ...s.nodes };
+      const childOrder = { ...s.childOrder };
+      nodes[gid] = {
+        id: gid,
+        parentId,
+        type: "group",
+        name: "Group",
+        x: gx,
+        y: gy,
+        width: gw,
+        height: gh,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        expanded: true,
+      };
+      for (const id of tops) {
+        const w = worldRect(id, s.nodes);
+        const n = nodes[id]!;
+        nodes[id] = {
+          ...n,
+          parentId: gid,
+          x: w.x - minX,
+          y: w.y - minY,
+        };
+      }
+      const list = [...(childOrder[P] ?? [])];
+      const ixs = tops.map((id) => list.indexOf(id)).sort((a, b) => a - b);
+      const insertAt = ixs[0]!;
+      const newList = list.filter((id) => !tops.includes(id));
+      newList.splice(insertAt, 0, gid);
+      childOrder[P] = newList;
+      childOrder[gid] = tops;
+      let nodesOut = nodes;
+      nodesOut = relayoutParentsWithAutoLayout(nodesOut, childOrder, [P]);
+      return {
+        nodes: nodesOut,
+        childOrder,
+        selectedIds: [gid],
+        tool: "move",
+        editingTextId: null,
+      };
+    });
+  },
+
+  ungroupSelection: () => {
+    const s0 = get();
+    if (s0.selectedIds.length !== 1) return;
+    const gid0 = s0.selectedIds[0]!;
+    const g0 = s0.nodes[gid0];
+    if (!g0 || g0.type !== "group" || g0.locked || !g0.visible) return;
+    const kids0 = [...(s0.childOrder[gid0] ?? [])];
+    if (kids0.length === 0) return;
+    get().pushHistory();
+    set((s) => {
+      if (s.selectedIds.length !== 1) return s;
+      const gid = s.selectedIds[0]!;
+      const g = s.nodes[gid];
+      if (!g || g.type !== "group" || g.locked || !g.visible) return s;
+      const kids = [...(s.childOrder[gid] ?? [])];
+      if (kids.length === 0) return s;
+      const parentId = g.parentId;
+      const P = parentListKey(parentId);
+      const pg = worldRect(gid, s.nodes);
+      const pp = parentId ? worldRect(parentId, s.nodes) : { x: 0, y: 0, width: 0, height: 0 };
+      const nodes = { ...s.nodes };
+      const childOrder = { ...s.childOrder };
+      for (const id of kids) {
+        const n = nodes[id]!;
+        nodes[id] = {
+          ...n,
+          parentId: parentId ?? null,
+          x: n.x + (pg.x - pp.x),
+          y: n.y + (pg.y - pp.y),
+        };
+      }
+      const list = [...(childOrder[P] ?? [])];
+      const ix = list.indexOf(gid);
+      const newList = list.filter((id) => id !== gid);
+      newList.splice(ix >= 0 ? ix : newList.length, 0, ...kids);
+      childOrder[P] = newList;
+      delete nodes[gid];
+      delete childOrder[gid];
+      let nodesOut = nodes;
+      nodesOut = relayoutParentsWithAutoLayout(nodesOut, childOrder, [P]);
+      return {
+        nodes: nodesOut,
+        childOrder,
+        selectedIds: kids,
+        tool: "move",
+        editingTextId: null,
+      };
+    });
+  },
+
+  toggleSelectNode: (id) =>
+    set((s) => ({
+      selectedIds: s.selectedIds.includes(id)
+        ? s.selectedIds.filter((x) => x !== id)
+        : [...s.selectedIds, id],
+    })),
+
+  setSelection: (ids) =>
+    set({
+      selectedIds: ids,
+      editingTextId: null,
+      contextMenu: null,
+      selectedPrototypeLinkId: null,
+      pathEditModeNodeId: null,
+  objectEditModeNodeId: null,
+      selectedPathPointId: null,
+    }),
+
+  setGuides: (guides) => set({ guides }),
+
+  reorderNode: (id, targetParentId, targetIndex) =>
+    set((s) => {
+      const n = s.nodes[id];
+      if (!n || n.locked) return s;
+      if ((n.parentId ?? ROOT) !== targetParentId) return s;
+      const res = applyMoveNodeToParent(s, id, targetParentId, targetIndex);
+      if (!res) return s;
+      let { nodes, childOrder } = res;
+      nodes = relayoutParentsWithAutoLayout(nodes, childOrder, [targetParentId]);
+      return { nodes, childOrder };
+    }),
+
+  moveNodeToParent: (id, newParentId, index) =>
+    set((s) => {
+      const n = s.nodes[id];
+      if (!n || n.locked) return s;
+      const newKey = newParentId === ROOT ? ROOT : newParentId;
+      const oldKey = parentListKey(n.parentId);
+      const res = applyMoveNodeToParent(s, id, newKey, index);
+      if (!res) return s;
+      let { nodes, childOrder } = res;
+      const refresh = new Set<string>();
+      if (oldKey !== newKey) {
+        if (oldKey !== ROOT) refresh.add(oldKey);
+        if (newKey !== ROOT) refresh.add(newKey);
+      } else {
+        refresh.add(oldKey);
+      }
+      nodes = relayoutParentsWithAutoLayout(nodes, childOrder, refresh);
+      return { nodes, childOrder };
+    }),
+
+  updateLayout: (id, patch) => {
+    const s0 = get();
+    const n0 = s0.nodes[id];
+    if (!n0 || n0.locked || (n0.type !== "frame" && n0.type !== "group")) return;
+    get().pushHistory();
+    set((s) => {
+      const n = s.nodes[id];
+      if (!n || n.locked || (n.type !== "frame" && n.type !== "group")) return s;
+      let nodes = { ...s.nodes, [id]: { ...n, ...patch } };
+      nodes = deepAutoLayout(nodes, s.childOrder, id);
+      return { nodes };
+    });
+  },
+
+  updateConstraints: (id, patch) => {
+    const s0 = get();
+    const n0 = s0.nodes[id];
+    if (!n0 || n0.locked) return;
+    get().pushHistory();
+    set((s) => {
+      const n = s.nodes[id];
+      if (!n || n.locked) return s;
+      return { nodes: { ...s.nodes, [id]: { ...n, ...patch } } };
+    });
+  },
+
+  applyAutoLayout: (parentId) => {
+    const s0 = get();
+    const p0 = s0.nodes[parentId];
+    if (!p0 || (p0.type !== "frame" && p0.type !== "group")) return;
+    get().pushHistory();
+    set((s) => {
+      const p = s.nodes[parentId];
+      if (!p || (p.type !== "frame" && p.type !== "group")) return s;
+      const nodes = deepAutoLayout({ ...s.nodes }, s.childOrder, parentId);
+      return { nodes };
+    });
+  },
+
+  createComponentFromSelection: () => {
+    const s0 = get();
+    if (!canCreateComponentFromSelection(s0.selectedIds, s0.nodes)) return;
+    get().pushHistory();
+    set((s) => {
+      if (!canCreateComponentFromSelection(s.selectedIds, s.nodes)) return s;
+
+      let nodes = { ...s.nodes };
+      let childOrder = { ...s.childOrder };
+      let tops = topLevelSelectedIds(s.selectedIds, nodes).filter((id) => {
+        const n = nodes[id];
+        return n && !n.locked && n.visible;
+      });
+
+      if (tops.length >= 2) {
+        const grouped = groupNodesForComponent(nodes, childOrder, tops);
+        if (!grouped) return s;
+        nodes = grouped.nodes;
+        childOrder = grouped.childOrder;
+        tops = [grouped.groupId];
+      }
+
+      let rootId = tops[0]!;
+      const wrapped = wrapNodeInFrameForComponent(nodes, childOrder, rootId);
+      if (!wrapped) return s;
+      nodes = wrapped.nodes;
+      childOrder = wrapped.childOrder;
+      rootId = wrapped.frameId;
+
+      const root = nodes[rootId];
+      if (!root || root.isComponent) return s;
+
+      nodes = markNodeAsComponent(nodes, rootId);
+      const parentId = nodes[rootId]!.parentId;
+      if (parentId) {
+        nodes = relayoutParentsWithAutoLayout(nodes, childOrder, [parentId]);
+      }
+
+      return {
+        nodes,
+        childOrder,
+        selectedIds: [rootId],
+        leftTab: "components" as LeftTab,
+        tool: "move" as Tool,
+      };
+    });
+  },
+
+  createInstance: (componentKey, worldX, worldY) => {
+    const s0 = get();
+    const masterId = resolveMasterRootId(s0.nodes, componentKey);
+    if (!masterId) return;
+    const master = s0.nodes[masterId];
+    if (!master?.isComponent || !master.componentId) return;
+    get().pushHistory();
+    set((s) => {
+      const masterId = resolveMasterRootId(s.nodes, componentKey);
+      if (!masterId) return s;
+      const master = s.nodes[masterId];
+      if (!master?.isComponent || !master.componentId) return s;
+      const pid = frameParentAtWorldPoint(worldX, worldY, s.nodes, s.childOrder);
+      const pos = centeredLocalPointInParent(worldX, worldY, pid, s.nodes, master.width, master.height);
+      const parentKey = parentListKey(pid);
+      const res = cloneEditorSubtree(
+        s.nodes,
+        s.childOrder,
+        masterId,
+        pid,
+        parentKey,
+        (root) => ({
+          ...root,
+          x: pos.x,
+          y: pos.y,
+          sourceComponentId: masterId,
+          componentId: master.componentId,
+          instanceOverrides: {},
+        }),
+        (_old, fresh) => stripComponentFields(fresh),
+      );
+      if (!res) return s;
+      let { nodes, childOrder, newRootId } = res;
+      if (pid) nodes = relayoutParentsWithAutoLayout(nodes, childOrder, [pid]);
+      return {
+        nodes,
+        childOrder,
+        selectedIds: [newRootId],
+        tool: "move",
+        placingComponentMasterId: null,
+        editingTextId: null,
+      };
+    });
+  },
+
+  detachInstance: (instanceRootId) => {
+    const s0 = get();
+    const root = s0.nodes[instanceRootId];
+    if (!root?.sourceComponentId || root.locked) return;
+    const next = detachInstanceTree(s0.nodes, s0.childOrder, instanceRootId);
+    if (!next) return;
+    get().pushHistory();
+    set({ nodes: next, selectedIds: [instanceRootId] });
+  },
+
+  updateInstanceOverride: (instanceRootId, targetNodeId, patch) => {
+    const s0 = get();
+    const root = s0.nodes[instanceRootId];
+    if (!root?.sourceComponentId || root.locked) return;
+    get().pushHistory();
+    set((s) => {
+      const root2 = s.nodes[instanceRootId];
+      if (!root2?.sourceComponentId || root2.locked) return s;
+      const io: Record<string, Record<string, unknown>> = { ...(root2.instanceOverrides ?? {}) };
+      const prev =
+        io[targetNodeId] && typeof io[targetNodeId] === "object" && !Array.isArray(io[targetNodeId])
+          ? { ...(io[targetNodeId] as Record<string, unknown>) }
+          : {};
+      io[targetNodeId] = { ...prev, ...patch };
+      return {
+        nodes: {
+          ...s.nodes,
+          [instanceRootId]: { ...root2, instanceOverrides: io },
+        },
+      };
+    });
+  },
+
+  createVariantFromComponent: (componentKey) => {
+    const s0 = get();
+    const masterId = resolveMasterRootId(s0.nodes, componentKey);
+    if (!masterId) return;
+    const m0 = s0.nodes[masterId];
+    if (!m0?.isComponent || m0.locked) return;
+    get().pushHistory();
+    set((s) => {
+      const masterId = resolveMasterRootId(s.nodes, componentKey);
+      if (!masterId) return s;
+      const m = s.nodes[masterId];
+      if (!m?.isComponent || m.locked) return s;
+      const OFFSET = 24;
+      const vg = m.variantGroupId ?? newVariantGroupId();
+      const siblingCount =
+        (m.variantGroupId
+          ? Object.values(s.nodes).filter((x) => x.variantGroupId === vg).length
+          : 0) + 1;
+      const res = cloneEditorSubtree(
+        s.nodes,
+        s.childOrder,
+        masterId,
+        m.parentId,
+        parentListKey(m.parentId),
+        (root) => ({
+          ...root,
+          isComponent: true,
+          componentId: newComponentId(),
+          variantGroupId: vg,
+          variantProperties: {
+            ...(m.variantProperties ?? {}),
+            Variant: `V${siblingCount + 1}`,
+          },
+          name: `${m.name} · variant`,
+        }),
+        (old, fresh) => {
+          let next = stripComponentFields(fresh);
+          if (old.id === masterId) {
+            next = { ...next, x: next.x + OFFSET, y: next.y + OFFSET };
+          }
+          return next;
+        },
+      );
+      if (!res) return s;
+      let nodes = res.nodes;
+      const childOrder = res.childOrder;
+      if (!m.variantGroupId) {
+        nodes = { ...nodes, [masterId]: { ...m, variantGroupId: vg } };
+      }
+      nodes = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(m.parentId)]);
+      return {
+        nodes,
+        childOrder,
+        selectedIds: [res.newRootId],
+        tool: "move",
+        editingTextId: null,
+      };
+    });
+  },
+
+  updateVariantProperties: (componentKey, properties) => {
+    const s0 = get();
+    const id0 = resolveMasterRootId(s0.nodes, componentKey);
+    if (!id0) return;
+    const n0 = s0.nodes[id0];
+    if (!n0?.isComponent || n0.locked) return;
+    get().pushHistory();
+    set((s) => {
+      const id = resolveMasterRootId(s.nodes, componentKey);
+      if (!id) return s;
+      const n = s.nodes[id];
+      if (!n?.isComponent || n.locked) return s;
+      return {
+        nodes: {
+          ...s.nodes,
+          [id]: {
+            ...n,
+            variantProperties: { ...(n.variantProperties ?? {}), ...properties },
+          },
+        },
+      };
+    });
+  },
+
+  duplicateSingle: (id) => {
+    const s0 = get();
+    const tops0 = topLevelSelectedIds([id], s0.nodes).filter((tid) => {
+      const nn = s0.nodes[tid];
+      return nn && !nn.locked && nn.visible;
+    });
+    if (tops0.length === 0) return;
+    const rootOld0 = s0.nodes[tops0[0]!];
+    if (!rootOld0) return;
+    get().pushHistory();
+    set((s) => {
+      const OFFSET = 24;
+      const tops = topLevelSelectedIds([id], s.nodes).filter((tid) => {
+        const nn = s.nodes[tid];
+        return nn && !nn.locked && nn.visible;
+      });
+      if (tops.length === 0) return s;
+      const rootId = tops[0]!;
+      const rootOld = s.nodes[rootId];
+      if (!rootOld) return s;
+
+      const nodes: Record<string, EditorNode> = { ...s.nodes };
+      const childOrder: Record<string, string[]> = { ...s.childOrder };
+      const nameForRoot = nextDuplicateName(nodes);
+
+      const cloneRecursive = (oldId: string, newParent: string | null): string => {
+        const old = s.nodes[oldId];
+        if (!old) return "";
+        const newId = `${old.type}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        const base: EditorNode = {
+          ...old,
+          id: newId,
+          parentId: newParent,
+          name: oldId === rootId ? nameForRoot : old.name,
+          x: old.x + OFFSET,
+          y: old.y + OFFSET,
+        };
+        nodes[newId] =
+          old.type === "path" && old.pathPoints?.length
+            ? { ...base, pathPoints: rekeyPathPoints(old.pathPoints) }
+            : base;
+        const newKids: string[] = [];
+        for (const k of s.childOrder[oldId] ?? []) {
+          newKids.push(cloneRecursive(k, newId));
+        }
+        childOrder[newId] = newKids;
+        return newId;
+      };
+
+      const newRootId = cloneRecursive(rootId, rootOld.parentId);
+      const P = parentListKey(rootOld.parentId);
+      const list = [...(childOrder[P] ?? [])];
+      const curIdx = list.indexOf(rootId);
+      const insertAt = curIdx >= 0 ? curIdx + 1 : list.length;
+      list.splice(insertAt, 0, newRootId);
+      childOrder[P] = list;
+
+      let nodesOut = nodes;
+      nodesOut = relayoutParentsWithAutoLayout(nodesOut, childOrder, [P]);
+
+      return {
+        nodes: nodesOut,
+        childOrder,
+        selectedIds: [newRootId],
+        tool: "move" as Tool,
+        editingTextId: null,
+        contextMenu: null,
+      };
+    });
+  },
+
+  deleteSingle: (id) => {
+    const s0 = get();
+    const tops0 = topLevelSelectedIds([id], s0.nodes).filter((tid) => {
+      const nn = s0.nodes[tid];
+      return nn && !nn.locked && nn.visible;
+    });
+    if (tops0.length === 0) return;
+    get().pushHistory();
+    set((s) => {
+      const tops = topLevelSelectedIds([id], s.nodes).filter((tid) => {
+        const nn = s.nodes[tid];
+        return nn && !nn.locked && nn.visible;
+      });
+      if (tops.length === 0) return s;
+      const parentsToRelayout = new Set<string>();
+      for (const root of tops) {
+        parentsToRelayout.add(parentListKey(s.nodes[root]!.parentId));
+      }
+      const toRemove = new Set<string>();
+      for (const root of tops) {
+        for (const tid of collectSubtreeIds(root, s.childOrder)) {
+          toRemove.add(tid);
+        }
+      }
+      let nodes = { ...s.nodes };
+      const childOrder: Record<string, string[]> = {};
+      for (const [k, arr] of Object.entries(s.childOrder)) {
+        childOrder[k] = arr.filter((tid) => !toRemove.has(tid));
+      }
+      for (const tid of toRemove) {
+        delete nodes[tid];
+        delete childOrder[tid];
+      }
+      nodes = relayoutParentsWithAutoLayout(nodes, childOrder, parentsToRelayout);
+      return {
+        nodes,
+        childOrder,
+        selectedIds: [],
+        editingTextId: null,
+        contextMenu: null,
+        layerRenameId: null,
+      };
+    });
+  },
+
+  resizeNode: (id, handle, startBounds, currentPoint, modifiers, opts) => {
+    if (!opts?.skipHistory && !get().isApplyingHistory) {
+      const pre = get();
+      const n0 = pre.nodes[id];
+      if (n0 && !n0.locked && n0.visible) get().pushHistory();
+    }
+    set((s) => {
+      const n = s.nodes[id];
+      if (!n || n.locked || !n.visible) return s;
+      const kind: ResizeKind =
+        n.type === "rectangle" ||
+        n.type === "ellipse" ||
+        n.type === "frame" ||
+        n.type === "text" ||
+        n.type === "line" ||
+        n.type === "path" ||
+        n.type === "group" ||
+        n.type === "image"
+          ? n.type
+          : "rectangle";
+      const next = computeResizedBounds(handle, startBounds, currentPoint, modifiers, kind);
+      let x = next.x;
+      let y = next.y;
+      const width = next.width;
+      const height = next.height;
+
+      if (opts?.fixedWorld && hasRotation(n.rotation)) {
+        const anchorLocal = getResizeAnchorLocal(handle, width, height);
+        const solved = solveNodeXYForAnchorWorld(
+          n,
+          s.nodes,
+          width,
+          height,
+          anchorLocal,
+          opts.fixedWorld,
+          { x: next.x, y: next.y },
+        );
+        x = solved.x;
+        y = solved.y;
+      }
+
+      const content = buildResizeContentPatches(n, startBounds, { x, y, width, height }, handle, modifiers);
+      let nodePatch: Partial<EditorNode> = { x, y, width, height, ...content };
+      if (n.type === "text") {
+        const layoutPatch = textLayoutPatchForNode({ ...n, ...nodePatch }, n.content ?? "");
+        if (layoutPatch) nodePatch = { ...nodePatch, ...layoutPatch };
+      }
+      let nodes: Record<string, EditorNode> = {
+        ...s.nodes,
+        [id]: { ...n, ...nodePatch },
+      };
+
+      const sx = startBounds.width > 0 ? width / startBounds.width : 1;
+      const sy = startBounds.height > 0 ? height / startBounds.height : 1;
+      const uniform = modifiers.shiftKey ? Math.max(sx, sy) : Math.sqrt(Math.max(0, sx * sy));
+
+      const isContainer = n.type === "frame" || n.type === "group";
+      const layoutMode = n.layoutMode ?? "none";
+      if (isContainer && layoutMode === "none") {
+        if (shouldProportionalFrameScale(handle, modifiers)) {
+          const childPatches = scaleSubtreeContentPatches(id, nodes, s.childOrder, sx, sy, uniform);
+          for (const [cid, patch] of Object.entries(childPatches)) {
+            const cn = nodes[cid];
+            if (cn && !cn.locked) nodes[cid] = { ...cn, ...patch };
+          }
+        } else {
+          const cp = constraintResizeChildPatches(
+            id,
+            toLayoutMap(nodes),
+            s.childOrder,
+            n.width,
+            n.height,
+            width,
+            height,
+          );
+          for (const [cid, patch] of Object.entries(cp)) {
+            const cn = nodes[cid];
+            if (cn && !cn.locked) nodes[cid] = { ...cn, ...patch };
+          }
+        }
+      } else if (isContainer && layoutMode !== "none") {
+        nodes = deepAutoLayout(nodes, s.childOrder, id);
+      }
+      if (n.parentId) {
+        nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId]);
+      }
+      const merged = nodes[id]!;
+      warnInvalidNodeGeometry("resizeNode", id, merged, nodes);
+      return { nodes };
+    });
+  },
+
+  resizeFrameWithConstraints: (frameId, newBounds, opts) => {
+    if (!opts?.skipHistory && !get().isApplyingHistory) {
+      const n0 = get().nodes[frameId];
+      if (n0 && !n0.locked) get().pushHistory();
+    }
+    set((s) => {
+      const n = s.nodes[frameId];
+      if (!n || n.locked || (n.type !== "frame" && n.type !== "group")) return s;
+      const oldW = n.width;
+      const oldH = n.height;
+      const W = Math.max(RESIZE_MIN_DIMENSION, newBounds.width);
+      const H = Math.max(RESIZE_MIN_DIMENSION, newBounds.height);
+      const next: EditorNode = {
+        ...n,
+        width: W,
+        height: H,
+        ...(newBounds.x !== undefined ? { x: newBounds.x } : {}),
+        ...(newBounds.y !== undefined ? { y: newBounds.y } : {}),
+      };
+      let nodes: Record<string, EditorNode> = { ...s.nodes, [frameId]: next };
+      const layoutMode = next.layoutMode ?? "none";
+      if (layoutMode === "none") {
+        const cp = constraintResizeChildPatches(
+          frameId,
+          toLayoutMap(nodes),
+          s.childOrder,
+          oldW,
+          oldH,
+          W,
+          H,
+        );
+        for (const [cid, patch] of Object.entries(cp)) {
+          const cn = nodes[cid];
+          if (cn && !cn.locked) nodes[cid] = { ...cn, ...patch };
+        }
+      } else {
+        nodes = deepAutoLayout(nodes, s.childOrder, frameId);
+      }
+      if (next.parentId && !opts?.skipParentRelayout) {
+        nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [next.parentId]);
+      }
+      return { nodes };
+    });
+  },
+
+  openResponsivePreview: (frameId) => {
+    set((s) => {
+      let nodes = { ...s.nodes };
+      if (s.responsivePreview) {
+        for (const [bid, g] of Object.entries(s.responsivePreview.geomBackup)) {
+          const nn = nodes[bid];
+          if (nn) nodes[bid] = { ...nn, ...g };
+        }
+      }
+      const n = nodes[frameId];
+      if (!n || n.locked || (n.type !== "frame" && n.type !== "group")) {
+        return { nodes, responsivePreview: null };
+      }
+      const subtree = collectSubtreeIds(frameId, s.childOrder);
+      const geomBackup: Record<string, { x: number; y: number; width: number; height: number }> = {};
+      for (const tid of subtree) {
+        const t = nodes[tid];
+        if (!t) continue;
+        geomBackup[tid] = { x: t.x, y: t.y, width: t.width, height: t.height };
+      }
+      return {
+        nodes,
+        responsivePreview: {
+          frameId,
+          geomBackup,
+          draftWidth: n.width,
+          draftHeight: n.height,
+        },
+      };
+    });
+  },
+
+  updateResponsivePreviewBounds: (width, height) => {
+    set((s) => {
+      const rp = s.responsivePreview;
+      if (!rp) return s;
+      let nodes = { ...s.nodes };
+      for (const [bid, g] of Object.entries(rp.geomBackup)) {
+        const nn = nodes[bid];
+        if (nn) nodes[bid] = { ...nn, ...g };
+      }
+      const fr = nodes[rp.frameId];
+      if (!fr || fr.locked) return { ...s, responsivePreview: null };
+      const oldW = fr.width;
+      const oldH = fr.height;
+      const W = Math.max(RESIZE_MIN_DIMENSION, width);
+      const H = Math.max(RESIZE_MIN_DIMENSION, height);
+      nodes[rp.frameId] = { ...fr, width: W, height: H };
+      const layoutMode = fr.layoutMode ?? "none";
+      if (layoutMode === "none") {
+        const cp = constraintResizeChildPatches(
+          rp.frameId,
+          toLayoutMap(nodes),
+          s.childOrder,
+          oldW,
+          oldH,
+          W,
+          H,
+        );
+        for (const [cid, patch] of Object.entries(cp)) {
+          const cn = nodes[cid];
+          if (cn && !cn.locked) nodes[cid] = { ...cn, ...patch };
+        }
+      } else {
+        nodes = deepAutoLayout(nodes, s.childOrder, rp.frameId);
+      }
+      const par = nodes[rp.frameId]?.parentId;
+      if (par) nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [par]);
+      return {
+        nodes,
+        responsivePreview: { ...rp, draftWidth: W, draftHeight: H },
+      };
+    });
+  },
+
+  resetResponsivePreview: () => {
+    set((s) => {
+      const rp = s.responsivePreview;
+      if (!rp) return s;
+      let nodes = { ...s.nodes };
+      for (const [bid, g] of Object.entries(rp.geomBackup)) {
+        const nn = nodes[bid];
+        if (nn) nodes[bid] = { ...nn, ...g };
+      }
+      const og = rp.geomBackup[rp.frameId]!;
+      return {
+        nodes,
+        responsivePreview: { ...rp, draftWidth: og.width, draftHeight: og.height },
+      };
+    });
+  },
+
+  cancelResponsivePreview: () => {
+    set((s) => {
+      const rp = s.responsivePreview;
+      if (!rp) return s;
+      let nodes = { ...s.nodes };
+      for (const [bid, g] of Object.entries(rp.geomBackup)) {
+        const nn = nodes[bid];
+        if (nn) nodes[bid] = { ...nn, ...g };
+      }
+      return { nodes, responsivePreview: null };
+    });
+  },
+
+  applyResponsivePreview: () => {
+    const rp = get().responsivePreview;
+    if (!rp) return;
+    const { frameId, geomBackup: gb, draftWidth, draftHeight } = rp;
+    set((s) => {
+      let nodes = { ...s.nodes };
+      for (const [bid, g] of Object.entries(gb)) {
+        const nn = nodes[bid];
+        if (nn) nodes[bid] = { ...nn, ...g };
+      }
+      return { nodes, responsivePreview: null };
+    });
+    get().pushHistory();
+    get().resizeFrameWithConstraints(frameId, { width: draftWidth, height: draftHeight }, { skipHistory: true });
+  },
+
+  toggleGrid: () => {
+    get().pushHistory();
+    set((s) => {
+      const next = { showGrid: !s.showGrid };
+      return { ...next, ...syncActivePageRecord({ ...s, ...next }) };
+    });
+  },
+
+  setCanvasBackgroundColor: (hex) => {
+    const normalized = normalizeHex(hex.startsWith("#") ? hex : `#${hex}`);
+    if (!normalized) return;
+    const s = get();
+    if (s.canvasBackgroundColor === normalized) return;
+    get().pushHistory();
+    set((state) => {
+      const next = { canvasBackgroundColor: normalized };
+      return { ...next, ...syncActivePageRecord({ ...state, ...next }) };
+    });
+  },
+
+  startPlacingComment: () => {
+    const s = get();
+    if (s.editorMode !== "design") return;
+    set({
+      tool: "comment",
+      isPlacingComment: true,
+      activeCommentId: null,
+      placingComponentMasterId: null,
+    });
+  },
+
+  cancelPlacingComment: () => {
+    set({
+      tool: "move",
+      isPlacingComment: false,
+      activeCommentId: null,
+    });
+  },
+
+  addComment: (point, parentNodeIdOverride) => {
+    const s = get();
+    if (s.editorMode !== "design" || !s.isPlacingComment || s.tool !== "comment") return;
+    const hit =
+      parentNodeIdOverride ??
+      pickDeepestVisibleNodeAtWorldPoint(point.x, point.y, s.nodes, s.childOrder) ??
+      undefined;
+    const frameHit =
+      pickDeepestFrameAtWorldPoint(point.x, point.y, s.nodes, s.childOrder) ?? undefined;
+    get().pushHistory();
+    const id = newCommentId();
+    const next: EditorComment = {
+      id,
+      x: point.x,
+      y: point.y,
+      ...(hit ? { parentNodeId: hit } : {}),
+      ...(frameHit ? { frameId: frameHit } : {}),
+      author: defaultCommentAuthor(),
+      body: "",
+      createdAt: new Date().toISOString(),
+      resolved: false,
+      replies: [],
+    };
+    set({
+      comments: [...s.comments, next],
+      activeCommentId: id,
+      isPlacingComment: false,
+    });
+
+    const st2 = get();
+    if (getPaytmCraftPublicEnv().mode !== "api" || !st2.isApiBackedFile || !st2.apiFileId) return;
+
+    const fileId = st2.apiFileId;
+    const localId = id;
+    const p = apiClient
+      .createComment({
+        fileId,
+        body: next.body,
+        x: next.x,
+        y: next.y,
+        parentNodeId: next.parentNodeId,
+        frameId: next.frameId,
+      })
+      .then((row) => row.id);
+    pendingCommentCreateByLocalId.set(localId, p);
+    void p
+      .then((apiId) => {
+        if (abortedCommentCreates.has(localId)) {
+          abortedCommentCreates.delete(localId);
+          return;
+        }
+        set((state) => ({
+          comments: state.comments.map((c) => (c.id === localId ? { ...c, id: apiId } : c)),
+          activeCommentId: state.activeCommentId === localId ? apiId : state.activeCommentId,
+          apiCommentsStatus: "synced" as ApiCommentsStatus,
+        }));
+        void getSyncProvider()
+          .saveDocument(editorStateToDocument(toPersistSlice(get())))
+          .catch((err) => {
+            console.warn("[Paytm Craft] persist after API comment create failed", err);
+          });
+      })
+      .catch((e) => {
+        console.warn("[Paytm Craft] createComment API failed", e);
+        set({ apiCommentsStatus: "failed" as ApiCommentsStatus });
+      })
+      .finally(() => {
+        pendingCommentCreateByLocalId.delete(localId);
+      });
+  },
+
+  updateComment: (id, body) => {
+    const s = get();
+    const prev = s.comments.find((c) => c.id === id);
+    if (!prev || prev.body === body) return;
+    get().pushHistory();
+    set((state) => ({
+      comments: state.comments.map((c) => (c.id === id ? { ...c, body } : c)),
+    }));
+    if (getPaytmCraftPublicEnv().mode !== "api" || !get().isApiBackedFile) return;
+    void resolveCommentServerId(id).then((sid) =>
+      apiClient
+        .updateComment(sid, { body })
+        .then(() => {
+          set({ apiCommentsStatus: "synced" as ApiCommentsStatus });
+        })
+        .catch((e) => {
+          console.warn("[Paytm Craft] updateComment API failed", e);
+          set({ apiCommentsStatus: "failed" as ApiCommentsStatus });
+        }),
+    );
+  },
+
+  addCommentReply: (commentId, body) => {
+    if (!isNonEmptyCommentBody(body)) return;
+    get().pushHistory();
+    const reply: EditorCommentReply = {
+      id: newReplyId(),
+      author: defaultCommentAuthor("reply"),
+      body: body.trim(),
+      createdAt: new Date().toISOString(),
+    };
+    set((state) => ({
+      comments: state.comments.map((c) =>
+        c.id === commentId ? { ...c, replies: [...c.replies, reply] } : c,
+      ),
+    }));
+  },
+
+  resolveComment: (id) => {
+    get().pushHistory();
+    set((state) => ({
+      comments: state.comments.map((c) => (c.id === id ? { ...c, resolved: true } : c)),
+    }));
+    if (getPaytmCraftPublicEnv().mode !== "api" || !get().isApiBackedFile) return;
+    void resolveCommentServerId(id).then((sid) =>
+      apiClient
+        .updateComment(sid, { resolved: true })
+        .then(() => {
+          set({ apiCommentsStatus: "synced" as ApiCommentsStatus });
+        })
+        .catch((e) => {
+          console.warn("[Paytm Craft] resolveComment API failed", e);
+          set({ apiCommentsStatus: "failed" as ApiCommentsStatus });
+        }),
+    );
+  },
+
+  reopenComment: (id) => {
+    get().pushHistory();
+    set((state) => ({
+      comments: state.comments.map((c) => (c.id === id ? { ...c, resolved: false } : c)),
+    }));
+    if (getPaytmCraftPublicEnv().mode !== "api" || !get().isApiBackedFile) return;
+    void resolveCommentServerId(id).then((sid) =>
+      apiClient
+        .updateComment(sid, { resolved: false })
+        .then(() => {
+          set({ apiCommentsStatus: "synced" as ApiCommentsStatus });
+        })
+        .catch((e) => {
+          console.warn("[Paytm Craft] reopenComment API failed", e);
+          set({ apiCommentsStatus: "failed" as ApiCommentsStatus });
+        }),
+    );
+  },
+
+  deleteComment: (id, opts) => {
+    const s0 = get();
+    if (!s0.comments.some((c) => c.id === id)) return;
+    const sidPromise = resolveCommentServerId(id);
+    abortedCommentCreates.add(id);
+    pendingCommentCreateByLocalId.delete(id);
+    if (!opts?.skipHistory) get().pushHistory();
+    set((state) => {
+      let { comments } = state;
+      if (opts?.pendingBody !== undefined) {
+        const pb = opts.pendingBody.trim();
+        if (isNonEmptyCommentBody(pb)) {
+          comments = comments.map((c) => (c.id === id ? { ...c, body: pb } : c));
+        }
+      }
+      return {
+        comments: comments.filter((c) => c.id !== id),
+        activeCommentId: state.activeCommentId === id ? null : state.activeCommentId,
+      };
+    });
+    if (getPaytmCraftPublicEnv().mode !== "api" || !get().isApiBackedFile) return;
+    void sidPromise
+      .then((sid) =>
+        apiClient.deleteComment(sid).catch((err) => {
+          console.warn("[Paytm Craft] deleteComment API failed", err);
+          set({ apiCommentsStatus: "failed" as ApiCommentsStatus });
+        }),
+      )
+      .catch(() => {
+        /* Pending create rejected or never assigned a server id */
+      });
+  },
+
+  setActiveCommentId: (activeCommentId) =>
+    set((s) => ({
+      activeCommentId,
+      isPlacingComment:
+        activeCommentId === null && s.tool === "comment" ? true : activeCommentId !== null ? false : s.isPlacingComment,
+    })),
+
+  toggleCommentsPanel: () => set((s) => ({ commentsPanelOpen: !s.commentsPanelOpen })),
+
+  focusComment: (id) => {
+    const s = get();
+    const c = s.comments.find((x) => x.id === id);
+    if (!c) return;
+    const el = typeof document !== "undefined" ? document.querySelector<HTMLElement>("[data-canvas-viewport]") : null;
+    const vw = el?.clientWidth ?? 800;
+    const vh = el?.clientHeight ?? 600;
+    const z = s.zoom;
+    set({
+      activeCommentId: id,
+      isPlacingComment: false,
+      pan: { x: vw / 2 - c.x * z, y: vh / 2 - c.y * z },
+    });
+  },
+
+  startPathAt: (worldPoint) => {
+    const s0 = get();
+    if (s0.editorMode !== "design" || s0.tool !== "pen" || s0.penDrawingNodeId) return;
+    get().pushHistory();
+    set((s) => {
+      if (s.editorMode !== "design" || s.tool !== "pen" || s.penDrawingNodeId) return s;
+      const { x, y } = worldCenteredRootPoint(worldPoint.x, worldPoint.y, 1, 1);
+      const id = `path-${Date.now()}`;
+      const roots = [...(s.childOrder[ROOT] ?? [])];
+      roots.push(id);
+      const pt0: PathPoint = { id: newPathPointId(), x: 0, y: 0 };
+      const node: EditorNode = {
+        id,
+        parentId: null,
+        type: "path",
+        name: "Path",
+        x,
+        y,
+        width: 1,
+        height: 1,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        expanded: true,
+        pathPoints: [pt0],
+        pathClosed: false,
+        fillEnabled: false,
+        fillOpacity: 1,
+        fill: "transparent",
+        strokeColor: "#0f172a",
+        strokeWidth: 2,
+        strokePosition: "center",
+      };
+      const normalized = normalizePathNode(node);
+      return {
+        nodes: { ...s.nodes, [id]: normalized },
+        childOrder: { ...s.childOrder, [ROOT]: roots },
+        penDrawingNodeId: id,
+        selectedIds: [],
+        tool: "pen",
+      };
+    });
+  },
+
+  addPathPoint: (worldPoint) => {
+    const s0 = get();
+    const drawId = s0.penDrawingNodeId;
+    if (!drawId || s0.tool !== "pen") return;
+    const path = s0.nodes[drawId];
+    if (!path || path.type !== "path" || !path.pathPoints?.length) return;
+    const wr = worldRect(drawId, s0.nodes);
+    const first = path.pathPoints[0]!;
+    const wfx = wr.x + first.x;
+    const wfy = wr.y + first.y;
+    if (path.pathPoints.length >= 2 && Math.hypot(worldPoint.x - wfx, worldPoint.y - wfy) <= 12) {
+      get().finishPath(true);
+      return;
+    }
+    set((s) => {
+      const n = s.nodes[drawId];
+      if (!n || n.type !== "path" || !n.pathPoints) return s;
+      const nwr = worldRect(drawId, s.nodes);
+      const plx = worldPoint.x - nwr.x;
+      const ply = worldPoint.y - nwr.y;
+      const pts = [...n.pathPoints, { id: newPathPointId(), x: plx, y: ply }];
+      let next: EditorNode = { ...n, pathPoints: pts };
+      next = normalizePathNode(next);
+      let nodes = { ...s.nodes, [drawId]: next };
+      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
+      return { nodes };
+    });
+  },
+
+  finishPath: (asClosed) => {
+    const id = get().penDrawingNodeId;
+    if (!id) return;
+    const closed = Boolean(asClosed);
+    set((s) => {
+      const n = s.nodes[id];
+      if (!n || n.type !== "path") return { ...s, penDrawingNodeId: null, tool: "move" as Tool };
+      const pts = n.pathPoints ?? [];
+      if (pts.length < 2) {
+        const parentRef = n.parentId;
+        const { nodes, childOrder } = removeNodeAndDescendants(s, id);
+        const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
+        return {
+          ...s,
+          nodes: nodes2,
+          childOrder,
+          penDrawingNodeId: null,
+          tool: "move" as Tool,
+          selectedIds: [],
+          pathEditModeNodeId: null,
+  objectEditModeNodeId: null,
+          selectedPathPointId: null,
+        };
+      }
+      let next: EditorNode = { ...n, pathClosed: closed };
+      next = normalizePathNode(next);
+      let nodes = { ...s.nodes, [id]: next };
+      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
+      return {
+        ...s,
+        nodes,
+        penDrawingNodeId: null,
+        tool: "move" as Tool,
+        selectedIds: [id],
+        pathEditModeNodeId: null,
+  objectEditModeNodeId: null,
+        selectedPathPointId: null,
+      };
+    });
+  },
+
+  cancelPath: () => {
+    const id = get().penDrawingNodeId;
+    if (!id) return;
+    set((s) => {
+      if (!s.nodes[id]) return { ...s, penDrawingNodeId: null, tool: "move" as Tool };
+      const parentRef = s.nodes[id]?.parentId;
+      const { nodes, childOrder } = removeNodeAndDescendants(s, id);
+      const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
+      return {
+        ...s,
+        nodes: nodes2,
+        childOrder,
+        penDrawingNodeId: null,
+        tool: "move" as Tool,
+        selectedIds: [],
+      };
+    });
+  },
+
+  updatePathPoint: (nodeId, pointId, patch, opts) => {
+    if (!opts?.skipHistory && !get().isApplyingHistory) get().pushHistory();
+    set((s) => {
+      const n = s.nodes[nodeId];
+      if (!n || n.type !== "path" || !n.pathPoints) return s;
+      const pts = n.pathPoints.map((p) => {
+        if (p.id !== pointId) return p;
+        const merged: PathPoint = { ...p };
+        if (patch.x !== undefined) merged.x = patch.x;
+        if (patch.y !== undefined) merged.y = patch.y;
+        if ("handleIn" in patch) merged.handleIn = patch.handleIn;
+        if ("handleOut" in patch) merged.handleOut = patch.handleOut;
+        return merged;
+      });
+      let next: EditorNode = { ...n, pathPoints: pts };
+      next = normalizePathNode(next);
+      let nodes = { ...s.nodes, [nodeId]: next };
+      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
+      return { nodes };
+    });
+  },
+
+  deletePathPoint: (nodeId, pointId) => {
+    get().pushHistory();
+    set((s) => {
+      const n = s.nodes[nodeId];
+      if (!n || n.type !== "path" || !n.pathPoints) return s;
+      const nextPts = n.pathPoints.filter((p) => p.id !== pointId);
+      if (nextPts.length < 2) {
+        const parentRef = n.parentId;
+        const { nodes, childOrder } = removeNodeAndDescendants(s, nodeId);
+        const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
+        return {
+          ...s,
+          nodes: nodes2,
+          childOrder,
+          selectedIds: s.selectedIds.filter((x) => x !== nodeId),
+          pathEditModeNodeId: s.pathEditModeNodeId === nodeId ? null : s.pathEditModeNodeId,
+          selectedPathPointId: null,
+        };
+      }
+      let next: EditorNode = { ...n, pathPoints: nextPts };
+      next = normalizePathNode(next);
+      let nodes = { ...s.nodes, [nodeId]: next };
+      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
+      return {
+        ...s,
+        nodes,
+        selectedPathPointId: s.selectedPathPointId === pointId ? null : s.selectedPathPointId,
+      };
+    });
+  },
+
+  togglePathClosed: (nodeId) => {
+    get().pushHistory();
+    set((s) => {
+      const n = s.nodes[nodeId];
+      if (!n || n.type !== "path") return s;
+      return { nodes: { ...s.nodes, [nodeId]: { ...n, pathClosed: !n.pathClosed } } };
+    });
+  },
+
+  setPathEditMode: (nodeId) => set({ pathEditModeNodeId: nodeId, selectedPathPointId: null }),
+
+  setSelectedPathPointId: (id) => set({ selectedPathPointId: id }),
+
+  setApiFileSession: (fileId, workspaceId) => {
+    pendingCommentCreateByLocalId.clear();
+    abortedCommentCreates.clear();
+    set({
+      apiFileId: fileId,
+      apiWorkspaceId: workspaceId,
+      isApiBackedFile: true,
+      apiCommentsStatus: "loading" as ApiCommentsStatus,
+      versionHistoryOpen: false,
+      apiVersionsStatus: "idle" as ApiVersionsStatus,
+      apiFileVersions: [],
+    });
+    void get().loadApiComments();
+  },
+
+  clearApiFileSession: () => {
+    pendingCommentCreateByLocalId.clear();
+    abortedCommentCreates.clear();
+    set({
+      apiFileId: undefined,
+      apiWorkspaceId: undefined,
+      isApiBackedFile: false,
+      apiCommentsStatus: "idle" as ApiCommentsStatus,
+      versionHistoryOpen: false,
+      apiVersionsStatus: "idle" as ApiVersionsStatus,
+      apiFileVersions: [],
+    });
+  },
+
+  saveCurrentDocumentAsApiFile: async () => {
+    if (getPaytmCraftPublicEnv().mode !== "api") return;
+    const st = get();
+    if (st.apiFileId) return;
+    const wid = getActiveMockWorkspace().id;
+    const doc = editorStateToDocument(toPersistSlice(st));
+    set({ documentSaveStatus: "saving" });
+    try {
+      const created = await apiClient.createFile({
+        workspaceId: wid,
+        name: sanitizeDocumentFilename(st.fileName) || "Untitled",
+        documentJson: doc,
+      });
+      try {
+        await getSyncProvider().saveDocument(doc);
+      } catch (e) {
+        console.warn("[Paytm Craft] local backup after Save as API failed", e);
+      }
+      set({
+        apiFileId: created.id,
+        apiWorkspaceId: wid,
+        isApiBackedFile: true,
+        documentSaveStatus: "saved-api" as DocumentSaveStatus,
+        versionHistoryOpen: false,
+        apiVersionsStatus: "idle" as ApiVersionsStatus,
+        apiFileVersions: [],
+      });
+      pendingCommentCreateByLocalId.clear();
+      abortedCommentCreates.clear();
+      void get().loadApiComments();
+    } catch (e) {
+      console.warn("[Paytm Craft] saveCurrentDocumentAsApiFile failed", e);
+      set({ documentSaveStatus: "unsaved" });
+    }
+  },
+
+  loadApiComments: async () => {
+    const st = get();
+    if (getPaytmCraftPublicEnv().mode !== "api" || !st.isApiBackedFile || !st.apiFileId) {
+      set({ apiCommentsStatus: "idle" as ApiCommentsStatus });
+      return;
+    }
+    const fileId = st.apiFileId;
+    const localComments = st.comments;
+    set({ apiCommentsStatus: "loading" as ApiCommentsStatus });
+    try {
+      const list = await apiClient.listComments(fileId);
+      const apiMapped = list.map((c) => editorCommentFromCraftApi(c));
+      const byId = new Map<string, EditorComment>();
+      for (const c of localComments) {
+        byId.set(c.id, c);
+      }
+      for (const c of apiMapped) {
+        const prev = byId.get(c.id);
+        byId.set(c.id, {
+          ...c,
+          replies: prev && prev.replies.length > 0 ? prev.replies : c.replies,
+        });
+      }
+      const merged = Array.from(byId.values()).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      set({ comments: merged, apiCommentsStatus: "synced" as ApiCommentsStatus });
+      void getSyncProvider()
+        .saveDocument(editorStateToDocument(toPersistSlice(get())))
+        .catch((err) => {
+          console.warn("[Paytm Craft] persist after loadApiComments failed", err);
+        });
+    } catch (e) {
+      console.warn("[Paytm Craft] loadApiComments failed", e);
+      set({ apiCommentsStatus: "failed" as ApiCommentsStatus });
+    }
+  },
+
+  syncCommentToApi: (commentId) => {
+    if (getPaytmCraftPublicEnv().mode !== "api" || !get().isApiBackedFile || !get().apiFileId) return;
+    const c = get().comments.find((x) => x.id === commentId);
+    if (!c) return;
+    void resolveCommentServerId(commentId).then((sid) =>
+      apiClient
+        .updateComment(sid, { body: c.body, resolved: c.resolved })
+        .then(() => {
+          set({ apiCommentsStatus: "synced" as ApiCommentsStatus });
+        })
+        .catch((err) => {
+          console.warn("[Paytm Craft] syncCommentToApi failed", err);
+          set({ apiCommentsStatus: "failed" as ApiCommentsStatus });
+        }),
+    );
+  },
+
+  deleteApiComment: (commentId) => {
+    if (getPaytmCraftPublicEnv().mode !== "api" || !get().isApiBackedFile) return;
+    void resolveCommentServerId(commentId).then((sid) =>
+      apiClient.deleteComment(sid).catch((err) => {
+        console.warn("[Paytm Craft] deleteApiComment failed", err);
+        set({ apiCommentsStatus: "failed" as ApiCommentsStatus });
+      }),
+    );
+  },
+
+  openVersionHistory: () => {
+    set({ versionHistoryOpen: true });
+    void get().loadApiFileVersions();
+  },
+
+  closeVersionHistory: () => set({ versionHistoryOpen: false }),
+
+  closeTopmostOverlay: () => {
+    const s = get();
+    if (s.commandMenuOpen) {
+      set({ commandMenuOpen: false });
+      return true;
+    }
+    if (s.shortcutOverlayOpen) {
+      set({ shortcutOverlayOpen: false });
+      return true;
+    }
+    if (s.versionHistoryOpen) {
+      set({ versionHistoryOpen: false });
+      return true;
+    }
+    if (s.aiModalOpen) {
+      set({ aiModalOpen: false, aiModalSource: null });
+      return true;
+    }
+    if (s.pluginMarketplaceOpen) {
+      set({ pluginMarketplaceOpen: false });
+      return true;
+    }
+    if (s.activePluginId) {
+      set({ activePluginId: undefined });
+      return true;
+    }
+    if (s.shareModalOpen) {
+      set({ shareModalOpen: false });
+      return true;
+    }
+    if (s.workspacePickerOpen) {
+      set({ workspacePickerOpen: false });
+      return true;
+    }
+    if (s.teamInviteModalOpen) {
+      set({ teamInviteModalOpen: false });
+      return true;
+    }
+    if (s.prototypePreview) {
+      set({ prototypePreview: null });
+      return true;
+    }
+    if (s.contextMenu) {
+      set({ contextMenu: null });
+      return true;
+    }
+    if (s.placingComponentMasterId) {
+      set({ placingComponentMasterId: null });
+      return true;
+    }
+    return false;
+  },
+
+  openHelpDemoChecklist: () => {
+    if (typeof window !== "undefined") {
+      window.open("/demo-checklist", "_blank", "noopener,noreferrer");
+    }
+  },
+
+  loadApiFileVersions: async () => {
+    const st = get();
+    if (getPaytmCraftPublicEnv().mode !== "api" || !st.isApiBackedFile || !st.apiFileId) {
+      set({
+        apiVersionsStatus: "idle" as ApiVersionsStatus,
+        apiFileVersions: [],
+      });
+      return;
+    }
+    set({ apiVersionsStatus: "loading" as ApiVersionsStatus });
+    try {
+      const list = await apiClient.listFileVersions(st.apiFileId);
+      set({ apiFileVersions: list, apiVersionsStatus: "synced" as ApiVersionsStatus });
+    } catch (e) {
+      console.warn("[Paytm Craft] loadApiFileVersions failed", e);
+      set({ apiVersionsStatus: "failed" as ApiVersionsStatus });
+    }
+  },
+
+  createApiFileVersion: async (name) => {
+    const st = get();
+    if (!st.isApiBackedFile || !st.apiFileId) return;
+    const doc = editorStateToDocument(toPersistSlice(st));
+    try {
+      await apiClient.createFileVersion(st.apiFileId, { name, documentJson: doc });
+      await get().loadApiFileVersions();
+    } catch (e) {
+      console.warn("[Paytm Craft] createApiFileVersion failed", e);
+      set({ apiVersionsStatus: "failed" as ApiVersionsStatus });
+    }
+  },
+
+  restoreApiFileVersion: async (versionId) => {
+    const st = get();
+    if (!st.isApiBackedFile || !st.apiFileId) return;
+    if (
+      !window.confirm(
+        "Restore this version? The editor will be replaced with this snapshot and the API file will be updated.",
+      )
+    ) {
+      return;
+    }
+    get().pushHistory();
+    try {
+      const file = await apiClient.restoreFileVersion(st.apiFileId, versionId);
+      const raw = file.documentJson;
+      if (raw == null || !validatePaytmCraftDocument(raw)) {
+        console.warn("[Paytm Craft] restoreApiFileVersion: invalid document from API");
+        return;
+      }
+      set((s) => ({
+        ...documentToEditorPatch(raw),
+        guides: [],
+        editingTextId: null,
+        hoveredCanvasId: null,
+        contextMenu: null,
+        layerRenameId: null,
+        placingComponentMasterId: null,
+        prototypeWireDrag: null,
+        selectedPrototypeLinkId: null,
+        prototypePreview: null,
+        responsivePreview: null,
+        activeCommentId: null,
+        isPlacingComment: false,
+        commentsPanelOpen: false,
+        penDrawingNodeId: null,
+        pathEditModeNodeId: null,
+  objectEditModeNodeId: null,
+        selectedPathPointId: null,
+        presenceUsers: [],
+        showPresence: false,
+        presenceActivityLog: [],
+        commandMenuOpen: false,
+        shortcutOverlayOpen: false,
+        aiModalOpen: false,
+        aiModalSource: null,
+        pluginMarketplaceOpen: false,
+        activePluginId: undefined,
+        shareModalOpen: false,
+        workspacePickerOpen: false,
+        teamInviteModalOpen: false,
+        versionHistoryOpen: false,
+        editorMode: "design",
+        tool: "move",
+        leftTab: "layers",
+        documentSaveStatus: "saved-api" as DocumentSaveStatus,
+        documentHydrationRevision: s.documentHydrationRevision + 1,
+        historyFuture: [],
+      }));
+      void getSyncProvider()
+        .saveDocument(raw)
+        .catch((err) => {
+          console.warn("[Paytm Craft] persist after restore failed", err);
+        });
+      void get().loadApiComments();
+      void get().loadApiFileVersions();
+    } catch (e) {
+      console.warn("[Paytm Craft] restoreApiFileVersion failed", e);
+    }
+  },
+
+  saveToLocal: () => {
+    set({ documentSaveStatus: "saving" });
+    const st = get();
+    const doc = editorStateToDocument(toPersistSlice(st));
+    const shouldPushApi =
+      getPaytmCraftPublicEnv().mode === "api" && st.isApiBackedFile && Boolean(st.apiFileId);
+
+    void getSyncProvider()
+      .saveDocument(doc)
+      .then(() => {
+        if (!shouldPushApi) {
+          set({ documentSaveStatus: "saved" });
+          return;
+        }
+        const fileId = st.apiFileId!;
+        return apiClient
+          .saveFile(fileId, { documentJson: doc })
+          .then(() => {
+            set({ documentSaveStatus: "saved-api" });
+          })
+          .catch((e) => {
+            console.warn("[Paytm Craft] API save failed", e);
+            set({ documentSaveStatus: "api-save-failed" });
+          });
+      })
+      .catch((e) => {
+        console.warn("[Paytm Craft] saveToLocal failed", e);
+        set({ documentSaveStatus: "unsaved" });
+      });
+  },
+
+  loadFromLocal: async () => {
+    try {
+      const doc = await getSyncProvider().loadDocument();
+      if (!doc) return false;
+      set((s) => ({ ...editorPartialFromPaytmCraftDocument(doc, s) }));
+      return true;
+    } catch (e) {
+      console.warn("[Paytm Craft] loadFromLocal failed", e);
+      return false;
+    }
+  },
+
+  applySampleDocumentIfEmpty: () => {
+    const s = get();
+    if (!isWorkspaceEmpty(s)) return;
+    if (typeof window !== "undefined" && readInitialDocumentFields()) return;
+    const mock = buildMock();
+    const fields = mergeSampleDocumentFields(mock, "Paytm Craft — Product exploration");
+    set({
+      ...fields,
+      selectedIds: [],
+      guides: [],
+      editingTextId: null,
+      documentSaveStatus: "saved",
+      documentHydrationRevision: s.documentHydrationRevision + 1,
+      historyPast: [],
+      historyFuture: [],
+    });
+  },
+
+  applyPersistedDocumentIfClean: (doc) => {
+    if (!doc) return false;
+    const st = get();
+    if (st.documentSaveStatus !== "saved" && st.documentSaveStatus !== "saved-api") return false;
+    const sliceFromDoc = documentToEditorPatch(doc);
+    const incoming: EditorPersistSlice = {
+      nodes: sliceFromDoc.nodes,
+      childOrder: sliceFromDoc.childOrder,
+      assets: sliceFromDoc.assets,
+      designTokens: sliceFromDoc.designTokens,
+      fileName: sliceFromDoc.fileName,
+      selectedIds: sliceFromDoc.selectedIds,
+      zoom: sliceFromDoc.zoom,
+      pan: sliceFromDoc.pan,
+      showGrid: sliceFromDoc.showGrid,
+      canvasBackgroundColor: sliceFromDoc.canvasBackgroundColor,
+      comments: sliceFromDoc.comments,
+      pages: sliceFromDoc.pages,
+      pageOrder: sliceFromDoc.pageOrder,
+      activePageId: sliceFromDoc.activePageId,
+    };
+    if (serializePersistStable(incoming) === serializePersistStable(toPersistSlice(st))) {
+      return false;
+    }
+    set((s) => ({ ...editorPartialFromPaytmCraftDocument(doc, s) }));
+    return true;
+  },
+
+  exportDocument: () => {
+    const s = get();
+    const doc = editorStateToDocument(toPersistSlice(s));
+    downloadJsonFile(`${sanitizeDocumentFilename(s.fileName)}.paytmcraft.json`, doc);
+  },
+
+  importDocument: async (file) => {
+    try {
+      const raw = await file.text();
+      const doc = parsePaytmCraftDocumentJson(raw);
+      if (!doc) {
+        window.alert("Invalid Paytm Craft document. Expected version 1 .paytmcraft.json.");
+        return;
+      }
+      set((s) => editorStateAfterDocumentImport(doc, s));
+      void getSyncProvider()
+        .saveDocument(editorStateToDocument(toPersistSlice(get())))
+        .catch((e) => {
+          console.warn("[Paytm Craft] persist save failed", e);
+          useEditorStore.setState({ documentSaveStatus: "unsaved" });
+        });
+    } catch {
+      window.alert("Could not import that file.");
+    }
+  },
+
+  importFigmaFile: async (file) => {
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const result = convertFigBytesToPaytmCraft(bytes, file.name);
+      if (!result.ok) {
+        window.alert(result.error);
+        return;
+      }
+      set((s) => editorStateAfterDocumentImport(result.document, s));
+      void getSyncProvider()
+        .saveDocument(editorStateToDocument(toPersistSlice(get())))
+        .catch((e) => {
+          console.warn("[Paytm Craft] persist save failed", e);
+          useEditorStore.setState({ documentSaveStatus: "unsaved" });
+        });
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : "Could not import Figma file.");
+    }
+  },
+
+  importWorkspaceFile: async (file) => {
+    if (isFigmaFigFile(file)) {
+      await get().importFigmaFile(file);
+      return;
+    }
+    await get().importDocument(file);
+  },
+
+  loadWorkspaceFromPersist: (slice, apiSession) => {
+    const backed = Boolean(apiSession?.apiFileId);
+    pendingCommentCreateByLocalId.clear();
+    abortedCommentCreates.clear();
+    set((s) => ({
+      nodes: slice.nodes,
+      childOrder: slice.childOrder,
+      assets: slice.assets ?? {},
+      designTokens: slice.designTokens ?? {},
+      fileName: slice.fileName,
+      selectedIds: slice.selectedIds,
+      zoom: slice.zoom,
+      pan: slice.pan,
+      showGrid: slice.showGrid,
+      comments: slice.comments,
+      pages: slice.pages,
+      pageOrder: slice.pageOrder,
+      activePageId: slice.activePageId,
+      guides: [],
+      editingTextId: null,
+      hoveredCanvasId: null,
+      contextMenu: null,
+      layerRenameId: null,
+      placingComponentMasterId: null,
+      prototypeWireDrag: null,
+      selectedPrototypeLinkId: null,
+      prototypePreview: null,
+      responsivePreview: null,
+      activeCommentId: null,
+      isPlacingComment: false,
+      commentsPanelOpen: false,
+      penDrawingNodeId: null,
+      pathEditModeNodeId: null,
+  objectEditModeNodeId: null,
+      selectedPathPointId: null,
+      presenceUsers: [],
+      showPresence: false,
+      presenceActivityLog: [],
+      commandMenuOpen: false,
+      shortcutOverlayOpen: false,
+      aiModalOpen: false,
+      aiModalSource: null,
+      pluginMarketplaceOpen: false,
+      activePluginId: undefined,
+      shareModalOpen: false,
+      workspacePickerOpen: false,
+      teamInviteModalOpen: false,
+      apiFileId: backed ? apiSession!.apiFileId : undefined,
+      apiWorkspaceId: backed ? apiSession!.apiWorkspaceId : undefined,
+      isApiBackedFile: backed,
+      apiCommentsStatus: (backed ? "loading" : "idle") as ApiCommentsStatus,
+      versionHistoryOpen: false,
+      apiVersionsStatus: "idle" as ApiVersionsStatus,
+      apiFileVersions: [],
+      editorMode: "design",
+      tool: "move",
+      leftTab: "layers",
+      documentSaveStatus: "saved",
+      documentHydrating: false,
+      documentHydrationRevision: s.documentHydrationRevision + 1,
+      historyPast: [],
+      historyFuture: [],
+    }));
+    if (backed) {
+      return get()
+        .loadApiComments()
+        .then(() =>
+          getSyncProvider().saveDocument(editorStateToDocument(toPersistSlice(get()))).catch((e) => {
+            console.warn("[Paytm Craft] persist save failed", e);
+            useEditorStore.setState({ documentSaveStatus: "unsaved" });
+          }),
+        );
+    }
+
+    return getSyncProvider()
+      .saveDocument(editorStateToDocument(toPersistSlice(get())))
+      .catch((e) => {
+        console.warn("[Paytm Craft] persist save failed", e);
+        useEditorStore.setState({ documentSaveStatus: "unsaved" });
+      });
+  },
+
+  applyGeneratedDesign: (slice, mode, opts) => {
+    const recordHistory = opts?.recordHistory !== false;
+    const uiReset = (s: EditorState) => ({
+      guides: [],
+      editingTextId: null,
+      hoveredCanvasId: null,
+      contextMenu: null,
+      layerRenameId: null,
+      placingComponentMasterId: null,
+      prototypeWireDrag: null,
+      selectedPrototypeLinkId: null,
+      prototypePreview: null,
+      responsivePreview: null,
+      activeCommentId: null,
+      isPlacingComment: false,
+      commentsPanelOpen: false,
+      penDrawingNodeId: null,
+      pathEditModeNodeId: null,
+  objectEditModeNodeId: null,
+      selectedPathPointId: null,
+      presenceUsers: [],
+      showPresence: false,
+      presenceActivityLog: [],
+      commandMenuOpen: false,
+      shortcutOverlayOpen: false,
+      aiModalOpen: false,
+      aiModalSource: null,
+      pluginMarketplaceOpen: false,
+      activePluginId: undefined,
+      shareModalOpen: false,
+      workspacePickerOpen: false,
+      teamInviteModalOpen: false,
+      apiFileId: undefined,
+      apiWorkspaceId: undefined,
+      isApiBackedFile: false,
+      apiCommentsStatus: "idle" as ApiCommentsStatus,
+      versionHistoryOpen: false,
+      apiVersionsStatus: "idle" as ApiVersionsStatus,
+      apiFileVersions: [],
+      editorMode: "design" as EditorMode,
+      tool: "move" as Tool,
+      leftTab: "layers" as LeftTab,
+      documentSaveStatus: "saved" as DocumentSaveStatus,
+      documentHydrationRevision: s.documentHydrationRevision + 1,
+    });
+
+    if (recordHistory) get().pushHistory();
+
+    if (mode === "replace") {
+      set((s) => ({
+        nodes: slice.nodes,
+        childOrder: slice.childOrder,
+        assets: slice.assets ?? {},
+        designTokens: slice.designTokens ?? {},
+        fileName: slice.fileName,
+        selectedIds: slice.selectedIds,
+        zoom: slice.zoom,
+        pan: slice.pan,
+        showGrid: slice.showGrid,
+        comments: slice.comments,
+        pages: slice.pages,
+        pageOrder: slice.pageOrder,
+        activePageId: slice.activePageId,
+        ...uiReset(s),
+        ...(recordHistory ? {} : { historyPast: [], historyFuture: [] }),
+      }));
+    } else {
+      set((s) => {
+        const merged = remapPersistSliceIds(slice);
+        const rootsExisting = [...(s.childOrder[ROOT] ?? [])];
+        let maxRight = 80;
+        for (const rid of rootsExisting) {
+          const wr = worldRect(rid, s.nodes);
+          maxRight = Math.max(maxRight, wr.x + wr.width);
+        }
+        const gap = 96;
+        let xCursor = maxRight + gap;
+        const newRootIds = [...(merged.childOrder[ROOT] ?? [])];
+        const nodes: Record<string, EditorNode> = { ...s.nodes };
+        for (const [oid, on] of Object.entries(merged.nodes)) {
+          nodes[oid] = { ...on };
+        }
+        for (const rootId of newRootIds) {
+          const n = nodes[rootId];
+          if (n && !n.parentId) {
+            nodes[rootId] = { ...n, x: xCursor };
+            xCursor += n.width + gap;
+          }
+        }
+        const childOrder = { ...s.childOrder };
+        for (const [k, v] of Object.entries(merged.childOrder)) {
+          if (k === ROOT) continue;
+          childOrder[k] = v;
+        }
+        childOrder[ROOT] = [...rootsExisting, ...newRootIds];
+        const mergedAssets = { ...s.assets, ...(merged.assets ?? {}) };
+        const mergedDesignTokens = { ...s.designTokens, ...(merged.designTokens ?? {}) };
+        const nextState = {
+          nodes,
+          childOrder,
+          assets: mergedAssets,
+          designTokens: mergedDesignTokens,
+          selectedIds: newRootIds,
+          fileName: s.fileName,
+          comments: s.comments,
+          ...uiReset(s),
+        };
+        return {
+          ...nextState,
+          ...syncActivePageRecord({ ...s, ...nextState }),
+        };
+      });
+    }
+    void getSyncProvider()
+      .saveDocument(editorStateToDocument(toPersistSlice(get())))
+      .catch((e) => {
+        console.warn("[Paytm Craft] persist save failed", e);
+        useEditorStore.setState({ documentSaveStatus: "unsaved" });
+      });
+  },
+
+  resetDocument: () => {
+    const s = get();
+    if (s.documentSaveStatus === "unsaved" || s.documentSaveStatus === "api-save-failed") {
+      if (!window.confirm("Discard unsaved changes and create a new file?")) return;
+    }
+    const { nodes, childOrder } = buildMock();
+    const pageInit = initialPagesFromCanvas(nodes, childOrder, {
+      zoom: 0.55,
+      pan: { x: 40, y: 24 },
+      showGrid: false,
+    });
+    set({
+      nodes,
+      childOrder,
+      pages: pageInit.pages,
+      pageOrder: pageInit.pageOrder,
+      activePageId: pageInit.activePageId,
+      assets: {},
+      designTokens: {},
+      fileName: "Untitled",
+      selectedIds: [],
+      zoom: 0.55,
+      pan: { x: 40, y: 24 },
+      showGrid: false,
+      comments: [],
+      commentsPanelOpen: false,
+      activeCommentId: null,
+      isPlacingComment: false,
+      penDrawingNodeId: null,
+      pathEditModeNodeId: null,
+  objectEditModeNodeId: null,
+      selectedPathPointId: null,
+      presenceUsers: [],
+      showPresence: false,
+      presenceActivityLog: [],
+      commandMenuOpen: false,
+      shortcutOverlayOpen: false,
+      aiModalOpen: false,
+      aiModalSource: null,
+      pluginMarketplaceOpen: false,
+      activePluginId: undefined,
+      shareModalOpen: false,
+      workspacePickerOpen: false,
+      teamInviteModalOpen: false,
+      apiFileId: undefined,
+      apiWorkspaceId: undefined,
+      isApiBackedFile: false,
+      apiCommentsStatus: "idle" as ApiCommentsStatus,
+      versionHistoryOpen: false,
+      apiVersionsStatus: "idle" as ApiVersionsStatus,
+      apiFileVersions: [],
+      guides: [],
+      editingTextId: null,
+      hoveredCanvasId: null,
+      contextMenu: null,
+      layerRenameId: null,
+      placingComponentMasterId: null,
+      prototypeWireDrag: null,
+      selectedPrototypeLinkId: null,
+      prototypePreview: null,
+      responsivePreview: null,
+      editorMode: "design",
+      tool: "move",
+      leftTab: "layers",
+      documentSaveStatus: "saved",
+      documentHydrationRevision: s.documentHydrationRevision + 1,
+      historyPast: [],
+      historyFuture: [],
+    });
+    void getSyncProvider()
+      .saveDocument(editorStateToDocument(toPersistSlice(get())))
+      .catch((e) => {
+        console.warn("[Paytm Craft] persist save failed", e);
+        useEditorStore.setState({ documentSaveStatus: "unsaved" });
+      });
+  },
+
+  setDocumentName: (name) => {
+    const next = name.trim() ? name.trim() : "Untitled";
+    if (next === get().fileName) return;
+    get().pushHistory();
+    set({ fileName: next });
+  },
+
+  setActivePage: (pageId) => {
+    const s = get();
+    if (pageId === s.activePageId || !s.pages[pageId]) return;
+    const captured = pagesWithActiveCaptured(s);
+    const nextPage = captured.pages[pageId]!;
+    set({
+      pages: captured.pages,
+      activePageId: pageId,
+      ...editorPatchFromPage(nextPage),
+      ...pageSwitchUiReset(),
+    });
+  },
+
+  addPage: () => {
+    const s = get();
+    const captured = pagesWithActiveCaptured(s);
+    const id = `page-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const name = nextPageName(captured.pages, captured.pageOrder);
+    const page = createEmptyPage(id, name);
+    set({
+      pages: { ...captured.pages, [id]: page },
+      pageOrder: [...captured.pageOrder, id],
+      activePageId: id,
+      ...editorPatchFromPage(page),
+      ...pageSwitchUiReset(),
+    });
+  },
+
+  duplicatePage: (pageId) => {
+    const s = get();
+    const captured = pagesWithActiveCaptured(s);
+    const sourceId = pageId ?? s.activePageId;
+    const source = captured.pages[sourceId];
+    if (!source) return;
+    const id = `page-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const cloned = clonePageCanvas(source);
+    const page: EditorPage = {
+      id,
+      name: `${source.name} copy`,
+      nodes: cloned.nodes,
+      childOrder: cloned.childOrder,
+      selectedIds: cloned.selectedIds,
+      zoom: source.zoom,
+      pan: { ...source.pan },
+      showGrid: source.showGrid,
+      canvasBackgroundColor: source.canvasBackgroundColor,
+    };
+    set({
+      pages: { ...captured.pages, [id]: page },
+      pageOrder: [...captured.pageOrder, id],
+      activePageId: id,
+      ...editorPatchFromPage(page),
+      ...pageSwitchUiReset(),
+    });
+  },
+
+  deletePage: (pageId) => {
+    const s = get();
+    if (s.pageOrder.length <= 1) return;
+    const captured = pagesWithActiveCaptured(s);
+    const page = captured.pages[pageId];
+    if (!page) return;
+    if (
+      !window.confirm(`Delete "${page.name}"? This page and all of its content will be removed.`)
+    ) {
+      return;
+    }
+    const restPages = { ...captured.pages };
+    delete restPages[pageId];
+    const newOrder = captured.pageOrder.filter((id) => id !== pageId);
+    if (pageId === s.activePageId) {
+      const nextId = newOrder[newOrder.length - 1] ?? newOrder[0]!;
+      const nextPage = restPages[nextId]!;
+      set({
+        pages: restPages,
+        pageOrder: newOrder,
+        activePageId: nextId,
+        ...editorPatchFromPage(nextPage),
+        ...pageSwitchUiReset(),
+      });
+      return;
+    }
+    set({ pages: restPages, pageOrder: newOrder });
+  },
+
+  cycleActivePage: (delta) => {
+    const s = get();
+    const idx = s.pageOrder.indexOf(s.activePageId);
+    if (idx < 0) return;
+    const nextIdx = idx + delta;
+    if (nextIdx < 0 || nextIdx >= s.pageOrder.length) return;
+    get().setActivePage(s.pageOrder[nextIdx]!);
+  },
+
+  renamePage: (pageId, name) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    set((s) => {
+      const page = s.pages[pageId];
+      if (!page || page.name === trimmed) return s;
+      return { pages: { ...s.pages, [pageId]: { ...page, name: trimmed } } };
+    });
+  },
+  };
+});

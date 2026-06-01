@@ -1,0 +1,519 @@
+"use client";
+
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  Boxes,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  Combine,
+  Component,
+  Eye,
+  EyeOff,
+  Frame,
+  Group,
+  ImageIcon,
+  Layers,
+  Lock,
+  Minus,
+  PenLine,
+  Square,
+  Type,
+  Unlock,
+  Layers2,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { ROOT, useEditorStore, type EditorNode } from "@/stores/useEditorStore";
+import { findInstanceRoot } from "@/lib/componentModel";
+import { isAncestorOf } from "@/lib/editorGraph";
+import { BOOLEAN_OPERATION_LABELS, isMaskGroup } from "@/lib/booleanGeometry";
+
+function KindIcon({ node }: { node: EditorNode }) {
+  const c = "h-3.5 w-3.5 shrink-0 text-[#6b6b6b]";
+  if (node.isBooleanGroup) return <Combine className={c} strokeWidth={1.75} />;
+  if (isMaskGroup(node)) return <Layers2 className={c} strokeWidth={1.75} />;
+  if (node.isMask) return <Layers2 className={c} strokeWidth={1.75} />;
+  if (node.type === "frame") return <Frame className={c} strokeWidth={1.75} />;
+  if (node.type === "group") return <Group className={c} strokeWidth={1.75} />;
+  if (node.type === "text") return <Type className={c} strokeWidth={1.75} />;
+  if (node.type === "image") return <ImageIcon className={c} strokeWidth={1.75} />;
+  if (node.type === "ellipse") return <Circle className={c} strokeWidth={1.75} />;
+  if (node.type === "line") return <Minus className={c} strokeWidth={1.75} />;
+  if (node.type === "path") return <PenLine className={c} strokeWidth={1.75} />;
+  return <Square className={c} strokeWidth={1.75} />;
+}
+
+type DropInd =
+  | null
+  | { kind: "reorder"; parentId: string; insertBefore: number }
+  | { kind: "nest"; targetId: string };
+
+function layerRowKey(parentId: string, nodeId: string) {
+  return `${parentId}::${nodeId}`;
+}
+
+const EMPTY_REMOTE_PEERS: { id: string; color: string; name: string }[] = [];
+
+function Tree({
+  parentId,
+  depth,
+  dragId,
+  indicator,
+  setIndicator,
+  onDragStartRow,
+}: {
+  parentId: string;
+  depth: number;
+  dragId: string | null;
+  indicator: DropInd;
+  setIndicator: (v: DropInd) => void;
+  onDragStartRow: (e: React.DragEvent, payloadId: string) => void;
+}) {
+  const childOrder = useEditorStore((s) => s.childOrder);
+  const nodes = useEditorStore((s) => s.nodes);
+  const ids = childOrder[parentId] ?? [];
+
+  return (
+    <>
+      {ids.map((id, index) => {
+        const node = nodes[id];
+        if (!node) return null;
+        const showChildren =
+          (node.type === "frame" || node.type === "group") &&
+          node.expanded &&
+          (childOrder[node.id]?.length ?? 0) > 0;
+        return (
+          <LayerRow
+            key={id}
+            node={node}
+            depth={depth}
+            parentId={parentId}
+            index={index}
+            dragId={dragId}
+            indicator={indicator}
+            setIndicator={setIndicator}
+            onDragStartRow={onDragStartRow}
+            showChildren={showChildren}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+function LayerRow({
+  node,
+  depth,
+  parentId,
+  index,
+  dragId,
+  indicator,
+  setIndicator,
+  onDragStartRow,
+  showChildren,
+}: {
+  node: EditorNode;
+  depth: number;
+  parentId: string;
+  index: number;
+  dragId: string | null;
+  indicator: DropInd;
+  setIndicator: (v: DropInd) => void;
+  onDragStartRow: (e: React.DragEvent, payloadId: string) => void;
+  showChildren: boolean;
+}) {
+  const selectedIds = useEditorStore((s) => s.selectedIds);
+  const select = useEditorStore((s) => s.select);
+  const toggleVisible = useEditorStore((s) => s.toggleVisible);
+  const toggleLock = useEditorStore((s) => s.toggleLock);
+  const toggleExpanded = useEditorStore((s) => s.toggleExpanded);
+  const childOrder = useEditorStore((s) => s.childOrder);
+  const nodes = useEditorStore((s) => s.nodes);
+  const instRoot = findInstanceRoot(nodes, node.id);
+  const openContextMenu = useEditorStore((s) => s.openContextMenu);
+  const layerRenameId = useEditorStore((s) => s.layerRenameId);
+  const setLayerRenameId = useEditorStore((s) => s.setLayerRenameId);
+  const renameNode = useEditorStore((s) => s.renameNode);
+  const showPresence = useEditorStore((s) => s.showPresence);
+  const presenceUsers = useEditorStore((s) => s.presenceUsers);
+
+  const remotePeers = useMemo(() => {
+    if (!showPresence) return EMPTY_REMOTE_PEERS;
+    return presenceUsers
+      .filter((u) => u.selectedNodeIds.includes(node.id))
+      .map((u) => ({ id: u.id, color: u.color, name: u.name }));
+  }, [showPresence, presenceUsers, node.id]);
+
+  const [draftName, setDraftName] = useState(node.name);
+  const skipBlurCommit = useRef(false);
+
+  useEffect(() => {
+    if (layerRenameId === node.id) setDraftName(node.name);
+  }, [layerRenameId, node.id, node.name]);
+
+  const hasKids =
+    (node.type === "frame" || node.type === "group") && (childOrder[node.id]?.length ?? 0) > 0;
+  const active = selectedIds.includes(node.id);
+  const nestHighlight = indicator?.kind === "nest" && indicator.targetId === node.id;
+  const isRenaming = layerRenameId === node.id;
+
+  const onRowDragOver = (e: React.DragEvent) => {
+    if (!dragId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "move";
+
+    if (dragId === node.id) {
+      setIndicator(null);
+      return;
+    }
+    if (isAncestorOf(nodes, dragId, node.id)) {
+      setIndicator(null);
+      return;
+    }
+
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const ratio = (e.clientY - rect.top) / Math.max(rect.height, 1);
+    const canNest = (node.type === "frame" || node.type === "group") && !node.locked;
+
+    if (canNest && ratio > 0.28 && ratio < 0.72) {
+      setIndicator({ kind: "nest", targetId: node.id });
+      return;
+    }
+
+    const insertBefore = ratio < 0.5 ? index : index + 1;
+    setIndicator({ kind: "reorder", parentId, insertBefore });
+  };
+
+  const onRowDragLeave = (e: React.DragEvent) => {
+    const rt = e.relatedTarget as Node | null;
+    if (!rt || !(e.currentTarget as HTMLElement).contains(rt)) {
+      setIndicator(null);
+    }
+  };
+
+  const commitRename = () => {
+    const t = draftName.trim();
+    if (t) renameNode(node.id, t);
+    setLayerRenameId(null);
+  };
+
+  return (
+    <div>
+      <div
+        data-layer-row={layerRowKey(parentId, node.id)}
+        draggable={!node.locked}
+        onDragStart={(e) => {
+          if (node.locked) {
+            e.preventDefault();
+            return;
+          }
+          const payloadId =
+            selectedIds.length > 0 && selectedIds.includes(node.id) ? selectedIds[0]! : node.id;
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("application/x-pc-layer", payloadId);
+          onDragStartRow(e, payloadId);
+        }}
+        onDragOver={onRowDragOver}
+        onDragLeave={onRowDragLeave}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          openContextMenu(node.id, e.clientX, e.clientY);
+        }}
+        className={cn(
+          "group flex h-7 items-center gap-0.5 rounded pr-1 text-ui-sm transition-colors",
+          active
+            ? "bg-[rgba(24,160,251,0.14)] text-[#f0f0f0]"
+            : "text-[#d4d4d4] hover:bg-white/[0.04]",
+          nestHighlight && "bg-[rgba(24,160,251,0.1)]",
+        )}
+        style={{ paddingLeft: 6 + depth * 14 }}
+      >
+        {hasKids ? (
+          <button
+            type="button"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[#6b6b6b] transition-colors hover:bg-white/[0.06] hover:text-white"
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleExpanded(node.id);
+            }}
+          >
+            {node.expanded ? (
+              <ChevronDown className="h-3.5 w-3.5" strokeWidth={2} />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5" strokeWidth={2} />
+            )}
+          </button>
+        ) : (
+          <span className="w-6 shrink-0" />
+        )}
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+          onClick={(e) => select(node.id, e.shiftKey)}
+        >
+          <KindIcon node={node} />
+          {remotePeers.length > 0 ? (
+            <span
+              className="flex shrink-0 items-center gap-0.5"
+              title={remotePeers.map((p) => p.name).join(", ")}
+            >
+              {remotePeers.map((p) => (
+                <span
+                  key={p.id}
+                  className="h-2 w-2 shrink-0 rounded-full border border-black/50 ring-1 ring-black/20"
+                  style={{ backgroundColor: p.color }}
+                />
+              ))}
+            </span>
+          ) : null}
+          {node.isComponent ? (
+            <span title="Component source" className="shrink-0 text-violet-300">
+              <Component className="h-3 w-3" strokeWidth={1.75} />
+            </span>
+          ) : null}
+          {instRoot ? (
+            <span title="Component instance" className="shrink-0 text-violet-200/90">
+              <Boxes className="h-3 w-3" strokeWidth={1.75} />
+            </span>
+          ) : null}
+          {isRenaming ? (
+            <input
+              className="min-w-0 flex-1 rounded border border-accent/50 bg-[#1f1f1f] px-1 py-0 text-[12px] font-medium text-white outline-none"
+              value={draftName}
+              autoFocus
+              onChange={(e) => setDraftName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  commitRename();
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  skipBlurCommit.current = true;
+                  setDraftName(node.name);
+                  setLayerRenameId(null);
+                }
+              }}
+              onBlur={() => {
+                if (skipBlurCommit.current) {
+                  skipBlurCommit.current = false;
+                  return;
+                }
+                commitRename();
+              }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <span
+              className={cn(
+                "min-w-0 truncate font-medium",
+                active
+                  ? node.type === "frame"
+                    ? "text-[#18a0fb]"
+                    : "text-[#f0f0f0]"
+                  : "text-[#d4d4d4]",
+              )}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                if (!node.locked) {
+                  setDraftName(node.name);
+                  setLayerRenameId(node.id);
+                }
+              }}
+            >
+              {node.name}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          className={cn(
+            "flex h-6 w-6 shrink-0 items-center justify-center rounded text-[#6b6b6b] transition-opacity hover:bg-white/[0.06] hover:text-white",
+            active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+          )}
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleVisible(node.id);
+          }}
+          title="Visibility"
+        >
+          {node.visible ? <Eye className="h-3.5 w-3.5" strokeWidth={1.75} /> : <EyeOff className="h-3.5 w-3.5" strokeWidth={1.75} />}
+        </button>
+        <button
+          type="button"
+          className={cn(
+            "flex h-6 w-6 shrink-0 items-center justify-center rounded text-[#6b6b6b] transition-opacity hover:bg-white/[0.06] hover:text-white",
+            active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+          )}
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleLock(node.id);
+          }}
+          title="Lock"
+        >
+          {node.locked ? <Lock className="h-3.5 w-3.5" strokeWidth={1.75} /> : <Unlock className="h-3.5 w-3.5" strokeWidth={1.75} />}
+        </button>
+      </div>
+      {showChildren ? (
+        <Tree
+          parentId={node.id}
+          depth={depth + 1}
+          dragId={dragId}
+          indicator={indicator}
+          setIndicator={setIndicator}
+          onDragStartRow={onDragStartRow}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+export function LayersPanel() {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [indicator, setIndicator] = useState<DropInd>(null);
+  const [lineTop, setLineTop] = useState<number | null>(null);
+  const childOrder = useEditorStore((s) => s.childOrder);
+  const nodes = useEditorStore((s) => s.nodes);
+  const selectedIds = useEditorStore((s) => s.selectedIds);
+  const moveNodeToParent = useEditorStore((s) => s.moveNodeToParent);
+
+  useLayoutEffect(() => {
+    const id = selectedIds[0];
+    if (!id || !scrollRef.current) return;
+    const raw = nodes[id];
+    if (!raw) return;
+    const pid = raw.parentId ?? ROOT;
+    const sel = `[data-layer-row="${layerRowKey(pid, id)}"]`;
+    const el = scrollRef.current.querySelector(sel);
+    el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [selectedIds, nodes]);
+
+  const onDragStartRow = useCallback((_e: React.DragEvent, payloadId: string) => {
+    setDragId(payloadId);
+    const onEnd = () => {
+      setDragId(null);
+      setIndicator(null);
+      setLineTop(null);
+      window.removeEventListener("dragend", onEnd);
+    };
+    window.addEventListener("dragend", onEnd);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!indicator || indicator.kind !== "reorder" || !scrollRef.current) {
+      setLineTop(null);
+      return;
+    }
+    const sc = scrollRef.current;
+    const ids = useEditorStore.getState().childOrder[indicator.parentId] ?? [];
+    const i = indicator.insertBefore;
+    let top: number | null = null;
+    if (i < ids.length) {
+      const el = sc.querySelector(`[data-layer-row="${layerRowKey(indicator.parentId, ids[i]!)}"]`);
+      if (el) {
+        const sr = sc.getBoundingClientRect();
+        const er = el.getBoundingClientRect();
+        top = er.top - sr.top + sc.scrollTop;
+      }
+    } else if (ids.length > 0) {
+      const el = sc.querySelector(`[data-layer-row="${layerRowKey(indicator.parentId, ids[ids.length - 1]!)}"]`);
+      if (el) {
+        const sr = sc.getBoundingClientRect();
+        const er = el.getBoundingClientRect();
+        top = er.bottom - sr.top + sc.scrollTop - 1;
+      }
+    }
+    setLineTop(top);
+  }, [indicator, childOrder, nodes]);
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const id = e.dataTransfer.getData("application/x-pc-layer");
+    if (!id || !indicator) {
+      setDragId(null);
+      setIndicator(null);
+      setLineTop(null);
+      return;
+    }
+    const n = nodes[id];
+    if (!n || n.locked) {
+      setDragId(null);
+      setIndicator(null);
+      setLineTop(null);
+      return;
+    }
+
+    if (indicator.kind === "nest") {
+      const target = nodes[indicator.targetId];
+      if (!target || (target.type !== "frame" && target.type !== "group")) {
+        setDragId(null);
+        setIndicator(null);
+        setLineTop(null);
+        return;
+      }
+      if (isAncestorOf(nodes, id, indicator.targetId)) {
+        setDragId(null);
+        setIndicator(null);
+        setLineTop(null);
+        return;
+      }
+      const nextLen = (useEditorStore.getState().childOrder[indicator.targetId] ?? []).filter((x) => x !== id).length;
+      useEditorStore.getState().pushHistory();
+      moveNodeToParent(id, indicator.targetId, nextLen);
+    } else {
+      useEditorStore.getState().pushHistory();
+      moveNodeToParent(id, indicator.parentId, indicator.insertBefore);
+    }
+
+    setDragId(null);
+    setIndicator(null);
+    setLineTop(null);
+  };
+
+  const onDragOverScroll = (e: React.DragEvent) => {
+    if (!dragId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  };
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex h-7 shrink-0 items-center gap-1.5 border-b border-black/30 px-2 text-[11px] font-semibold uppercase tracking-wide text-[#7a7a7a]">
+        <Layers className="h-3.5 w-3.5 text-[#6b6b6b]" strokeWidth={2} />
+        Layers
+      </div>
+      <div
+        ref={scrollRef}
+        className="thin-scroll relative min-h-0 flex-1 overflow-y-auto py-0.5"
+        onDragOver={onDragOverScroll}
+        onDrop={onDrop}
+      >
+        {lineTop != null && indicator?.kind === "reorder" ? (
+          <div
+            className="pointer-events-none absolute right-1 left-1 z-10 h-px bg-accent shadow-[0_0_0_1px_rgba(13,153,255,0.35)]"
+            style={{ top: lineTop }}
+          />
+        ) : null}
+        <Tree
+          parentId={ROOT}
+          depth={0}
+          dragId={dragId}
+          indicator={indicator}
+          setIndicator={setIndicator}
+          onDragStartRow={onDragStartRow}
+        />
+        {(childOrder[ROOT] ?? []).length === 0 ? (
+          <div className="mx-2 mt-4 rounded-lg border border-dashed border-white/[0.08] bg-white/[0.02] px-3 py-6 text-center">
+            <Layers className="mx-auto mb-2 h-8 w-8 text-[#4a4a4a]" strokeWidth={1.25} />
+            <p className="text-[12px] font-medium text-[#9a9a9a]">No layers yet</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-[#6b6b6b]">
+              Press <span className="font-medium text-[#8c8c8c]">F</span> for a frame or use the toolbar to add shapes and text.
+            </p>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
