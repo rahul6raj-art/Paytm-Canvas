@@ -1,3 +1,4 @@
+import { canAddAutoLayoutToSelection } from "@/lib/autoLayoutSelection";
 import { canCreateComponentFromSelection, findInstanceRoot } from "@/lib/componentModel";
 import { topLevelSelectedIds } from "@/lib/editorGraph";
 import { hasEditorClipboardContent } from "@/lib/editorClipboardAvailability";
@@ -372,6 +373,16 @@ export const ALL_COMMANDS: CommandDefinition[] = [
     run: (s) => s.ungroupSelection(),
   },
   {
+    id: "add-auto-layout",
+    title: "Add auto layout",
+    subtitle: "Wrap selection in an auto-layout frame (Figma ⇧A)",
+    category: "Actions",
+    shortcut: "⇧A",
+    keywords: ["frame", "flex", "stack", "layout"],
+    enabled: (s) => inDesign(s) && canAddAutoLayoutToSelection(s.selectedIds, s.nodes),
+    run: (s) => s.addAutoLayoutToSelection(),
+  },
+  {
     id: "bring-forward",
     title: "Bring forward",
     subtitle: "Move up one level",
@@ -494,7 +505,7 @@ export const ALL_COMMANDS: CommandDefinition[] = [
   },
   {
     id: "open-styles-panel",
-    title: "Open styles panel",
+    title: "Open design system library",
     subtitle: "Shared colors, typography, spacing, and effects",
     category: "View",
     shortcut: "",

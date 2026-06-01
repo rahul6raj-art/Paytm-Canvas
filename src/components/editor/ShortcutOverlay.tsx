@@ -51,6 +51,7 @@ const EDITING: Row[] = [
   { keys: "⌫", label: "Delete selection" },
   { keys: "⌘G", label: "Group selection" },
   { keys: "⌘⇧G", label: "Ungroup selection" },
+  { keys: "⇧A", label: "Add auto layout (wrap in frame)" },
 ];
 
 const ARRANGE: Row[] = [

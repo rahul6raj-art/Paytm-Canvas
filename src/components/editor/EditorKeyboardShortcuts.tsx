@@ -7,6 +7,7 @@ import { KEYBOARD_ZOOM_STEP } from "@/lib/canvasZoom";
 import { cancelActiveMarqueeFromKeyboard } from "@/lib/canvasMarqueeController";
 import { screenPxToWorld } from "@/lib/canvasVisual";
 import { topLevelSelectedIds } from "@/lib/editorGraph";
+import { canAddAutoLayoutToSelection } from "@/lib/autoLayoutSelection";
 import { isEditableFieldElement } from "@/lib/editorKeyboardFocus";
 
 function shouldIgnoreShortcutForTyping(target: EventTarget | null): boolean {
@@ -314,6 +315,18 @@ export function EditorKeyboardShortcuts() {
         if (e.shiftKey) useEditorStore.getState().ungroupSelection();
         else useEditorStore.getState().groupSelection();
         return;
+      }
+
+      if (!mod && e.shiftKey && e.code === "KeyA") {
+        const stAl = useEditorStore.getState();
+        if (
+          stAl.editorMode === "design" &&
+          canAddAutoLayoutToSelection(stAl.selectedIds, stAl.nodes)
+        ) {
+          e.preventDefault();
+          stAl.addAutoLayoutToSelection();
+          return;
+        }
       }
 
       if (e.key === "Escape") {

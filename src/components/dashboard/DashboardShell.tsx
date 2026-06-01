@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Plus, Search, Sparkles, Upload } from "lucide-react";
+import { Download, Plus, Search, Sparkles, Upload } from "lucide-react";
 import { DashboardSidebar, type DashboardNavId } from "./DashboardSidebar";
 import { FileCard } from "./FileCard";
 import { FileCardSkeleton } from "./FileCardSkeleton";
@@ -24,6 +24,9 @@ import {
 } from "@/lib/documentPersistence";
 import { convertFigBytesToPaytmCraft, isFigmaFigFile } from "@/lib/figImport";
 import { AIGenerateModal } from "@/components/ai/AIGenerateModal";
+import { ImportHub } from "@/components/import/ImportHub";
+import { ImportFigmaModal } from "@/components/import/ImportFigmaModal";
+import { ImportWebModal } from "@/components/import/ImportWebModal";
 import {
   getActiveMockWorkspace,
   getMockCurrentUser,
@@ -191,6 +194,7 @@ function DashboardTeamView({ workspace }: { workspace: MockWorkspace }) {
 export function DashboardShell() {
   const router = useRouter();
   const openAIModal = useEditorStore((s) => s.openAIModal);
+  const openImportHub = useEditorStore((s) => s.openImportHub);
   const importRef = useRef<HTMLInputElement>(null);
   const [nav, setNav] = useState<DashboardNavId>("home");
   const [search, setSearch] = useState("");
@@ -511,6 +515,9 @@ export function DashboardShell() {
   return (
     <div className="flex min-h-dvh bg-[#f4f5f7] text-slate-900 antialiased [color-scheme:light]">
       <AIGenerateModal />
+      <ImportHub />
+      <ImportFigmaModal onImportFigFile={onImportFile} />
+      <ImportWebModal />
       <DashboardSidebar
         active={nav}
         onNavigate={setNav}
@@ -580,6 +587,14 @@ export function DashboardShell() {
               >
                 <Sparkles className="h-4 w-4" strokeWidth={2} />
                 Generate with AI
+              </button>
+              <button
+                type="button"
+                onClick={() => openImportHub()}
+                className="inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-4 py-2 text-[13px] font-semibold text-sky-900 shadow-sm transition-colors hover:border-sky-300 hover:bg-sky-100"
+              >
+                <Download className="h-4 w-4" strokeWidth={2} />
+                Import design…
               </button>
               <button
                 type="button"

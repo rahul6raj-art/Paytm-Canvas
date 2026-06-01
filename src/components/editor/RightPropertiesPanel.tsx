@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { canAddAutoLayoutToSelection } from "@/lib/autoLayoutSelection";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { CanvasInspector } from "./CanvasInspector";
 import { DesignInspector } from "./DesignInspector";
@@ -15,6 +16,11 @@ export function RightPropertiesPanel() {
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const nodes = useEditorStore((s) => s.nodes);
   const editorMode = useEditorStore((s) => s.editorMode);
+  const addAutoLayoutToSelection = useEditorStore((s) => s.addAutoLayoutToSelection);
+  const canAutoLayout = useMemo(
+    () => canAddAutoLayoutToSelection(selectedIds, nodes),
+    [selectedIds, nodes],
+  );
   const selectedPrototypeLinkId = useEditorStore((s) => s.selectedPrototypeLinkId);
 
   const singleId = selectedIds.length === 1 ? selectedIds[0] : null;
@@ -49,7 +55,12 @@ export function RightPropertiesPanel() {
           <div className="thin-scroll min-h-0 flex-1 overflow-y-auto">
             {!node ? (
               selectedIds.length > 0 ? (
-                <InspectorEmptyState multi count={selectedIds.length} />
+                <InspectorEmptyState
+                  multi
+                  count={selectedIds.length}
+                  canAddAutoLayout={canAutoLayout}
+                  onAddAutoLayout={() => addAutoLayoutToSelection()}
+                />
               ) : (
                 <CanvasInspector />
               )

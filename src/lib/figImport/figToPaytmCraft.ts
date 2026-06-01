@@ -11,14 +11,14 @@ import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import { newPathPointId, normalizePathNode, type PathPoint } from "@/lib/pathGeometry";
 import type { EditorAsset, PaytmCraftDocument } from "@/lib/documentPersistence";
 import type { EditorNode, NodeKind } from "@/stores/useEditorStore";
-import type { CrossAxisAlign, LayoutFields, PrimaryAxisAlign } from "@/lib/autoLayout";
+import { applyDeepAutoLayoutAll, type CrossAxisAlign, type LayoutFields, type LayoutNode, type PrimaryAxisAlign } from "@/lib/autoLayout";
 import { DEFAULT_CANVAS_BACKGROUND } from "@/lib/canvasVisual";
 import { DEFAULT_GRADIENT_TRANSFORM, newGradientStopId, type FillGradient } from "@/lib/fillGradient";
 import { newNodeEffectId, type NodeEffect } from "@/lib/nodeEffects";
 import {
   applyFigBooleanToNode,
+  figContainerClipChildren,
   finalizeFigContainer,
-  frameClipChildrenFromFig,
 } from "@/lib/figImport/figMaskImport";
 
 const ROOT = EDITOR_ROOT_KEY;
@@ -409,7 +409,9 @@ function mapNodeKind(node: FigNode): NodeKind | null {
   switch (node.type) {
     case "FRAME": {
       const hasAutoLayout = node.stackMode && node.stackMode !== "NONE";
-      if (node.resizeToFit && !hasAutoLayout) return "group";
+      // Group-like frames (resizeToFit) still clip in Figma when clip is enabled.
+      const clips = figContainerClipChildren(node) === true;
+      if (node.resizeToFit && !hasAutoLayout && !clips) return "group";
       return "frame";
     }
     case "GROUP":
@@ -560,9 +562,8 @@ function convertFigNode(
     effects: effectsFromFigNode(node, ctx.variableColors),
   };
 
-  if (kind === "frame") {
-    base.clipChildren = frameClipChildrenFromFig(node);
-  }
+  const clipChildren = figContainerClipChildren(node);
+  if (clipChildren !== undefined) base.clipChildren = clipChildren;
 
   applyFigBooleanToNode(node, base);
 
@@ -699,6 +700,11 @@ export function convertFigBytesToPaytmCraft(
       };
 
       walkFigTree(canvasId, null, fig, ctx);
+
+      ctx.nodes = applyDeepAutoLayoutAll(
+        ctx.nodes as Record<string, LayoutNode>,
+        ctx.childOrder,
+      ) as typeof ctx.nodes;
 
       if ((ctx.childOrder[ROOT] ?? []).length === 0) continue;
 

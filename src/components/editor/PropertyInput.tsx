@@ -17,7 +17,40 @@ type PropertyNumberInputProps = {
   /** Bump when selection changes to reset draft */
   instanceKey?: string;
   decimals?: number;
+  /** Base step for ArrowUp/ArrowDown (default: 1, or 10^-decimals when decimals > 0). */
+  step?: number;
 };
+
+function parseDraftNumber(raw: string, fallback: number): number {
+  const trimmed = raw.trim();
+  if (trimmed === "" || trimmed === "-" || trimmed === "." || trimmed === "-.") return fallback;
+  const n = Number(trimmed);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function keyboardStep(
+  baseStep: number,
+  decimals: number,
+  shift: boolean,
+  alt: boolean,
+): number {
+  let step = baseStep;
+  if (shift) step *= 10;
+  if (alt) step /= 10;
+  if (decimals > 0) {
+    const minStep = 10 ** -decimals;
+    step = Math.max(minStep, step);
+    return Number(step.toFixed(decimals));
+  }
+  return step;
+}
+
+function clampAndRound(n: number, min: number | undefined, max: number | undefined, decimals: number): number {
+  let v = n;
+  if (min !== undefined) v = Math.max(min, v);
+  if (max !== undefined) v = Math.min(max, v);
+  return decimals > 0 ? Number(v.toFixed(decimals)) : Math.round(v);
+}
 
 export function PropertyNumberInput({
   label,
@@ -29,15 +62,25 @@ export function PropertyNumberInput({
   commitOnInput = true,
   instanceKey = "",
   decimals = 0,
+  step: stepProp,
 }: PropertyNumberInputProps) {
   const format = (n: number) =>
     decimals > 0 ? String(Number(n.toFixed(decimals))) : String(Math.round(n));
+
+  const baseStep = stepProp ?? (decimals > 0 ? 10 ** -decimals : 1);
 
   const [text, setText] = useState(() => format(value));
 
   useEffect(() => {
     setText(format(value));
   }, [value, instanceKey, decimals]);
+
+  const commitValue = (v: number) => {
+    const next = clampAndRound(v, min, max, decimals);
+    onCommit(next);
+    setText(format(next));
+    return next;
+  };
 
   const apply = (raw: string) => {
     const trimmed = raw.trim();
@@ -46,12 +89,14 @@ export function PropertyNumberInput({
     }
     const n = Number(trimmed);
     if (!Number.isFinite(n)) return false;
-    let v = n;
-    if (min !== undefined) v = Math.max(min, v);
-    if (max !== undefined) v = Math.min(max, v);
-    onCommit(v);
-    setText(format(v));
+    commitValue(n);
     return true;
+  };
+
+  const nudge = (direction: 1 | -1, shift: boolean, alt: boolean) => {
+    const delta = keyboardStep(baseStep, decimals, shift, alt) * direction;
+    const current = parseDraftNumber(text, value);
+    commitValue(current + delta);
   };
 
   const onBlur = () => {
@@ -76,7 +121,13 @@ export function PropertyNumberInput({
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
+            if (!apply(text)) setText(format(value));
             (e.target as HTMLInputElement).blur();
+            return;
+          }
+          if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+            e.preventDefault();
+            nudge(e.key === "ArrowUp" ? 1 : -1, e.shiftKey, e.altKey);
           }
         }}
       />

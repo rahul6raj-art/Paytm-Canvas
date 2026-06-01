@@ -66,6 +66,20 @@ export function frameClipChildrenFromFig(node: FigNode): boolean {
   return node.frameMaskDisabled !== true;
 }
 
+const FIG_CLIP_CONTAINER_TYPES = new Set([
+  "FRAME",
+  "INSTANCE",
+  "COMPONENT",
+  "COMPONENT_SET",
+  "SYMBOL",
+]);
+
+/** Whether a Figma node should set `clipChildren` on the imported editor node. */
+export function figContainerClipChildren(node: FigNode): boolean | undefined {
+  if (!FIG_CLIP_CONTAINER_TYPES.has(node.type)) return undefined;
+  return frameClipChildrenFromFig(node);
+}
+
 function convertParentToMaskGroup(
   groupId: string,
   maskId: string,
@@ -174,9 +188,12 @@ export function finalizeFigContainer(
   const parent = ctx.nodes[paytmParentId];
   if (!parent) return;
 
-  if (parent.type === "frame") {
-    const figNode = doc.nodeMap.get(figKey);
-    if (figNode) parent.clipChildren = frameClipChildrenFromFig(figNode);
+  const figNode = doc.nodeMap.get(figKey);
+  if (figNode) {
+    const clip = figContainerClipChildren(figNode);
+    if (clip !== undefined && (parent.type === "frame" || parent.type === "group")) {
+      parent.clipChildren = clip;
+    }
   }
 
   if (parent.isBooleanGroup) return;

@@ -31,6 +31,10 @@ import {
   type PrimaryAxisAlign,
 } from "@/lib/autoLayout";
 import {
+  applyAutoLayoutToSelection,
+  canAddAutoLayoutToSelection,
+} from "@/lib/autoLayoutSelection";
+import {
   computeResizedBounds,
   RESIZE_MIN_DIMENSION,
   type Bounds,
@@ -80,6 +84,7 @@ import {
 } from "@/lib/designTokens";
 import { defaultNodeEffect, newNodeEffectId, type NodeEffectType } from "@/lib/nodeEffects";
 import { effectiveFillType, normalizeFillGradient } from "@/lib/fillGradient";
+import { buildPaletteTokens, createColorDesignToken, DEFAULT_COLOR_PALETTE } from "@/lib/designSystemPresets";
 import {
   buildResizeContentPatches,
   scaleSubtreeContentPatches,
@@ -209,6 +214,9 @@ export type NodeKind = "frame" | "group" | "rectangle" | "ellipse" | "line" | "p
 /** How image pixels map to the layer box (canvas uses CSS `object-fit`; export uses best-effort equivalents). */
 export type ImageFitMode = "fill" | "fit" | "crop";
 
+/** Figma-style child/frame sizing in auto layout */
+export type LayoutSizingMode = "fixed" | "hug" | "fill";
+
 export type StrokePosition = "inside" | "center" | "outside";
 
 export type { LayoutMode, PrimaryAxisAlign, CrossAxisAlign, ConstraintHorizontal, ConstraintVertical };
@@ -285,6 +293,10 @@ export interface EditorNode {
   paddingLeft?: number;
   primaryAxisAlign?: PrimaryAxisAlign;
   counterAxisAlign?: CrossAxisAlign;
+  /** Horizontal sizing in parent auto layout (Figma hug/fill/fixed). */
+  layoutSizingHorizontal?: LayoutSizingMode;
+  /** Vertical sizing in parent auto layout. */
+  layoutSizingVertical?: LayoutSizingMode;
   /** Resizing a non-auto-layout parent can adjust children with these constraints. */
   constraintsHorizontal?: ConstraintHorizontal;
   constraintsVertical?: ConstraintVertical;
@@ -328,6 +340,8 @@ export interface EditorNode {
   figMaskType?: string;
   /** Frame clips children to bounds when true (Figma `frameMaskDisabled` inverse). */
   clipChildren?: boolean;
+  /** Locked screenshot reference from web import (non-interactive). */
+  isImportReference?: boolean;
   /** SVG path `d` for flattened boolean result */
   flattenedPathData?: string;
 }
@@ -514,6 +528,10 @@ export interface EditorState {
   createGradientTokenFromSelection: (name?: string) => void;
   createTypographyTokenFromSelection: (name?: string) => void;
   createSpacingToken: (name: string, value: number) => void;
+  /** Create a color style in the library (no selection required). */
+  createColorToken: (name: string, hex: string, opacity?: number) => string | null;
+  /** Add default brand + neutral color palette to the design system. */
+  seedDesignSystemColorPalette: () => void;
   updateDesignToken: (id: string, patch: Partial<Omit<DesignToken, "id" | "createdAt">>) => void;
   deleteDesignToken: (id: string) => void;
   applyTokenToSelection: (tokenId: string) => void;
@@ -555,6 +573,8 @@ export interface EditorState {
   nudgeSelection: (dx: number, dy: number) => void;
   groupSelection: () => void;
   ungroupSelection: () => void;
+  /** Figma ⇧A — wrap selection in auto-layout frame or enable on container. */
+  addAutoLayoutToSelection: () => void;
   toggleSelectNode: (id: string) => void;
   setSelection: (ids: string[]) => void;
   setGuides: (g: GuideLine[]) => void;
@@ -701,6 +721,17 @@ export interface EditorState {
   aiModalSource: "dashboard" | "editor" | null;
   openAIModal: (source: "dashboard" | "editor") => void;
   closeAIModal: () => void;
+
+  importHubOpen: boolean;
+  importWebModalOpen: boolean;
+  importFigmaModalOpen: boolean;
+  openImportHub: () => void;
+  closeImportHub: () => void;
+  openImportWebModal: () => void;
+  closeImportWebModal: () => void;
+  openImportFigmaModal: () => void;
+  closeImportFigmaModal: () => void;
+
   applyGeneratedDesign: (
     slice: EditorPersistSlice,
     mode: "replace" | "append",
@@ -1810,6 +1841,40 @@ export const useEditorStore = create<EditorState>((set, get) => {
       teamInviteModalOpen: false,
     })),
   closeAIModal: () => set({ aiModalOpen: false, aiModalSource: null }),
+
+  importHubOpen: false,
+  importWebModalOpen: false,
+  importFigmaModalOpen: false,
+  openImportHub: () =>
+    set(() => ({
+      importHubOpen: true,
+      importWebModalOpen: false,
+      importFigmaModalOpen: false,
+      aiModalOpen: false,
+      aiModalSource: null,
+      commandMenuOpen: false,
+      shortcutOverlayOpen: false,
+      pluginMarketplaceOpen: false,
+      activePluginId: undefined,
+      shareModalOpen: false,
+      workspacePickerOpen: false,
+      teamInviteModalOpen: false,
+    })),
+  closeImportHub: () => set({ importHubOpen: false }),
+  openImportWebModal: () =>
+    set(() => ({
+      importHubOpen: false,
+      importWebModalOpen: true,
+      importFigmaModalOpen: false,
+    })),
+  closeImportWebModal: () => set({ importWebModalOpen: false }),
+  openImportFigmaModal: () =>
+    set(() => ({
+      importHubOpen: false,
+      importWebModalOpen: false,
+      importFigmaModalOpen: true,
+    })),
+  closeImportFigmaModal: () => set({ importFigmaModalOpen: false }),
 
   pluginMarketplaceOpen: false,
   installedPluginIds: readInstalledPluginIds(),
@@ -3009,6 +3074,30 @@ export const useEditorStore = create<EditorState>((set, get) => {
     });
   },
 
+  createColorToken: (name, hex, opacity = 1) => {
+    const h = normalizeHex(hex.trim().startsWith("#") ? hex.trim() : `#${hex.trim()}`);
+    if (!h) return null;
+    get().pushHistory();
+    let createdId: string | null = null;
+    set((s) => {
+      const token = createColorDesignToken(
+        name,
+        { hex: h, opacity: Math.min(1, Math.max(0, opacity)) },
+        s.designTokens,
+      );
+      createdId = token.id;
+      return { designTokens: { ...s.designTokens, [token.id]: token } };
+    });
+    return createdId;
+  },
+
+  seedDesignSystemColorPalette: () => {
+    get().pushHistory();
+    set((s) => ({
+      designTokens: buildPaletteTokens(DEFAULT_COLOR_PALETTE, s.designTokens),
+    }));
+  },
+
   updateDesignToken: (id, patch) => {
     get().pushHistory();
     set((s) => {
@@ -3059,7 +3148,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
         if (!raw || raw.locked) continue;
         if (t.type === "color") {
           if (["frame", "rectangle", "ellipse", "path", "text"].includes(raw.type)) {
-            nodes[id] = { ...raw, fillTokenId: tokenId, fillType: "solid" };
+            nodes[id] = {
+              ...raw,
+              fillTokenId: tokenId,
+              fillType: "solid",
+              fillEnabled: true,
+            };
           }
         } else if (t.type === "gradient") {
           if (["frame", "rectangle", "ellipse", "path"].includes(raw.type)) {
@@ -4485,6 +4579,22 @@ export const useEditorStore = create<EditorState>((set, get) => {
         editingTextId: null,
       };
     });
+  },
+
+  addAutoLayoutToSelection: () => {
+    const s0 = get();
+    if (s0.editorMode !== "design") return;
+    if (!canAddAutoLayoutToSelection(s0.selectedIds, s0.nodes)) return;
+    const result = applyAutoLayoutToSelection(s0.nodes, s0.childOrder, s0.selectedIds);
+    if (!result) return;
+    get().pushHistory();
+    set((s) => ({
+      nodes: result.nodes,
+      childOrder: result.childOrder,
+      selectedIds: result.selectedIds,
+      tool: "move",
+      editingTextId: null,
+    }));
   },
 
   ungroupSelection: () => {
@@ -6201,6 +6311,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
       shortcutOverlayOpen: false,
       aiModalOpen: false,
       aiModalSource: null,
+      importHubOpen: false,
+      importWebModalOpen: false,
+      importFigmaModalOpen: false,
       pluginMarketplaceOpen: false,
       activePluginId: undefined,
       shareModalOpen: false,

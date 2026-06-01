@@ -33,7 +33,7 @@ export function LeftSidebar() {
                 ? "Comp"
                 : t === "assets"
                   ? "Assets"
-                  : "Styles"}
+                  : "Library"}
           </button>
         ))}
       </div>

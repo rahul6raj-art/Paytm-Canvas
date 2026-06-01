@@ -2,6 +2,7 @@ import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import type { EditorPersistSlice } from "@/lib/documentPersistence";
 import { wrapPersistSliceWithPages } from "@/lib/documentPersistence";
 import type { EditorNode } from "@/stores/useEditorStore";
+import { buildPaletteTokens } from "@/lib/designSystemPresets";
 
 const ROOT = EDITOR_ROOT_KEY;
 
@@ -350,21 +351,62 @@ function checkoutFlow(): EditorPersistSlice {
 }
 
 function designSystemStarter(): EditorPersistSlice {
+  const designTokens = buildPaletteTokens([
+    { name: "Brand / Paytm Blue", hex: "#00baf2" },
+    { name: "Brand / Navy", hex: "#002970" },
+    { name: "Semantic / Success", hex: "#22c55e" },
+    { name: "Semantic / Warning", hex: "#f59e0b" },
+    { name: "Semantic / Error", hex: "#ef4444" },
+  ]);
+  const tokenIds = Object.keys(designTokens);
+  const tPrimary = tokenIds.find((id) => designTokens[id]?.name.includes("Paytm Blue")) ?? tokenIds[0];
+  const tSuccess = tokenIds.find((id) => designTokens[id]?.name.includes("Success")) ?? tPrimary;
+  const tWarning = tokenIds.find((id) => designTokens[id]?.name.includes("Warning")) ?? tPrimary;
+  const tError = tokenIds.find((id) => designTokens[id]?.name.includes("Error")) ?? tPrimary;
+
   const f = "tpl-ds-frame";
   const nodes: Record<string, EditorNode> = {
     [f]: baseFrame(f, "Design system", 60, 48, 1100, 720, { cornerRadius: 16 }),
     "tpl-ds-h": childText("tpl-ds-h", f, "Heading", 40, 36, 600, 36, "Foundations"),
-    "tpl-ds-c1": childRect("tpl-ds-c1", f, "Primary", 40, 100, 120, 72, "#0d99ff", 8),
-    "tpl-ds-c2": childRect("tpl-ds-c2", f, "Success", 180, 100, 120, 72, "#22c55e", 8),
-    "tpl-ds-c3": childRect("tpl-ds-c3", f, "Warning", 320, 100, 120, 72, "#f59e0b", 8),
-    "tpl-ds-c4": childRect("tpl-ds-c4", f, "Danger", 460, 100, 120, 72, "#ef4444", 8),
+    "tpl-ds-c1": {
+      ...childRect("tpl-ds-c1", f, "Primary", 40, 100, 120, 72, "#0d99ff", 8),
+      fillTokenId: tPrimary,
+      fillType: "solid",
+    },
+    "tpl-ds-c2": {
+      ...childRect("tpl-ds-c2", f, "Success", 180, 100, 120, 72, "#22c55e", 8),
+      fillTokenId: tSuccess,
+      fillType: "solid",
+    },
+    "tpl-ds-c3": {
+      ...childRect("tpl-ds-c3", f, "Warning", 320, 100, 120, 72, "#f59e0b", 8),
+      fillTokenId: tWarning,
+      fillType: "solid",
+    },
+    "tpl-ds-c4": {
+      ...childRect("tpl-ds-c4", f, "Danger", 460, 100, 120, 72, "#ef4444", 8),
+      fillTokenId: tError,
+      fillType: "solid",
+    },
     "tpl-ds-body": childText("tpl-ds-body", f, "Body sample", 40, 220, 800, 80, "The quick brown fox jumps over the lazy dog."),
   };
   const childOrder: Record<string, string[]> = {
     [ROOT]: [f],
     [f]: ["tpl-ds-h", "tpl-ds-c1", "tpl-ds-c2", "tpl-ds-c3", "tpl-ds-c4", "tpl-ds-body"],
   };
-  return slice("Design System Starter", nodes, childOrder, [f]);
+  return wrapPersistSliceWithPages({
+    fileName: "Design System Starter",
+    nodes,
+    childOrder,
+    assets: {},
+    designTokens,
+    selectedIds: [f],
+    zoom: 0.52,
+    pan: { x: 48, y: 32 },
+    showGrid: true,
+    canvasBackgroundColor: "#e5e5e5",
+    comments: [],
+  });
 }
 
 function wireframeKit(): EditorPersistSlice {

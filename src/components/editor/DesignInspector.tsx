@@ -28,6 +28,7 @@ import { PropertiesSection } from "./PropertiesSection";
 import { PropertyNumberInput, PropertyTextInput } from "./PropertyInput";
 import { FontFamilyPicker } from "./FontFamilyPicker";
 import { ColorInput } from "./ColorInput";
+import { ColorLibrary } from "./ColorLibrary";
 import { cn } from "@/lib/utils";
 import {
   useEditorStore,
@@ -106,6 +107,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
   const updateNode = useEditorStore((s) => s.updateNode);
   const updateNodeStyle = useEditorStore((s) => s.updateNodeStyle);
   const updateLayout = useEditorStore((s) => s.updateLayout);
+  const addAutoLayoutToSelection = useEditorStore((s) => s.addAutoLayoutToSelection);
   const updateConstraints = useEditorStore((s) => s.updateConstraints);
   const renameNode = useEditorStore((s) => s.renameNode);
   const setNodeVisible = useEditorStore((s) => s.setNodeVisible);
@@ -476,24 +478,33 @@ export function DesignInspector({ node }: { node: EditorNode }) {
         </PropertiesSection>
       )}
 
+      {!isContainer && !locked ? (
+        <PropertiesSection title="Auto layout" defaultOpen>
+          <p className="mb-2 text-[10px] leading-snug text-[#737373]">
+            Wrap this layer in a frame with horizontal or vertical auto layout (like Figma ⇧A).
+          </p>
+          <button
+            type="button"
+            disabled={locked}
+            onClick={() => addAutoLayoutToSelection()}
+            className={cn(
+              "flex h-6 w-full items-center justify-center gap-1.5 rounded border text-[11px] font-medium transition-colors disabled:opacity-40",
+              "border-white/[0.1] bg-[#2c2c2c] text-[#e6e6e6] hover:bg-white/[0.06]",
+            )}
+          >
+            <LayoutTemplate className="h-3.5 w-3.5" strokeWidth={1.75} />
+            Add auto layout
+          </button>
+        </PropertiesSection>
+      ) : null}
+
       {isContainer && (
         <PropertiesSection title="Auto layout" defaultOpen>
           {layoutMode === "none" ? (
             <button
               type="button"
               disabled={locked}
-              onClick={() =>
-                updateLayout(id, {
-                  layoutMode: "horizontal",
-                  layoutGap: 8,
-                  paddingTop: 12,
-                  paddingRight: 12,
-                  paddingBottom: 12,
-                  paddingLeft: 12,
-                  primaryAxisAlign: "start",
-                  counterAxisAlign: "start",
-                })
-              }
+              onClick={() => addAutoLayoutToSelection()}
               className={cn(
                 "flex h-6 w-full items-center justify-center gap-1.5 rounded border text-[11px] font-medium transition-colors disabled:opacity-40",
                 "border-white/[0.1] bg-[#2c2c2c] text-[#e6e6e6] hover:bg-white/[0.06]",
@@ -729,10 +740,12 @@ export function DesignInspector({ node }: { node: EditorNode }) {
 
       {canFillStroke && (
         <PropertiesSection title="Fill" defaultOpen>
+          <ColorLibrary variant="compact" className="mb-2" />
           {fillToken ? (
             <p className="mb-1.5 truncate text-[10px] text-[#9a9a9a]">
               Linked style:{" "}
               <span className="font-medium text-[#d4d4d4]">{fillToken.name}</span>
+              <span className="text-[#6b6b6b]"> · updates everywhere this style is used</span>
             </p>
           ) : null}
           <div className="mb-1.5 flex flex-wrap gap-1">
@@ -1005,6 +1018,8 @@ export function DesignInspector({ node }: { node: EditorNode }) {
           ) : linkedFillTokenType === "color" ? (
             <ColorInput
               label="Color"
+              libraryName={fillToken?.name}
+              libraryTokenId={node.fillTokenId}
               hex={display.fill ?? "#ffffff"}
               instanceKey={key}
               disabled={locked || !fillEnabled}
@@ -1428,6 +1443,16 @@ export function DesignInspector({ node }: { node: EditorNode }) {
           <div className="mt-1.5">
             <ColorInput
               label="Text color"
+              libraryName={
+                node.fillTokenId && designTokens[node.fillTokenId]?.type === "color"
+                  ? designTokens[node.fillTokenId]!.name
+                  : undefined
+              }
+              libraryTokenId={
+                node.fillTokenId && designTokens[node.fillTokenId]?.type === "color"
+                  ? node.fillTokenId
+                  : undefined
+              }
               hex={display.textColor ?? display.fill ?? "#111111"}
               instanceKey={`${key}-tc`}
               disabled={locked}

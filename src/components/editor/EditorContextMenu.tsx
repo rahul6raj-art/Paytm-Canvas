@@ -9,6 +9,7 @@ import {
   canCreateComponentFromSelection,
   findInstanceRoot,
 } from "@/lib/componentModel";
+import { canAddAutoLayoutToSelection } from "@/lib/autoLayoutSelection";
 import {
   getBooleanEligibleSelection,
   isMaskGroup,
@@ -35,6 +36,7 @@ export function EditorContextMenu() {
   const sendToBack = useEditorStore((s) => s.sendToBack);
   const groupSelection = useEditorStore((s) => s.groupSelection);
   const ungroupSelection = useEditorStore((s) => s.ungroupSelection);
+  const addAutoLayoutToSelection = useEditorStore((s) => s.addAutoLayoutToSelection);
   const toggleLock = useEditorStore((s) => s.toggleLock);
   const toggleVisible = useEditorStore((s) => s.toggleVisible);
   const editorMode = useEditorStore((s) => s.editorMode);
@@ -77,6 +79,8 @@ export function EditorContextMenu() {
       });
     const ungroupOk =
       selectedIds.length === 1 && node.type === "group" && !node.locked && node.visible;
+    const autoLayoutOk =
+      editorMode === "design" && canAddAutoLayoutToSelection(selectedIds, nodes);
 
     const canClipboard = tops.some((id) => {
       const n = nodes[id];
@@ -296,6 +300,14 @@ export function EditorContextMenu() {
         hint: "⌘⇧G",
         disabled: !ungroupOk,
         onSelect: () => ungroupSelection(),
+      },
+      {
+        type: "item",
+        id: "autolayout",
+        label: "Add auto layout",
+        hint: "⇧A",
+        disabled: !autoLayoutOk,
+        onSelect: () => addAutoLayoutToSelection(),
       },
       { type: "sep" },
       ...boolItems,

@@ -95,6 +95,13 @@ function pointInWorldRect(
   return px >= r.x && py >= r.y && px <= r.x + r.width && py <= r.y + r.height;
 }
 
+/** Frames clip by default (Figma); groups only when import sets `clipChildren: true`. */
+function clipsChildContent(node: EditorNode): boolean {
+  if (node.type === "frame") return node.clipChildren !== false;
+  if (node.type === "group") return node.clipChildren === true;
+  return false;
+}
+
 export function CanvasObject({ id }: { id: string }) {
   const nodesMap = useEditorStore((s) => s.nodes);
   const assets = useEditorStore((s) => s.assets);
@@ -409,7 +416,11 @@ export function CanvasObject({ id }: { id: string }) {
         />
       );
     } else {
-      body = childrenTree;
+      body = clipsChildContent(node) ? (
+        <div className="relative h-full w-full overflow-hidden">{childrenTree}</div>
+      ) : (
+        childrenTree
+      );
     }
   } else if (node.type === "frame") {
     const shell = (
@@ -423,7 +434,7 @@ export function CanvasObject({ id }: { id: string }) {
               : (fill ?? "#ffffff"),
           borderRadius: r,
           border: isRootFrame ? undefined : borderStyle,
-          overflow: node.clipChildren !== false ? "hidden" : "visible",
+          overflow: clipsChildContent(node) ? "hidden" : "visible",
         }}
       >
         {showShapeFill ? <ShapeGradientFill node={node} nodeId={id} shape="rect" /> : null}
@@ -515,8 +526,7 @@ export function CanvasObject({ id }: { id: string }) {
         height: node.height,
         pointerEvents: objectPointerEvents,
         borderRadius: radiusStyle,
-        overflow:
-          node.type === "frame" && node.clipChildren !== false ? "hidden" : "visible",
+        overflow: clipsChildContent(node) ? "hidden" : "visible",
         outline:
           node.type === "group" &&
           !node.isBooleanGroup &&

@@ -25,6 +25,8 @@ export interface ConstraintFields {
   constraintsVertical?: ConstraintVertical;
 }
 
+export type LayoutSizingMode = "fixed" | "hug" | "fill";
+
 export interface LayoutNode extends LayoutFields, ConstraintFields {
   id: string;
   type: string;
@@ -35,6 +37,8 @@ export interface LayoutNode extends LayoutFields, ConstraintFields {
   height: number;
   visible: boolean;
   locked: boolean;
+  layoutSizingHorizontal?: LayoutSizingMode;
+  layoutSizingVertical?: LayoutSizingMode;
 }
 
 export type LayoutPatch = Partial<LayoutFields>;
@@ -110,27 +114,38 @@ export function computeAutoLayoutPatches(
     const between =
       primary === "space-between" && kids.length > 1 ? extra / (kids.length - 1) : 0;
 
+    const fillCount = kids.filter((id) => nodes[id]!.layoutSizingHorizontal === "fill").length;
+    const fixedMain = kids.reduce((sum, id, i) => {
+      return nodes[id]!.layoutSizingHorizontal === "fill" ? sum : sum + mains[i]!;
+    }, 0);
+    const fillExtra =
+      fillCount > 0 ? Math.max(0, innerW - fixedMain - gap * Math.max(0, kids.length - 1)) : 0;
+    const fillW = fillCount > 0 ? fillExtra / fillCount : 0;
+
     for (let i = 0; i < kids.length; i++) {
       const id = kids[i]!;
-      const w = mains[i]!;
+      const child = nodes[id]!;
+      const w0 = mains[i]!;
       const h0 = crosses[i]!;
       const x = mainCursor;
       let y = p.top;
       let h = h0;
-      const cw = w;
+      const cw = child.layoutSizingHorizontal === "fill" ? Math.max(1, fillW) : w0;
 
-      if (cross === "stretch") {
+      const childCross =
+        child.layoutSizingVertical === "fill" ? "stretch" : cross;
+      if (childCross === "stretch") {
         h = innerH;
         y = p.top;
-      } else if (cross === "center") {
+      } else if (childCross === "center") {
         y = p.top + (innerH - h0) / 2;
-      } else if (cross === "end") {
+      } else if (childCross === "end") {
         y = p.top + innerH - h0;
       }
 
       out[id] = { x, y, width: cw, height: h };
 
-      mainCursor += w + gap + between;
+      mainCursor += cw + gap + between;
     }
   } else {
     const mains = kids.map((id) => Math.max(1, nodes[id]!.height));
@@ -148,26 +163,38 @@ export function computeAutoLayoutPatches(
     const between =
       primary === "space-between" && kids.length > 1 ? extra / (kids.length - 1) : 0;
 
+    const fillCount = kids.filter((id) => nodes[id]!.layoutSizingVertical === "fill").length;
+    const fixedMain = kids.reduce((sum, id, i) => {
+      return nodes[id]!.layoutSizingVertical === "fill" ? sum : sum + mains[i]!;
+    }, 0);
+    const fillExtra =
+      fillCount > 0 ? Math.max(0, innerH - fixedMain - gap * Math.max(0, kids.length - 1)) : 0;
+    const fillH = fillCount > 0 ? fillExtra / fillCount : 0;
+
     for (let i = 0; i < kids.length; i++) {
       const id = kids[i]!;
-      const h = mains[i]!;
+      const child = nodes[id]!;
+      const h0 = mains[i]!;
       const w0 = crosses[i]!;
       const y = mainCursor;
       let x = p.left;
       let w = w0;
+      const ch = child.layoutSizingVertical === "fill" ? Math.max(1, fillH) : h0;
 
-      if (cross === "stretch") {
+      const childCross =
+        child.layoutSizingHorizontal === "fill" ? "stretch" : cross;
+      if (childCross === "stretch") {
         w = innerW;
         x = p.left;
-      } else if (cross === "center") {
+      } else if (childCross === "center") {
         x = p.left + (innerW - w0) / 2;
-      } else if (cross === "end") {
+      } else if (childCross === "end") {
         x = p.left + innerW - w0;
       }
 
-      out[id] = { x, y, width: w, height: h };
+      out[id] = { x, y, width: w, height: ch };
 
-      mainCursor += h + gap + between;
+      mainCursor += ch + gap + between;
     }
   }
 
