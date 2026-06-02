@@ -2,7 +2,9 @@ export { type ShapeModel, type ShapeType, type StrokeStyle, editorNodeToShape, i
 export {
   createShapeNode,
   boundsFromDrag,
+  constrainLineEndpointTo45Degrees,
   lineGeometryFromDrag,
+  resolveLineEndpoints,
   toolToShapeType,
   type Point,
   type ShapeModifiers,

@@ -38,11 +38,11 @@ async function copyToClipboard(text: string): Promise<boolean> {
 
 function CodeBlock({ title, code }: { title: string; code: string }) {
   return (
-    <div className="rounded-md border border-white/[0.08] bg-[#1e1e1e] shadow-inner">
-      <div className="border-b border-white/[0.06] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[#7a7a7a]">
+    <div className="rounded-md border border-app-border bg-app-surface shadow-inner">
+      <div className="border-b border-app-border-subtle px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-app-subtle">
         {title}
       </div>
-      <pre className="thin-scroll max-h-[140px] overflow-auto p-2 font-mono text-[11px] leading-snug text-[#d4d4d4]">
+      <pre className="thin-scroll max-h-[140px] overflow-auto p-2 font-mono text-[11px] leading-snug text-app-fg">
         {code}
       </pre>
     </div>
@@ -79,7 +79,7 @@ function CopyRow({
         "flex h-7 w-full items-center justify-center rounded-md border text-[11px] font-medium transition-colors",
         copied
           ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-200"
-          : "border-white/10 bg-white/[0.04] text-[#e6e6e6] hover:border-white/20 hover:bg-white/[0.07]",
+          : "border-white/10 bg-app-hover text-app-fg hover:border-white/20 hover:bg-white/[0.07]",
       )}
     >
       {copied ? "Copied" : label}
@@ -119,39 +119,39 @@ export function InspectInspector({ node }: { node: EditorNode }) {
   }, [assets, childOrder, designTokens, node, nodes, safeName]);
 
   return (
-    <div className="space-y-3 p-3 text-[12px] leading-snug text-[#d4d4d4]">
+    <div className="space-y-3 p-3 text-[12px] leading-snug text-app-fg">
       <div>
         <h2 className="truncate text-[13px] font-semibold text-white">{node.name}</h2>
-        <p className="mt-0.5 text-[11px] capitalize text-[#8c8c8c]">{node.type}</p>
+        <p className="mt-0.5 text-[11px] capitalize text-app-subtle">{node.type}</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 rounded-md border border-white/[0.06] bg-[#2a2a2a] p-2 font-mono text-[11px]">
-        <span className="text-[#6b6b6b]">Position</span>
-        <span className="text-right text-[#ececec]">
+      <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 rounded-md border border-app-border-subtle bg-app-panel p-2 font-mono text-[11px]">
+        <span className="text-app-subtle">Position</span>
+        <span className="text-right text-app-fg">
           X {Math.round(node.x)} · Y {Math.round(node.y)}
         </span>
-        <span className="text-[#6b6b6b]">Size</span>
-        <span className="text-right text-[#ececec]">
+        <span className="text-app-subtle">Size</span>
+        <span className="text-right text-app-fg">
           W {Math.round(node.width)} · H {Math.round(node.height)}
         </span>
-        <span className="text-[#6b6b6b]">World</span>
-        <span className="text-right text-[#ececec]">
+        <span className="text-app-subtle">World</span>
+        <span className="text-right text-app-fg">
           {Math.round(wr.x)}, {Math.round(wr.y)}
         </span>
-        <span className="text-[#6b6b6b]">Rotation</span>
-        <span className="text-right text-[#ececec]">{node.rotation ?? 0}°</span>
-        <span className="text-[#6b6b6b]">Parent frame</span>
-        <span className="truncate text-right text-[#ececec]" title={parentFrameId ?? ""}>
+        <span className="text-app-subtle">Rotation</span>
+        <span className="text-right text-app-fg">{node.rotation ?? 0}°</span>
+        <span className="text-app-subtle">Parent frame</span>
+        <span className="truncate text-right text-app-fg" title={parentFrameId ?? ""}>
           {parentLabel}
         </span>
-        <span className="text-[#6b6b6b]">Visible</span>
-        <span className="text-right text-[#ececec]">{node.visible ? "Yes" : "No"}</span>
-        <span className="text-[#6b6b6b]">Locked</span>
-        <span className="text-right text-[#ececec]">{node.locked ? "Yes" : "No"}</span>
+        <span className="text-app-subtle">Visible</span>
+        <span className="text-right text-app-fg">{node.visible ? "Yes" : "No"}</span>
+        <span className="text-app-subtle">Locked</span>
+        <span className="text-right text-app-fg">{node.locked ? "Yes" : "No"}</span>
       </div>
 
       <div className="space-y-1.5">
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-[#7a7a7a]">CSS</p>
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-app-subtle">CSS</p>
         <CodeBlock title="Generated" code={css} />
         <CopyRow
           label="Copy CSS"
@@ -163,7 +163,7 @@ export function InspectInspector({ node }: { node: EditorNode }) {
       </div>
 
       <div className="space-y-1.5">
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-[#7a7a7a]">Tailwind</p>
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-app-subtle">Tailwind</p>
         <CodeBlock title="Classes" code={tw} />
         <CopyRow
           label="Copy Tailwind"
@@ -175,7 +175,7 @@ export function InspectInspector({ node }: { node: EditorNode }) {
       </div>
 
       <div className="space-y-1.5">
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-[#7a7a7a]">Export</p>
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-app-subtle">Export</p>
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
@@ -194,7 +194,7 @@ export function InspectInspector({ node }: { node: EditorNode }) {
             Export SVG
           </button>
         </div>
-        <p className="text-[10px] leading-relaxed text-[#6b6b6b]">
+        <p className="text-[10px] leading-relaxed text-app-subtle">
           PNG uses canvas rasterization. SVG is a best-effort vector snapshot of this subtree.
         </p>
       </div>

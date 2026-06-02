@@ -47,7 +47,6 @@ export function startCanvasMarqueeSession(opts: MarqueeSessionOptions): void {
     window.removeEventListener("pointermove", onMove);
     window.removeEventListener("pointerup", onPointerEnd);
     window.removeEventListener("pointercancel", onPointerEnd);
-    target.removeEventListener("lostpointercapture", onLostCapture);
   };
 
   const activate = () => {
@@ -157,14 +156,7 @@ export function startCanvasMarqueeSession(opts: MarqueeSessionOptions): void {
     finish(ev.type === "pointerup");
   };
 
-  const onLostCapture = (ev: Event) => {
-    const pe = ev as PointerEvent;
-    if (pe.pointerId !== capId) return;
-    finish(false);
-  };
-
   window.addEventListener("pointermove", onMove, { passive: true });
   window.addEventListener("pointerup", onPointerEnd);
   window.addEventListener("pointercancel", onPointerEnd);
-  target.addEventListener("lostpointercapture", onLostCapture);
 }

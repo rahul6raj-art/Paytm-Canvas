@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import {
+  Code2,
   Component,
   ChevronRight,
   CircleHelp,
@@ -50,6 +51,7 @@ import { DEFAULT_MOCK_WORKSPACE, getActiveMockWorkspace, getMockCurrentUser, sub
 import { PaytmCraftApiModeBanner } from "@/components/PaytmCraftApiModeBanner";
 import { isPaytmCraftApiMode } from "@/lib/env";
 import { EditorMenuBar } from "./EditorMenuBar";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 const tools: { id: Tool; icon: typeof MousePointer2; label: string; shortcut?: string }[] = [
   { id: "move", icon: MousePointer2, label: "Move", shortcut: "V" },
@@ -102,6 +104,7 @@ export function TopToolbar() {
   const togglePresence = useEditorStore((s) => s.togglePresence);
   const setCommandMenuOpen = useEditorStore((s) => s.setCommandMenuOpen);
   const openAIModal = useEditorStore((s) => s.openAIModal);
+  const openCodeRoundTrip = useEditorStore((s) => s.openCodeRoundTrip);
   const openPluginMarketplace = useEditorStore((s) => s.openPluginMarketplace);
   const openShareModal = useEditorStore((s) => s.openShareModal);
   const openVersionHistory = useEditorStore((s) => s.openVersionHistory);
@@ -159,11 +162,11 @@ export function TopToolbar() {
   ];
 
   return (
-    <header className="relative z-30 flex shrink-0 flex-col border-b border-black/25 bg-chrome-raised shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+    <header className="relative z-30 flex shrink-0 flex-col border-b border-app-border bg-chrome-raised shadow-app-raised">
       <EditorMenuBar />
       <div className="flex h-10 min-w-0 items-center gap-2 px-2">
       <div className="flex min-w-0 shrink items-center gap-2">
-      <div className="flex shrink-0 items-center gap-0.5 border-r border-white/[0.08] pr-2">
+      <div className="flex shrink-0 items-center gap-0.5 border-r border-app-border pr-2">
         <button
           type="button"
           disabled={!canUndo}
@@ -171,8 +174,8 @@ export function TopToolbar() {
           aria-label="Undo"
           onClick={() => undo()}
           className={cn(
-            "flex h-8 w-8 items-center justify-center rounded-md text-[#b8b8b8] transition-colors hover:bg-white/[0.08] hover:text-white",
-            !canUndo && "cursor-not-allowed opacity-30 hover:bg-transparent hover:text-[#b8b8b8]",
+            "flex h-8 w-8 items-center justify-center rounded-md text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg",
+            !canUndo && "cursor-not-allowed opacity-30 hover:bg-transparent hover:text-app-muted",
           )}
         >
           <Undo2 className="h-4 w-4" strokeWidth={1.75} />
@@ -184,8 +187,8 @@ export function TopToolbar() {
           aria-label="Redo"
           onClick={() => redo()}
           className={cn(
-            "flex h-8 w-8 items-center justify-center rounded-md text-[#b8b8b8] transition-colors hover:bg-white/[0.08] hover:text-white",
-            !canRedo && "cursor-not-allowed opacity-30 hover:bg-transparent hover:text-[#b8b8b8]",
+            "flex h-8 w-8 items-center justify-center rounded-md text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg",
+            !canRedo && "cursor-not-allowed opacity-30 hover:bg-transparent hover:text-app-muted",
           )}
         >
           <Redo2 className="h-4 w-4" strokeWidth={1.75} />
@@ -195,20 +198,20 @@ export function TopToolbar() {
       <div className="relative flex min-w-0 max-w-[min(36vw,320px)] items-center gap-1.5">
         <Link
           href="/"
-          className="shrink-0 text-[11px] font-medium tracking-wide text-[#7a7a7a] transition-colors hover:text-white"
+          className="shrink-0 text-[11px] font-medium tracking-wide text-app-subtle transition-colors hover:text-app-fg"
         >
           Paytm Craft
         </Link>
-        <ChevronRight className="h-3 w-3 shrink-0 text-[#5c5c5c]" strokeWidth={2} />
-        <span className="max-w-[120px] shrink-0 truncate text-[11px] font-medium text-[#a3a3a3]" title={workspace.name}>
+        <ChevronRight className="h-3 w-3 shrink-0 text-app-subtle" strokeWidth={2} />
+        <span className="max-w-[120px] shrink-0 truncate text-[11px] font-medium text-app-subtle" title={workspace.name}>
           {workspace.name}
         </span>
-        <ChevronRight className="h-3 w-3 shrink-0 text-[#5c5c5c]" strokeWidth={2} />
+        <ChevronRight className="h-3 w-3 shrink-0 text-app-subtle" strokeWidth={2} />
 
         <div className="relative shrink-0" ref={fileMenuRef}>
           <button
             type="button"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-[#b8b8b8] transition-colors hover:bg-white/[0.08] hover:text-white"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
             aria-label="File menu"
             aria-expanded={fileMenuOpen}
             onClick={() => setFileMenuOpen((o) => !o)}
@@ -218,12 +221,12 @@ export function TopToolbar() {
           {fileMenuOpen ? (
             <div
               role="menu"
-              className="absolute left-0 top-full z-50 mt-1 min-w-[200px] rounded-md border border-white/[0.1] bg-[#1e1e1e] py-1 shadow-lg"
+              className="absolute left-0 top-full z-50 mt-1 min-w-[200px] rounded-md border border-app-border bg-app-surface py-1 shadow-lg"
             >
               <button
                 type="button"
                 role="menuitem"
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-[#ececec] hover:bg-white/[0.08]"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-app-fg hover:bg-app-hover"
                 onClick={() => {
                   setFileMenuOpen(false);
                   resetDocument();
@@ -235,7 +238,7 @@ export function TopToolbar() {
               <button
                 type="button"
                 role="menuitem"
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-[#ececec] hover:bg-white/[0.08]"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-app-fg hover:bg-app-hover"
                 onClick={() => {
                   setFileMenuOpen(false);
                   saveToLocal();
@@ -248,7 +251,7 @@ export function TopToolbar() {
                 <button
                   type="button"
                   role="menuitem"
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-[#ececec] hover:bg-white/[0.08]"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-app-fg hover:bg-app-hover"
                   onClick={() => {
                     setFileMenuOpen(false);
                     void saveCurrentDocumentAsApiFile();
@@ -261,7 +264,7 @@ export function TopToolbar() {
               <button
                 type="button"
                 role="menuitem"
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-[#ececec] hover:bg-white/[0.08]"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-app-fg hover:bg-app-hover"
                 onClick={() => {
                   setFileMenuOpen(false);
                   exportDocument();
@@ -273,7 +276,7 @@ export function TopToolbar() {
               <button
                 type="button"
                 role="menuitem"
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-[#ececec] hover:bg-white/[0.08]"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-app-fg hover:bg-app-hover"
                 onClick={() => {
                   setFileMenuOpen(false);
                   importInputRef.current?.click();
@@ -285,13 +288,37 @@ export function TopToolbar() {
               <button
                 type="button"
                 role="menuitem"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-app-fg hover:bg-app-hover"
+                onClick={() => {
+                  setFileMenuOpen(false);
+                  openCodeRoundTrip("export");
+                }}
+              >
+                <Code2 className="h-3.5 w-3.5 shrink-0 opacity-80" strokeWidth={2} />
+                Export React (Design ↔ Code)
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-app-fg hover:bg-app-hover"
+                onClick={() => {
+                  setFileMenuOpen(false);
+                  openCodeRoundTrip("import");
+                }}
+              >
+                <Code2 className="h-3.5 w-3.5 shrink-0 opacity-80" strokeWidth={2} />
+                Import React (Design ↔ Code)
+              </button>
+              <button
+                type="button"
+                role="menuitem"
                 disabled={!isApiMode || !isApiBackedFile}
                 title={!isApiMode || !isApiBackedFile ? "API file required" : "Browse and restore saved versions"}
                 className={cn(
                   "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px]",
                   !isApiMode || !isApiBackedFile
-                    ? "cursor-not-allowed text-[#6b6b6b]"
-                    : "text-[#ececec] hover:bg-white/[0.08]",
+                    ? "cursor-not-allowed text-app-subtle"
+                    : "text-app-fg hover:bg-app-hover",
                 )}
                 onClick={() => {
                   if (!isApiMode || !isApiBackedFile) return;
@@ -305,7 +332,7 @@ export function TopToolbar() {
               <button
                 type="button"
                 role="menuitem"
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-[#ececec] hover:bg-white/[0.08]"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-app-fg hover:bg-app-hover"
                 onClick={() => {
                   setFileMenuOpen(false);
                   openHelpDemoChecklist();
@@ -340,7 +367,7 @@ export function TopToolbar() {
             "shrink-0 whitespace-nowrap text-[10px] font-medium tabular-nums",
             documentSaveStatus === "saving" && "text-amber-300/90",
             documentSaveStatus === "unsaved" && "text-amber-200/85",
-            documentSaveStatus === "saved" && "text-[#6b6b6b]",
+            documentSaveStatus === "saved" && "text-app-subtle",
             documentSaveStatus === "saved-api" && "text-emerald-400/85",
             documentSaveStatus === "api-save-failed" && "text-red-400/90",
           )}
@@ -370,19 +397,19 @@ export function TopToolbar() {
           type="button"
           onClick={() => setCommandMenuOpen(true)}
           title="Search commands"
-          className="flex h-7 w-full max-w-[280px] items-center gap-1.5 rounded-md border border-white/[0.08] bg-black/25 px-2 text-[11px] font-medium text-[#b8b8b8] transition-colors hover:border-white/[0.12] hover:bg-white/[0.06] hover:text-white"
+          className="flex h-7 w-full max-w-[280px] items-center gap-1.5 rounded-md border border-app-border bg-app-toolbar-well px-2 text-[11px] font-medium text-app-muted transition-colors hover:border-app-border hover:bg-app-hover hover:text-app-fg"
         >
           <Search className="h-3.5 w-3.5 shrink-0 opacity-90" strokeWidth={2} />
           <span className="min-w-0 truncate">Search commands</span>
-          <span className="hidden shrink-0 text-[10px] tabular-nums text-[#5c5c5c] lg:inline">{formatShortcutLabel("⌘K")}</span>
+          <span className="hidden shrink-0 text-[10px] tabular-nums text-app-subtle lg:inline">{formatShortcutLabel("⌘K")}</span>
         </button>
       </div>
 
-      <div className="flex shrink-0 items-center gap-1.5 border-l border-white/[0.08] pl-2">
+      <div className="flex shrink-0 items-center gap-1.5 border-l border-app-border pl-2">
         <Button
           variant="toolbar"
           type="button"
-          className="h-7 gap-1 border border-white/[0.06] px-2 text-[11px] font-medium shadow-none md:px-2.5"
+          className="h-7 gap-1 border border-app-border-subtle px-2 text-[11px] font-medium shadow-none md:px-2.5"
           title="Present prototype"
           onClick={() => openPrototypePreview()}
         >
@@ -393,6 +420,7 @@ export function TopToolbar() {
           <Share2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
           <span className="hidden sm:inline">Share</span>
         </Button>
+        <ThemeToggle size="sm" />
         <div className="relative shrink-0" ref={accountMenuRef}>
           <button
             type="button"
@@ -400,7 +428,7 @@ export function TopToolbar() {
             aria-label="Account menu"
             aria-expanded={accountMenuOpen}
             onClick={() => setAccountMenuOpen((o) => !o)}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/[0.12] bg-black/30 text-[10px] font-bold text-white shadow-inner transition-colors hover:border-white/[0.2] hover:bg-white/[0.08]"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-app-border bg-app-toolbar-well text-[10px] font-bold text-white shadow-inner transition-colors hover:border-white/[0.2] hover:bg-app-hover"
             style={{
               boxShadow: `inset 0 0 0 1px hsl(${currentUser.avatarHue} 65% 42% / 0.35)`,
             }}
@@ -410,17 +438,17 @@ export function TopToolbar() {
           {accountMenuOpen ? (
             <div
               role="menu"
-              className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border border-white/[0.1] bg-[#1e1e1e] py-1 shadow-lg"
+              className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border border-app-border bg-app-surface py-1 shadow-lg"
             >
-              <div className="border-b border-white/[0.06] px-3 py-2">
-                <p className="truncate text-[12px] font-semibold text-white">{currentUser.name}</p>
-                <p className="truncate text-[11px] text-[#8c8c8c]">{currentUser.email}</p>
-                <p className="mt-1 text-[10px] text-[#6b6b6b]">{workspace.name}</p>
+              <div className="border-b border-app-border-subtle px-3 py-2">
+                <p className="truncate text-[12px] font-semibold text-app-fg">{currentUser.name}</p>
+                <p className="truncate text-[11px] text-app-subtle">{currentUser.email}</p>
+                <p className="mt-1 text-[10px] text-app-subtle">{workspace.name}</p>
               </div>
               <Link
                 href="/"
                 role="menuitem"
-                className="block px-3 py-1.5 text-[11px] text-[#ececec] hover:bg-white/[0.08]"
+                className="block px-3 py-1.5 text-[11px] text-app-fg hover:bg-app-hover"
                 onClick={() => setAccountMenuOpen(false)}
               >
                 Back to dashboard
@@ -428,7 +456,7 @@ export function TopToolbar() {
               <button
                 type="button"
                 role="menuitem"
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-[#ececec] hover:bg-white/[0.08]"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-app-fg hover:bg-app-hover"
                 onClick={() => {
                   setAccountMenuOpen(false);
                   window.alert("Sign out is a mock action — no session exists.");
@@ -440,11 +468,11 @@ export function TopToolbar() {
             </div>
           ) : null}
         </div>
-        <div className="hidden items-center gap-1 border-l border-white/[0.08] pl-1.5 sm:flex">
+        <div className="hidden items-center gap-1 border-l border-app-border pl-1.5 sm:flex">
           <Button
             variant="toolbar"
             type="button"
-            className="h-7 gap-1 border border-white/[0.08] bg-black/25 px-2 text-[11px] font-medium text-[#d4d4d4] shadow-none hover:bg-white/[0.06] xl:px-2.5"
+            className="h-7 gap-1 border border-app-border bg-app-toolbar-well px-2 text-[11px] font-medium text-app-fg shadow-none hover:bg-app-hover xl:px-2.5"
             title="Help and demo checklist"
             aria-label="Help"
             onClick={() => openHelpDemoChecklist()}
@@ -465,7 +493,7 @@ export function TopToolbar() {
           <Button
             variant="toolbar"
             type="button"
-            className="hidden h-7 gap-1 border border-white/[0.08] bg-black/25 px-2 text-[11px] font-medium text-[#d4d4d4] shadow-none hover:bg-white/[0.06] lg:flex xl:px-2.5"
+            className="hidden h-7 gap-1 border border-app-border bg-app-toolbar-well px-2 text-[11px] font-medium text-app-fg shadow-none hover:bg-app-hover lg:flex xl:px-2.5"
             title="Plugins marketplace"
             onClick={() => openPluginMarketplace()}
           >
@@ -480,14 +508,14 @@ export function TopToolbar() {
               "hidden h-7 items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium transition-colors lg:flex",
               showPresence
                 ? "border-[rgba(13,153,255,0.35)] bg-[rgba(13,153,255,0.12)] text-white"
-                : "border-white/[0.08] bg-black/20 text-[#b8b8b8] hover:bg-white/[0.06] hover:text-white",
+                : "border-app-border bg-app-toolbar-well text-app-muted hover:bg-app-hover hover:text-app-fg",
             )}
           >
             <Users className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
             <span className="hidden xl:inline">Presence</span>
           </button>
           {showPresence ? (
-            <span className="hidden whitespace-nowrap text-[10px] tabular-nums text-[#8c8c8c] xl:inline">
+            <span className="hidden whitespace-nowrap text-[10px] tabular-nums text-app-subtle xl:inline">
               {presenceUsers.length > 0 ? `${presenceUsers.length} online` : "Live"}
             </span>
           ) : null}
@@ -500,9 +528,9 @@ export function TopToolbar() {
 
       {editorMode === "design" ? <TextTypographyBar /> : null}
 
-      <div className="flex h-9 min-w-0 items-center justify-center gap-2 border-t border-white/[0.06] px-2">
+      <div className="flex h-9 min-w-0 items-center justify-center gap-2 border-t border-app-border-subtle px-2">
         <div
-          className="flex shrink-0 items-center gap-px rounded-lg border border-white/[0.06] bg-black/30 p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
+          className="flex shrink-0 items-center gap-px rounded-lg border border-app-border-subtle bg-app-toolbar-well p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
           role="tablist"
           aria-label="Editor mode"
         >
@@ -517,7 +545,7 @@ export function TopToolbar() {
                 "rounded-[6px] px-2.5 py-1 text-[11px] font-semibold transition-colors",
                 editorMode === id
                   ? "bg-[rgba(13,153,255,0.22)] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
-                  : "text-[#9a9a9a] hover:bg-white/[0.06] hover:text-[#e6e6e6]",
+                  : "text-app-muted hover:bg-app-hover hover:text-app-fg",
               )}
             >
               {label}
@@ -525,7 +553,7 @@ export function TopToolbar() {
           ))}
         </div>
 
-        <div className="flex min-w-0 max-w-full items-center gap-px overflow-x-auto rounded-lg border border-white/[0.06] bg-black/25 p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] thin-scroll">
+        <div className="flex min-w-0 max-w-full items-center gap-px overflow-x-auto rounded-lg border border-app-border-subtle bg-app-toolbar-well p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] thin-scroll">
           {tools.slice(0, 1).map(({ id, icon: Icon, label, shortcut }) => (
             <ToolButton
               key={id}

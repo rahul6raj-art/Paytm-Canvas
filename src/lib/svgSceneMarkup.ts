@@ -7,7 +7,6 @@ import {
   collectNodeEffects,
   createSvgFilterRegistry,
   registerClipRect,
-  registerRootArtboardShadow,
   resolveNodeForMarkup,
   svgImageMarkup,
   svgLine,
@@ -16,6 +15,7 @@ import {
   svgSafeId,
   svgTextMarkup,
 } from "@/lib/svgMarkupCore";
+import { shouldClipChildren } from "@/lib/clipChildren";
 import { effectiveFillType, fillPaintCss } from "@/lib/fillGradient";
 
 const SUPPORTED_TYPES = new Set([
@@ -136,19 +136,15 @@ function renderNode(nodeId: string, ctx: BuildCtx): string {
 
   if (node.type === "frame") {
     const isRoot = node.parentId == null;
-    const r = node.cornerRadius ?? 0;
     const fillFallback = isRoot && resolved.fill == null && effectiveFillType(resolved) === "solid"
       ? "#ffffff"
       : undefined;
 
+    const clip = shouldClipChildren(node);
     const clipId = `pc-clip-${svgSafeId(nodeId)}`;
-    registerClipRect(ctx.defs, clipId, w, h, r);
+    if (clip) registerClipRect(ctx.defs, clipId, w, h, node);
 
-    let shellFilter = filterRef;
-    if (isRoot && !shellFilter) {
-      const shadowId = registerRootArtboardShadow(ctx.defs, nodeId);
-      shellFilter = shadowId;
-    }
+    const shellFilter = filterRef;
 
     const stroke =
       isRoot
@@ -174,9 +170,8 @@ function renderNode(nodeId: string, ctx: BuildCtx): string {
     );
 
     const children = renderChildren(nodeId, ctx);
-    return wrapOpacity(
-      `${shell}<g clip-path="url(#${clipId})">${children}</g>`,
-    );
+    const body = clip ? `<g clip-path="url(#${clipId})">${children}</g>` : children;
+    return wrapOpacity(`${shell}${body}`);
   }
 
   return "";

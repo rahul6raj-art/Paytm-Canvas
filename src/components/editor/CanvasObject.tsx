@@ -7,17 +7,31 @@ import { ShapeGradientFill } from "./ShapeGradientFill";
 import { releaseFieldFocusForCanvas } from "@/lib/editorKeyboardFocus";
 import { cn } from "@/lib/utils";
 import { ROOT, useEditorStore, type EditorNode } from "@/stores/useEditorStore";
-import { pickDeepestFrameOrGroupAtWorldPoint, pickDeepestFrameAtWorldPoint, worldRect, worldToLocalForNode } from "@/lib/tree";
+import {
+  pickDeepestFrameOrGroupAtWorldPoint,
+  pickDeepestFrameAtWorldPoint,
+  pickDeepestNodeAtWorldPoint,
+  worldRect,
+  worldToLocalForNode,
+} from "@/lib/tree";
 import { insertIndexInAutoLayout, type LayoutNode } from "@/lib/autoLayout";
 import { isAncestorOf } from "@/lib/editorGraph";
 import { mergeInstanceOverrides } from "@/lib/componentModel";
 import { legacyEffectShadowAppend, resolveEffectBoxShadow, resolveNodeWithDesignTokens } from "@/lib/designTokens";
 import { buildNodeEffectRenderStyle, firstVisibleDropShadowFilter } from "@/lib/nodeEffects";
+import { EffectOverlays } from "./EffectOverlays";
 import { CANVAS_VISUAL, screenPxToWorld } from "@/lib/canvasVisual";
 import { useCanvasToWorld } from "./CanvasToWorldContext";
 import { useCanvasInteraction } from "./CanvasInteractionContext";
 import { clientToWorldFromDocument } from "@/lib/canvasCoordinates";
 import { beginCanvasNodeDrag } from "@/lib/canvasNodeDrag";
+import {
+  drillTargetForDoubleClick,
+  selectionTargetForClick,
+  shouldCollapseContainerHits,
+} from "@/lib/containerSelection";
+import { clampCornerRadii, cornerRadiiToCss, getNodeCornerRadii } from "@/lib/cornerRadius";
+import { prepareAltDragDuplicate } from "@/lib/canvasAltDrag";
 import { EMPTY_CHILD_IDS } from "@/lib/editorConstants";
 import {
   canCanvasObjectDrag,
@@ -27,7 +41,10 @@ import {
 } from "@/lib/canvasInteractionGuards";
 import { TextCanvasView } from "./TextCanvasView";
 import { ShapeVectorView } from "./ShapeVectorView";
-import { BooleanGroupView, MaskGroupView, MaskPreviewOverlay } from "./BooleanGroupView";
+import { BooleanGroupView, MaskGroupView } from "./BooleanGroupView";
+import { shouldClipChildren } from "@/lib/clipChildren";
+import { cssRotationStyle } from "@/lib/transformMath";
+import { shouldSuppressCanvasPointer } from "@/lib/canvasCreationGuard";
 
 function isUnder(nodes: Record<string, EditorNode>, nodeId: string, ancestorId: string): boolean {
   let cur: string | null = nodes[nodeId]?.parentId ?? null;
@@ -95,13 +112,6 @@ function pointInWorldRect(
   return px >= r.x && py >= r.y && px <= r.x + r.width && py <= r.y + r.height;
 }
 
-/** Frames clip by default (Figma); groups only when import sets `clipChildren: true`. */
-function clipsChildContent(node: EditorNode): boolean {
-  if (node.type === "frame") return node.clipChildren !== false;
-  if (node.type === "group") return node.clipChildren === true;
-  return false;
-}
-
 export function CanvasObject({ id }: { id: string }) {
   const nodesMap = useEditorStore((s) => s.nodes);
   const assets = useEditorStore((s) => s.assets);
@@ -116,7 +126,9 @@ export function CanvasObject({ id }: { id: string }) {
     if (!node || node.type !== "image") return undefined;
     return node.imageSrc ?? (node.assetId ? assets[node.assetId]?.dataUrl : undefined);
   }, [node, assets]);
-  const childIds = useEditorStore((s) => s.childOrder[id] ?? EMPTY_CHILD_IDS);
+  const childOrder = useEditorStore((s) => s.childOrder);
+  const childIds = childOrder[id] ?? EMPTY_CHILD_IDS;
+  const objectEditModeNodeId = useEditorStore((s) => s.objectEditModeNodeId);
   const tool = useEditorStore((s) => s.tool);
   const zoom = useEditorStore((s) => s.zoom);
   const penDrawingNodeId = useEditorStore((s) => s.penDrawingNodeId);
@@ -146,7 +158,8 @@ export function CanvasObject({ id }: { id: string }) {
   const createInstance = useEditorStore((s) => s.createInstance);
 
   const toWorld = useCanvasToWorld();
-  const { spaceDown, panning: canvasPanning } = useCanvasInteraction();
+  const { spaceDown, panning: canvasPanning, optionDown, optionOverSelection } =
+    useCanvasInteraction();
   const isPlacingComment = useEditorStore((s) => s.isPlacingComment);
   const objectPointerEvents = canvasObjectPointerEvents({
     tool,
@@ -275,43 +288,58 @@ export function CanvasObject({ id }: { id: string }) {
     (e: React.PointerEvent) => {
       if (!node || !node.visible) return;
 
+      if (shouldSuppressCanvasPointer()) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+
       if (objectPointerEvents === "none") return;
 
       if (e.button === 0) releaseFieldFocusForCanvas();
 
+      const st = useEditorStore.getState();
+      const targetId = selectionTargetForClick(
+        node.id,
+        st.nodes,
+        st.childOrder,
+        st.objectEditModeNodeId,
+      );
+
       if (editorMode === "inspect") {
         e.stopPropagation();
-        if (tool === "comment" || tool === "pen" || e.button === 1) return;
-        select(node.id, e.shiftKey);
+        if (tool === "comment" || tool === "pen" || tool === "pencil" || e.button === 1) return;
+        select(targetId, e.shiftKey);
         return;
       }
 
       if (node.locked) {
         e.stopPropagation();
-        if (isCanvasSelectTool()) select(node.id, e.shiftKey);
+        if (isCanvasSelectTool()) select(targetId, e.shiftKey);
         return;
       }
       e.stopPropagation();
 
-      if (tool === "comment" || tool === "pen" || e.button === 1) return;
+      if (tool === "comment" || tool === "pen" || tool === "pencil" || e.button === 1) return;
 
       if (tool !== "move" && tool !== "frame") {
-        select(node.id, e.shiftKey);
+        select(targetId, e.shiftKey);
         return;
       }
 
-      select(node.id, e.shiftKey);
+      select(targetId, e.shiftKey);
 
+      const dragNode = st.nodes[targetId];
       if (
         e.button === 0 &&
         e.altKey &&
-        node.isComponent &&
-        (node.type === "frame" || node.type === "group") &&
+        dragNode?.isComponent &&
+        (dragNode.type === "frame" || dragNode.type === "group") &&
         tool === "move" &&
         canCanvasObjectDrag()
       ) {
         const w = clientToWorld(e.clientX, e.clientY);
-        createInstance(node.id, w.x, w.y);
+        createInstance(targetId, w.x, w.y);
         const newId = useEditorStore.getState().selectedIds[0];
         if (newId) {
           beginCanvasNodeDrag({
@@ -328,8 +356,10 @@ export function CanvasObject({ id }: { id: string }) {
 
       if (e.button !== 0 || !canCanvasObjectDrag()) return;
 
+      if (e.altKey && !prepareAltDragDuplicate(targetId)) return;
+
       beginCanvasNodeDrag({
-        nodeId: node.id,
+        nodeId: targetId,
         pointerId: e.pointerId,
         clientX: e.clientX,
         clientY: e.clientY,
@@ -337,24 +367,22 @@ export function CanvasObject({ id }: { id: string }) {
         captureTarget: e.currentTarget as HTMLElement,
       });
     },
-    [node, select, tool, clientToWorld, editorMode, objectPointerEvents, selectedIds, pushHistory, setEditingTextId, createInstance],
+    [node, select, tool, clientToWorld, editorMode, objectPointerEvents, createInstance],
   );
 
   const isEditingText = node?.type === "text" && editingTextId === id;
 
   if (!node || !node.visible) return null;
 
-  const r = node.cornerRadius ?? 0;
+  const cornerRadiusCss =
+    node.type === "rectangle" || node.type === "frame"
+      ? cornerRadiiToCss(clampCornerRadii(getNodeCornerRadii(node), node.width, node.height))
+      : undefined;
   const sw = node.strokeWidth ?? 0;
-  const sc = node.strokeColor;
   const fill = fillPaintCss(node);
   const isGradientFill = effectiveFillType(node) === "gradient";
   const showShapeFill = node.fillEnabled !== false && isGradientFill;
   const isRootFrame = node.type === "frame" && node.parentId === null;
-  const borderStyle =
-    sw > 0 && sc
-      ? `${sw}px ${node.strokeStyle === "dashed" ? "dashed" : node.strokeStyle === "dotted" ? "dotted" : "solid"} ${sc}`
-      : undefined;
   const showInspectHover =
     editorMode === "inspect" && hoveredCanvasId === id && !selectedIds.includes(id) && node.visible;
   const showDesignHover =
@@ -364,8 +392,18 @@ export function CanvasObject({ id }: { id: string }) {
     !node.locked &&
     node.visible;
 
+  const collapseChildHits = shouldCollapseContainerHits(
+    id,
+    nodesMap,
+    childOrder,
+    objectEditModeNodeId,
+  );
+
   const childrenTree = (
-    <div className="relative h-full w-full">
+    <div
+      className="relative h-full w-full"
+      style={collapseChildHits ? { pointerEvents: "none" } : undefined}
+    >
       {childIds.map((cid) => (
         <CanvasObject key={cid} id={cid} />
       ))}
@@ -397,13 +435,7 @@ export function CanvasObject({ id }: { id: string }) {
               ))}
             </div>
           }
-          maskPreview={
-            maskNode ? (
-              <MaskPreviewOverlay>
-                <CanvasObject id={node.maskId!} />
-              </MaskPreviewOverlay>
-            ) : null
-          }
+          maskLayer={maskNode ? <CanvasObject id={node.maskId!} /> : null}
         />
       );
     } else if (node.isBooleanGroup) {
@@ -416,7 +448,7 @@ export function CanvasObject({ id }: { id: string }) {
         />
       );
     } else {
-      body = clipsChildContent(node) ? (
+      body = shouldClipChildren(node) ? (
         <div className="relative h-full w-full overflow-hidden">{childrenTree}</div>
       ) : (
         childrenTree
@@ -432,12 +464,14 @@ export function CanvasObject({ id }: { id: string }) {
             : node.fillEnabled === false
               ? "transparent"
               : (fill ?? "#ffffff"),
-          borderRadius: r,
-          border: isRootFrame ? undefined : borderStyle,
-          overflow: clipsChildContent(node) ? "hidden" : "visible",
+          borderRadius: cornerRadiusCss,
+          overflow: shouldClipChildren(node) ? "hidden" : "visible",
         }}
       >
         {showShapeFill ? <ShapeGradientFill node={node} nodeId={id} shape="rect" /> : null}
+        {!isRootFrame && sw > 0 && node.strokeEnabled !== false ? (
+          <ShapeVectorView node={node} nodeId={id} strokeOnly />
+        ) : null}
         {childrenTree}
       </div>
     );
@@ -448,7 +482,11 @@ export function CanvasObject({ id }: { id: string }) {
     const pts = node.pathPoints ?? [];
     const singleSelected = selectedIds.length === 1 && selectedIds[0] === id;
     const showAnchors =
-      editorMode === "design" && tool === "move" && singleSelected && pts.length > 0;
+      editorMode === "design" &&
+      tool === "move" &&
+      singleSelected &&
+      pathEditModeNodeId === id &&
+      pts.length > 0;
     body = (
       <>
         <ShapeVectorView node={node} nodeId={id} />
@@ -460,7 +498,7 @@ export function CanvasObject({ id }: { id: string }) {
                 type="button"
                 aria-label="Anchor point"
                 className={cn(
-                  "pointer-events-auto absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 border-2 border-[#18a0fb] bg-white",
+                  "pointer-events-auto absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 border-2 border-[color:var(--pc-canvas-selection)] bg-white",
                   pathEditModeNodeId === id && selectedPathPointId === pt.id ? "ring-2 ring-amber-300" : "",
                 )}
                 style={{ left: pt.x, top: pt.y }}
@@ -493,12 +531,11 @@ export function CanvasObject({ id }: { id: string }) {
     );
   }
 
-  const radiusStyle =
-    node.type === "frame" ? (node.cornerRadius ?? 0) : undefined;
+  const radiusStyle = node.type === "frame" ? cornerRadiusCss : undefined;
 
   const tokenShadow = resolveEffectBoxShadow(node, designTokens);
   const ringShadow = showInspectHover
-    ? `0 0 0 1px rgba(244,114,182,0.75)`
+    ? `0 0 0 1px ${CANVAS_VISUAL.inspectHover}`
     : showDesignHover
       ? `0 0 0 1px ${CANVAS_VISUAL.hoverOutline}`
       : undefined;
@@ -509,16 +546,19 @@ export function CanvasObject({ id }: { id: string }) {
   const filterParts = [dropF, er.filter].filter(Boolean);
   const combinedFilter = filterParts.length ? filterParts.join(" ") : undefined;
   const combinedShadow = [er.boxShadow, ringShadow].filter(Boolean).join(", ") || undefined;
+  const glassBg =
+    er.glassBackground && node.fillEnabled !== false
+      ? er.glassBackground
+      : undefined;
+  const glassBorder = er.glassBorder;
+  const effectOverlays = er.overlayLayers;
   const layerOpacity = node.opacity ?? 1;
   const imageAlpha = node.type === "image" ? layerOpacity * (node.fillOpacity ?? 1) : layerOpacity;
 
   return (
     <div
       data-canvas-node={id}
-      className={cn(
-        "absolute box-border select-none",
-        isRootFrame && node.type === "frame" && "shadow-artboard",
-      )}
+      className="absolute relative box-border select-none"
       style={{
         left: node.x,
         top: node.y,
@@ -526,48 +566,74 @@ export function CanvasObject({ id }: { id: string }) {
         height: node.height,
         pointerEvents: objectPointerEvents,
         borderRadius: radiusStyle,
-        overflow: clipsChildContent(node) ? "hidden" : "visible",
+        overflow: shouldClipChildren(node) ? "hidden" : "visible",
         outline:
           node.type === "group" &&
           !node.isBooleanGroup &&
           !node.maskId &&
           (node.layoutMode ?? "none") === "none"
-            ? "1px dashed rgba(15,23,42,0.12)"
+            ? `1px dashed ${CANVAS_VISUAL.groupOutline}`
             : node.isBooleanGroup
-            ? "1px dashed rgba(24,160,251,0.45)"
-            : node.maskId
-              ? "1px dashed rgba(168,85,247,0.45)"
-              : undefined,
+              ? `1px dashed ${CANVAS_VISUAL.booleanOutline}`
+              : node.maskId
+                ? `1px dashed ${CANVAS_VISUAL.maskOutline}`
+                : undefined,
         boxShadow: combinedShadow,
         filter: combinedFilter,
         backdropFilter: er.backdropFilter,
+        ...(glassBg ? { backgroundColor: glassBg } : {}),
+        ...(glassBorder ? { border: glassBorder, boxSizing: "border-box" as const } : {}),
         cursor:
           editorMode === "inspect"
             ? "default"
-            : tool === "text"
-              ? "text"
-              : tool === "hand"
-                ? "grab"
-                : undefined,
-        transform: node.rotation ? `rotate(${node.rotation}deg)` : undefined,
-        transformOrigin: "50% 50%",
+            : optionDown &&
+                (tool === "move" || tool === "frame") &&
+                selectedIds.includes(id) &&
+                optionOverSelection
+              ? "copy"
+              : tool === "text"
+                ? "text"
+                : tool === "hand"
+                  ? "grab"
+                  : undefined,
+        ...cssRotationStyle(node),
         opacity: imageAlpha < 0.999 ? imageAlpha : undefined,
       }}
       onPointerDown={onPointerDown}
       onDoubleClick={(e) => {
-        if (node.type === "text" && editorMode === "design" && !node.locked && node.visible) {
+        if (editorMode !== "design" || node.locked || !node.visible) return;
+
+        const st0 = useEditorStore.getState();
+        if (st0.pathEditModeNodeId && st0.pathEditModeNodeId !== id) {
+          st0.setPathEditMode(null);
+        }
+
+        if (node.type === "text") {
           e.stopPropagation();
           setEditingTextId(node.id);
           return;
         }
-        if (node.isBooleanGroup && editorMode === "design" && !node.locked) {
+
+        const st = useEditorStore.getState();
+        const w = clientToWorld(e.clientX, e.clientY);
+        const drill = drillTargetForDoubleClick(
+          id,
+          w.x,
+          w.y,
+          st.nodes,
+          st.childOrder,
+          st.objectEditModeNodeId,
+          (x, y) => pickDeepestNodeAtWorldPoint(x, y, st.nodes, st.childOrder),
+        );
+        if (drill) {
           e.stopPropagation();
-          useEditorStore.getState().enterObjectEditMode(node.id);
+          st.enterObjectEditMode(drill.containerId);
+          st.select(drill.selectId);
           return;
         }
-        if (node.type !== "path" || editorMode === "inspect") return;
+
+        if (node.type !== "path") return;
         e.stopPropagation();
-        const st = useEditorStore.getState();
         if (st.pathEditModeNodeId === id) st.setPathEditMode(null);
         else st.setPathEditMode(id);
       }}
@@ -593,6 +659,7 @@ export function CanvasObject({ id }: { id: string }) {
       }}
     >
       {body}
+      {effectOverlays?.length ? <EffectOverlays layers={effectOverlays} /> : null}
       {editorMode === "prototype" &&
       tool === "move" &&
       selectedIds.length === 1 &&

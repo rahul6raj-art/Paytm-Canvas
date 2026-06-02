@@ -1,11 +1,16 @@
 "use client";
 
-import { useCallback, useRef, useEffect, useState } from "react";
-import { Grid3X3 } from "lucide-react";
+import { useCallback, useMemo, useRef, useEffect, useState } from "react";
+import { Grid3X3, Ruler } from "lucide-react";
+import { CanvasRulers } from "./CanvasRulers";
 import { SelectionBox } from "./SelectionBox";
 import { SceneRenderer } from "@/editor-core/renderer/SceneRenderer";
 import { RootFrameLabels } from "./RootFrameLabels";
 import { PrototypeWireLayer } from "./PrototypeWireLayer";
+import { AltMeasureLayer } from "./AltMeasureLayer";
+import { DragSnapOverlay } from "./DragSnapOverlay";
+import { pickLayoutGuideAt } from "@/lib/layoutGuidePick";
+import { LayoutGuidesOverlay } from "./LayoutGuidesOverlay";
 import { InspectMeasurementsLayer } from "./InspectMeasurementsLayer";
 import { PresenceLayer } from "./PresenceLayer";
 import { CommentPinLayer } from "./CommentPinLayer";
@@ -16,7 +21,9 @@ import { cn } from "@/lib/utils";
 import { CanvasToWorldContext } from "./CanvasToWorldContext";
 import { CanvasInteractionContext } from "./CanvasInteractionContext";
 import { clientToWorld } from "@/lib/canvasCoordinates";
-import { CANVAS_VISUAL } from "@/lib/canvasVisual";
+import { useTheme } from "@/components/ThemeProvider";
+import { CANVAS_VISUAL, displayCanvasBackground } from "@/lib/canvasVisual";
+import { useOptionPointerTracking } from "@/hooks/useOptionPointerTracking";
 import { pickDeepestNodeAtWorldPoint, pickDeepestVisibleNodeAtWorldPoint, worldRect } from "@/lib/tree";
 import { startCanvasMarqueeSession } from "@/lib/canvasMarqueeSession";
 import { validateImageImportFile } from "@/lib/editorAssets";
@@ -30,7 +37,16 @@ import {
 } from "@/lib/canvasInteractionGuards";
 import { boundsFromDrag, lineGeometryFromDrag, toolToShapeType, type ShapeType } from "@/lib/shapes";
 import { wheelZoomFactor, zoomAtScreenPoint } from "@/lib/canvasZoom";
-import { focusCanvasViewport, releaseFieldFocusForCanvas } from "@/lib/editorKeyboardFocus";
+import {
+  activateCanvasForShortcuts,
+  focusCanvasViewport,
+  releaseFieldFocusForCanvas,
+} from "@/lib/editorKeyboardFocus";
+import {
+  clearPostCreationPointerSuppress,
+  shouldSuppressCanvasPointer,
+  suppressPostCreationPointer,
+} from "@/lib/canvasCreationGuard";
 
 function PenStrokePreview({
   drawId,
@@ -82,22 +98,58 @@ function PenStrokePreview({
 function ShapeDraftPreview({
   draft,
 }: {
-  draft: { shapeType: ShapeType; x0: number; y0: number; x1: number; y1: number };
+  draft: {
+    shapeType: ShapeType;
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+    shiftKey: boolean;
+    altKey: boolean;
+  };
 }) {
   const start = { x: draft.x0, y: draft.y0 };
   const end = { x: draft.x1, y: draft.y1 };
-  const mods = { shiftKey: false, altKey: false };
+  const mods = { shiftKey: draft.shiftKey, altKey: draft.altKey };
 
-  let box: { x: number; y: number; width: number; height: number };
   if (draft.shapeType === "line" || draft.shapeType === "arrow") {
     const g = lineGeometryFromDrag(start, end, mods);
-    box = { x: g.x, y: g.y, width: g.width, height: g.height };
-  } else {
-    box = boundsFromDrag(start, end, mods, {
-      preserveAspect: draft.shapeType === "ellipse",
-    });
+    const midY = g.height / 2;
+    return (
+      <div
+        className="pointer-events-none absolute z-[19] overflow-visible"
+        style={{
+          left: g.x,
+          top: g.y,
+          width: g.width,
+          height: g.height,
+          transform: g.rotation ? `rotate(${g.rotation}deg)` : undefined,
+          transformOrigin: "0 50%",
+        }}
+        aria-hidden
+      >
+        <svg
+          className="block overflow-visible"
+          width={Math.max(1, g.width)}
+          height={Math.max(1, g.height)}
+        >
+          <line
+            x1={0}
+            y1={midY}
+            x2={g.width}
+            y2={midY}
+            stroke="#18a0fb"
+            strokeWidth={2}
+            strokeLinecap="round"
+          />
+        </svg>
+      </div>
+    );
   }
 
+  const box = boundsFromDrag(start, end, mods, {
+    preserveAspect: draft.shapeType === "ellipse",
+  });
   const rounded = draft.shapeType === "ellipse";
 
   return (
@@ -135,13 +187,22 @@ function ShapeDraftPreview({
 
 export function Canvas() {
   const viewportRef = useRef<HTMLDivElement>(null);
+  const canvasBgRef = useRef<HTMLDivElement>(null);
   const zoom = useEditorStore((s) => s.zoom);
   const pan = useEditorStore((s) => s.pan);
   const setPan = useEditorStore((s) => s.setPan);
-  const guides = useEditorStore((s) => s.guides);
   const showGrid = useEditorStore((s) => s.showGrid);
-  const canvasBackgroundColor = useEditorStore((s) => s.canvasBackgroundColor);
+  const showRulers = useEditorStore((s) => s.showRulers);
+  const storedCanvasBg = useEditorStore((s) => s.canvasBackgroundColor);
+  const { resolved: themeResolved } = useTheme();
+  const canvasBackgroundColor = useMemo(
+    () => displayCanvasBackground(storedCanvasBg, themeResolved),
+    [storedCanvasBg, themeResolved],
+  );
+  const gridLineColor =
+    themeResolved === "dark" ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.045)";
   const toggleGrid = useEditorStore((s) => s.toggleGrid);
+  const toggleRulers = useEditorStore((s) => s.toggleRulers);
   const clearSelection = useEditorStore((s) => s.clearSelection);
   const tool = useEditorStore((s) => s.tool);
   const addRectangleAt = useEditorStore((s) => s.addRectangleAt);
@@ -170,6 +231,7 @@ export function Canvas() {
 
   const [penHoverWorld, setPenHoverWorld] = useState<{ x: number; y: number } | null>(null);
   const [spaceDown, setSpaceDown] = useState(false);
+  const [optionDown, setOptionDown] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [marquee, setMarquee] = useState<null | { x0: number; y0: number; x1: number; y1: number }>(null);
   const [frameDraft, setFrameDraft] = useState<null | { x0: number; y0: number; x1: number; y1: number }>(
@@ -181,6 +243,8 @@ export function Canvas() {
     y0: number;
     x1: number;
     y1: number;
+    shiftKey: boolean;
+    altKey: boolean;
   }>(null);
   const frameDraftRef = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const shapeDraftRef = useRef<{
@@ -189,8 +253,11 @@ export function Canvas() {
     y0: number;
     x1: number;
     y1: number;
+    shiftKey: boolean;
+    altKey: boolean;
   } | null>(null);
   const shapeSessionCleanupRef = useRef<(() => void) | null>(null);
+  const pencilSessionCleanupRef = useRef<(() => void) | null>(null);
   const frameSessionCleanupRef = useRef<(() => void) | null>(null);
   const panDrag = useRef<{ pointerId: number; sx: number; sy: number; px: number; py: number } | null>(
     null,
@@ -200,6 +267,7 @@ export function Canvas() {
     registerMarqueeAbortHandler(() => {
       frameSessionCleanupRef.current?.();
       shapeSessionCleanupRef.current?.();
+      pencilSessionCleanupRef.current?.();
     });
     return () => {
       registerMarqueeAbortHandler(null);
@@ -209,17 +277,34 @@ export function Canvas() {
   }, []);
 
   useEffect(() => {
+    const syncOption = (e: KeyboardEvent) => setOptionDown(e.altKey);
     const down = (e: KeyboardEvent) => {
       if (e.code === "Space") setSpaceDown(true);
+      syncOption(e);
     };
     const up = (e: KeyboardEvent) => {
       if (e.code === "Space") setSpaceDown(false);
+      syncOption(e);
+    };
+    const onBlur = () => {
+      setOptionDown(false);
+      setSpaceDown(false);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        setOptionDown(false);
+        setSpaceDown(false);
+      }
     };
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
+    window.addEventListener("blur", onBlur);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", onBlur);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
 
@@ -227,6 +312,12 @@ export function Canvas() {
     (clientX: number, clientY: number) =>
       clientToWorld(clientX, clientY, viewportRef.current, { pan, zoom }),
     [pan, zoom],
+  );
+
+  const { optionOverSelection, optionPointerHoverId } = useOptionPointerTracking(
+    optionDown,
+    editorMode,
+    toWorld,
   );
 
   const startMarquee = useCallback(
@@ -298,7 +389,17 @@ export function Canvas() {
 
   const panning = tool === "hand" || spaceDown;
 
+  const pointerCaptureTarget = useCallback((): HTMLElement => {
+    return canvasBgRef.current ?? viewportRef.current!;
+  }, []);
+
   const onBgPointerDown = (e: React.PointerEvent) => {
+    if (shouldSuppressCanvasPointer()) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    clearPostCreationPointerSuppress();
     const debugCanvas = isPaytmCraftDebugCanvas();
     let creationBranch: string | null = null;
     const st = useEditorStore.getState();
@@ -354,21 +455,25 @@ export function Canvas() {
     if (activeMode === "design") {
       if (activeTool === "frame") {
         creationBranch = "frame";
+        frameSessionCleanupRef.current?.();
         const w0 = toWorld(e.clientX, e.clientY);
         const rect0 = { x0: w0.x, y0: w0.y, x1: w0.x, y1: w0.y };
         frameDraftRef.current = rect0;
         setFrameDraft(rect0);
 
-        const target = e.currentTarget as HTMLElement;
+        const target = pointerCaptureTarget();
         const capId = e.pointerId;
-        target.setPointerCapture(capId);
+        try {
+          target.setPointerCapture(capId);
+        } catch {
+          /* ignore — pointerup still ends the session */
+        }
 
         let ended = false;
         const removeListeners = () => {
           window.removeEventListener("pointermove", onMove);
           window.removeEventListener("pointerup", onPointerEnd);
           window.removeEventListener("pointercancel", onPointerEnd);
-          target.removeEventListener("lostpointercapture", onLostCapture);
         };
 
         const finish = (commit: boolean) => {
@@ -395,6 +500,7 @@ export function Canvas() {
           } else {
             createFrameWithBounds(mx0, my0, mw, mh);
           }
+          suppressPostCreationPointer();
         };
 
         frameSessionCleanupRef.current = () => finish(false);
@@ -414,16 +520,9 @@ export function Canvas() {
           finish(ev.type === "pointerup");
         };
 
-        const onLostCapture = (ev: Event) => {
-          const pe = ev as PointerEvent;
-          if (pe.pointerId !== capId) return;
-          finish(false);
-        };
-
         window.addEventListener("pointermove", onMove);
         window.addEventListener("pointerup", onPointerEnd);
         window.addEventListener("pointercancel", onPointerEnd);
-        target.addEventListener("lostpointercapture", onLostCapture);
         return;
       }
 
@@ -433,14 +532,27 @@ export function Canvas() {
           : toolToShapeType(activeTool);
       if (shapeType) {
         creationBranch = activeTool;
+        shapeSessionCleanupRef.current?.();
         const w0 = toWorld(e.clientX, e.clientY);
-        const draft0 = { shapeType, x0: w0.x, y0: w0.y, x1: w0.x, y1: w0.y };
+        const draft0 = {
+          shapeType,
+          x0: w0.x,
+          y0: w0.y,
+          x1: w0.x,
+          y1: w0.y,
+          shiftKey: e.shiftKey,
+          altKey: e.altKey,
+        };
         shapeDraftRef.current = draft0;
         setShapeDraft(draft0);
 
-        const target = e.currentTarget as HTMLElement;
+        const target = pointerCaptureTarget();
         const capId = e.pointerId;
-        target.setPointerCapture(capId);
+        try {
+          target.setPointerCapture(capId);
+        } catch {
+          /* ignore */
+        }
         let shiftHeld = e.shiftKey;
         let altHeld = e.altKey;
         let ended = false;
@@ -449,7 +561,6 @@ export function Canvas() {
           window.removeEventListener("pointermove", onMove);
           window.removeEventListener("pointerup", onPointerEnd);
           window.removeEventListener("pointercancel", onPointerEnd);
-          target.removeEventListener("lostpointercapture", onLostCapture);
         };
 
         const finish = (commit: boolean) => {
@@ -485,6 +596,7 @@ export function Canvas() {
               altKey: altHeld,
             }, activeTool === "triangle" ? { polygonSides: 3 } : undefined);
           }
+          suppressPostCreationPointer();
         };
 
         shapeSessionCleanupRef.current = () => finish(false);
@@ -495,8 +607,8 @@ export function Canvas() {
           altHeld = ev.altKey;
           const ww = toWorld(ev.clientX, ev.clientY);
           const next = shapeDraftRef.current
-            ? { ...shapeDraftRef.current, x1: ww.x, y1: ww.y }
-            : { ...draft0, x1: ww.x, y1: ww.y };
+            ? { ...shapeDraftRef.current, x1: ww.x, y1: ww.y, shiftKey: shiftHeld, altKey: altHeld }
+            : { ...draft0, x1: ww.x, y1: ww.y, shiftKey: shiftHeld, altKey: altHeld };
           shapeDraftRef.current = next;
           setShapeDraft(next);
         };
@@ -506,16 +618,65 @@ export function Canvas() {
           finish(ev.type === "pointerup");
         };
 
-        const onLostCapture = (ev: Event) => {
-          const pe = ev as PointerEvent;
-          if (pe.pointerId !== capId) return;
-          finish(false);
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onPointerEnd);
+        window.addEventListener("pointercancel", onPointerEnd);
+        return;
+      }
+
+      if (activeTool === "pencil") {
+        creationBranch = "pencil";
+        pencilSessionCleanupRef.current?.();
+        const w0 = toWorld(e.clientX, e.clientY);
+        st.startPencilStroke(w0);
+
+        const target = pointerCaptureTarget();
+        const capId = e.pointerId;
+        try {
+          target.setPointerCapture(capId);
+        } catch {
+          /* ignore */
+        }
+        let ended = false;
+
+        const removeListeners = () => {
+          window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("pointerup", onPointerEnd);
+          window.removeEventListener("pointercancel", onPointerEnd);
+        };
+
+        const finish = (commit: boolean) => {
+          if (ended) return;
+          ended = true;
+          pencilSessionCleanupRef.current = null;
+          removeListeners();
+          try {
+            target.releasePointerCapture(capId);
+          } catch {
+            /* ignore */
+          }
+          if (!commit) {
+            st.cancelPencilStroke();
+            return;
+          }
+          st.finishPencilStroke();
+        };
+
+        pencilSessionCleanupRef.current = () => finish(false);
+
+        const onMove = (ev: PointerEvent) => {
+          if (ev.pointerId !== capId) return;
+          st.extendPencilStroke(toWorld(ev.clientX, ev.clientY));
+        };
+
+        const onPointerEnd = (ev: PointerEvent) => {
+          if (ev.pointerId !== capId) return;
+          finish(ev.type === "pointerup");
         };
 
         window.addEventListener("pointermove", onMove);
         window.addEventListener("pointerup", onPointerEnd);
         window.addEventListener("pointercancel", onPointerEnd);
-        target.addEventListener("lostpointercapture", onLostCapture);
         return;
       }
 
@@ -548,19 +709,47 @@ export function Canvas() {
       }
     }
 
-    if (st.penDrawingNodeId) return;
+    if (st.penDrawingNodeId || st.pencilDrawingNodeId) return;
 
     clearSelection();
     if (debugCanvas) logBgPointerDown(e, creationBranch ?? "clear-selection");
   };
 
   const onViewportPointerDownCapture = (e: React.PointerEvent) => {
+    if (shouldSuppressCanvasPointer()) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (e.button === 0 || e.button === 2) {
       releaseFieldFocusForCanvas();
       focusCanvasViewport(viewportRef.current);
     }
     const st = useEditorStore.getState();
     const placing = st.editorMode === "design" && st.tool === "comment" && st.isPlacingComment;
+
+    if (
+      e.button === 0 &&
+      st.editorMode === "design" &&
+      !st.penDrawingNodeId &&
+      !st.pencilDrawingNodeId &&
+      !placing &&
+      !st.contextMenu &&
+      !st.editingTextId &&
+      !isCanvasChromeTarget(e.target)
+    ) {
+      const w = toWorld(e.clientX, e.clientY);
+      const nodeHit = pickDeepestVisibleNodeAtWorldPoint(w.x, w.y, st.nodes, st.childOrder);
+      if (!nodeHit) {
+        const guideId = pickLayoutGuideAt(w.x, w.y, st.layoutGuides, st.zoom);
+        if (guideId) {
+          e.preventDefault();
+          e.stopPropagation();
+          st.selectLayoutGuide(guideId);
+          return;
+        }
+      }
+    }
 
     const canMarquee =
       e.button === 0 &&
@@ -569,6 +758,7 @@ export function Canvas() {
       !spaceDown &&
       !st.placingComponentMasterId &&
       !st.penDrawingNodeId &&
+      !st.pencilDrawingNodeId &&
       !st.prototypeWireDrag &&
       !placing &&
       !st.contextMenu &&
@@ -593,6 +783,7 @@ export function Canvas() {
     if (!isCanvasBgCreationTool(st.tool, st.editorMode, { isPlacingComment: placing })) return;
     const tgt = e.target as HTMLElement | null;
     if (tgt?.closest("[data-grid-toggle]")) return;
+    clearPostCreationPointerSuppress();
     if (e.button === 0) {
       e.preventDefault();
       e.stopPropagation();
@@ -624,9 +815,17 @@ export function Canvas() {
       tool === "polygon" ||
       tool === "star" ||
       tool === "triangle" ||
+      tool === "pencil" ||
       tool === "frame" ||
       placingComment ||
       tool === "pen");
+  const optionMeasureMode =
+    optionDown &&
+    editorMode === "design" &&
+    (tool === "move" || tool === "frame") &&
+    selectedIds.length > 0 &&
+    !optionOverSelection;
+
   const cursor =
     isPanning
       ? "grabbing"
@@ -638,20 +837,29 @@ export function Canvas() {
             ? "crosshair"
             : placingComponentMasterId
               ? "copy"
-              : tool === "text"
-                ? "text"
-                : crosshairTool
-                  ? "crosshair"
-                  : "default";
+              : optionDown &&
+                  editorMode === "design" &&
+                  (tool === "move" || tool === "frame") &&
+                  selectedIds.length > 0 &&
+                  optionOverSelection
+                ? "copy"
+              : optionMeasureMode
+                ? "default"
+                : tool === "text"
+                  ? "text"
+                  : crosshairTool
+                    ? "crosshair"
+                    : "default";
 
   return (
     <div
       ref={viewportRef}
       data-canvas-viewport
-      tabIndex={-1}
+      tabIndex={0}
       className="absolute inset-0 overflow-hidden touch-none overscroll-none outline-none"
       style={{ cursor, touchAction: "none", backgroundColor: canvasBackgroundColor }}
       onPointerDownCapture={onViewportPointerDownCapture}
+      onFocus={() => activateCanvasForShortcuts()}
       onPointerMove={(e) => {
         if (tool !== "pen" || !useEditorStore.getState().penDrawingNodeId) {
           setPenHoverWorld(null);
@@ -661,16 +869,25 @@ export function Canvas() {
       }}
       onPointerLeave={() => setPenHoverWorld(null)}
     >
-      <CanvasInteractionContext.Provider value={{ spaceDown, panning }}>
+      <CanvasInteractionContext.Provider
+        value={{
+          spaceDown,
+          panning,
+          optionDown,
+          optionOverSelection,
+          optionPointerHoverId,
+        }}
+      >
       <CanvasToWorldContext.Provider value={toWorld}>
+      {showRulers ? <CanvasRulers zoom={zoom} pan={pan} viewportRef={viewportRef} /> : null}
       {showGrid ? (
         <div
           className="pointer-events-none absolute inset-0"
           style={{
             opacity: 0.55,
             backgroundImage: [
-              `linear-gradient(to right, rgba(0,0,0,0.045) 1px, transparent 1px)`,
-              `linear-gradient(to bottom, rgba(0,0,0,0.045) 1px, transparent 1px)`,
+              `linear-gradient(to right, ${gridLineColor} 1px, transparent 1px)`,
+              `linear-gradient(to bottom, ${gridLineColor} 1px, transparent 1px)`,
             ].join(", "),
             backgroundSize: `${8 * zoom}px ${8 * zoom}px`,
             backgroundPosition: `${pan.x}px ${pan.y}px`,
@@ -684,25 +901,10 @@ export function Canvas() {
           transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})`,
         }}
       >
-        {guides.map((g, i) =>
-          g.axis === "v" ? (
-            <div
-              key={`v-${i}-${g.pos}`}
-              className="pointer-events-none absolute top-0 z-40 h-full w-px bg-guide"
-              style={{ left: g.pos }}
-            />
-          ) : (
-            <div
-              key={`h-${i}-${g.pos}`}
-              className="pointer-events-none absolute left-0 z-40 h-px w-full bg-guide"
-              style={{ top: g.pos }}
-            />
-          ),
-        )}
-
         <div className="relative" style={{ width: 6000, height: 6000 }}>
           <PrototypeWireLayer />
           <div
+            ref={canvasBgRef}
             role="presentation"
             data-canvas-bg
             className={cn(
@@ -713,6 +915,11 @@ export function Canvas() {
             onDoubleClick={(e) => {
               if (editorMode !== "design") return;
               const st = useEditorStore.getState();
+              if (st.pathEditModeNodeId) {
+                e.preventDefault();
+                st.setPathEditMode(null);
+                return;
+              }
               if (st.tool !== "pen" || !st.penDrawingNodeId) return;
               e.preventDefault();
               st.finishPath(false);
@@ -788,7 +995,7 @@ export function Canvas() {
           {editorMode === "design" ? <CommentPinLayer /> : null}
           {frameDraft ? (
             <div
-              className="pointer-events-none absolute z-[19] border border-[#18a0fb] bg-white/90 shadow-sm"
+              className="pointer-events-none absolute z-[19] border border-accent/60 bg-app-panel/90 shadow-sm"
               style={{
                 left: Math.min(frameDraft.x0, frameDraft.x1),
                 top: Math.min(frameDraft.y0, frameDraft.y1),
@@ -813,6 +1020,9 @@ export function Canvas() {
             />
           ) : null}
           <SelectionBox />
+          <LayoutGuidesOverlay zoom={zoom} />
+          <DragSnapOverlay />
+          <AltMeasureLayer />
           <ComponentPlacementPreview />
           <GradientEditorLayer />
           <PresenceLayer />
@@ -820,24 +1030,44 @@ export function Canvas() {
         </div>
       </div>
 
-      <button
-        type="button"
-        data-grid-toggle
-        onClick={(e) => {
-          e.stopPropagation();
-          toggleGrid();
-        }}
-        title={showGrid ? "Hide layout grid" : "Show layout grid"}
-        className={cn(
-          "absolute bottom-3 left-3 z-50 flex h-6 items-center gap-1 rounded border px-1.5 text-[11px] font-medium transition-colors",
-          showGrid
-            ? "border-[#c8c8c8] bg-white text-[#333] shadow-sm"
-            : "border-[#d4d4d4] bg-white/90 text-[#666] hover:border-[#bbb] hover:text-[#333]",
-        )}
-      >
-        <Grid3X3 className="h-3.5 w-3.5" strokeWidth={1.75} />
-        Grid
-      </button>
+      <div className="absolute bottom-3 left-3 z-50 flex items-center gap-1">
+        <button
+          type="button"
+          data-rulers-toggle
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleRulers();
+          }}
+          title={showRulers ? "Hide rulers" : "Show rulers"}
+          className={cn(
+            "flex h-6 items-center gap-1 rounded border px-1.5 text-[11px] font-medium transition-colors",
+            showRulers
+              ? "border-accent/40 bg-app-panel text-app-fg shadow-sm"
+              : "border-app-border bg-app-panel/95 text-app-muted hover:border-app-border hover:bg-app-hover hover:text-app-fg",
+          )}
+        >
+          <Ruler className="h-3.5 w-3.5" strokeWidth={1.75} />
+          Rulers
+        </button>
+        <button
+          type="button"
+          data-grid-toggle
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleGrid();
+          }}
+          title={showGrid ? "Hide layout grid" : "Show layout grid"}
+          className={cn(
+            "flex h-6 items-center gap-1 rounded border px-1.5 text-[11px] font-medium transition-colors",
+            showGrid
+              ? "border-accent/40 bg-app-panel text-app-fg shadow-sm"
+              : "border-app-border bg-app-panel/95 text-app-muted hover:border-app-border hover:bg-app-hover hover:text-app-fg",
+          )}
+        >
+          <Grid3X3 className="h-3.5 w-3.5" strokeWidth={1.75} />
+          Grid
+        </button>
+      </div>
       </CanvasToWorldContext.Provider>
       </CanvasInteractionContext.Provider>
     </div>

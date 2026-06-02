@@ -27,6 +27,17 @@ export type ResizeKind =
 
 const MIN = RESIZE_MIN_DIMENSION;
 
+export function isEdgeHandle(handle: ResizeHandle): boolean {
+  return handle === "n" || handle === "s" || handle === "e" || handle === "w";
+}
+
+/** Figma-like proportional resize (Shift+Option, or Shift on a corner). */
+export function isProportionalResize(handle: ResizeHandle, modifiers: ResizeModifiers): boolean {
+  if (modifiers.shiftKey && modifiers.altKey) return true;
+  if (modifiers.shiftKey && !isEdgeHandle(handle)) return true;
+  return false;
+}
+
 function anchoredResize(handle: ResizeHandle, s: Bounds, px: number, py: number): Bounds {
   const L = s.x;
   const T = s.y;
@@ -273,7 +284,10 @@ export function computeResizedBounds(
   } else if (altKey) {
     out = altCenterResize(handle, startBounds, px, py);
   } else if (shiftKey) {
-    out = shiftAnchoredResize(handle, startBounds, px, py);
+    // Shift alone: one-axis / opposite-side anchored on edges; proportional on corners.
+    out = isEdgeHandle(handle)
+      ? anchoredResize(handle, startBounds, px, py)
+      : shiftAnchoredResize(handle, startBounds, px, py);
   } else {
     out = anchoredResize(handle, startBounds, px, py);
   }

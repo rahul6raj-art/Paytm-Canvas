@@ -133,25 +133,25 @@ export function ImportWebModal() {
       }}
     >
       <div
-        className="relative flex w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-white/[0.12] bg-gradient-to-b from-[#1e1e22] to-[#141416] shadow-2xl"
+        className="relative flex w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-app-border bg-gradient-to-b from-[#1e1e22] to-[#141416] shadow-2xl"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="h-1 w-full bg-gradient-to-r from-sky-500 via-cyan-400 to-emerald-400" />
-        <div className="flex items-start justify-between gap-3 border-b border-white/[0.06] px-5 py-4">
+        <div className="flex items-start justify-between gap-3 border-b border-app-border-subtle px-5 py-4">
           <div className="flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/[0.06] text-sky-300">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-app-hover text-sky-300">
               <Globe className="h-5 w-5" strokeWidth={1.75} />
             </span>
             <div>
               <h2 className="text-[15px] font-semibold text-white">Import from Web</h2>
-              <p className="text-[12px] text-[#9a9a9a]">Capture a live site or HTML into the canvas.</p>
+              <p className="text-[12px] text-app-muted">Capture a live site or HTML into the canvas.</p>
             </div>
           </div>
           <button
             type="button"
             disabled={loading}
             onClick={() => closeImportWebModal()}
-            className="rounded-lg p-1.5 text-[#9a9a9a] transition-colors hover:bg-white/[0.06] hover:text-white disabled:opacity-40"
+            className="rounded-lg p-1.5 text-app-muted transition-colors hover:bg-app-hover hover:text-white disabled:opacity-40"
             aria-label="Close"
           >
             <X className="h-5 w-5" strokeWidth={1.75} />
@@ -174,15 +174,15 @@ export function ImportWebModal() {
                       key={step.id}
                       className={cn(
                         "flex items-center gap-2 rounded-lg px-3 py-2 text-[12px]",
-                        active && "bg-white/[0.08] text-white",
+                        active && "bg-app-hover text-white",
                         done && !active && "text-emerald-400",
-                        !done && !active && "text-[#6b6b6b]",
+                        !done && !active && "text-app-subtle",
                       )}
                     >
                       <span
                         className={cn(
                           "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold",
-                          done ? "bg-emerald-500/20 text-emerald-400" : active ? "bg-sky-500/30 text-sky-300" : "bg-white/[0.06]",
+                          done ? "bg-emerald-500/20 text-emerald-400" : active ? "bg-sky-500/30 text-sky-300" : "bg-app-hover",
                         )}
                       >
                         {done ? "✓" : i + 1}
@@ -196,7 +196,7 @@ export function ImportWebModal() {
           ) : (
             <div className="space-y-4">
               <label className="block">
-                <span className="mb-1.5 block text-[11px] font-medium uppercase tracking-wide text-[#9a9a9a]">
+                <span className="mb-1.5 block text-[11px] font-medium uppercase tracking-wide text-app-muted">
                   Website URL
                 </span>
                 <input
@@ -204,12 +204,12 @@ export function ImportWebModal() {
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   placeholder="https://example.com"
-                  className="h-10 w-full rounded-lg border border-white/[0.1] bg-white/[0.04] px-3 text-[13px] text-white outline-none ring-sky-500/30 placeholder:text-[#6b6b6b] focus:border-sky-500/50 focus:ring-2"
+                  className="h-10 w-full rounded-lg border border-app-border bg-app-hover px-3 text-[13px] text-white outline-none ring-sky-500/30 placeholder:text-app-subtle focus:border-sky-500/50 focus:ring-2"
                 />
               </label>
 
               <label className="block">
-                <span className="mb-1.5 block text-[11px] font-medium uppercase tracking-wide text-[#9a9a9a]">
+                <span className="mb-1.5 block text-[11px] font-medium uppercase tracking-wide text-app-muted">
                   Raw HTML (optional)
                 </span>
                 <textarea
@@ -217,12 +217,12 @@ export function ImportWebModal() {
                   onChange={(e) => setHtml(e.target.value)}
                   rows={4}
                   placeholder="<html>…</html>"
-                  className="w-full resize-y rounded-lg border border-white/[0.1] bg-white/[0.04] px-3 py-2 font-mono text-[12px] text-white outline-none ring-sky-500/30 placeholder:text-[#6b6b6b] focus:border-sky-500/50 focus:ring-2"
+                  className="w-full resize-y rounded-lg border border-app-border bg-app-hover px-3 py-2 font-mono text-[12px] text-white outline-none ring-sky-500/30 placeholder:text-app-subtle focus:border-sky-500/50 focus:ring-2"
                 />
               </label>
 
               <fieldset>
-                <legend className="mb-2 text-[11px] font-medium uppercase tracking-wide text-[#9a9a9a]">
+                <legend className="mb-2 text-[11px] font-medium uppercase tracking-wide text-app-muted">
                   Import mode
                 </legend>
                 <div className="space-y-2">
@@ -233,7 +233,7 @@ export function ImportWebModal() {
                         "flex cursor-pointer gap-3 rounded-lg border px-3 py-2.5 transition-colors",
                         mode === m.id
                           ? "border-sky-500/50 bg-sky-500/10"
-                          : "border-white/[0.08] bg-white/[0.02] hover:border-white/[0.14]",
+                          : "border-app-border bg-white/[0.02] hover:border-white/[0.14]",
                       )}
                     >
                       <input
@@ -245,7 +245,7 @@ export function ImportWebModal() {
                       />
                       <span>
                         <span className="block text-[13px] font-medium text-white">{m.label}</span>
-                        <span className="text-[11px] text-[#9a9a9a]">{m.hint}</span>
+                        <span className="text-[11px] text-app-muted">{m.hint}</span>
                       </span>
                     </label>
                   ))}
@@ -253,7 +253,7 @@ export function ImportWebModal() {
               </fieldset>
 
               <fieldset>
-                <legend className="mb-2 text-[11px] font-medium uppercase tracking-wide text-[#9a9a9a]">
+                <legend className="mb-2 text-[11px] font-medium uppercase tracking-wide text-app-muted">
                   Viewport
                 </legend>
                 <div className="flex flex-wrap gap-2">
@@ -273,7 +273,7 @@ export function ImportWebModal() {
                         "rounded-lg border px-2.5 py-1.5 text-[11px] font-medium transition-colors",
                         viewportPreset === id
                           ? "border-sky-500/50 bg-sky-500/15 text-sky-200"
-                          : "border-white/[0.1] text-[#9a9a9a] hover:border-white/[0.2]",
+                          : "border-app-border text-app-muted hover:border-white/[0.2]",
                       )}
                     >
                       {label}
@@ -288,17 +288,17 @@ export function ImportWebModal() {
                       max={4096}
                       value={customW}
                       onChange={(e) => setCustomW(Number(e.target.value))}
-                      className="h-9 w-24 rounded-lg border border-white/[0.1] bg-white/[0.04] px-2 text-[12px] text-white"
+                      className="h-9 w-24 rounded-lg border border-app-border bg-app-hover px-2 text-[12px] text-white"
                       aria-label="Viewport width"
                     />
-                    <span className="self-center text-[#6b6b6b]">×</span>
+                    <span className="self-center text-app-subtle">×</span>
                     <input
                       type="number"
                       min={480}
                       max={4096}
                       value={customH}
                       onChange={(e) => setCustomH(Number(e.target.value))}
-                      className="h-9 w-24 rounded-lg border border-white/[0.1] bg-white/[0.04] px-2 text-[12px] text-white"
+                      className="h-9 w-24 rounded-lg border border-app-border bg-app-hover px-2 text-[12px] text-white"
                       aria-label="Viewport height"
                     />
                   </div>
@@ -314,12 +314,12 @@ export function ImportWebModal() {
           )}
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-white/[0.06] px-5 py-4">
+        <div className="flex justify-end gap-2 border-t border-app-border-subtle px-5 py-4">
           <button
             type="button"
             disabled={loading}
             onClick={() => closeImportWebModal()}
-            className="rounded-lg px-4 py-2 text-[13px] font-medium text-[#9a9a9a] hover:bg-white/[0.06] hover:text-white disabled:opacity-40"
+            className="rounded-lg px-4 py-2 text-[13px] font-medium text-app-muted hover:bg-app-hover hover:text-white disabled:opacity-40"
           >
             Cancel
           </button>

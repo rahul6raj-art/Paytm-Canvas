@@ -71,7 +71,7 @@ export function PageTabsBar() {
         title="Previous page (⌘⌥↑)"
         aria-label="Previous page"
         onClick={() => cycleActivePage(-1)}
-        className="flex h-full w-6 shrink-0 items-center justify-center text-[#7a7a7a] transition-colors hover:bg-white/[0.06] hover:text-white"
+        className="flex h-full w-6 shrink-0 items-center justify-center text-app-subtle transition-colors hover:bg-app-hover hover:text-app-fg"
       >
         <ChevronLeft className="h-3.5 w-3.5" strokeWidth={2} />
       </button>
@@ -93,8 +93,8 @@ export function PageTabsBar() {
             <div
               key={pageId}
               className={cn(
-                "group relative flex h-full shrink-0 items-stretch border-r border-white/[0.06]",
-                active ? "bg-[#383838]" : "bg-[#2c2c2c] hover:bg-[#333333]",
+                "group relative flex h-full shrink-0 items-stretch border-r border-app-border-subtle",
+                active ? "bg-app-inset" : "bg-app-panel hover:bg-[#333333]",
               )}
             >
               {renaming ? (
@@ -107,7 +107,7 @@ export function PageTabsBar() {
                     if (e.key === "Enter") commitRename();
                     if (e.key === "Escape") setRenameId(null);
                   }}
-                  className="h-full w-[min(140px,28vw)] min-w-[72px] border-0 bg-[#1a1a1a] px-2.5 text-[11px] font-medium text-white outline-none ring-1 ring-inset ring-accent"
+                  className="h-full w-[min(140px,28vw)] min-w-[72px] border-0 bg-app-field px-2.5 text-[11px] font-medium text-white outline-none ring-1 ring-inset ring-accent"
                 />
               ) : (
                 <button
@@ -132,7 +132,7 @@ export function PageTabsBar() {
                   }}
                   className={cn(
                     "flex h-full max-w-[180px] items-center px-2.5 text-[11px] font-medium transition-colors",
-                    active ? "text-white" : "text-[#a3a3a3] group-hover:text-[#e6e6e6]",
+                    active ? "text-white" : "text-[#a3a3a3] group-hover:text-app-fg",
                   )}
                 >
                   <span className="truncate">{page.name}</span>
@@ -148,7 +148,7 @@ export function PageTabsBar() {
         title="Add page"
         aria-label="Add page"
         onClick={() => addPage()}
-        className="flex h-full shrink-0 items-center gap-1 border-l border-white/[0.06] px-2 text-[11px] font-medium text-[#8c8c8c] transition-colors hover:bg-white/[0.06] hover:text-white"
+        className="flex h-full shrink-0 items-center gap-1 border-l border-app-border-subtle px-2 text-[11px] font-medium text-app-subtle transition-colors hover:bg-app-hover hover:text-app-fg"
       >
         <Plus className="h-3.5 w-3.5" strokeWidth={2.25} />
       </button>
@@ -158,20 +158,20 @@ export function PageTabsBar() {
         title="Next page (⌘⌥↓)"
         aria-label="Next page"
         onClick={() => cycleActivePage(1)}
-        className="flex h-full w-6 shrink-0 items-center justify-center text-[#7a7a7a] transition-colors hover:bg-white/[0.06] hover:text-white"
+        className="flex h-full w-6 shrink-0 items-center justify-center text-app-subtle transition-colors hover:bg-app-hover hover:text-app-fg"
       >
         <ChevronRight className="h-3.5 w-3.5" strokeWidth={2} />
       </button>
 
       {contextPageId && pages[contextPageId] ? (
         <div
-          className="fixed z-[80] min-w-[160px] rounded-md border border-white/[0.1] bg-[#1e1e1e] py-1 shadow-xl"
+          className="fixed z-[80] min-w-[160px] rounded-md border border-app-border bg-app-surface py-1 shadow-xl"
           style={{ left: contextPos.x, top: contextPos.y }}
           onPointerDown={(e) => e.stopPropagation()}
         >
           <button
             type="button"
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-[#ececec] hover:bg-white/[0.08]"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-app-fg hover:bg-app-hover"
             onClick={() => {
               setRenameId(contextPageId);
               setDraftName(pages[contextPageId]!.name);
@@ -182,7 +182,7 @@ export function PageTabsBar() {
           </button>
           <button
             type="button"
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-[#ececec] hover:bg-white/[0.08]"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-app-fg hover:bg-app-hover"
             onClick={() => {
               duplicatePage(contextPageId);
               setContextPageId(null);

@@ -23,7 +23,7 @@ export function LibraryColorPickerMenu({ activeTokenId, onPick }: LibraryColorPi
 
   if (colors.length === 0) {
     return (
-      <p className="px-3 py-4 text-center text-[11px] leading-snug text-[#8c8c8c]">
+      <p className="px-3 py-4 text-center text-[11px] leading-snug text-app-subtle">
         No colors in the library yet. Open the Library panel to add a palette or create colors.
       </p>
     );
@@ -31,7 +31,7 @@ export function LibraryColorPickerMenu({ activeTokenId, onPick }: LibraryColorPi
 
   return (
     <div className="p-2">
-      <p className="mb-2 px-0.5 text-[11px] font-medium text-[#8c8c8c]">Choose library color</p>
+      <p className="mb-2 px-0.5 text-[11px] font-medium text-app-subtle">Choose library color</p>
       <div className="grid grid-cols-5 gap-1.5">
         {colors.map((token) => {
           const v = token.value;
@@ -59,7 +59,7 @@ export function LibraryColorPickerMenu({ activeTokenId, onPick }: LibraryColorPi
           );
         })}
       </div>
-      <ul className="thin-scroll mt-2 max-h-48 space-y-0.5 overflow-y-auto border-t border-white/[0.06] pt-2">
+      <ul className="thin-scroll mt-2 max-h-48 space-y-0.5 overflow-y-auto border-t border-app-border-subtle pt-2">
         {colors.map((token) => {
           const v = token.value;
           if (!isColorValue(v)) return null;
@@ -70,12 +70,12 @@ export function LibraryColorPickerMenu({ activeTokenId, onPick }: LibraryColorPi
                 type="button"
                 onClick={() => onPick(token.id)}
                 className={cn(
-                  "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors hover:bg-white/[0.06]",
+                  "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors hover:bg-app-hover",
                   active && "bg-accent/10 text-accent",
                 )}
               >
                 <span
-                  className="h-4 w-4 shrink-0 rounded border border-white/[0.12]"
+                  className="h-4 w-4 shrink-0 rounded border border-app-border"
                   style={{ backgroundColor: v.hex, opacity: v.opacity ?? 1 }}
                   aria-hidden
                 />

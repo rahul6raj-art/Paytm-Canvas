@@ -18,6 +18,42 @@ export type ShapeModifiers = {
 };
 
 const MIN = RESIZE_MIN_DIMENSION;
+const SNAP_45_RAD = Math.PI / 4;
+
+/** Snap the drag endpoint to 0°, 45°, 90°, … (Figma Shift while drawing lines). */
+export function constrainLineEndpointTo45Degrees(start: Point, end: Point): Point {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) return { ...end };
+  const angle = Math.atan2(dy, dx);
+  const snapped = Math.round(angle / SNAP_45_RAD) * SNAP_45_RAD;
+  return {
+    x: start.x + Math.cos(snapped) * len,
+    y: start.y + Math.sin(snapped) * len,
+  };
+}
+
+/**
+ * Resolve line endpoints from a drag gesture.
+ * Shift snaps angle; Option/Alt uses the press point as the line center (Figma shape modifiers).
+ */
+export function resolveLineEndpoints(
+  start: Point,
+  end: Point,
+  modifiers: ShapeModifiers,
+): { start: Point; end: Point } {
+  const endPt = modifiers.shiftKey ? constrainLineEndpointTo45Degrees(start, end) : end;
+  if (modifiers.altKey) {
+    const dx = endPt.x - start.x;
+    const dy = endPt.y - start.y;
+    return {
+      start: { x: start.x - dx, y: start.y - dy },
+      end: { x: start.x + dx, y: start.y + dy },
+    };
+  }
+  return { start, end: endPt };
+}
 
 /**
  * Compute axis-aligned bounds from a drag gesture.
@@ -97,23 +133,15 @@ export function lineGeometryFromDrag(
   end: Point,
   modifiers: ShapeModifiers,
 ): { x: number; y: number; width: number; height: number; rotation: number } {
-  let ex = end.x;
-  let ey = end.y;
-  if (modifiers.shiftKey) {
-    const dx = ex - start.x;
-    const dy = ey - start.y;
-    if (Math.abs(dx) > Math.abs(dy)) ey = start.y;
-    else ex = start.x;
-  }
-
-  const dx = ex - start.x;
-  const dy = ey - start.y;
+  const { start: s, end: e } = resolveLineEndpoints(start, end, modifiers);
+  const dx = e.x - s.x;
+  const dy = e.y - s.y;
   const length = Math.max(MIN, Math.hypot(dx, dy));
   const rotation = (Math.atan2(dy, dx) * 180) / Math.PI;
   const height = 8;
   return {
-    x: start.x,
-    y: start.y - height / 2,
+    x: s.x,
+    y: s.y - height / 2,
     width: length,
     height,
     rotation,
@@ -183,7 +211,7 @@ export function createShapeNode(
       fillEnabled: false,
       fill: "transparent",
       fillOpacity: 0,
-      strokeColor: style?.strokeColor ?? DEFAULT_SHAPE_FILL,
+      strokeColor: style?.strokeColor ?? DEFAULT_SHAPE_STROKE,
       strokeWidth: style?.strokeWidth ?? 3,
     };
   }

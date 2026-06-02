@@ -1,6 +1,6 @@
 "use client";
 
-import { Figma, Globe, X } from "lucide-react";
+import { Code2, Figma, Globe, X } from "lucide-react";
 import { useEditorStore } from "@/stores/useEditorStore";
 
 export function ImportHub() {
@@ -8,6 +8,7 @@ export function ImportHub() {
   const closeImportHub = useEditorStore((s) => s.closeImportHub);
   const openImportWebModal = useEditorStore((s) => s.openImportWebModal);
   const openImportFigmaModal = useEditorStore((s) => s.openImportFigmaModal);
+  const openCodeRoundTrip = useEditorStore((s) => s.openCodeRoundTrip);
 
   if (!open) return null;
 
@@ -44,13 +45,13 @@ export function ImportHub() {
           </button>
         </div>
 
-        <div className="grid gap-4 p-6 sm:grid-cols-2">
+        <div className="grid gap-4 p-6 sm:grid-cols-2 lg:grid-cols-3">
           <button
             type="button"
             onClick={() => openImportFigmaModal()}
             className="group flex flex-col items-start gap-3 rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-6 text-left shadow-sm transition-all hover:border-slate-300 hover:shadow-md"
           >
-            <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#1e1e1e] text-white">
+            <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-app-surface text-white">
               <Figma className="h-6 w-6" strokeWidth={1.75} />
             </span>
             <div>
@@ -73,6 +74,22 @@ export function ImportHub() {
               <h3 className="text-[15px] font-semibold text-slate-900">Import from Web</h3>
               <p className="mt-1 text-[13px] leading-relaxed text-slate-500">
                 Capture website elements into Paytm Canvas
+              </p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => openCodeRoundTrip("import")}
+            className="group flex flex-col items-start gap-3 rounded-xl border border-violet-200 bg-gradient-to-br from-violet-50 to-white p-6 text-left shadow-sm transition-all hover:border-violet-300 hover:shadow-md"
+          >
+            <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-violet-600 text-white">
+              <Code2 className="h-6 w-6" strokeWidth={1.75} />
+            </span>
+            <div>
+              <h3 className="text-[15px] font-semibold text-slate-900">Design ↔ Code</h3>
+              <p className="mt-1 text-[13px] leading-relaxed text-slate-500">
+                Capture live React from Storybook, edit on canvas, export code
               </p>
             </div>
           </button>

@@ -25,7 +25,7 @@ export function SvgHoverOutline() {
   if (!node?.visible || node.locked) return null;
 
   const ringColor =
-    editorMode === "inspect" ? "rgba(244,114,182,0.75)" : CANVAS_VISUAL.hoverOutline;
+    editorMode === "inspect" ? CANVAS_VISUAL.inspectHover : CANVAS_VISUAL.hoverOutline;
 
   const oriented = nodeNeedsOrientedOverlay(hoveredCanvasId, nodes);
   const worldMatrix = oriented ? getNodeWorldMatrix(hoveredCanvasId, nodes) : null;

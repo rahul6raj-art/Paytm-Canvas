@@ -100,11 +100,17 @@ function relativeBox(
   return { x: b.x - parentBox.x, y: b.y - parentBox.y, w: b.w, h: b.h };
 }
 
-function cornerRadius(node: FigmaApiNode): number | undefined {
-  if (node.cornerRadius != null) return node.cornerRadius;
-  const r = node.rectangleCornerRadii;
-  if (r?.length) return Math.max(...r);
-  return undefined;
+function cornerRadiusFields(
+  node: FigmaApiNode,
+): Pick<import("@/stores/useEditorStore").EditorNode, "cornerRadius" | "cornerRadii"> {
+  const corners = node.rectangleCornerRadii;
+  if (corners?.length === 4) {
+    const [tl, tr, br, bl] = corners;
+    if (tl === tr && tr === br && br === bl) return { cornerRadius: tl };
+    return { cornerRadii: [tl, tr, br, bl] };
+  }
+  if (node.cornerRadius != null) return { cornerRadius: node.cornerRadius };
+  return {};
 }
 
 function strokeFromNode(node: FigmaApiNode): Partial<EditorNode> {
@@ -194,7 +200,7 @@ function convertNode(
     ...strokeFromNode(node),
     ...autoLayoutFromFigmaNode(node),
     ...constraintsFromFigma(node),
-    cornerRadius: cornerRadius(node),
+    ...cornerRadiusFields(node),
     opacity: node.opacity,
     effects: effectsFromApi(node.effects as unknown[] | undefined),
     clipChildren: node.clipsContent !== false && (kind === "frame" || kind === "group"),

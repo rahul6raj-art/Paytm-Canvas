@@ -48,7 +48,7 @@ export function DocumentTitleField() {
         type="text"
         value={draft}
         aria-label="Page title"
-        className="min-w-0 flex-1 rounded border border-[rgba(13,153,255,0.45)] bg-[#1a1a1a] px-1.5 py-0.5 text-ui-sm font-medium leading-tight text-[#ececec] outline-none ring-1 ring-[rgba(13,153,255,0.25)]"
+        className="min-w-0 flex-1 rounded border border-[rgba(13,153,255,0.45)] bg-app-field px-1.5 py-0.5 text-ui-sm font-medium leading-tight text-app-fg outline-none ring-1 ring-[rgba(13,153,255,0.25)]"
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => {
@@ -75,8 +75,8 @@ export function DocumentTitleField() {
         setEditing(true);
       }}
       className={cn(
-        "min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-ui-sm font-medium leading-tight text-[#ececec]",
-        "transition-colors hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
+        "min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-ui-sm font-medium leading-tight text-app-fg",
+        "transition-colors hover:bg-app-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
       )}
     >
       {displayName}

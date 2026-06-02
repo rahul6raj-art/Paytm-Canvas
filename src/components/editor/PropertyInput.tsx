@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { appFieldClass } from "@/lib/appFieldStyles";
 import { cn } from "@/lib/utils";
 
-const baseField =
-  "h-6 min-h-[24px] w-full rounded border border-white/[0.1] bg-[#262626] px-1.5 py-0 text-[12px] leading-4 text-[#f5f5f5] placeholder:text-[#6b6b6b] focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-45";
+const baseField = appFieldClass;
 
 type PropertyNumberInputProps = {
   label: string;
@@ -105,7 +105,7 @@ export function PropertyNumberInput({
 
   return (
     <div>
-      <div className="mb-0.5 text-[11px] font-medium leading-4 text-[#8c8c8c]">{label}</div>
+      <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">{label}</div>
       <input
         type="text"
         inputMode="decimal"
@@ -166,7 +166,7 @@ export function PropertyTextInput({
 
   return (
     <div>
-      <div className="mb-0.5 text-[11px] font-medium leading-4 text-[#8c8c8c]">{label}</div>
+      <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">{label}</div>
       <input
         type="text"
         disabled={disabled}

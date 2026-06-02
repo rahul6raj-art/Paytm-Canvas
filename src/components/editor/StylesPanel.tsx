@@ -30,10 +30,10 @@ function EmptyStyleHint({
   body: string;
 }) {
   return (
-    <div className="mx-1 rounded-lg border border-dashed border-white/[0.08] bg-white/[0.02] px-3 py-5 text-center">
+    <div className="mx-1 rounded-lg border border-dashed border-app-border bg-white/[0.02] px-3 py-5 text-center">
       <Icon className="mx-auto mb-2 h-7 w-7 text-[#4a4a4a]" strokeWidth={1.25} />
-      <p className="text-[12px] font-medium text-[#9a9a9a]">{title}</p>
-      <p className="mt-1 text-[11px] leading-relaxed text-[#6b6b6b]">{body}</p>
+      <p className="text-[12px] font-medium text-app-muted">{title}</p>
+      <p className="mt-1 text-[11px] leading-relaxed text-app-subtle">{body}</p>
     </div>
   );
 }
@@ -66,7 +66,7 @@ function TokenPreview({ token }: { token: DesignToken }) {
     const op = v.opacity ?? 1;
     return (
       <div
-        className="h-8 w-full rounded border border-white/[0.12] shadow-inner"
+        className="h-8 w-full rounded border border-app-border shadow-inner"
         style={{ backgroundColor: v.hex, opacity: op }}
         title={tokenValueSummary(token)}
       />
@@ -75,7 +75,7 @@ function TokenPreview({ token }: { token: DesignToken }) {
   if (token.type === "gradient" && isGradientValue(token.value)) {
     return (
       <div
-        className="h-8 w-full rounded border border-white/[0.12] shadow-inner"
+        className="h-8 w-full rounded border border-app-border shadow-inner"
         style={{
           background: fillPaintCss({
             fillType: "gradient",
@@ -92,11 +92,11 @@ function TokenPreview({ token }: { token: DesignToken }) {
     const v = token.value;
     return (
       <div
-        className="flex h-8 w-full items-center justify-center overflow-hidden rounded border border-white/[0.12] bg-[#1e1e1e] px-1"
+        className="flex h-8 w-full items-center justify-center overflow-hidden rounded border border-app-border bg-app-surface px-1"
         title={tokenValueSummary(token)}
       >
         <span
-          className="truncate text-[11px] text-[#ececec]"
+          className="truncate text-[11px] text-app-fg"
           style={{
             fontFamily: v.fontFamily,
             fontSize: Math.min(v.fontSize, 14),
@@ -113,9 +113,9 @@ function TokenPreview({ token }: { token: DesignToken }) {
   if (token.type === "spacing" && isSpacingValue(token.value)) {
     const px = Math.max(0, token.value.value);
     return (
-      <div className="flex h-8 w-full items-center justify-center rounded border border-white/[0.12] bg-[#1e1e1e] px-2">
+      <div className="flex h-8 w-full items-center justify-center rounded border border-app-border bg-app-surface px-2">
         <div className="h-2 flex-1 rounded bg-accent/40" style={{ width: `${Math.min(px, 72)}px`, maxWidth: "100%" }} />
-        <span className="ml-2 shrink-0 font-mono text-[10px] text-[#9a9a9a]">{px}px</span>
+        <span className="ml-2 shrink-0 font-mono text-[10px] text-app-muted">{px}px</span>
       </div>
     );
   }
@@ -124,9 +124,9 @@ function TokenPreview({ token }: { token: DesignToken }) {
     const er = buildNodeEffectRenderStyle(v.effects, v.shadow?.trim() || undefined);
     const fallbackShadow = !er.boxShadow && !er.filter ? effectValueToCssShadow(v) : undefined;
     return (
-      <div className="flex h-8 w-full items-center justify-center rounded border border-white/[0.12] bg-[#262626]">
+      <div className="flex h-8 w-full items-center justify-center rounded border border-app-border bg-app-field">
         <div
-          className="h-4 w-10 rounded-sm bg-white/[0.08]"
+          className="h-4 w-10 rounded-sm bg-app-hover"
           style={{
             boxShadow: er.boxShadow ?? fallbackShadow,
             filter: er.filter || undefined,
@@ -136,7 +136,7 @@ function TokenPreview({ token }: { token: DesignToken }) {
       </div>
     );
   }
-  return <div className="h-8 w-full rounded border border-dashed border-white/[0.12] bg-[#1a1a1a]" />;
+  return <div className="h-8 w-full rounded border border-dashed border-app-border bg-app-inset" />;
 }
 
 function TokenRow({ token }: { token: DesignToken }) {
@@ -146,9 +146,9 @@ function TokenRow({ token }: { token: DesignToken }) {
   const canApply = selectedIds.length > 0;
 
   return (
-    <li className="rounded-md border border-white/[0.08] bg-[#2c2c2c] p-2">
+    <li className="rounded-md border border-app-border bg-app-panel p-2">
       <TokenPreview token={token} />
-      <p className="mt-1.5 truncate text-[12px] font-medium text-[#ececec]" title={token.name}>
+      <p className="mt-1.5 truncate text-[12px] font-medium text-app-fg" title={token.name}>
         {token.name}
       </p>
       <p className="truncate font-mono text-[10px] text-[#737373]" title={tokenValueSummary(token)}>
@@ -163,7 +163,7 @@ function TokenRow({ token }: { token: DesignToken }) {
             "flex-1 rounded border py-1 text-[10px] font-semibold uppercase tracking-wide transition-colors",
             canApply
               ? "border-sky-500/40 bg-sky-500/15 text-sky-100 hover:bg-sky-500/25"
-              : "cursor-not-allowed border-white/[0.06] text-[#5c5c5c]",
+              : "cursor-not-allowed border-app-border-subtle text-app-subtle",
           )}
         >
           Apply
@@ -183,7 +183,7 @@ function TokenRow({ token }: { token: DesignToken }) {
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="mb-3">
-      <h3 className="mb-1.5 px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-[#6b6b6b]">
+      <h3 className="mb-1.5 px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-app-subtle">
         {title}
       </h3>
       {children}
@@ -219,12 +219,12 @@ export function StylesPanel() {
 
   return (
     <div className="thin-scroll flex min-h-0 flex-1 flex-col overflow-y-auto p-2">
-      <div className="mb-3 rounded-lg border border-white/[0.08] bg-[#262626] px-3 py-2.5">
+      <div className="mb-3 rounded-lg border border-app-border bg-app-field px-3 py-2.5">
         <div className="flex items-center gap-2">
           <Library className="h-4 w-4 text-accent" strokeWidth={1.75} />
           <div>
-            <p className="text-[12px] font-semibold text-[#ececec]">Design system</p>
-            <p className="text-[10px] text-[#8c8c8c]">Reusable colors, type, and effects</p>
+            <p className="text-[12px] font-semibold text-app-fg">Design system</p>
+            <p className="text-[10px] text-app-subtle">Reusable colors, type, and effects</p>
           </div>
         </div>
       </div>
@@ -246,19 +246,19 @@ export function StylesPanel() {
             </button>
           </div>
         ) : (
-          <ColorLibrary variant="panel" className="mb-3 rounded-md border border-white/[0.08] bg-[#1e1e1e] p-2" />
+          <ColorLibrary variant="panel" className="mb-3 rounded-md border border-app-border bg-app-surface p-2" />
         )}
 
-        <div className="flex flex-col gap-2 rounded-md border border-white/[0.08] bg-[#262626] p-2">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-[#6b6b6b]">
+        <div className="flex flex-col gap-2 rounded-md border border-app-border bg-app-field p-2">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-app-subtle">
             Create color
           </p>
-          <label className="text-[10px] font-medium text-[#8c8c8c]">
+          <label className="text-[10px] font-medium text-app-subtle">
             Name
             <input
               value={colorName}
               onChange={(e) => setColorName(e.target.value)}
-              className="mt-0.5 w-full rounded border border-white/[0.1] bg-[#1e1e1e] px-1.5 py-1 text-[12px] text-[#ececec]"
+              className="mt-0.5 w-full rounded border border-app-border bg-app-surface px-1.5 py-1 text-[12px] text-app-fg"
             />
           </label>
           <ColorInput hex={colorHex} onCommitHex={setColorHex} />
@@ -266,7 +266,7 @@ export function StylesPanel() {
             <button
               type="button"
               onClick={addColor}
-              className="flex-1 rounded border border-white/[0.12] bg-white/[0.06] py-1.5 text-[11px] font-medium text-white hover:bg-white/[0.1]"
+              className="flex-1 rounded border border-app-border bg-app-hover py-1.5 text-[11px] font-medium text-white hover:bg-white/[0.1]"
             >
               Add to library
             </button>
@@ -274,7 +274,7 @@ export function StylesPanel() {
               type="button"
               disabled={selectedIds.length === 0}
               onClick={() => createColorTokenFromSelection(colorName.trim() || undefined)}
-              className="flex-1 rounded border border-white/[0.12] bg-white/[0.06] py-1.5 text-[11px] font-medium text-white hover:bg-white/[0.1] disabled:opacity-40"
+              className="flex-1 rounded border border-app-border bg-app-hover py-1.5 text-[11px] font-medium text-white hover:bg-white/[0.1] disabled:opacity-40"
               title="Save the selected layer's fill as a library color"
             >
               From selection
@@ -284,7 +284,7 @@ export function StylesPanel() {
             <button
               type="button"
               onClick={() => seedDesignSystemColorPalette()}
-              className="text-[10px] font-medium text-[#8c8c8c] underline-offset-2 hover:text-[#d4d4d4] hover:underline"
+              className="text-[10px] font-medium text-app-subtle underline-offset-2 hover:text-app-fg hover:underline"
             >
               + Add more starter colors
             </button>
@@ -301,29 +301,29 @@ export function StylesPanel() {
       </Section>
 
       <Section title="New spacing token">
-        <div className="flex flex-col gap-1.5 rounded-md border border-white/[0.08] bg-[#262626] p-2">
-          <label className="text-[10px] font-medium text-[#8c8c8c]">
+        <div className="flex flex-col gap-1.5 rounded-md border border-app-border bg-app-field p-2">
+          <label className="text-[10px] font-medium text-app-subtle">
             Name
             <input
               value={spaceName}
               onChange={(e) => setSpaceName(e.target.value)}
-              className="mt-0.5 w-full rounded border border-white/[0.1] bg-[#1e1e1e] px-1.5 py-1 text-[12px] text-[#ececec]"
+              className="mt-0.5 w-full rounded border border-app-border bg-app-surface px-1.5 py-1 text-[12px] text-app-fg"
             />
           </label>
-          <label className="text-[10px] font-medium text-[#8c8c8c]">
+          <label className="text-[10px] font-medium text-app-subtle">
             Value (px)
             <input
               type="number"
               min={0}
               value={spaceVal}
               onChange={(e) => setSpaceVal(e.target.value)}
-              className="mt-0.5 w-full rounded border border-white/[0.1] bg-[#1e1e1e] px-1.5 py-1 text-[12px] text-[#ececec]"
+              className="mt-0.5 w-full rounded border border-app-border bg-app-surface px-1.5 py-1 text-[12px] text-app-fg"
             />
           </label>
           <button
             type="button"
             onClick={addSpacing}
-            className="rounded border border-white/[0.12] bg-white/[0.06] py-1.5 text-[11px] font-medium text-white hover:bg-white/[0.1]"
+            className="rounded border border-app-border bg-app-hover py-1.5 text-[11px] font-medium text-white hover:bg-white/[0.1]"
           >
             Add spacing token
           </button>

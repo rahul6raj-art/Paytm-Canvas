@@ -37,11 +37,11 @@ export function ColorLibrary({ variant = "panel", className }: ColorLibraryProps
   return (
     <div className={className}>
       <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="text-[11px] font-medium text-[#8c8c8c]">Color library</span>
+        <span className="text-[11px] font-medium text-app-subtle">Color library</span>
         {!canApply ? (
-          <span className="text-[10px] text-[#6b6b6b]">Select a layer</span>
+          <span className="text-[10px] text-app-subtle">Select a layer</span>
         ) : (
-          <span className="text-[10px] text-[#6b6b6b]">Click to apply</span>
+          <span className="text-[10px] text-app-subtle">Click to apply</span>
         )}
       </div>
       <div className={gridClass}>
@@ -81,7 +81,7 @@ export function ColorLibrary({ variant = "panel", className }: ColorLibraryProps
             </li>
           ))}
           {colors.length > 8 ? (
-            <li className="text-[10px] text-[#5c5c5c]">+{colors.length - 8} more in list below</li>
+            <li className="text-[10px] text-app-subtle">+{colors.length - 8} more in list below</li>
           ) : null}
         </ul>
       ) : null}

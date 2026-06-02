@@ -12,7 +12,8 @@ import {
   type EditorPageSnapshot,
 } from "@/lib/editorPages";
 import { DEFAULT_CANVAS_BACKGROUND } from "@/lib/canvasVisual";
-import type { EditorNode } from "@/stores/useEditorStore";
+import { repairNodeHierarchy } from "@/lib/editorGraph";
+import type { EditorNode, LayoutGuide } from "@/stores/useEditorStore";
 
 export type { EditorPage, EditorPageSnapshot };
 
@@ -48,6 +49,7 @@ export interface PaytmCraftDocument {
     panX: number;
     panY: number;
     showGrid: boolean;
+    showRulers?: boolean;
     backgroundColor?: string;
   };
 }
@@ -62,11 +64,14 @@ export interface EditorPersistSlice {
   zoom: number;
   pan: { x: number; y: number };
   showGrid: boolean;
+  showRulers: boolean;
   canvasBackgroundColor: string;
   comments: EditorComment[];
   pages: Record<string, EditorPage>;
   pageOrder: string[];
   activePageId: string;
+  /** Active page layout guides (mirrored from `pages[activePageId]`). */
+  layoutGuides?: LayoutGuide[];
 }
 
 export function wrapPersistSliceWithPages(
@@ -76,6 +81,7 @@ export function wrapPersistSliceWithPages(
     zoom: slice.zoom,
     pan: slice.pan,
     showGrid: slice.showGrid,
+    showRulers: slice.showRulers,
     canvasBackgroundColor: slice.canvasBackgroundColor,
   });
   const page: EditorPage = {
@@ -100,8 +106,10 @@ function sliceWithCapturedActivePage(slice: EditorPersistSlice): EditorPersistSl
     zoom: slice.zoom,
     pan: slice.pan,
     showGrid: slice.showGrid,
+    showRulers: slice.showRulers,
     canvasBackgroundColor: slice.canvasBackgroundColor,
     selectedIds: slice.selectedIds,
+    layoutGuides: slice.layoutGuides ?? slice.pages[slice.activePageId]?.layoutGuides ?? [],
   });
   return {
     ...slice,
@@ -123,6 +131,7 @@ export function serializePersistStable(slice: EditorPersistSlice): string {
     zoom: synced.zoom,
     pan: synced.pan,
     showGrid: synced.showGrid,
+    showRulers: synced.showRulers,
     canvasBackgroundColor: synced.canvasBackgroundColor,
     comments: synced.comments,
   });
@@ -148,6 +157,7 @@ export function editorStateToDocument(slice: EditorPersistSlice): PaytmCraftDocu
       panX: active.pan.x,
       panY: active.pan.y,
       showGrid: active.showGrid,
+      showRulers: active.showRulers,
       backgroundColor: active.canvasBackgroundColor,
     },
   };
@@ -177,14 +187,18 @@ export function documentToEditorPatch(doc: PaytmCraftDocument): EditorPersistSli
       zoom: activePage.zoom,
       pan: activePage.pan,
       showGrid: activePage.showGrid,
+      showRulers: activePage.showRulers,
       canvasBackgroundColor: activePage.canvasBackgroundColor,
+      layoutGuides: activePage.layoutGuides ?? [],
     };
   }
 
-  const pageMeta = initialPagesFromCanvas(doc.nodes, doc.childOrder, {
+  const repaired = repairNodeHierarchy(doc.nodes, doc.childOrder);
+  const pageMeta = initialPagesFromCanvas(repaired.nodes, repaired.childOrder, {
     zoom: doc.canvas?.zoom ?? 0.55,
     pan: { x: doc.canvas?.panX ?? 40, y: doc.canvas?.panY ?? 24 },
     showGrid: doc.canvas?.showGrid ?? true,
+    showRulers: doc.canvas?.showRulers ?? true,
     canvasBackgroundColor: doc.canvas?.backgroundColor ?? DEFAULT_CANVAS_BACKGROUND,
   });
   const legacyPage: EditorPage = {
@@ -196,13 +210,15 @@ export function documentToEditorPatch(doc: PaytmCraftDocument): EditorPersistSli
     pages: { ...pageMeta.pages, [pageMeta.activePageId]: legacyPage },
     pageOrder: pageMeta.pageOrder,
     activePageId: pageMeta.activePageId,
-    nodes: doc.nodes,
-    childOrder: doc.childOrder,
+    nodes: repaired.nodes,
+    childOrder: repaired.childOrder,
     selectedIds: doc.selectedIds ?? [],
     zoom: doc.canvas?.zoom ?? 0.55,
     pan: { x: doc.canvas?.panX ?? 40, y: doc.canvas?.panY ?? 24 },
     showGrid: doc.canvas?.showGrid ?? true,
+    showRulers: doc.canvas?.showRulers ?? true,
     canvasBackgroundColor: doc.canvas?.backgroundColor ?? DEFAULT_CANVAS_BACKGROUND,
+    layoutGuides: legacyPage.layoutGuides ?? [],
   };
 }
 

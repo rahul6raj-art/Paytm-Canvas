@@ -16,7 +16,7 @@ import {
 } from "./useAnchoredDropdown";
 
 const row =
-  "flex w-full items-center justify-between gap-3 px-2.5 py-1.5 text-left text-[12px] text-[#e6e6e6] hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35";
+  "flex w-full items-center justify-between gap-3 px-2.5 py-1.5 text-left text-[12px] text-app-fg hover:bg-app-hover disabled:cursor-not-allowed disabled:opacity-35";
 
 const OPS: { op: BooleanOperation; keys: string }[] = [
   { op: "union", keys: "⌘⌥U" },
@@ -56,10 +56,10 @@ export function BooleanToolbarDropdown() {
       <div
         ref={menuRef}
         role="menu"
-        className="fixed z-[100] min-w-[220px] rounded-md border border-white/[0.1] bg-[#1e1e1e] py-1 shadow-lg"
+        className="fixed z-[100] min-w-[220px] rounded-md border border-app-border bg-app-surface py-1 shadow-lg"
         style={{ left: position.left, top: position.top }}
       >
-        <div className="px-2.5 py-1 text-[9px] font-semibold uppercase tracking-wide text-[#6b6b6b]">
+        <div className="px-2.5 py-1 text-[9px] font-semibold uppercase tracking-wide text-app-subtle">
           Boolean
         </div>
         {OPS.map(({ op, keys }) => (
@@ -72,10 +72,10 @@ export function BooleanToolbarDropdown() {
             onClick={() => runOp(op)}
           >
             <span>{BOOLEAN_OPERATION_LABELS[op]}</span>
-            <span className="font-mono text-[10px] text-[#6b6b6b]">{keys}</span>
+            <span className="font-mono text-[10px] text-app-subtle">{keys}</span>
           </button>
         ))}
-        <div className="my-1 h-px bg-white/[0.08]" />
+        <div className="my-1 h-px bg-app-hover" />
         <button
           type="button"
           role="menuitem"
@@ -87,7 +87,7 @@ export function BooleanToolbarDropdown() {
           }}
         >
           <span>Flatten</span>
-          <span className="font-mono text-[10px] text-[#6b6b6b]">⌘⌥F</span>
+          <span className="font-mono text-[10px] text-app-subtle">⌘⌥F</span>
         </button>
         <button
           type="button"
@@ -101,7 +101,7 @@ export function BooleanToolbarDropdown() {
         >
           Edit object
         </button>
-        <div className="my-1 h-px bg-white/[0.08]" />
+        <div className="my-1 h-px bg-app-hover" />
         <button
           type="button"
           role="menuitem"
@@ -113,7 +113,7 @@ export function BooleanToolbarDropdown() {
           }}
         >
           <span>Use as mask</span>
-          <span className="font-mono text-[10px] text-[#6b6b6b]">⌘⌥M</span>
+          <span className="font-mono text-[10px] text-app-subtle">⌘⌥M</span>
         </button>
       </div>
     ) : null;
@@ -128,9 +128,9 @@ export function BooleanToolbarDropdown() {
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
           className={cn(
-            "flex h-8 items-center gap-1 rounded-md border border-transparent px-2 text-[#b8b8b8] transition-colors hover:border-white/[0.08] hover:bg-white/[0.06] hover:text-white",
-            open && "border-white/[0.12] bg-white/[0.06] text-white",
-            (canBoolean || isBoolGroup) && "text-[#c4c4c4]",
+            "flex h-8 items-center gap-1 rounded-md border border-transparent px-2 text-app-muted transition-colors hover:border-app-border hover:bg-app-hover hover:text-app-fg",
+            open && "border-app-border bg-app-hover text-white",
+            (canBoolean || isBoolGroup) && "text-app-muted",
           )}
         >
           <Combine className="h-4 w-4" strokeWidth={1.75} />

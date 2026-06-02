@@ -6,6 +6,9 @@ import {
   readLocalDocument,
   serializePersistStable,
 } from "@/lib/documentPersistence";
+import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
+import { needsNodeHierarchyRepair, repairNodeHierarchy } from "@/lib/editorGraph";
+import { editorPatchFromPage } from "@/lib/editorPages";
 import { getSyncProvider } from "@/lib/syncProviderSingleton";
 import { toPersistSlice, useEditorStore } from "@/stores/useEditorStore";
 
@@ -27,9 +30,11 @@ export function EditorDocumentPersistence() {
     let unsubStore: (() => void) | null = null;
     let unsubDoc: (() => void) | null = null;
 
+    const st = useEditorStore.getState();
+    const hasInMemoryDesign = (st.childOrder[EDITOR_ROOT_KEY] ?? []).length > 0;
     const localDoc = readLocalDocument();
-    if (localDoc) {
-      const st = useEditorStore.getState();
+    // Keep designs applied before navigation (e.g. React import from dashboard).
+    if (localDoc && !hasInMemoryDesign) {
       useEditorStore.setState({
         ...documentToEditorPatch(localDoc),
         documentHydrating: false,
@@ -38,10 +43,38 @@ export function EditorDocumentPersistence() {
         historyPast: [],
         historyFuture: [],
       });
-    } else {
+    } else if (!localDoc) {
       useEditorStore.getState().applySampleDocumentIfEmpty();
       useEditorStore.setState({ documentHydrating: false });
+    } else {
+      useEditorStore.setState({ documentHydrating: false });
     }
+
+    // Repair desynced trees (parentId vs childOrder) from older builds or partial updates.
+    const afterHydrate = useEditorStore.getState();
+    let pagesChanged = false;
+    const pages = { ...afterHydrate.pages };
+    for (const [pageId, page] of Object.entries(pages)) {
+      if (!needsNodeHierarchyRepair(page.nodes, page.childOrder)) continue;
+      pagesChanged = true;
+      const repaired = repairNodeHierarchy(page.nodes, page.childOrder);
+      pages[pageId] = { ...page, ...repaired };
+    }
+    if (pagesChanged) {
+      const active = pages[afterHydrate.activePageId]!;
+      useEditorStore.setState({
+        pages,
+        ...editorPatchFromPage(active),
+      });
+    }
+
+    // Always repair the active canvas once (idempotent) so render matches selection.
+    const live = useEditorStore.getState();
+    const liveRepaired = repairNodeHierarchy(live.nodes, live.childOrder);
+    if (needsNodeHierarchyRepair(live.nodes, live.childOrder)) {
+      useEditorStore.setState(liveRepaired);
+    }
+
     lastSavedRef.current = persistFingerprint(useEditorStore.getState());
 
     unsubStore = useEditorStore.subscribe((state, prev) => {

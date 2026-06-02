@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { cn } from "@/lib/utils";
 import { useEditorStore, type EditorNode } from "@/stores/useEditorStore";
 import {
   BOOLEAN_OPERATION_LABELS,
@@ -9,6 +10,8 @@ import {
   type BooleanOperation,
 } from "@/lib/booleanGeometry";
 import { svgSafeId } from "@/lib/svgMarkupCore";
+import { DEFAULT_SHAPE_FILL } from "@/lib/shapes/shapeModel";
+import { svgStrokePropsFromNode } from "@/lib/stroke";
 
 function BooleanBadge({ operation }: { operation: BooleanOperation }) {
   return (
@@ -43,7 +46,7 @@ export function BooleanGroupView({
       return {
         d: node.flattenedPathData,
         fillRule,
-        fill: node.fill ?? "#0d99ff",
+        fill: node.fill ?? DEFAULT_SHAPE_FILL,
       };
     }
     return buildCompositePathDForGroup(groupId, childIds, nodes, op);
@@ -100,7 +103,7 @@ export function BooleanGroupView({
     return (
       <>
         <svg
-          className="pointer-events-none absolute inset-0 overflow-visible"
+          className="absolute inset-0 overflow-visible"
           width={Math.max(1, node.width)}
           height={Math.max(1, node.height)}
           aria-hidden
@@ -112,6 +115,8 @@ export function BooleanGroupView({
             fillOpacity={node.fillOpacity ?? 1}
             stroke={node.strokeColor && (node.strokeWidth ?? 0) > 0 ? node.strokeColor : "none"}
             strokeWidth={node.strokeWidth ?? 0}
+            {...((node.strokeWidth ?? 0) > 0 ? svgStrokePropsFromNode(node) : {})}
+            pointerEvents="none"
           />
         </svg>
         <div className="pointer-events-none absolute inset-0 opacity-0" aria-hidden>
@@ -136,16 +141,19 @@ export function MaskGroupView({
   node,
   maskNode,
   contentTree,
-  maskPreview,
+  maskLayer,
 }: {
   groupId: string;
   node: EditorNode;
   maskNode: EditorNode | null;
   contentTree: React.ReactNode;
-  maskPreview?: React.ReactNode;
+  /** Mask shape layer (below content, still selectable). */
+  maskLayer?: React.ReactNode;
 }) {
   const nodes = useEditorStore((s) => s.nodes);
+  const selectedIds = useEditorStore((s) => s.selectedIds);
   const maskId = node.maskId;
+  const maskSelected = Boolean(maskId && selectedIds.includes(maskId));
   const safeId = svgSafeId(groupId);
   const clipId = `pc-mask-clip-${safeId}`;
 
@@ -170,21 +178,22 @@ export function MaskGroupView({
           </defs>
         </svg>
       ) : null}
-      <div
-        className="relative h-full w-full"
-        style={clipD ? { clipPath: `url(#${clipId})` } : undefined}
-      >
-        {contentTree}
+      <div className="relative h-full w-full">
+        {maskLayer ? (
+          <div
+            className={cn("absolute inset-0 z-0", !maskSelected && "opacity-30")}
+            data-mask-shape
+          >
+            {maskLayer}
+          </div>
+        ) : null}
+        <div
+          className="relative z-10 h-full w-full"
+          style={clipD ? { clipPath: `url(#${clipId})` } : undefined}
+        >
+          {contentTree}
+        </div>
       </div>
-      {maskPreview}
     </>
-  );
-}
-
-export function MaskPreviewOverlay({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="pointer-events-none absolute inset-0 opacity-30" aria-hidden>
-      {children}
-    </div>
   );
 }

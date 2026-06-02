@@ -1,22 +1,24 @@
 import type { EditorNode } from "@/stores/useEditorStore";
 import { pathToSvgD } from "@/lib/pathGeometry";
-import { editorNodeToShape, type ShapeModel, type StrokeStyle } from "./shapeModel";
-
-function strokeDash(style: StrokeStyle, width: number): number[] {
-  if (style === "dashed") return [width * 4, width * 2];
-  if (style === "dotted") return [width, width * 1.5];
-  return [];
-}
+import { applyCanvasStrokeStyle } from "@/lib/stroke";
+import { editorNodeToShape, type ShapeModel } from "./shapeModel";
 
 /** Render a shape onto Canvas2D in local box coordinates. */
 export function renderShape(ctx: CanvasRenderingContext2D, shapeNode: EditorNode | ShapeModel): void {
+  const editorNode = "shapeType" in shapeNode ? null : shapeNode;
   const shape = "shapeType" in shapeNode ? shapeNode : editorNodeToShape(shapeNode);
   if (!shape) return;
 
   ctx.save();
   ctx.globalAlpha = shape.opacity;
-  const dash = strokeDash(shape.strokeStyle, shape.strokeWidth);
-  if (dash.length) ctx.setLineDash(dash);
+  if (editorNode) {
+    applyCanvasStrokeStyle(ctx, editorNode);
+  } else {
+    applyCanvasStrokeStyle(ctx, {
+      strokeStyle: shape.strokeStyle,
+      strokeWidth: shape.strokeWidth,
+    });
+  }
 
   switch (shape.shapeType) {
     case "rectangle":
@@ -71,7 +73,6 @@ function renderLine(ctx: CanvasRenderingContext2D, shape: ShapeModel): void {
   ctx.lineTo(shape.width, shape.height / 2);
   ctx.strokeStyle = shape.stroke;
   ctx.lineWidth = shape.strokeWidth;
-  ctx.lineCap = "round";
   ctx.stroke();
 }
 
@@ -87,7 +88,6 @@ function renderPath(ctx: CanvasRenderingContext2D, shape: ShapeModel): void {
   if (shape.strokeWidth > 0) {
     ctx.strokeStyle = shape.stroke;
     ctx.lineWidth = shape.strokeWidth;
-    ctx.lineJoin = "round";
     ctx.stroke(path);
   }
 }

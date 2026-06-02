@@ -10,12 +10,12 @@ type Row = { keys: string; label: string };
 function Section({ title, rows }: { title: string; rows: Row[] }) {
   return (
     <section className="mb-4 last:mb-0">
-      <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[#6b6b6b]">{title}</h3>
+      <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-app-subtle">{title}</h3>
       <ul className="space-y-0.5">
         {rows.map((r) => (
           <li key={`${title}-${r.keys}-${r.label}`} className="flex items-baseline justify-between gap-4 text-[12px] leading-snug">
-            <span className="text-[#c4c4c4]">{r.label}</span>
-            <span className="shrink-0 text-right text-[11px] tabular-nums text-[#6b6b6b]">{formatShortcutLabel(r.keys)}</span>
+            <span className="text-app-muted">{r.label}</span>
+            <span className="shrink-0 text-right text-[11px] tabular-nums text-app-subtle">{formatShortcutLabel(r.keys)}</span>
           </li>
         ))}
       </ul>
@@ -66,8 +66,8 @@ const MOVE: Row[] = [
   { keys: "↑ ↓ ← →", label: "Nudge selection 1px" },
   { keys: "⇧↑ ↓ ← →", label: "Nudge selection 10px" },
   { keys: "⇧ (drag handle)", label: "Resize with locked aspect ratio" },
-  { keys: "⇧ (drag shape)", label: "Draw square / circle / constrain line" },
-  { keys: "⌥ (drag shape)", label: "Draw from center" },
+  { keys: "⇧ (drag shape)", label: "Draw square / circle; line snaps to 45°" },
+  { keys: "⌥ (drag shape)", label: "Draw from center (incl. lines)" },
   { keys: "⇧ (rotate handle)", label: "Snap rotation to 15°" },
 ];
 
@@ -129,20 +129,20 @@ export function ShortcutOverlay() {
       }}
     >
       <div
-        className="max-h-[min(80vh,640px)] w-full max-w-md overflow-y-auto rounded-lg border border-white/[0.1] bg-[#1a1a1a]/95 p-4 shadow-2xl backdrop-blur-md"
+        className="max-h-[min(80vh,640px)] w-full max-w-md overflow-y-auto rounded-lg border border-app-border bg-app-panel/95 p-4 shadow-2xl backdrop-blur-md"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-start justify-between gap-2">
           <div>
             <h2 className="text-[14px] font-semibold text-white">Keyboard shortcuts</h2>
-            <p className="mt-0.5 text-[11px] text-[#7a7a7a]">⌘ = Ctrl on Windows / Linux</p>
+            <p className="mt-0.5 text-[11px] text-app-subtle">⌘ = Ctrl on Windows / Linux</p>
           </div>
           <button
             type="button"
             onClick={() => setOpen(false)}
             className={cn(
-              "rounded-md border border-white/[0.08] px-2 py-1 text-[11px] font-medium text-[#b8b8b8]",
-              "hover:bg-white/[0.06] hover:text-white",
+              "rounded-md border border-app-border px-2 py-1 text-[11px] font-medium text-app-muted",
+              "hover:bg-app-hover hover:text-app-fg",
             )}
           >
             Close

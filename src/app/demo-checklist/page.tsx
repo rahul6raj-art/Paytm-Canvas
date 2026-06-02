@@ -179,26 +179,26 @@ export default function DemoChecklistPage() {
   const readyCount = items.filter((i) => i.status === "ready").length;
 
   return (
-    <div className="min-h-dvh bg-[#0f0f10] text-[#e6e6e6] antialiased">
-      <header className="border-b border-white/[0.08] bg-[#1a1a1a]">
+    <div className="min-h-dvh bg-[#0f0f10] text-app-fg antialiased">
+      <header className="border-b border-app-border bg-[#1a1a1a]">
         <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-3 px-6 py-5">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-[#6b6b6b]">Paytm Craft</p>
-            <h1 className="text-[22px] font-semibold tracking-tight text-white">Demo checklist</h1>
-            <p className="mt-1 text-[13px] text-[#9a9a9a]">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-app-subtle">Paytm Craft</p>
+            <h1 className="text-[22px] font-semibold tracking-tight text-app-bg">Demo checklist</h1>
+            <p className="mt-1 text-[13px] text-app-muted">
               {readyCount} of {items.length} areas demo-ready · use this page to walk through the product end-to-end.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Link
               href="/"
-              className="rounded-lg border border-white/[0.1] bg-white/[0.06] px-3 py-1.5 text-[12px] font-medium hover:bg-white/[0.1]"
+              className="rounded-lg border border-app-border bg-app-hover px-3 py-1.5 text-[12px] font-medium hover:bg-app-card/[0.1]"
             >
               Dashboard
             </Link>
             <Link
               href="/editor"
-              className="rounded-lg bg-[#0d99ff] px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-[#0b87e0]"
+              className="rounded-lg bg-[#0d99ff] px-3 py-1.5 text-[12px] font-semibold text-app-bg hover:bg-[#0b87e0]"
             >
               Open editor
             </Link>
@@ -211,10 +211,10 @@ export default function DemoChecklistPage() {
           {items.map((item) => (
             <li
               key={item.id}
-              className="rounded-xl border border-white/[0.08] bg-[#1e1e1e] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+              className="rounded-xl border border-app-border bg-app-surface p-4 shadow-app-raised"
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
-                <h2 className="text-[14px] font-semibold text-white">{item.title}</h2>
+                <h2 className="text-[14px] font-semibold text-app-bg">{item.title}</h2>
                 <span
                   className={cn(
                     "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
@@ -225,7 +225,7 @@ export default function DemoChecklistPage() {
                 </span>
               </div>
               <p className="mt-1.5 text-[13px] leading-relaxed text-[#a3a3a3]">{item.description}</p>
-              {item.note ? <p className="mt-1 text-[11px] text-[#6b6b6b]">{item.note}</p> : null}
+              {item.note ? <p className="mt-1 text-[11px] text-app-subtle">{item.note}</p> : null}
               {item.href && item.hrefLabel ? (
                 <Link
                   href={item.href}
@@ -237,9 +237,9 @@ export default function DemoChecklistPage() {
             </li>
           ))}
         </ul>
-        <p className="mt-8 text-center text-[11px] text-[#5c5c5c]">
-          Tip: press <span className="font-mono text-[#8c8c8c]">⌘K</span> in the editor for commands, or{" "}
-          <span className="font-mono text-[#8c8c8c]">⌘/</span> for shortcuts.
+        <p className="mt-8 text-center text-[11px] text-app-subtle">
+          Tip: press <span className="font-mono text-app-subtle">⌘K</span> in the editor for commands, or{" "}
+          <span className="font-mono text-app-subtle">⌘/</span> for shortcuts.
         </p>
       </main>
     </div>

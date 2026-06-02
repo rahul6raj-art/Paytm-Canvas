@@ -30,7 +30,7 @@ export type ShapeModel = {
   visible: boolean;
 };
 
-export const DEFAULT_SHAPE_FILL = "#0d99ff";
+export const DEFAULT_SHAPE_FILL = "#ffffff";
 export const DEFAULT_SHAPE_STROKE = "#0f172a";
 /** Filled shapes start with no stroke; lines/arrows set width explicitly at creation. */
 export const DEFAULT_STROKE_WIDTH = 0;

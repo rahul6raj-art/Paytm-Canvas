@@ -86,23 +86,23 @@ export function WorkspaceTeamModals() {
           role="dialog"
           aria-modal="true"
           aria-label="Switch workspace"
-          className="relative w-full max-w-md overflow-hidden rounded-2xl border border-white/[0.1] bg-gradient-to-b from-[#1c1c20] to-[#121214] shadow-2xl"
+          className="relative w-full max-w-md overflow-hidden rounded-2xl border border-app-border bg-gradient-to-b from-[#1c1c20] to-[#121214] shadow-2xl"
           onMouseDown={(e) => e.stopPropagation()}
         >
-          <header className="flex items-start justify-between gap-3 border-b border-white/[0.06] px-5 py-4">
+          <header className="flex items-start justify-between gap-3 border-b border-app-border-subtle px-5 py-4">
             <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.06] text-indigo-300">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-app-hover text-indigo-300">
                 <Building2 className="h-5 w-5" strokeWidth={1.75} />
               </span>
               <div>
                 <h2 className="text-[16px] font-semibold text-white">Switch workspace</h2>
-                <p className="text-[12px] text-[#9a9a9a]">Stored in this browser only (localStorage).</p>
+                <p className="text-[12px] text-app-muted">Stored in this browser only (localStorage).</p>
               </div>
             </div>
             <button
               type="button"
               onClick={closeWorkspacePicker}
-              className="rounded-lg p-1.5 text-[#9a9a9a] transition-colors hover:bg-white/[0.06] hover:text-white"
+              className="rounded-lg p-1.5 text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
               aria-label="Close"
             >
               <X className="h-5 w-5" strokeWidth={1.75} />
@@ -119,7 +119,7 @@ export function WorkspaceTeamModals() {
                   }}
                   className={cn(
                     "flex w-full items-center justify-between rounded-lg px-3 py-3 text-left text-[13px] transition-colors",
-                    w.id === active.id ? "bg-sky-500/15 text-white" : "text-[#d4d4d4] hover:bg-white/[0.06]",
+                    w.id === active.id ? "bg-sky-500/15 text-white" : "text-app-fg hover:bg-app-hover",
                   )}
                 >
                   <span className="font-medium">{w.name}</span>
@@ -138,25 +138,25 @@ export function WorkspaceTeamModals() {
           role="dialog"
           aria-modal="true"
           aria-label="Invite team member"
-          className="relative w-full max-w-md overflow-hidden rounded-2xl border border-white/[0.1] bg-gradient-to-b from-[#1c1c20] to-[#121214] shadow-2xl"
+          className="relative w-full max-w-md overflow-hidden rounded-2xl border border-app-border bg-gradient-to-b from-[#1c1c20] to-[#121214] shadow-2xl"
           onMouseDown={(e) => e.stopPropagation()}
         >
-          <header className="flex items-start justify-between gap-3 border-b border-white/[0.06] px-5 py-4">
+          <header className="flex items-start justify-between gap-3 border-b border-app-border-subtle px-5 py-4">
             <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.06] text-emerald-300">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-app-hover text-emerald-300">
                 <UserPlus className="h-5 w-5" strokeWidth={1.75} />
               </span>
               <div>
                 <h2 className="text-[16px] font-semibold text-white">Invite teammate</h2>
-                <p className="text-[12px] text-[#9a9a9a]">
-                  Adds a pending invite for <span className="text-[#d4d4d4]">{active.name}</span>.
+                <p className="text-[12px] text-app-muted">
+                  Adds a pending invite for <span className="text-app-fg">{active.name}</span>.
                 </p>
               </div>
             </div>
             <button
               type="button"
               onClick={closeTeamInviteModal}
-              className="rounded-lg p-1.5 text-[#9a9a9a] transition-colors hover:bg-white/[0.06] hover:text-white"
+              className="rounded-lg p-1.5 text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
               aria-label="Close"
             >
               <X className="h-5 w-5" strokeWidth={1.75} />
@@ -167,7 +167,7 @@ export function WorkspaceTeamModals() {
               value={inviteEmail}
               onChange={(e) => setInviteEmail(e.target.value)}
               placeholder="colleague@paytm.com"
-              className="h-9 border-white/[0.08] bg-black/35 text-[13px] text-white placeholder:text-[#6b6b6b]"
+              className="h-9 border-app-border bg-black/35 text-[13px] text-white placeholder:text-app-subtle"
               onKeyDown={(e) => {
                 if (e.key === "Enter") onInvite();
               }}
@@ -176,7 +176,7 @@ export function WorkspaceTeamModals() {
               <Button
                 variant="toolbar"
                 type="button"
-                className="h-8 border border-white/[0.1] bg-transparent text-[12px] text-[#d4d4d4]"
+                className="h-8 border border-app-border bg-transparent text-[12px] text-app-fg"
                 onClick={closeTeamInviteModal}
               >
                 Cancel

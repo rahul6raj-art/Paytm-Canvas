@@ -14,6 +14,8 @@ export interface ImportWebRequest {
   html?: string;
   mode: ImportWebMode;
   viewport: ImportWebViewport;
+  /** When `react-preview`, localhost / 127.0.0.1 are allowed (Storybook, dev server). */
+  urlPolicy?: "public" | "react-preview";
 }
 
 export interface ImportWebPageMeta {
@@ -64,6 +66,8 @@ export interface DomSnapshotRect {
 export interface DomSnapshotNode {
   id: string;
   tagName: string;
+  /** HTML class attribute (for Design ↔ Code export round-trip) */
+  className?: string;
   role?: string;
   text?: string;
   href?: string;
@@ -123,6 +127,10 @@ export interface ImportWebSceneNode {
   clipChildren?: boolean;
   /** Screenshot reference under imported content */
   isImportReference?: boolean;
+  /** Design ↔ Code: original className from DOM */
+  codeClassName?: string;
+  codeJsxTag?: string;
+  codeJsxIntrinsic?: boolean;
   children?: ImportWebSceneNode[];
 }
 

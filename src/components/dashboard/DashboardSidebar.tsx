@@ -47,14 +47,14 @@ export function DashboardSidebar({
   onInviteSubmit: () => void;
 }) {
   return (
-    <aside className="flex w-[240px] shrink-0 flex-col border-r border-slate-200 bg-white">
-      <div className="border-b border-slate-100 px-3 py-3">
-        <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Workspace</label>
+    <aside className="flex w-[240px] shrink-0 flex-col border-r border-app-border bg-app-card">
+      <div className="border-b border-app-border-subtle px-3 py-3">
+        <label className="text-[10px] font-semibold uppercase tracking-wider text-app-subtle">Workspace</label>
         <div className="relative mt-1.5">
           <select
             value={activeWorkspace.id}
             onChange={(e) => onSwitchWorkspace(e.target.value)}
-            className="h-9 w-full cursor-pointer appearance-none rounded-lg border border-slate-200 bg-slate-50 pl-3 pr-8 text-[13px] font-medium text-slate-900 outline-none ring-slate-900/10 focus:border-slate-300 focus:bg-white focus:ring-2"
+            className="h-9 w-full cursor-pointer appearance-none rounded-lg border border-app-border bg-app-raised pl-3 pr-8 text-[13px] font-medium text-app-fg outline-none ring-slate-900/10 focus:border-slate-300 focus:bg-app-card focus:ring-2"
             aria-label="Active workspace"
           >
             {workspaces.map((w) => (
@@ -63,16 +63,16 @@ export function DashboardSidebar({
               </option>
             ))}
           </select>
-          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" strokeWidth={2} />
+          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-app-subtle" strokeWidth={2} />
         </div>
-        <p className="mt-2 text-[11px] leading-snug text-slate-500">
+        <p className="mt-2 text-[11px] leading-snug text-app-muted">
           Files and invites below are scoped to{" "}
-          <span className="font-medium text-slate-700">{activeWorkspace.name}</span>.
+          <span className="font-medium text-app-fg">{activeWorkspace.name}</span>.
         </p>
       </div>
 
-      <div className="border-b border-slate-100 px-3 py-2">
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Sections</div>
+      <div className="border-b border-app-border-subtle px-3 py-2">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-app-subtle">Sections</div>
         <ul className="mt-1.5 space-y-0.5">
           {workspaces.map((w) => (
             <li key={w.id}>
@@ -81,7 +81,7 @@ export function DashboardSidebar({
                 onClick={() => onSwitchWorkspace(w.id)}
                 className={cn(
                   "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[12px] transition-colors",
-                  w.id === activeWorkspace.id ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100",
+                  w.id === activeWorkspace.id ? "bg-app-fg text-app-bg" : "text-app-muted hover:bg-app-inset",
                 )}
               >
                 <span>{sectionLabels[w.section]}</span>
@@ -103,8 +103,8 @@ export function DashboardSidebar({
             className={cn(
               "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors",
               active === id
-                ? "bg-slate-900 text-white shadow-sm"
-                : "text-slate-700 hover:bg-slate-100 hover:text-slate-900",
+                ? "bg-app-fg text-app-bg shadow-sm"
+                : "text-app-fg hover:bg-app-inset hover:text-app-fg",
             )}
           >
             <Icon className="h-4 w-4 shrink-0 opacity-90" strokeWidth={1.75} />
@@ -113,13 +113,13 @@ export function DashboardSidebar({
         ))}
       </nav>
 
-      <div className="border-t border-slate-100 p-3">
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Team</div>
+      <div className="border-t border-app-border-subtle p-3">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-app-subtle">Team</div>
         <div className="mt-2 flex items-center gap-1">
           {teamPreviewMembers.slice(0, 5).map((m) => (
             <span
               key={m.userId}
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-slate-100 text-[10px] font-bold text-slate-700"
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-app-border bg-app-inset text-[10px] font-bold text-app-fg"
               title={`${m.name} (${m.role})`}
             >
               {m.initials}
@@ -129,7 +129,7 @@ export function DashboardSidebar({
         <button
           type="button"
           onClick={() => onNavigate("team")}
-          className="mt-2 text-[11px] font-medium text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline"
+          className="mt-2 text-[11px] font-medium text-app-muted underline-offset-2 hover:text-app-fg hover:underline"
         >
           Manage team →
         </button>
@@ -138,7 +138,7 @@ export function DashboardSidebar({
             value={inviteEmail}
             onChange={(e) => onInviteEmailChange(e.target.value)}
             placeholder="Email"
-            className="min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[12px] text-slate-900 outline-none ring-slate-900/10 placeholder:text-slate-400 focus:border-slate-300 focus:ring-2"
+            className="min-w-0 flex-1 rounded-md border border-app-border bg-app-card px-2 py-1.5 text-[12px] text-app-fg outline-none ring-slate-900/10 placeholder:text-app-subtle focus:border-slate-300 focus:ring-2"
             onKeyDown={(e) => {
               if (e.key === "Enter") onInviteSubmit();
             }}
@@ -146,7 +146,7 @@ export function DashboardSidebar({
           <button
             type="button"
             onClick={onInviteSubmit}
-            className="inline-flex shrink-0 items-center gap-1 rounded-md bg-slate-900 px-2 py-1.5 text-[11px] font-semibold text-white hover:bg-slate-800"
+            className="inline-flex shrink-0 items-center gap-1 rounded-md bg-app-fg px-2 py-1.5 text-[11px] font-semibold text-app-bg hover:bg-app-muted"
             title="Invite to workspace"
           >
             <UserPlus className="h-3.5 w-3.5" strokeWidth={2} />
@@ -155,29 +155,29 @@ export function DashboardSidebar({
         </div>
       </div>
 
-      <div className="border-t border-slate-100 px-2 py-2">
+      <div className="border-t border-app-border-subtle px-2 py-2">
         <Link
           href="/demo-checklist"
           target="_blank"
           rel="noopener noreferrer"
-          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[12px] font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
+          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[12px] font-medium text-app-muted transition-colors hover:bg-app-inset hover:text-app-fg"
         >
-          <ListChecks className="h-4 w-4 shrink-0 text-slate-400" strokeWidth={1.75} />
+          <ListChecks className="h-4 w-4 shrink-0 text-app-subtle" strokeWidth={1.75} />
           Demo checklist
         </Link>
       </div>
 
-      <div className="border-t border-slate-100 p-3">
-        <div className="flex items-center gap-2.5 rounded-lg border border-slate-100 bg-slate-50/80 p-2.5">
+      <div className="border-t border-app-border-subtle p-3">
+        <div className="flex items-center gap-2.5 rounded-lg border border-app-border-subtle bg-app-raised/80 p-2.5">
           <span
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-[11px] font-bold text-slate-800"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-app-border bg-app-card text-[11px] font-bold text-app-fg"
             style={{ boxShadow: `inset 0 0 0 2px hsl(${currentUser.avatarHue} 70% 45% / 0.25)` }}
           >
             {currentUser.initials}
           </span>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-[12px] font-semibold text-slate-900">{currentUser.name}</p>
-            <p className="truncate text-[11px] text-slate-500">{currentUser.email}</p>
+            <p className="truncate text-[12px] font-semibold text-app-fg">{currentUser.name}</p>
+            <p className="truncate text-[11px] text-app-muted">{currentUser.email}</p>
           </div>
         </div>
       </div>

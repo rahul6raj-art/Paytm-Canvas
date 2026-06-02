@@ -233,11 +233,27 @@ export function inverseTransformPoint(
   return { x: lx + w / 2, y: ly + h / 2 };
 }
 
-/** Wrap local SVG markup with center rotation (standalone export at 0,0). */
-export function wrapSvgNodeRotation(inner: string, node: EditorNode): string {
+/** SVG scale/rotate around node center (local geometry at 0,0). */
+export function layerTransformSvg(node: EditorNode): string {
+  const w = Math.max(1, node.width);
+  const h = Math.max(1, node.height);
+  const cx = w / 2;
+  const cy = h / 2;
+  const parts: string[] = [];
+  const { sx, sy } = layerFlipScale(node);
+  if (sx !== 1 || sy !== 1) {
+    parts.push(`translate(${cx} ${cy}) scale(${sx} ${sy}) translate(${-cx} ${-cy})`);
+  }
   const rot = rotationTransform(node);
-  if (!rot) return inner;
-  return `<g transform="${rot}">${inner}</g>`;
+  if (rot) parts.push(rot);
+  return parts.join(" ");
+}
+
+/** Wrap local SVG markup with center flip/rotation (standalone export at 0,0). */
+export function wrapSvgNodeRotation(inner: string, node: EditorNode): string {
+  const t = layerTransformSvg(node);
+  if (!t) return inner;
+  return `<g transform="${t}">${inner}</g>`;
 }
 
 /** CSS transform matching DOM CanvasObject (center origin). */
@@ -245,9 +261,9 @@ export function cssRotationStyle(node: EditorNode): {
   transform?: string;
   transformOrigin?: string;
 } {
-  const r = node.rotation ?? 0;
-  if (!hasRotation(r)) return {};
-  return { transform: `rotate(${r}deg)`, transformOrigin: "50% 50%" };
+  const transform = buildLayerCssTransform(node);
+  if (!transform) return {};
+  return { transform, transformOrigin: "50% 50%" };
 }
 
 // --- 2D affine matrix utilities (SSR-safe; DOMMatrix when available) ---
@@ -284,6 +300,39 @@ export function rotateMatrix(deg: number, cx = 0, cy = 0): Matrix2D {
   const r = { a: cos, b: sin, c: -sin, d: cos, e: 0, f: 0 };
   const t2 = translateMatrix(-cx, -cy);
   return multiplyMatrix(multiplyMatrix(t1, r), t2);
+}
+
+export function scaleMatrix(sx: number, sy: number, cx = 0, cy = 0): Matrix2D {
+  if (typeof DOMMatrix !== "undefined") {
+    return fromDomMatrix(new DOMMatrix().translate(cx, cy).scale(sx, sy).translate(-cx, -cy));
+  }
+  const t1 = translateMatrix(cx, cy);
+  const s = { a: sx, b: 0, c: 0, d: sy, e: 0, f: 0 };
+  const t2 = translateMatrix(-cx, -cy);
+  return multiplyMatrix(multiplyMatrix(t1, s), t2);
+}
+
+export function layerFlipScale(node: Pick<EditorNode, "flipHorizontal" | "flipVertical">): {
+  sx: number;
+  sy: number;
+} {
+  return {
+    sx: node.flipHorizontal ? -1 : 1,
+    sy: node.flipVertical ? -1 : 1,
+  };
+}
+
+export function buildLayerCssTransform(
+  node: Pick<EditorNode, "rotation" | "flipHorizontal" | "flipVertical">,
+): string | undefined {
+  const parts: string[] = [];
+  const r = normalizeRotationDegrees(node.rotation);
+  if (hasRotation(r)) parts.push(`rotate(${r}deg)`);
+  const { sx, sy } = layerFlipScale(node);
+  if (sx === -1 && sy === -1) parts.push("scale(-1)");
+  else if (sx === -1) parts.push("scaleX(-1)");
+  else if (sy === -1) parts.push("scaleY(-1)");
+  return parts.length > 0 ? parts.join(" ") : undefined;
 }
 
 export function multiplyMatrix(a: Matrix2D, b: Matrix2D): Matrix2D {
@@ -372,13 +421,19 @@ export function worldRectSum(
   return { x, y, width: n.width, height: n.height };
 }
 
-/** Local matrix: translate(x,y) then rotate around node center. */
+/** Local matrix: translate(x,y), flip/scale, then rotate around node center. */
 export function getNodeLocalMatrix(node: EditorNode): Matrix2D {
   const w = Math.max(1, node.width);
   const h = Math.max(1, node.height);
+  const cx = w / 2;
+  const cy = h / 2;
   let m = translateMatrix(node.x, node.y);
+  const { sx, sy } = layerFlipScale(node);
+  if (sx !== 1 || sy !== 1) {
+    m = multiplyMatrix(m, scaleMatrix(sx, sy, cx, cy));
+  }
   if (hasRotation(node.rotation)) {
-    m = multiplyMatrix(m, rotateMatrix(node.rotation ?? 0, w / 2, h / 2));
+    m = multiplyMatrix(m, rotateMatrix(node.rotation ?? 0, cx, cy));
   }
   return m;
 }

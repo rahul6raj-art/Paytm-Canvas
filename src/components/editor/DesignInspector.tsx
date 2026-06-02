@@ -28,7 +28,6 @@ import { PropertiesSection } from "./PropertiesSection";
 import { PropertyNumberInput, PropertyTextInput } from "./PropertyInput";
 import { FontFamilyPicker } from "./FontFamilyPicker";
 import { ColorInput } from "./ColorInput";
-import { ColorLibrary } from "./ColorLibrary";
 import { cn } from "@/lib/utils";
 import {
   useEditorStore,
@@ -45,26 +44,31 @@ import {
   isColorValue,
   isGradientValue,
   isTypographyValue,
-  isEffectValue,
   resolveNodeWithDesignTokens,
   type ColorTokenValue,
   type TypographyTokenValue,
   type EffectTokenValue,
 } from "@/lib/designTokens";
-import type { NodeEffect, NodeEffectType } from "@/lib/nodeEffects";
 import {
-  defaultFillGradient,
   effectiveFillType,
-  fillPaintCss,
-  newGradientStopId,
   normalizeFillGradient,
+  type FillGradient,
 } from "@/lib/fillGradient";
+import { inferAutoLayoutGap, type LayoutNode } from "@/lib/autoLayout";
 import { generatePolygonPoints, generateStarPoints } from "@/lib/shapes/pathGenerators";
 import {
   BOOLEAN_OPERATION_LABELS,
   isMaskGroup,
   type BooleanOperation,
 } from "@/lib/booleanGeometry";
+import { LayoutSizingControls } from "./LayoutSizingControls";
+import { AppearanceSection } from "./design-panel/AppearanceSection";
+import { StrokeSection } from "./design-panel/StrokeSection";
+import { EffectsSection } from "./design-panel/EffectsSection";
+import { FillSection } from "./design-panel/FillSection";
+import { InspectorSegmented } from "./design-panel/InspectorPrimitives";
+import { PositionSection } from "./design-panel/PositionSection";
+import { resolveStrokeEndPoint } from "@/lib/strokeEndpoints";
 
 const field =
   "h-6 min-h-[24px] px-1.5 py-0 text-[12px] leading-4";
@@ -90,23 +94,11 @@ function typeLabel(t: EditorNode["type"]): string {
   }
 }
 
-function effectTypeLabel(t: NodeEffectType): string {
-  switch (t) {
-    case "drop-shadow":
-      return "Drop shadow";
-    case "inner-shadow":
-      return "Inner shadow";
-    case "layer-blur":
-      return "Layer blur";
-    case "background-blur":
-      return "Background blur";
-  }
-}
-
 export function DesignInspector({ node }: { node: EditorNode }) {
   const updateNode = useEditorStore((s) => s.updateNode);
   const updateNodeStyle = useEditorStore((s) => s.updateNodeStyle);
   const updateLayout = useEditorStore((s) => s.updateLayout);
+  const updateLayoutPositioning = useEditorStore((s) => s.updateLayoutPositioning);
   const addAutoLayoutToSelection = useEditorStore((s) => s.addAutoLayoutToSelection);
   const updateConstraints = useEditorStore((s) => s.updateConstraints);
   const renameNode = useEditorStore((s) => s.renameNode);
@@ -114,6 +106,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
   const setNodeLocked = useEditorStore((s) => s.setNodeLocked);
   const parent = useEditorStore((s) => (node.parentId ? s.nodes[node.parentId!] : null));
   const nodesAll = useEditorStore((s) => s.nodes);
+  const childOrder = useEditorStore((s) => s.childOrder);
   const createComponentFromSelection = useEditorStore((s) => s.createComponentFromSelection);
   const createVariantFromComponent = useEditorStore((s) => s.createVariantFromComponent);
   const updateVariantProperties = useEditorStore((s) => s.updateVariantProperties);
@@ -125,6 +118,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
   const replaceImageAsset = useEditorStore((s) => s.replaceImageAsset);
   const designTokens = useEditorStore((s) => s.designTokens);
   const updateDesignToken = useEditorStore((s) => s.updateDesignToken);
+  const pushHistory = useEditorStore((s) => s.pushHistory);
   const createColorTokenFromSelection = useEditorStore((s) => s.createColorTokenFromSelection);
   const createGradientTokenFromSelection = useEditorStore((s) => s.createGradientTokenFromSelection);
   const createTypographyTokenFromSelection = useEditorStore((s) => s.createTypographyTokenFromSelection);
@@ -162,6 +156,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
 
   const isContainer = node.type === "frame" || node.type === "group";
   const layoutMode = node.layoutMode ?? "none";
+  const inAutoLayoutParent = (parent?.layoutMode ?? "none") !== "none";
   const parentAutoLayout = Boolean(parent && (parent.layoutMode ?? "none") !== "none");
 
   const replaceImageInputRef = useRef<HTMLInputElement>(null);
@@ -182,17 +177,33 @@ export function DesignInspector({ node }: { node: EditorNode }) {
 
   const fillOpacity = display.fillOpacity ?? 1;
   const fillEnabled = node.fillEnabled !== false;
-  const fillType = effectiveFillType(node);
-  const fillGradient = normalizeFillGradient(node.fillGradient, display.fill ?? node.fill);
+  const fillType = effectiveFillType(display);
+  const fillGradient = normalizeFillGradient(
+    display.fillGradient ?? node.fillGradient,
+    display.fill ?? node.fill,
+  );
   const fillToken = node.fillTokenId ? designTokens[node.fillTokenId] : undefined;
   const linkedFillTokenType = fillToken?.type;
+
+  const applyFillGradient = (next: FillGradient, opts?: { skipHistory?: boolean }) => {
+    const normalized = normalizeFillGradient(next, display.fill ?? node.fill);
+    if (node.fillTokenId && fillToken?.type === "gradient") {
+      updateDesignToken(node.fillTokenId, { value: normalized });
+      return;
+    }
+    updateNodeStyle(
+      id,
+      { fillType: "gradient", fillGradient: normalized },
+      { skipHistory: opts?.skipHistory },
+    );
+  };
   const strokePos: StrokePosition = node.strokePosition ?? "center";
 
   return (
     <>
-      <div className="border-b border-white/[0.06] px-2 py-2">
+      <div className="border-b border-app-border-subtle px-2 py-2">
         <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-          <span className="rounded border border-white/[0.08] bg-white/[0.04] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#9a9a9a]">
+          <span className="rounded border border-app-border bg-app-hover px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-app-muted">
             {typeLabel(node.type)}
           </span>
           {node.isComponent ? (
@@ -223,7 +234,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               type="button"
               disabled={locked}
               onClick={() => setPlacingComponentMasterId(node.id)}
-              className="flex h-6 items-center justify-center gap-1.5 rounded border border-white/[0.1] bg-[#2c2c2c] text-[11px] font-medium text-[#e6e6e6] transition-colors hover:bg-white/[0.06] disabled:opacity-40"
+              className="flex h-6 items-center justify-center gap-1.5 rounded border border-app-border bg-app-panel text-[11px] font-medium text-app-fg transition-colors hover:bg-app-hover disabled:opacity-40"
             >
               <Copy className="h-3.5 w-3.5" strokeWidth={1.75} />
               Create instance
@@ -232,7 +243,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               type="button"
               disabled={locked}
               onClick={() => createVariantFromComponent(node.componentId ?? node.id)}
-              className="flex h-6 items-center justify-center gap-1.5 rounded border border-white/[0.1] bg-[#2c2c2c] text-[11px] font-medium text-[#e6e6e6] transition-colors hover:bg-white/[0.06] disabled:opacity-40"
+              className="flex h-6 items-center justify-center gap-1.5 rounded border border-app-border bg-app-panel text-[11px] font-medium text-app-fg transition-colors hover:bg-app-hover disabled:opacity-40"
             >
               <Link2 className="h-3.5 w-3.5" strokeWidth={1.75} />
               Add variant
@@ -259,21 +270,21 @@ export function DesignInspector({ node }: { node: EditorNode }) {
 
       {instRootId && (
         <PropertiesSection title="Instance" defaultOpen>
-          <p className="mb-1.5 text-[11px] leading-snug text-[#9a9a9a]">
+          <p className="mb-1.5 text-[11px] leading-snug text-app-muted">
             Source:{" "}
-            <span className="font-medium text-[#d4d4d4]">{sourceMaster?.name ?? "Unknown"}</span>
+            <span className="font-medium text-app-fg">{sourceMaster?.name ?? "Unknown"}</span>
           </p>
           <button
             type="button"
             disabled={locked}
             onClick={() => detachInstance(instRootId)}
-            className="flex h-6 w-full items-center justify-center gap-1.5 rounded border border-white/[0.1] bg-[#2c2c2c] text-[11px] font-medium text-[#e6e6e6] transition-colors hover:bg-white/[0.06] disabled:opacity-40"
+            className="flex h-6 w-full items-center justify-center gap-1.5 rounded border border-app-border bg-app-panel text-[11px] font-medium text-app-fg transition-colors hover:bg-app-hover disabled:opacity-40"
           >
             <Unlink className="h-3.5 w-3.5" strokeWidth={1.75} />
             Detach instance
           </button>
           {instRootId !== id ? (
-            <p className="mt-1.5 text-[10px] leading-relaxed text-[#6b6b6b]">
+            <p className="mt-1.5 text-[10px] leading-relaxed text-app-subtle">
               Fill, stroke, and text edits are saved as overrides on this instance.
             </p>
           ) : null}
@@ -291,8 +302,31 @@ export function DesignInspector({ node }: { node: EditorNode }) {
             <Component className="h-3.5 w-3.5" strokeWidth={1.75} />
             Create component
           </button>
-          <p className="mt-1 text-[10px] leading-relaxed text-[#6b6b6b]">
+          <p className="mt-1 text-[10px] leading-relaxed text-app-subtle">
             Turn this selection into a reusable component. It appears in the Comp panel for drag-and-drop.
+          </p>
+        </PropertiesSection>
+      ) : null}
+
+      {node.type === "frame" ? (
+        <PropertiesSection title="Frame" defaultOpen>
+          <label
+            className={cn(
+              "flex cursor-pointer items-center gap-2 rounded py-0.5",
+              locked && "cursor-not-allowed opacity-40",
+            )}
+          >
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 rounded border-white/20 bg-app-panel accent-[#0d99ff]"
+              checked={node.clipChildren !== false}
+              disabled={locked}
+              onChange={(e) => patch({ clipChildren: e.target.checked })}
+            />
+            <span className="text-[11px] text-app-fg">Clip content</span>
+          </label>
+          <p className="mt-1 text-[10px] leading-snug text-app-subtle">
+            When enabled, layers outside the frame bounds are hidden.
           </p>
         </PropertiesSection>
       ) : null}
@@ -305,8 +339,8 @@ export function DesignInspector({ node }: { node: EditorNode }) {
             className={cn(
               "flex h-6 flex-1 items-center justify-center gap-1 rounded border text-[11px] font-medium transition-colors",
               node.visible
-                ? "border-white/[0.1] bg-[#2c2c2c] text-[#e6e6e6] hover:bg-white/[0.06]"
-                : "border-white/[0.06] bg-black/20 text-[#737373] hover:text-[#c4c4c4]",
+                ? "border-app-border bg-app-panel text-app-fg hover:bg-app-hover"
+                : "border-app-border-subtle bg-app-toolbar-well text-[#737373] hover:text-app-muted",
             )}
           >
             {node.visible ? (
@@ -323,7 +357,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               "flex h-6 flex-1 items-center justify-center gap-1 rounded border text-[11px] font-medium transition-colors",
               node.locked
                 ? "border-amber-500/35 bg-amber-500/10 text-amber-100 hover:bg-amber-500/15"
-                : "border-white/[0.1] bg-[#2c2c2c] text-[#e6e6e6] hover:bg-white/[0.06]",
+                : "border-app-border bg-app-panel text-app-fg hover:bg-app-hover",
             )}
           >
             {node.locked ? (
@@ -336,61 +370,49 @@ export function DesignInspector({ node }: { node: EditorNode }) {
         </div>
       </PropertiesSection>
 
-      <PropertiesSection title="Position" defaultOpen>
-        <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
-          <PropertyNumberInput commitOnInput={false}
-            label="X"
-            value={node.x}
-            instanceKey={key}
-            disabled={locked || parentAutoLayout}
-            onCommit={(v) => patch({ x: v })}
-          />
-          <PropertyNumberInput commitOnInput={false}
-            label="Y"
-            value={node.y}
-            instanceKey={key}
-            disabled={locked || parentAutoLayout}
-            onCommit={(v) => patch({ y: v })}
-          />
-          <PropertyNumberInput commitOnInput={false}
-            label="W"
-            value={node.width}
-            instanceKey={key}
-            disabled={locked}
-            min={1}
-            onCommit={(v) =>
-              isContainer
-                ? resizeFrameWithConstraints(id, { width: v, height: node.height })
-                : patch({ width: v })
-            }
-          />
-          <PropertyNumberInput commitOnInput={false}
-            label="H"
-            value={node.height}
-            instanceKey={key}
-            disabled={locked}
-            min={1}
-            onCommit={(v) =>
-              isContainer
-                ? resizeFrameWithConstraints(id, { width: node.width, height: v })
-                : patch({ height: v })
-            }
-          />
-        </div>
-        <div className="mt-1.5">
-          <PropertyNumberInput commitOnInput={false}
-            label="Rotation"
-            value={node.rotation}
-            instanceKey={key}
-            disabled={locked}
-            onCommit={(v) => patch({ rotation: ((v % 360) + 360) % 360 })}
-          />
-        </div>
-      </PropertiesSection>
+      <PositionSection
+        node={node}
+        instanceKey={key}
+        locked={locked}
+        parentAutoLayout={parentAutoLayout}
+        isContainer={isContainer}
+        onPatch={patch}
+        onResizeFrame={(width, height) => resizeFrameWithConstraints(id, { width, height })}
+      />
+
+      {inAutoLayoutParent && layoutMode === "none" ? (
+        <PropertiesSection title="Layout" defaultOpen>
+          <p className="mb-2 text-[10px] leading-snug text-app-subtle">
+            Sizing in parent auto-layout frame.
+          </p>
+          <LayoutSizingControls node={node} nodes={nodesAll} locked={locked} />
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <span className="text-[11px] font-medium text-app-subtle">Absolute position</span>
+            <button
+              type="button"
+              disabled={locked}
+              onClick={() =>
+                updateLayoutPositioning(
+                  id,
+                  (node.layoutPositioning ?? "auto") === "absolute" ? "auto" : "absolute",
+                )
+              }
+              className={cn(
+                "rounded border px-2 py-0.5 text-[11px] font-medium transition-colors disabled:opacity-40",
+                (node.layoutPositioning ?? "auto") === "absolute"
+                  ? "border-accent/40 bg-accent/15 text-accent"
+                  : "border-app-border text-app-muted hover:bg-app-hover",
+              )}
+            >
+              {(node.layoutPositioning ?? "auto") === "absolute" ? "On" : "Off"}
+            </button>
+          </div>
+        </PropertiesSection>
+      ) : null}
 
       {isImage && (
         <PropertiesSection title="Image" defaultOpen>
-          <div className="mb-2 overflow-hidden rounded border border-white/[0.08] bg-black/30">
+          <div className="mb-2 overflow-hidden rounded border border-app-border bg-app-toolbar-well">
             {imagePreviewSrc ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -402,7 +424,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               <div className="flex h-[100px] items-center justify-center text-[11px] text-[#737373]">No preview</div>
             )}
           </div>
-          <p className="mb-1.5 truncate text-[11px] text-[#b8b8b8]" title={node.imageName ?? node.name}>
+          <p className="mb-1.5 truncate text-[11px] text-app-muted" title={node.imageName ?? node.name}>
             {node.imageName ?? node.name}
           </p>
           <input
@@ -422,16 +444,16 @@ export function DesignInspector({ node }: { node: EditorNode }) {
             type="button"
             disabled={locked}
             onClick={() => replaceImageInputRef.current?.click()}
-            className="mb-2 flex h-6 w-full items-center justify-center gap-1.5 rounded border border-white/[0.1] bg-[#2c2c2c] text-[11px] font-medium text-[#e6e6e6] transition-colors hover:bg-white/[0.06] disabled:opacity-40"
+            className="mb-2 flex h-6 w-full items-center justify-center gap-1.5 rounded border border-app-border bg-app-panel text-[11px] font-medium text-app-fg transition-colors hover:bg-app-hover disabled:opacity-40"
           >
             Replace image…
           </button>
-          <div className="mb-1.5 text-[11px] font-medium text-[#8c8c8c]">Fit mode</div>
+          <div className="mb-1.5 text-[11px] font-medium text-app-subtle">Fit mode</div>
           <select
             disabled={locked}
             className={cn(
               field,
-              "mb-2 w-full rounded border border-white/[0.1] bg-[#2c2c2c] text-[#e6e6e6] focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
+              "mb-2 w-full rounded border border-app-border bg-app-panel text-app-fg focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
             )}
             value={node.imageFitMode ?? "fill"}
             onChange={(e) => style({ imageFitMode: e.target.value as "fill" | "fit" | "crop" })}
@@ -442,7 +464,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
           </select>
           <PropertyNumberInput
             commitOnInput={false}
-            label="Opacity %"
+            label="Image fill %"
             value={Math.round(fillOpacity * 100)}
             instanceKey={`${key}-img-op`}
             disabled={locked}
@@ -456,7 +478,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
       {isPath && (
         <PropertiesSection title="Path" defaultOpen>
           <div className="mb-1.5 flex items-center justify-between gap-2">
-            <span className="text-[11px] font-medium text-[#8c8c8c]">Closed path</span>
+            <span className="text-[11px] font-medium text-app-subtle">Closed path</span>
             <button
               type="button"
               disabled={locked}
@@ -465,57 +487,57 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                 "rounded border px-2 py-0.5 text-[11px] font-medium transition-colors disabled:opacity-40",
                 node.pathClosed
                   ? "border-accent/40 bg-accent/15 text-accent"
-                  : "border-white/[0.08] text-[#9a9a9a] hover:bg-white/[0.04]",
+                  : "border-app-border text-app-muted hover:bg-app-hover",
               )}
             >
               {node.pathClosed ? "Closed" : "Open"}
             </button>
           </div>
-          <p className="text-[10px] leading-relaxed text-[#6b6b6b]">
+          <p className="text-[10px] leading-relaxed text-app-subtle">
             Double-click the path on the canvas to toggle anchor editing. With anchors shown, Backspace removes the
             selected point.
           </p>
         </PropertiesSection>
       )}
 
-      {!isContainer && !locked ? (
-        <PropertiesSection title="Auto layout" defaultOpen>
-          <p className="mb-2 text-[10px] leading-snug text-[#737373]">
-            Wrap this layer in a frame with horizontal or vertical auto layout (like Figma ⇧A).
-          </p>
-          <button
-            type="button"
-            disabled={locked}
-            onClick={() => addAutoLayoutToSelection()}
-            className={cn(
-              "flex h-6 w-full items-center justify-center gap-1.5 rounded border text-[11px] font-medium transition-colors disabled:opacity-40",
-              "border-white/[0.1] bg-[#2c2c2c] text-[#e6e6e6] hover:bg-white/[0.06]",
-            )}
-          >
-            <LayoutTemplate className="h-3.5 w-3.5" strokeWidth={1.75} />
-            Add auto layout
-          </button>
-        </PropertiesSection>
-      ) : null}
-
-      {isContainer && (
-        <PropertiesSection title="Auto layout" defaultOpen>
-          {layoutMode === "none" ? (
+      {(isContainer || (!isContainer && !locked)) && (
+        <PropertiesSection title="Layout" defaultOpen>
+          {isContainer ? (
+            <div className="mb-2">
+              <InspectorSegmented
+                options={[
+                  { value: "auto" as const, label: "Auto" },
+                  { value: "none" as const, label: "None" },
+                ]}
+                value={layoutMode === "none" ? "none" : "auto"}
+                disabled={locked}
+                onChange={(v) => {
+                  if (v === "none") updateLayout(id, { layoutMode: "none" });
+                  else if (layoutMode === "none") addAutoLayoutToSelection();
+                }}
+              />
+            </div>
+          ) : null}
+          {!isContainer ? (
             <button
               type="button"
               disabled={locked}
               onClick={() => addAutoLayoutToSelection()}
               className={cn(
                 "flex h-6 w-full items-center justify-center gap-1.5 rounded border text-[11px] font-medium transition-colors disabled:opacity-40",
-                "border-white/[0.1] bg-[#2c2c2c] text-[#e6e6e6] hover:bg-white/[0.06]",
+                "border-app-border bg-app-panel text-app-fg hover:bg-app-hover",
               )}
             >
               <LayoutTemplate className="h-3.5 w-3.5" strokeWidth={1.75} />
               Add auto layout
             </button>
+          ) : layoutMode === "none" ? (
+            <p className="text-[10px] leading-snug text-app-subtle">
+              Switch to Auto to enable horizontal or vertical stack (⇧A).
+            </p>
           ) : (
             <>
-              <div className="mb-1 text-[11px] font-medium text-[#8c8c8c]">Direction</div>
+              <div className="mb-1 text-[11px] font-medium text-app-subtle">Direction</div>
               <div className="mb-1.5 flex gap-0.5">
                 {(
                   [
@@ -536,7 +558,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                         "flex h-6 flex-1 items-center justify-center gap-0.5 rounded border text-[10px] font-semibold transition-colors disabled:opacity-40",
                         active
                           ? "border-accent/45 bg-accent/15 text-white"
-                          : "border-white/[0.08] text-[#9a9a9a] hover:bg-white/[0.04]",
+                          : "border-app-border text-app-muted hover:bg-app-hover",
                       )}
                     >
                       {Icon ? <Icon className="h-3 w-3" strokeWidth={1.75} /> : null}
@@ -545,16 +567,98 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                   );
                 })}
               </div>
-              <PropertyNumberInput commitOnInput={false}
-                label="Gap"
-                value={node.layoutGap ?? 0}
-                instanceKey={`${key}-gap`}
-                disabled={locked}
-                min={0}
-                max={256}
-                onCommit={(v) => updateLayout(id, { layoutGap: Math.max(0, v) })}
-              />
-              <div className="mt-1.5 text-[11px] font-medium text-[#8c8c8c]">Padding</div>
+              <div className="mb-1.5">
+                <div className="mb-0.5 flex items-center justify-between gap-1">
+                  <span className="text-[11px] font-medium text-app-subtle">Gap</span>
+                  <button
+                    type="button"
+                    disabled={locked}
+                    title="Use spacing inferred from child positions"
+                    onClick={() => {
+                      const flowKids = (childOrder[id] ?? []).filter((cid) => {
+                        const c = nodesAll[cid];
+                        return c?.visible && !c.locked;
+                      });
+                      const inferred =
+                        flowKids.length >= 2
+                          ? inferAutoLayoutGap(
+                              nodesAll as Record<string, LayoutNode>,
+                              flowKids,
+                              layoutMode,
+                            )
+                          : 0;
+                      if (node.layoutGapAuto) {
+                        updateLayout(id, { layoutGapAuto: false, layoutGap: inferred });
+                      } else {
+                        updateLayout(id, { layoutGapAuto: true, layoutGap: inferred });
+                      }
+                    }}
+                    className={cn(
+                      "rounded border px-2 py-0.5 text-[10px] font-semibold transition-colors disabled:opacity-40",
+                      node.layoutGapAuto
+                        ? "border-accent/40 bg-accent/15 text-accent"
+                        : "border-app-border text-app-muted hover:bg-app-hover",
+                    )}
+                  >
+                    Auto
+                  </button>
+                </div>
+                {node.layoutGapAuto ? (
+                  <div
+                    className={cn(
+                      "flex h-6 items-center rounded border border-app-border bg-app-panel px-1.5",
+                      locked && "opacity-50",
+                    )}
+                    title="Gap is calculated from current child spacing"
+                  >
+                    <span className="text-[12px] font-medium text-app-fg">Auto</span>
+                    <span className="ml-auto text-[10px] tabular-nums text-app-subtle">
+                      {(() => {
+                        const flowKids = (childOrder[id] ?? []).filter((cid) => {
+                          const c = nodesAll[cid];
+                          return c?.visible && !c.locked;
+                        });
+                        if (flowKids.length < 2) return "—";
+                        return `${inferAutoLayoutGap(
+                          nodesAll as Record<string, LayoutNode>,
+                          flowKids,
+                          layoutMode,
+                        )}px`;
+                      })()}
+                    </span>
+                  </div>
+                ) : (
+                  <PropertyNumberInput
+                    commitOnInput={false}
+                    label=""
+                    value={node.layoutGap ?? 0}
+                    instanceKey={`${key}-gap`}
+                    disabled={locked}
+                    min={0}
+                    max={256}
+                    onCommit={(v) =>
+                      updateLayout(id, { layoutGap: Math.max(0, v), layoutGapAuto: false })
+                    }
+                  />
+                )}
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <span className="text-[11px] font-medium text-app-subtle">Wrap</span>
+                <button
+                  type="button"
+                  disabled={locked}
+                  onClick={() => updateLayout(id, { layoutWrap: !node.layoutWrap })}
+                  className={cn(
+                    "rounded border px-2 py-0.5 text-[11px] font-medium transition-colors disabled:opacity-40",
+                    node.layoutWrap
+                      ? "border-accent/40 bg-accent/15 text-accent"
+                      : "border-app-border text-app-muted hover:bg-app-hover",
+                  )}
+                >
+                  {node.layoutWrap ? "On" : "Off"}
+                </button>
+              </div>
+              <div className="mt-1.5 text-[11px] font-medium text-app-subtle">Padding</div>
               <div className="mt-0.5 grid grid-cols-4 gap-1">
                 <PropertyNumberInput commitOnInput={false}
                   label="T"
@@ -593,7 +697,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                   onCommit={(v) => updateLayout(id, { paddingLeft: Math.max(0, v) })}
                 />
               </div>
-              <div className="mt-1.5 text-[11px] font-medium text-[#8c8c8c]">Primary axis</div>
+              <div className="mt-1.5 text-[11px] font-medium text-app-subtle">Primary axis</div>
               <div className="mt-0.5 flex flex-wrap gap-0.5">
                 {(layoutMode === "horizontal"
                   ? ([
@@ -622,7 +726,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                         "flex h-6 w-8 items-center justify-center rounded border transition-colors disabled:opacity-40",
                         active
                           ? "border-accent/45 bg-accent/15 text-white"
-                          : "border-white/[0.08] text-[#9a9a9a] hover:bg-white/[0.04]",
+                          : "border-app-border text-app-muted hover:bg-app-hover",
                       )}
                     >
                       <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
@@ -630,7 +734,14 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                   );
                 })}
               </div>
-              <div className="mt-1.5 text-[11px] font-medium text-[#8c8c8c]">Counter axis</div>
+              <div className="mt-2 border-t border-app-border-subtle pt-2">
+                <div className="mb-1.5 text-[11px] font-medium text-app-subtle">Frame sizing</div>
+                <p className="mb-2 text-[10px] leading-snug text-app-subtle">
+                  Hug shrinks the frame to fit children; fixed keeps your current size on that axis.
+                </p>
+                <LayoutSizingControls node={node} nodes={nodesAll} locked={locked} />
+              </div>
+              <div className="mt-1.5 text-[11px] font-medium text-app-subtle">Counter axis</div>
               <div className="mt-0.5 flex flex-wrap gap-0.5">
                 {(layoutMode === "horizontal"
                   ? ([
@@ -658,7 +769,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                         "flex h-6 w-8 items-center justify-center rounded border transition-colors disabled:opacity-40",
                         active
                           ? "border-accent/45 bg-accent/15 text-white"
-                          : "border-white/[0.08] text-[#9a9a9a] hover:bg-white/[0.04]",
+                          : "border-app-border text-app-muted hover:bg-app-hover",
                       )}
                     >
                       <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
@@ -673,7 +784,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
 
       {isContainer && (
         <PropertiesSection title="Responsive preview" defaultOpen={false}>
-          <p className="mb-1.5 text-[10px] leading-relaxed text-[#6b6b6b]">
+          <p className="mb-1.5 text-[10px] leading-relaxed text-app-subtle">
             Try viewport sizes with live constraint behavior. Changes stay temporary until you apply from the panel
             below.
           </p>
@@ -683,7 +794,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
             onClick={() => openResponsivePreview(id)}
             className={cn(
               "flex h-7 w-full items-center justify-center gap-1.5 rounded border text-[11px] font-medium transition-colors disabled:opacity-40",
-              "border-white/[0.1] bg-[#2c2c2c] text-[#e6e6e6] hover:bg-white/[0.06]",
+              "border-app-border bg-app-panel text-app-fg hover:bg-app-hover",
             )}
           >
             <Monitor className="h-3.5 w-3.5" strokeWidth={1.75} />
@@ -699,12 +810,12 @@ export function DesignInspector({ node }: { node: EditorNode }) {
 
       {node.parentId && (
         <PropertiesSection title="Constraints" defaultOpen={false}>
-          <div className="mb-0.5 text-[11px] font-medium text-[#8c8c8c]">Horizontal</div>
+          <div className="mb-0.5 text-[11px] font-medium text-app-subtle">Horizontal</div>
           <select
             disabled={locked}
             className={cn(
               field,
-              "mb-1.5 w-full rounded border border-white/[0.1] bg-[#2c2c2c] text-[#e6e6e6] focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
+              "mb-1.5 w-full rounded border border-app-border bg-app-panel text-app-fg focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
             )}
             value={node.constraintsHorizontal ?? "left"}
             onChange={(e) =>
@@ -717,12 +828,12 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               </option>
             ))}
           </select>
-          <div className="mb-0.5 text-[11px] font-medium text-[#8c8c8c]">Vertical</div>
+          <div className="mb-0.5 text-[11px] font-medium text-app-subtle">Vertical</div>
           <select
             disabled={locked}
             className={cn(
               field,
-              "w-full rounded border border-white/[0.1] bg-[#2c2c2c] text-[#e6e6e6] focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
+              "w-full rounded border border-app-border bg-app-panel text-app-fg focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
             )}
             value={node.constraintsVertical ?? "top"}
             onChange={(e) =>
@@ -738,583 +849,84 @@ export function DesignInspector({ node }: { node: EditorNode }) {
         </PropertiesSection>
       )}
 
+      {(canFillStroke || isLine || canRadius || isImage) && (
+        <AppearanceSection
+          node={node}
+          instanceKey={key}
+          locked={locked}
+          layerOpacity={display.opacity ?? 1}
+          canCornerRadius={canRadius}
+          onOpacityCommit={(opacity) => style({ opacity })}
+          onCornerStyle={style}
+        />
+      )}
+
       {canFillStroke && (
-        <PropertiesSection title="Fill" defaultOpen>
-          <ColorLibrary variant="compact" className="mb-2" />
-          {fillToken ? (
-            <p className="mb-1.5 truncate text-[10px] text-[#9a9a9a]">
-              Linked style:{" "}
-              <span className="font-medium text-[#d4d4d4]">{fillToken.name}</span>
-              <span className="text-[#6b6b6b]"> · updates everywhere this style is used</span>
-            </p>
-          ) : null}
-          <div className="mb-1.5 flex flex-wrap gap-1">
-            <button
-              type="button"
-              disabled={locked || fillType === "gradient"}
-              onClick={() => createColorTokenFromSelection()}
-              className="rounded border border-white/[0.1] bg-[#2c2c2c] px-2 py-0.5 text-[10px] font-medium text-[#e6e6e6] hover:bg-white/[0.06] disabled:opacity-40"
-            >
-              Create color style
-            </button>
-            <button
-              type="button"
-              disabled={locked || fillType !== "gradient"}
-              onClick={() => createGradientTokenFromSelection()}
-              className="rounded border border-white/[0.1] bg-[#2c2c2c] px-2 py-0.5 text-[10px] font-medium text-[#e6e6e6] hover:bg-white/[0.06] disabled:opacity-40"
-            >
-              Create gradient style
-            </button>
-            {node.fillTokenId ? (
-              <button
-                type="button"
-                disabled={locked}
-                onClick={() =>
-                  detachTokenFromSelection(linkedFillTokenType === "gradient" ? "gradient" : "color")
-                }
-                className="rounded border border-white/[0.1] bg-[#2c2c2c] px-2 py-0.5 text-[10px] font-medium text-[#e6e6e6] hover:bg-white/[0.06] disabled:opacity-40"
-              >
-                Detach style
-              </button>
-            ) : null}
-          </div>
-          <div className="mb-1.5 flex items-center justify-between gap-2">
-            <span className="text-[11px] font-medium text-[#8c8c8c]">Enabled</span>
-            <button
-              type="button"
-              disabled={locked}
-              onClick={() => style({ fillEnabled: !fillEnabled })}
-              className={cn(
-                "rounded border px-2 py-0.5 text-[11px] font-medium transition-colors disabled:opacity-40",
-                fillEnabled
-                  ? "border-accent/40 bg-accent/15 text-accent"
-                  : "border-white/[0.08] text-[#9a9a9a] hover:bg-white/[0.04]",
-              )}
-            >
-              {fillEnabled ? "On" : "Off"}
-            </button>
-          </div>
-          {linkedFillTokenType === "gradient" && isGradientValue(fillToken?.value) ? (
-            <div
-              className="mb-2 h-10 w-full rounded border border-white/[0.08]"
-              style={{
-                background: fillPaintCss({
-                  fillType: "gradient",
-                  fillGradient: normalizeFillGradient(fillToken!.value),
-                  fillEnabled,
-                  fillOpacity,
-                }),
-              }}
-              aria-hidden
-            />
-          ) : !node.fillTokenId ? (
-            <>
-              <div className="mb-1.5">
-                <div className="mb-0.5 text-[11px] font-medium text-[#8c8c8c]">Fill type</div>
-                <div className="flex gap-0.5">
-                  {(["solid", "gradient"] as const).map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      disabled={locked || !fillEnabled}
-                      onClick={() => {
-                        if (t === "gradient") {
-                          style({
-                            fillType: "gradient",
-                            fillGradient: node.fillGradient ?? defaultFillGradient(display.fill ?? node.fill),
-                          });
-                        } else {
-                          style({ fillType: "solid" });
-                        }
-                      }}
-                      className={cn(
-                        "h-6 flex-1 rounded border text-[10px] font-semibold capitalize transition-colors disabled:opacity-40",
-                        fillType === t
-                          ? "border-accent/45 bg-accent/15 text-white"
-                          : "border-white/[0.08] text-[#9a9a9a] hover:bg-white/[0.04]",
-                      )}
-                    >
-                      {t}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {fillType === "solid" ? (
-                <ColorInput
-                  label="Color"
-                  hex={display.fill ?? "#ffffff"}
-                  instanceKey={key}
-                  disabled={locked || !fillEnabled}
-                  onCommitHex={(hex) => style({ fill: hex, fillType: "solid" })}
-                />
-              ) : (
-                <>
-                  <div
-                    className="mb-2 h-10 w-full rounded border border-white/[0.08]"
-                    style={{
-                      background: fillPaintCss({
-                        fillType: "gradient",
-                        fillGradient,
-                        fill: display.fill ?? node.fill,
-                        fillEnabled,
-                        fillOpacity,
-                      }),
-                    }}
-                    aria-hidden
-                  />
-                  <div className="mb-1.5">
-                    <div className="mb-0.5 text-[11px] font-medium text-[#8c8c8c]">Gradient type</div>
-                    <div className="grid grid-cols-2 gap-0.5">
-                      {(
-                        [
-                          ["linear", "Linear"],
-                          ["radial", "Radial"],
-                          ["angular", "Angular"],
-                          ["diamond", "Diamond"],
-                        ] as const
-                      ).map(([kind, label]) => (
-                        <button
-                          key={kind}
-                          type="button"
-                          disabled={locked || !fillEnabled}
-                          onClick={() =>
-                            style({
-                              fillType: "gradient",
-                              fillGradient: {
-                                ...fillGradient,
-                                kind,
-                                transform: {
-                                  ...fillGradient.transform,
-                                  rotation:
-                                    kind === "linear"
-                                      ? fillGradient.transform.rotation || 180
-                                      : fillGradient.transform.rotation,
-                                },
-                              },
-                            })
-                          }
-                          className={cn(
-                            "h-6 rounded border text-[10px] font-semibold transition-colors disabled:opacity-40",
-                            fillGradient.kind === kind
-                              ? "border-accent/45 bg-accent/15 text-white"
-                              : "border-white/[0.08] text-[#9a9a9a] hover:bg-white/[0.04]",
-                          )}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  {(fillGradient.kind === "linear" || fillGradient.kind === "angular") && (
-                    <PropertyNumberInput
-                      commitOnInput={false}
-                      label={fillGradient.kind === "linear" ? "Angle °" : "Start angle °"}
-                      value={Math.round(fillGradient.transform.rotation)}
-                      instanceKey={`${key}-grad-rotation`}
-                      disabled={locked || !fillEnabled}
-                      min={0}
-                      max={359}
-                      onCommit={(v) => {
-                        const rotation = ((Math.round(v) % 360) + 360) % 360;
-                        style({
-                          fillType: "gradient",
-                          fillGradient: {
-                            ...fillGradient,
-                            transform: { ...fillGradient.transform, rotation },
-                          },
-                        });
-                      }}
-                    />
-                  )}
-                  <p className="mb-1 text-[10px] text-[#737373]">
-                    Drag stops and handles on canvas. Double-click a stop to remove.
-                  </p>
-                  {fillGradient.stops.map((stop, index) => (
-                    <div key={stop.id} className="mt-1.5 rounded border border-white/[0.06] p-1.5">
-                      <div className="mb-1 flex items-center justify-between gap-1">
-                        <span className="text-[10px] font-medium text-[#8c8c8c]">Stop {index + 1}</span>
-                        {fillGradient.stops.length > 2 ? (
-                          <button
-                            type="button"
-                            disabled={locked || !fillEnabled}
-                            onClick={() =>
-                              style({
-                                fillType: "gradient",
-                                fillGradient: {
-                                  ...fillGradient,
-                                  stops: fillGradient.stops.filter((s) => s.id !== stop.id),
-                                },
-                              })
-                            }
-                            className="rounded px-1 text-[10px] text-rose-300 hover:bg-white/[0.06] disabled:opacity-40"
-                          >
-                            Remove
-                          </button>
-                        ) : null}
-                      </div>
-                      <ColorInput
-                        label="Color"
-                        hex={stop.color}
-                        instanceKey={`${key}-grad-stop-${stop.id}`}
-                        disabled={locked || !fillEnabled}
-                        onCommitHex={(hex) => {
-                          const stops = fillGradient.stops.map((s) =>
-                            s.id === stop.id ? { ...s, color: hex } : s,
-                          );
-                          style({ fillType: "gradient", fillGradient: { ...fillGradient, stops } });
-                        }}
-                      />
-                      <div className="mt-1">
-                        <PropertyNumberInput
-                          commitOnInput={false}
-                          label="Position %"
-                          value={Math.round(stop.position)}
-                          instanceKey={`${key}-grad-pos-${stop.id}`}
-                          disabled={locked || !fillEnabled}
-                          min={0}
-                          max={100}
-                          onCommit={(v) => {
-                            const stops = fillGradient.stops.map((s) =>
-                              s.id === stop.id
-                                ? { ...s, position: Math.min(100, Math.max(0, v)) }
-                                : s,
-                            );
-                            style({ fillType: "gradient", fillGradient: { ...fillGradient, stops } });
-                          }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    disabled={locked || !fillEnabled}
-                    onClick={() => {
-                      const mid =
-                        fillGradient.stops.length >= 2
-                          ? (fillGradient.stops[0]!.position + fillGradient.stops.at(-1)!.position) / 2
-                          : 50;
-                      style({
-                        fillType: "gradient",
-                        fillGradient: {
-                          ...fillGradient,
-                          stops: [
-                            ...fillGradient.stops,
-                            {
-                              id: newGradientStopId(),
-                              color: display.fill ?? "#ffffff",
-                              position: mid,
-                            },
-                          ].sort((a, b) => a.position - b.position),
-                        },
-                      });
-                    }}
-                    className="mt-1.5 w-full rounded border border-white/[0.1] bg-[#2c2c2c] py-1 text-[10px] font-medium text-[#e6e6e6] hover:bg-white/[0.06] disabled:opacity-40"
-                  >
-                    Add stop
-                  </button>
-                </>
-              )}
-            </>
-          ) : linkedFillTokenType === "color" ? (
-            <ColorInput
-              label="Color"
-              libraryName={fillToken?.name}
-              libraryTokenId={node.fillTokenId}
-              hex={display.fill ?? "#ffffff"}
-              instanceKey={key}
-              disabled={locked || !fillEnabled}
-              onCommitHex={(hex) => {
-                const t = designTokens[node.fillTokenId!];
-                if (t?.type === "color" && isColorValue(t.value)) {
-                  updateDesignToken(node.fillTokenId!, { value: { ...(t.value as ColorTokenValue), hex } });
-                  return;
-                }
-                style({ fill: hex });
-              }}
-            />
-          ) : null}
-          <div className="mt-1.5">
-            <PropertyNumberInput commitOnInput={false}
-              label="Opacity %"
-              value={Math.round(fillOpacity * 100)}
-              instanceKey={`${key}-fo`}
-              disabled={locked || !fillEnabled}
-              min={0}
-              max={100}
-              onCommit={(v) => {
-                const op = Math.min(1, Math.max(0, v / 100));
-                if (node.fillTokenId) {
-                  const t = designTokens[node.fillTokenId];
-                  if (t?.type === "color" && isColorValue(t.value)) {
-                    updateDesignToken(node.fillTokenId, { value: { ...(t.value as ColorTokenValue), opacity: op } });
-                    return;
-                  }
-                }
-                style({ fillOpacity: op });
-              }}
-            />
-          </div>
-        </PropertiesSection>
+        <FillSection
+          node={node}
+          display={display}
+          instanceKey={key}
+          locked={locked}
+          fillType={fillType}
+          fillEnabled={fillEnabled}
+          fillOpacity={fillOpacity}
+          fillGradient={fillGradient}
+          fillToken={fillToken}
+          linkedFillTokenType={linkedFillTokenType}
+          designTokens={designTokens}
+          onStyle={style}
+          onApplyGradient={applyFillGradient}
+          onCreateColorToken={() => createColorTokenFromSelection()}
+          onCreateGradientToken={() => createGradientTokenFromSelection()}
+          onDetachToken={(kind) => detachTokenFromSelection(kind)}
+          onUpdateDesignToken={(tokenId, patch) => updateDesignToken(tokenId, patch)}
+          onBeginDrag={() => pushHistory()}
+        />
       )}
 
       {(canFillStroke || isLine) && (
-        <PropertiesSection title="Stroke" defaultOpen>
-          <ColorInput
-            label="Color"
-            hex={node.strokeColor ?? "#000000"}
-            instanceKey={key}
-            disabled={locked}
-            onCommitHex={(hex) => style({ strokeColor: hex })}
-          />
-          <div className="mt-1.5">
-            <PropertyNumberInput commitOnInput={false}
-              label="Width"
-              value={node.strokeWidth ?? 0}
-              instanceKey={key}
-              disabled={locked}
-              min={0}
-              max={64}
-              onCommit={(v) => style({ strokeWidth: v })}
-            />
-          </div>
-          <div className="mt-1.5">
-            <div className="mb-0.5 text-[11px] font-medium text-[#8c8c8c]">Style</div>
-            <div className="flex gap-0.5">
-              {(["solid", "dashed", "dotted"] as const).map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  disabled={locked}
-                  onClick={() => style({ strokeStyle: s })}
-                  className={cn(
-                    "h-6 flex-1 rounded border text-[10px] font-semibold capitalize transition-colors disabled:opacity-40",
-                    (node.strokeStyle ?? "solid") === s
-                      ? "border-accent/45 bg-accent/15 text-white"
-                      : "border-white/[0.08] text-[#9a9a9a] hover:bg-white/[0.04]",
-                  )}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="mt-1.5">
-            <div className="mb-0.5 text-[11px] font-medium text-[#8c8c8c]">Position</div>
-            <div className="flex gap-0.5">
-              {(["inside", "center", "outside"] as const).map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  disabled={locked}
-                  onClick={() => style({ strokePosition: p })}
-                  className={cn(
-                    "h-6 flex-1 rounded border text-[10px] font-semibold capitalize transition-colors disabled:opacity-40",
-                    strokePos === p
-                      ? "border-accent/45 bg-accent/15 text-white"
-                      : "border-white/[0.08] text-[#9a9a9a] hover:bg-white/[0.04]",
-                  )}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
-          </div>
-        </PropertiesSection>
+        <StrokeSection
+          instanceKey={key}
+          locked={locked}
+          strokeWidth={node.strokeWidth ?? 0}
+          strokeColor={node.strokeColor ?? "#000000"}
+          strokeOpacity={node.strokeOpacity ?? 1}
+          strokeEnabled={node.strokeEnabled !== false}
+          strokeStyle={node.strokeStyle ?? "solid"}
+          strokePosition={strokePos}
+          strokeDashLength={node.strokeDashLength}
+          strokeDashGap={node.strokeDashGap}
+          strokeLinecap={node.strokeLinecap}
+          strokeLinejoin={node.strokeLinejoin}
+          strokeMiterAngle={node.strokeMiterAngle}
+          strokeWidthProfileFlipped={node.strokeWidthProfileFlipped}
+          strokeStartPoint={node.strokeStartPoint}
+          strokeEndPoint={resolveStrokeEndPoint(node)}
+          showEndpoints={
+            node.type === "line" || (node.type === "path" && !node.pathClosed)
+          }
+          onStyle={style}
+        />
       )}
 
-      <PropertiesSection title="Effects" defaultOpen>
-        {node.effectTokenId && designTokens[node.effectTokenId]?.type === "effect" ? (
-          <p className="mb-1.5 truncate text-[10px] text-[#9a9a9a]">
-            Linked style:{" "}
-            <span className="font-medium text-[#d4d4d4]">{designTokens[node.effectTokenId]!.name}</span>
-          </p>
-        ) : null}
-        <div className="mb-1.5 flex flex-wrap gap-1">
-          <button
-            type="button"
-            disabled={locked}
-            onClick={() => createEffectTokenFromSelection()}
-            className="rounded border border-white/[0.1] bg-[#2c2c2c] px-2 py-0.5 text-[10px] font-medium text-[#e6e6e6] hover:bg-white/[0.06] disabled:opacity-40"
-          >
-            Create effect style
-          </button>
-          {node.effectTokenId ? (
-            <button
-              type="button"
-              disabled={locked}
-              onClick={() => detachEffectTokenFromSelection()}
-              className="rounded border border-white/[0.1] bg-[#2c2c2c] px-2 py-0.5 text-[10px] font-medium text-[#e6e6e6] hover:bg-white/[0.06] disabled:opacity-40"
-            >
-              Detach effect style
-            </button>
-          ) : null}
-        </div>
-        <div className="mb-1.5">
-          <PropertyNumberInput
-            commitOnInput={false}
-            label="Layer opacity %"
-            value={Math.round((display.opacity ?? 1) * 100)}
-            instanceKey={`${key}-layer-op`}
-            disabled={locked}
-            min={0}
-            max={100}
-            onCommit={(v) => style({ opacity: Math.min(1, Math.max(0, v / 100)) })}
-          />
-        </div>
-        <div className="mb-1.5">
-          <div className="mb-0.5 text-[11px] font-medium text-[#8c8c8c]">Add effect</div>
-          <select
-            disabled={locked}
-            className={cn(
-              field,
-              "w-full rounded border border-white/[0.1] bg-[#2c2c2c] text-[#e6e6e6] focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
-            )}
-            defaultValue=""
-            onChange={(e) => {
-              const v = e.target.value as NodeEffectType | "";
-              if (v) addEffect(id, v);
-              e.target.selectedIndex = 0;
-            }}
-          >
-            <option value="">Choose type…</option>
-            <option value="drop-shadow">Drop shadow</option>
-            <option value="inner-shadow">Inner shadow</option>
-            <option value="layer-blur">Layer blur</option>
-            <option value="background-blur">Background blur</option>
-          </select>
-        </div>
-        {node.effectTokenId &&
-        designTokens[node.effectTokenId]?.type === "effect" &&
-        isEffectValue(designTokens[node.effectTokenId]!.value) &&
-        !(designTokens[node.effectTokenId]!.value as EffectTokenValue).effects?.length ? (
-          <p className="mb-1.5 text-[10px] leading-relaxed text-[#8c8c8c]">
-            This effect style uses a legacy shadow. Add an effect to edit individual layers, or detach and use local effects.
-          </p>
-        ) : null}
-        {(display.effects ?? []).length === 0 ? (
-          <p className="text-[10px] text-[#6b6b6b]">No effects on this layer.</p>
-        ) : (
-          <ul className="space-y-2">
-            {(display.effects ?? []).map((e: NodeEffect) => {
-              const shadowLike = e.type === "drop-shadow" || e.type === "inner-shadow";
-              const blurOnly = e.type === "layer-blur" || e.type === "background-blur";
-              return (
-                <li key={e.id} className="rounded border border-white/[0.08] bg-[#262626] p-1.5">
-                  <div className="mb-1 flex items-center justify-between gap-1">
-                    <span className="text-[10px] font-medium text-[#b5b5b5]">{effectTypeLabel(e.type)}</span>
-                    <div className="flex items-center gap-0.5">
-                      <button
-                        type="button"
-                        disabled={locked}
-                        title={e.visible ? "Hide" : "Show"}
-                        onClick={() => toggleEffect(id, e.id)}
-                        className="rounded p-1 text-[#c4c4c4] hover:bg-white/[0.06] disabled:opacity-40"
-                      >
-                        {e.visible ? <Eye className="h-3.5 w-3.5" strokeWidth={1.75} /> : <EyeOff className="h-3.5 w-3.5" strokeWidth={1.75} />}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={locked}
-                        onClick={() => deleteEffect(id, e.id)}
-                        className="rounded px-1.5 py-0.5 text-[10px] font-medium text-rose-200 hover:bg-rose-500/15 disabled:opacity-40"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                  {shadowLike ? (
-                    <>
-                      <div className="grid grid-cols-2 gap-1">
-                        <PropertyNumberInput
-                          commitOnInput={false}
-                          label="X"
-                          value={e.x ?? 0}
-                          instanceKey={`${key}-efx-${e.id}-x`}
-                          disabled={locked || !e.visible}
-                          onCommit={(v) => updateEffect(id, e.id, { x: v })}
-                        />
-                        <PropertyNumberInput
-                          commitOnInput={false}
-                          label="Y"
-                          value={e.y ?? 0}
-                          instanceKey={`${key}-efx-${e.id}-y`}
-                          disabled={locked || !e.visible}
-                          onCommit={(v) => updateEffect(id, e.id, { y: v })}
-                        />
-                        <PropertyNumberInput
-                          commitOnInput={false}
-                          label="Blur"
-                          value={e.blur ?? 0}
-                          instanceKey={`${key}-efx-${e.id}-blur`}
-                          disabled={locked || !e.visible}
-                          min={0}
-                          max={256}
-                          onCommit={(v) => updateEffect(id, e.id, { blur: v })}
-                        />
-                        <PropertyNumberInput
-                          commitOnInput={false}
-                          label="Spread"
-                          value={e.spread ?? 0}
-                          instanceKey={`${key}-efx-${e.id}-spread`}
-                          disabled={locked || !e.visible}
-                          onCommit={(v) => updateEffect(id, e.id, { spread: v })}
-                        />
-                      </div>
-                      <div className="mt-1">
-                        <ColorInput
-                          label="Color"
-                          hex={e.color ?? "#000000"}
-                          instanceKey={`${key}-efx-${e.id}-c`}
-                          disabled={locked || !e.visible}
-                          onCommitHex={(hex) => updateEffect(id, e.id, { color: hex })}
-                        />
-                      </div>
-                      <div className="mt-1">
-                        <PropertyNumberInput
-                          commitOnInput={false}
-                          label="Effect opacity %"
-                          value={Math.round((e.opacity ?? 1) * 100)}
-                          instanceKey={`${key}-efx-${e.id}-op`}
-                          disabled={locked || !e.visible}
-                          min={0}
-                          max={100}
-                          onCommit={(v) => updateEffect(id, e.id, { opacity: Math.min(1, Math.max(0, v / 100)) })}
-                        />
-                      </div>
-                    </>
-                  ) : null}
-                  {blurOnly ? (
-                    <PropertyNumberInput
-                      commitOnInput={false}
-                      label="Blur"
-                      value={e.blur ?? 0}
-                      instanceKey={`${key}-efx-${e.id}-bonly`}
-                      disabled={locked || !e.visible}
-                      min={0}
-                      max={256}
-                      onCommit={(v) => updateEffect(id, e.id, { blur: v })}
-                    />
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </PropertiesSection>
-
-      {canRadius && (
-        <PropertiesSection title="Corner radius" defaultOpen>
-          <PropertyNumberInput commitOnInput={false}
-            label="Radius"
-            value={node.cornerRadius ?? 0}
-            instanceKey={key}
-            disabled={locked}
-            min={0}
-            max={999}
-            onCommit={(v) => style({ cornerRadius: v })}
-          />
-        </PropertiesSection>
-      )}
+      <EffectsSection
+        instanceKey={key}
+        locked={locked}
+        effects={display.effects ?? []}
+        effectToken={
+          node.effectTokenId && designTokens[node.effectTokenId]?.type === "effect"
+            ? designTokens[node.effectTokenId]
+            : undefined
+        }
+        hasEffectToken={Boolean(node.effectTokenId)}
+        onAddEffect={(type) => addEffect(id, type)}
+        onCreateEffectToken={() => createEffectTokenFromSelection()}
+        onDetachEffectToken={() => detachEffectTokenFromSelection()}
+        onToggleEffect={(effectId) => toggleEffect(id, effectId)}
+        onDeleteEffect={(effectId) => deleteEffect(id, effectId)}
+        onUpdateEffect={(effectId, patch) => updateEffect(id, effectId, patch)}
+        onChangeEffectType={(effectId, type) => updateEffect(id, effectId, { type })}
+      />
 
       {node.type === "path" && node.polygonSides != null && node.starPoints == null ? (
         <PropertiesSection title="Polygon" defaultOpen>
@@ -1378,15 +990,15 @@ export function DesignInspector({ node }: { node: EditorNode }) {
       {isText && (
         <PropertiesSection title="Typography" defaultOpen>
           {node.textStyleTokenId && designTokens[node.textStyleTokenId]?.type === "typography" ? (
-            <p className="mb-1.5 truncate text-[10px] text-[#9a9a9a]">
+            <p className="mb-1.5 truncate text-[10px] text-app-muted">
               Linked typography:{" "}
-              <span className="font-medium text-[#d4d4d4]">{designTokens[node.textStyleTokenId]!.name}</span>
+              <span className="font-medium text-app-fg">{designTokens[node.textStyleTokenId]!.name}</span>
             </p>
           ) : null}
           {node.fillTokenId && designTokens[node.fillTokenId]?.type === "color" ? (
-            <p className="mb-1.5 truncate text-[10px] text-[#9a9a9a]">
+            <p className="mb-1.5 truncate text-[10px] text-app-muted">
               Linked color style:{" "}
-              <span className="font-medium text-[#d4d4d4]">{designTokens[node.fillTokenId]!.name}</span>
+              <span className="font-medium text-app-fg">{designTokens[node.fillTokenId]!.name}</span>
             </p>
           ) : null}
           <div className="mb-1.5 flex flex-wrap gap-1">
@@ -1394,7 +1006,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               type="button"
               disabled={locked}
               onClick={() => createTypographyTokenFromSelection()}
-              className="rounded border border-white/[0.1] bg-[#2c2c2c] px-2 py-0.5 text-[10px] font-medium text-[#e6e6e6] hover:bg-white/[0.06] disabled:opacity-40"
+              className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-[10px] font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
             >
               Create typography style
             </button>
@@ -1402,7 +1014,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               type="button"
               disabled={locked}
               onClick={() => createColorTokenFromSelection()}
-              className="rounded border border-white/[0.1] bg-[#2c2c2c] px-2 py-0.5 text-[10px] font-medium text-[#e6e6e6] hover:bg-white/[0.06] disabled:opacity-40"
+              className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-[10px] font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
             >
               Create color style
             </button>
@@ -1411,7 +1023,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                 type="button"
                 disabled={locked}
                 onClick={() => detachTokenFromSelection("typography")}
-                className="rounded border border-white/[0.1] bg-[#2c2c2c] px-2 py-0.5 text-[10px] font-medium text-[#e6e6e6] hover:bg-white/[0.06] disabled:opacity-40"
+                className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-[10px] font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
               >
                 Detach typography
               </button>
@@ -1421,7 +1033,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                 type="button"
                 disabled={locked}
                 onClick={() => detachTokenFromSelection("color")}
-                className="rounded border border-white/[0.1] bg-[#2c2c2c] px-2 py-0.5 text-[10px] font-medium text-[#e6e6e6] hover:bg-white/[0.06] disabled:opacity-40"
+                className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-[10px] font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
               >
                 Detach color style
               </button>
@@ -1430,7 +1042,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
           <textarea
             disabled={locked}
             className={cn(
-              "min-h-[72px] w-full resize-y rounded border border-white/[0.1] bg-[#262626] p-1.5 text-[12px] leading-snug text-[#f5f5f5] focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-45",
+              "min-h-[72px] w-full resize-y rounded border border-app-border bg-app-field p-1.5 text-[12px] leading-snug text-app-field-fg focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-45",
               field,
             )}
             value={textContentDraft}
@@ -1469,7 +1081,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
             />
           </div>
           <div className="mt-1.5">
-            <div className="mb-0.5 text-[11px] font-medium leading-4 text-[#8c8c8c]">Font</div>
+            <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">Font</div>
             <FontFamilyPicker
               value={
                 display.fontFamily ?? "var(--font-inter), Inter, system-ui, sans-serif"
@@ -1597,7 +1209,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                   "rounded border px-2 py-0.5 text-[10px] font-medium capitalize",
                   (node.booleanOperation ?? "union") === op
                     ? "border-[#18a0fb] bg-[#18a0fb]/15 text-white"
-                    : "border-white/[0.08] text-[#9a9a9a] hover:bg-white/[0.04]",
+                    : "border-app-border text-app-muted hover:bg-app-hover",
                 )}
               >
                 {BOOLEAN_OPERATION_LABELS[op]}
@@ -1608,7 +1220,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
             <button
               type="button"
               disabled={locked}
-              className="flex-1 rounded border border-white/[0.08] py-1.5 text-[11px] font-medium text-[#c4c4c4] hover:bg-white/[0.05] hover:text-white disabled:opacity-40"
+              className="flex-1 rounded border border-app-border py-1.5 text-[11px] font-medium text-app-muted hover:bg-white/[0.05] hover:text-app-fg disabled:opacity-40"
               onClick={() => flattenSelection()}
             >
               Flatten
@@ -1616,7 +1228,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
             <button
               type="button"
               disabled={locked}
-              className="flex-1 rounded border border-white/[0.08] py-1.5 text-[11px] font-medium text-[#c4c4c4] hover:bg-white/[0.05] hover:text-white disabled:opacity-40"
+              className="flex-1 rounded border border-app-border py-1.5 text-[11px] font-medium text-app-muted hover:bg-white/[0.05] hover:text-app-fg disabled:opacity-40"
               onClick={() => enterObjectEditMode(id)}
             >
               Edit object
@@ -1640,14 +1252,14 @@ export function DesignInspector({ node }: { node: EditorNode }) {
             Mask layer: {node.maskId ? nodesAll[node.maskId]?.name ?? "Mask" : "—"}
           </p>
           {node.figMaskType === "LUMINANCE" ? (
-            <p className="mb-2 text-[10px] leading-snug text-[#6b6b6b]">
+            <p className="mb-2 text-[10px] leading-snug text-app-subtle">
               Figma luminance mask — shown as vector outline clip in this editor.
             </p>
           ) : null}
           <button
             type="button"
             disabled={locked}
-            className="w-full rounded border border-white/[0.08] py-1.5 text-[11px] font-medium text-[#c4c4c4] hover:bg-white/[0.05] hover:text-white disabled:opacity-40"
+            className="w-full rounded border border-app-border py-1.5 text-[11px] font-medium text-app-muted hover:bg-white/[0.05] hover:text-app-fg disabled:opacity-40"
             onClick={() => releaseMask(id)}
           >
             Release mask
@@ -1662,7 +1274,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
           </p>
           <button
             type="button"
-            className="w-full rounded border border-white/[0.08] py-1.5 text-[11px] font-medium text-[#c4c4c4] hover:bg-white/[0.05] hover:text-white"
+            className="w-full rounded border border-app-border py-1.5 text-[11px] font-medium text-app-muted hover:bg-white/[0.05] hover:text-app-fg"
             onClick={() => useSelectionAsMask()}
           >
             Use as mask
@@ -1674,13 +1286,13 @@ export function DesignInspector({ node }: { node: EditorNode }) {
         <div className="flex gap-1.5">
           <button
             type="button"
-            className="flex-1 rounded border border-white/[0.08] py-1.5 text-[11px] font-medium text-[#c4c4c4] transition-colors hover:bg-white/[0.05] hover:text-white"
+            className="flex-1 rounded border border-app-border py-1.5 text-[11px] font-medium text-app-muted transition-colors hover:bg-white/[0.05] hover:text-app-fg"
           >
             PNG
           </button>
           <button
             type="button"
-            className="flex-1 rounded border border-white/[0.08] py-1.5 text-[11px] font-medium text-[#c4c4c4] transition-colors hover:bg-white/[0.05] hover:text-white"
+            className="flex-1 rounded border border-app-border py-1.5 text-[11px] font-medium text-app-muted transition-colors hover:bg-white/[0.05] hover:text-app-fg"
           >
             SVG
           </button>

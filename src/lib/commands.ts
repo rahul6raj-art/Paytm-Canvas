@@ -485,6 +485,15 @@ export const ALL_COMMANDS: CommandDefinition[] = [
     run: (s) => s.toggleGrid(),
   },
   {
+    id: "toggle-rulers",
+    title: "Toggle rulers",
+    subtitle: "Canvas top/left rulers",
+    category: "View",
+    shortcut: "",
+    enabled: () => true,
+    run: (s) => s.toggleRulers(),
+  },
+  {
     id: "toggle-presence",
     title: "Toggle mock presence",
     subtitle: "Simulated collaborators",
@@ -708,6 +717,32 @@ export const ALL_COMMANDS: CommandDefinition[] = [
     shortcut: "",
     enabled: () => true,
     run: (s) => s.exportDocument(),
+  },
+  {
+    id: "open-code-export",
+    title: "Export React code",
+    subtitle: "Canvas → React with round-trip payload",
+    category: "Files",
+    shortcut: "",
+    keywords: ["code", "react", "tsx", "export", "round trip"],
+    enabled: (s) => s.editorMode === "design",
+    run: (s) => {
+      s.setCommandMenuOpen(false);
+      s.openCodeRoundTrip("export");
+    },
+  },
+  {
+    id: "open-code-import",
+    title: "Import React code",
+    subtitle: "Bring edited React back to the canvas",
+    category: "Files",
+    shortcut: "",
+    keywords: ["code", "react", "tsx", "import", "round trip"],
+    enabled: (s) => s.editorMode === "design",
+    run: (s) => {
+      s.setCommandMenuOpen(false);
+      s.openCodeRoundTrip("import");
+    },
   },
   {
     id: "save-locally",

@@ -72,23 +72,23 @@ function ComponentCard({
         "w-full rounded-md border p-2 text-left transition-colors",
         active
           ? "border-accent/50 bg-accent/10 ring-1 ring-accent/30"
-          : "border-white/[0.08] bg-[#2c2c2c] hover:border-violet-500/35 hover:bg-violet-500/10",
+          : "border-app-border bg-app-panel hover:border-violet-500/35 hover:bg-violet-500/10",
       )}
     >
       <ComponentPreview width={master.width} height={master.height} />
       <div className="mt-1.5 flex items-center gap-1.5">
         <Component className="h-3.5 w-3.5 shrink-0 text-violet-300" strokeWidth={1.75} />
-        <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-[#ececec]">
+        <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-app-fg">
           {showGroupContext ? master.name : group.label}
         </span>
         {showGroupContext ? (
-          <span className="shrink-0 rounded bg-white/[0.06] px-1 py-0.5 text-[9px] font-semibold uppercase text-[#9a9a9a]">
+          <span className="shrink-0 rounded bg-app-hover px-1 py-0.5 text-[9px] font-semibold uppercase text-app-muted">
             Var
           </span>
         ) : null}
       </div>
       {subtitle ? (
-        <p className="mt-0.5 truncate text-[10px] text-[#8c8c8c]" title={subtitle}>
+        <p className="mt-0.5 truncate text-[10px] text-app-subtle" title={subtitle}>
           {subtitle}
         </p>
       ) : null}
@@ -207,10 +207,10 @@ export function ComponentsPanel() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 border-b border-white/[0.06] p-2">
+      <div className="shrink-0 border-b border-app-border-subtle p-2">
         <div className="relative">
           <Search
-            className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#6b6b6b]"
+            className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-app-subtle"
             strokeWidth={2}
             aria-hidden
           />
@@ -222,7 +222,7 @@ export function ComponentsPanel() {
             onKeyDown={onSearchKeyDown}
             placeholder="Search components"
             aria-label="Search components"
-            className="h-8 w-full rounded-md border border-white/[0.1] bg-[#262626] py-0 pl-7 pr-7 text-[12px] text-[#f5f5f5] placeholder:text-[#6b6b6b] focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            className="h-8 w-full rounded-md border border-app-border bg-app-field py-0 pl-7 pr-7 text-[12px] text-app-field-fg placeholder:text-app-subtle focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           />
           {query ? (
             <button
@@ -231,7 +231,7 @@ export function ComponentsPanel() {
                 setQuery("");
                 searchRef.current?.focus();
               }}
-              className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-[#8c8c8c] hover:bg-white/[0.06] hover:text-white"
+              className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-app-subtle hover:bg-app-hover hover:text-app-fg"
               aria-label="Clear search"
             >
               <X className="h-3.5 w-3.5" strokeWidth={2} />
@@ -239,13 +239,13 @@ export function ComponentsPanel() {
           ) : null}
         </div>
         {searching ? (
-          <p className="mt-1.5 px-0.5 text-[10px] text-[#6b6b6b]">
+          <p className="mt-1.5 px-0.5 text-[10px] text-app-subtle">
             {resultCount === 0
               ? "No components match your search"
               : `${resultCount} of ${totalCount} component${totalCount === 1 ? "" : "s"}`}
           </p>
         ) : totalCount > 0 ? (
-          <p className="mt-1.5 px-0.5 text-[10px] text-[#6b6b6b]">
+          <p className="mt-1.5 px-0.5 text-[10px] text-app-subtle">
             {totalCount} component{totalCount === 1 ? "" : "s"} in this file
           </p>
         ) : null}
@@ -258,42 +258,42 @@ export function ComponentsPanel() {
             "mt-2 flex h-8 w-full items-center justify-center gap-1.5 rounded-md border text-[11px] font-semibold transition-colors",
             canCreate
               ? "border-violet-500/40 bg-violet-500/15 text-violet-100 hover:bg-violet-500/25"
-              : "cursor-not-allowed border-white/[0.06] text-[#5c5c5c]",
+              : "cursor-not-allowed border-app-border-subtle text-app-subtle",
           )}
         >
           <Plus className="h-3.5 w-3.5" strokeWidth={2} />
           Create component
         </button>
-        <p className="mt-1.5 px-0.5 text-[10px] leading-relaxed text-[#6b6b6b]">
+        <p className="mt-1.5 px-0.5 text-[10px] leading-relaxed text-app-subtle">
           Select layers, then create. Use{" "}
-          <span className="font-medium text-[#8c8c8c]">⌘⌥K</span> · ↑↓ to browse · Enter to place.
+          <span className="font-medium text-app-subtle">⌘⌥K</span> · ↑↓ to browse · Enter to place.
         </p>
       </div>
 
       <div className="thin-scroll min-h-0 flex-1 overflow-y-auto p-2">
         {totalCount === 0 ? (
-          <div className="mx-1 rounded-lg border border-dashed border-white/[0.08] bg-white/[0.02] px-3 py-8 text-center">
+          <div className="mx-1 rounded-lg border border-dashed border-app-border bg-white/[0.02] px-3 py-8 text-center">
             <Package className="mx-auto mb-2 h-8 w-8 text-[#4a4a4a]" strokeWidth={1.25} />
-            <p className="text-[12px] font-medium text-[#9a9a9a]">No components yet</p>
-            <p className="mt-1 text-[11px] leading-relaxed text-[#6b6b6b]">
+            <p className="text-[12px] font-medium text-app-muted">No components yet</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-app-subtle">
               Components you create appear here. Search by name or variant, then drag or click to place
               instances.
             </p>
           </div>
         ) : searching && resultCount === 0 ? (
-          <div className="mx-1 rounded-lg border border-dashed border-white/[0.08] bg-white/[0.02] px-3 py-6 text-center">
+          <div className="mx-1 rounded-lg border border-dashed border-app-border bg-white/[0.02] px-3 py-6 text-center">
             <Search className="mx-auto mb-2 h-7 w-7 text-[#4a4a4a]" strokeWidth={1.25} />
-            <p className="text-[12px] font-medium text-[#9a9a9a]">No results</p>
-            <p className="mt-1 text-[11px] text-[#6b6b6b]">Try another name or variant label.</p>
+            <p className="text-[12px] font-medium text-app-muted">No results</p>
+            <p className="mt-1 text-[11px] text-app-subtle">Try another name or variant label.</p>
           </div>
         ) : (
           <div className="space-y-3">
             {filteredGroups.map((group) => (
               <div key={group.id}>
                 {group.variants.length > 1 ? (
-                  <p className="mb-1 truncate px-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#6b6b6b]">
+                  <p className="mb-1 truncate px-0.5 text-[10px] font-semibold uppercase tracking-wide text-app-subtle">
                     {group.label}
-                    <span className="ml-1 font-normal normal-case text-[#5c5c5c]">
+                    <span className="ml-1 font-normal normal-case text-app-subtle">
                       · {group.variants.length} variants
                     </span>
                   </p>
@@ -317,7 +317,7 @@ export function ComponentsPanel() {
         )}
 
         {resultCount > 0 ? (
-          <p className="mt-3 px-1 text-[10px] leading-relaxed text-[#5c5c5c]">
+          <p className="mt-3 px-1 text-[10px] leading-relaxed text-app-subtle">
             Drag onto the canvas, click to place with the cursor, or double-click a master to select it on
             the canvas.
           </p>

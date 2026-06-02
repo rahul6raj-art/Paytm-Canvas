@@ -34,13 +34,13 @@ export function PagesPanel() {
   };
 
   return (
-    <div className="border-b border-black/30 px-2 py-2">
+    <div className="border-b border-app-border px-2 py-2">
       <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[#6b6b6b]">Pages</p>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-app-subtle">Pages</p>
         <button
           type="button"
           onClick={() => addPage()}
-          className="flex h-6 items-center gap-1 rounded-md border border-white/[0.08] bg-white/[0.04] px-2 text-[10px] font-semibold text-[#b8b8b8] transition-colors hover:border-[rgba(13,153,255,0.35)] hover:bg-[rgba(13,153,255,0.12)] hover:text-white"
+          className="flex h-6 items-center gap-1 rounded-md border border-app-border bg-app-hover px-2 text-[10px] font-semibold text-app-muted transition-colors hover:border-[rgba(13,153,255,0.35)] hover:bg-[rgba(13,153,255,0.12)] hover:text-app-fg"
           title="Add page"
           aria-label="Add page"
         >
@@ -90,13 +90,13 @@ export function PagesPanel() {
                       if (e.key === "Escape") setRenameId(null);
                     }}
                     onClick={(e) => e.stopPropagation()}
-                    className="min-w-0 flex-1 rounded border border-[rgba(13,153,255,0.45)] bg-[#1a1a1a] px-1 py-0 text-ui-sm text-white outline-none"
+                    className="min-w-0 flex-1 rounded border border-[rgba(13,153,255,0.45)] bg-app-field px-1 py-0 text-ui-sm text-white outline-none"
                   />
                 ) : (
                   <span
                     className={cn(
                       "truncate text-ui-sm font-medium",
-                      active ? "text-white" : "text-[#c4c4c4] group-hover:text-white",
+                      active ? "text-white" : "text-app-muted group-hover:text-app-fg",
                     )}
                   >
                     {page.name}
@@ -108,7 +108,7 @@ export function PagesPanel() {
                   <button
                     type="button"
                     onClick={() => duplicatePage(pageId)}
-                    className="flex h-5 w-5 items-center justify-center rounded text-[#7a7a7a] hover:bg-white/[0.08] hover:text-white"
+                    className="flex h-5 w-5 items-center justify-center rounded text-app-subtle hover:bg-app-hover hover:text-app-fg"
                     title="Duplicate page"
                     aria-label={`Duplicate ${page.name}`}
                   >
@@ -121,7 +121,7 @@ export function PagesPanel() {
                         e.stopPropagation();
                         deletePage(pageId);
                       }}
-                      className="flex h-5 w-5 items-center justify-center rounded text-[#7a7a7a] hover:bg-red-500/20 hover:text-red-300"
+                      className="flex h-5 w-5 items-center justify-center rounded text-app-subtle hover:bg-red-500/20 hover:text-red-300"
                       title="Delete page"
                       aria-label={`Delete ${page.name}`}
                     >
@@ -137,7 +137,7 @@ export function PagesPanel() {
       <button
         type="button"
         onClick={() => addPage()}
-        className="mt-1.5 flex h-7 w-full items-center gap-2 rounded px-2 text-left text-ui-sm font-medium text-[#8a8a8a] transition-colors hover:bg-white/[0.05] hover:text-white"
+        className="mt-1.5 flex h-7 w-full items-center gap-2 rounded px-2 text-left text-ui-sm font-medium text-[#8a8a8a] transition-colors hover:bg-white/[0.05] hover:text-app-fg"
         title="Add new page"
         aria-label="Add new page"
       >

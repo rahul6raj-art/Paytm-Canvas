@@ -278,6 +278,7 @@ function slice(
     zoom: 0.52,
     pan: { x: 48, y: 32 },
     showGrid: true,
+    showRulers: true,
     canvasBackgroundColor: "#e5e5e5",
     comments: [],
   });
@@ -404,6 +405,7 @@ function designSystemStarter(): EditorPersistSlice {
     zoom: 0.52,
     pan: { x: 48, y: 32 },
     showGrid: true,
+    showRulers: true,
     canvasBackgroundColor: "#e5e5e5",
     comments: [],
   });

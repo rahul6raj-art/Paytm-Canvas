@@ -34,7 +34,7 @@ export function EditorMenuBar() {
 
   return (
     <div
-      className="flex h-7 shrink-0 items-stretch gap-0 border-b border-white/[0.06] bg-[#2a2a2a] px-1"
+      className="flex h-7 shrink-0 items-stretch gap-0 border-b border-app-border-subtle bg-app-panel px-1"
       role="menubar"
       aria-label="Application menu"
     >
@@ -52,8 +52,8 @@ export function EditorMenuBar() {
               className={cn(
                 "rounded px-2.5 text-[11px] font-medium transition-colors",
                 open
-                  ? "bg-white/[0.1] text-white"
-                  : "text-[#c4c4c4] hover:bg-white/[0.06] hover:text-white",
+                  ? "bg-app-hover text-app-fg"
+                  : "text-app-muted hover:bg-app-hover hover:text-app-fg",
               )}
               onClick={() => setOpenMenuId((id) => (id === menu.id ? null : menu.id))}
               onMouseEnter={() => {

@@ -2,12 +2,17 @@ import { ROOT, useEditorStore, type EditorNode } from "@/stores/useEditorStore";
 import { insertIndexInAutoLayout, type LayoutNode } from "@/lib/autoLayout";
 import { screenDeltaToWorld } from "@/lib/canvasCoordinates";
 import {
+  computeDragSmartGuides,
+  proposedBoundsForMoving,
+  type WorldRect,
+} from "@/lib/dragSmartGuides";
+import {
   getNodeTransformedWorldBounds,
   getNodeWorldOrigin,
   worldOriginToNodeXY,
 } from "@/lib/transformMath";
 import { isAncestorOf } from "@/lib/editorGraph";
-import { pickDeepestFrameAtWorldPoint, pickDeepestFrameOrGroupAtWorldPoint, worldToLocalForNode } from "@/lib/tree";
+import { pickDeepestFrameAtWorldPoint, worldToLocalForNode } from "@/lib/tree";
 
 export type ClientToWorldFn = (clientX: number, clientY: number) => { x: number; y: number };
 
@@ -48,48 +53,14 @@ function toLayoutMap(nodes: Record<string, EditorNode>): Record<string, LayoutNo
   return m;
 }
 
-function collectSnapXs(nodes: Record<string, EditorNode>, excludeId: string): number[] {
-  const xs: number[] = [];
-  const isUnder = (nodeId: string, ancestorId: string) => {
-    let cur: string | null = nodes[nodeId]?.parentId ?? null;
-    while (cur) {
-      if (cur === ancestorId) return true;
-      cur = nodes[cur]?.parentId ?? null;
-    }
-    return false;
-  };
-  for (const id of Object.keys(nodes)) {
-    if (id === excludeId || isUnder(id, excludeId)) continue;
-    const w = getNodeTransformedWorldBounds(id, nodes);
-    xs.push(w.x, w.x + w.width / 2, w.x + w.width);
-  }
-  return xs;
-}
-
-function collectSnapYs(nodes: Record<string, EditorNode>, excludeId: string): number[] {
-  const ys: number[] = [];
-  const isUnder = (nodeId: string, ancestorId: string) => {
-    let cur: string | null = nodes[nodeId]?.parentId ?? null;
-    while (cur) {
-      if (cur === ancestorId) return true;
-      cur = nodes[cur]?.parentId ?? null;
-    }
-    return false;
-  };
-  for (const id of Object.keys(nodes)) {
-    if (id === excludeId || isUnder(id, excludeId)) continue;
-    const w = getNodeTransformedWorldBounds(id, nodes);
-    ys.push(w.y, w.y + w.height / 2, w.y + w.height);
-  }
-  return ys;
-}
-
 type DragSession = {
   pointerId: number;
   sx: number;
   sy: number;
   primaryId: string;
+  movingIds: string[];
   startWorld: Record<string, { x: number; y: number }>;
+  startBounds: Record<string, WorldRect>;
   mode: "free" | "al-reorder";
   alParentId?: string;
   lastAlInsert?: number;
@@ -118,8 +89,10 @@ export function beginCanvasNodeDrag(opts: {
 
   const primaryId = dragTargets.includes(opts.nodeId) ? opts.nodeId : dragTargets[0]!;
   const startWorld: Record<string, { x: number; y: number }> = {};
+  const startBounds: Record<string, WorldRect> = {};
   for (const sid of dragTargets) {
     startWorld[sid] = getNodeWorldOrigin(sid, s1.nodes);
+    startBounds[sid] = getNodeTransformedWorldBounds(sid, s1.nodes);
   }
 
   const pAl = s1.nodes[primaryId]!.parentId;
@@ -133,7 +106,9 @@ export function beginCanvasNodeDrag(opts: {
     sx: opts.clientX,
     sy: opts.clientY,
     primaryId,
+    movingIds: dragTargets,
     startWorld,
+    startBounds,
     mode: useAl ? "al-reorder" : "free",
     alParentId: useAl ? pAl! : undefined,
     lastAlInsert: -1,
@@ -149,7 +124,7 @@ export function beginCanvasNodeDrag(opts: {
     const d = activeDrag;
     if (!d || ev.pointerId !== d.pointerId) return;
     const state = useEditorStore.getState();
-    const { updateNode, setGuides, reorderNode, moveNodeToParent } = state;
+    const { updateNode, setSnapOverlay, reorderNode, moveNodeToParent } = state;
     const pid = d.primaryId;
 
     if (d.mode === "al-reorder" && d.alParentId) {
@@ -183,59 +158,27 @@ export function beginCanvasNodeDrag(opts: {
         d.sy = ev.clientY;
         const wrPid = getNodeWorldOrigin(pid, st2.nodes);
         d.startWorld = { [pid]: wrPid };
+        d.startBounds = { [pid]: getNodeTransformedWorldBounds(pid, st2.nodes) };
+        d.movingIds = [pid];
       }
+      setSnapOverlay([], []);
       return;
     }
 
     const z = state.zoom;
-    const ddx = screenDeltaToWorld(ev.clientX - d.sx, z);
-    const ddy = screenDeltaToWorld(ev.clientY - d.sy, z);
+    const fdx = screenDeltaToWorld(ev.clientX - d.sx, z);
+    const fdy = screenDeltaToWorld(ev.clientY - d.sy, z);
 
-    const base = d.startWorld[pid]!;
-    let worldX = base.x + ddx;
-    let worldY = base.y + ddy;
+    const proposed = proposedBoundsForMoving(d.movingIds, d.startBounds, fdx, fdy);
+    const snap = computeDragSmartGuides(d.movingIds, proposed, state.nodes, z);
+    setSnapOverlay(snap.guides, snap.measurements);
 
-    const SNAP = 5;
-    const n0 = state.nodes[pid]!;
-    const wr = { x: worldX, y: worldY, width: n0.width, height: n0.height };
-    const snapXs = collectSnapXs(state.nodes, pid);
-    const snapYs = collectSnapYs(state.nodes, pid);
-    const guides: { axis: "v" | "h"; pos: number }[] = [];
+    const fdx2 = fdx + snap.dx;
+    const fdy2 = fdy + snap.dy;
 
-    const tryX = (edgeX: number, target: number) => {
-      if (Math.abs(edgeX - target) <= SNAP) {
-        worldX += target - edgeX;
-        guides.push({ axis: "v", pos: target });
-        return true;
-      }
-      return false;
-    };
-    const tryY = (edgeY: number, target: number) => {
-      if (Math.abs(edgeY - target) <= SNAP) {
-        worldY += target - edgeY;
-        guides.push({ axis: "h", pos: target });
-        return true;
-      }
-      return false;
-    };
-
-    for (const tx of snapXs) {
-      if (tryX(wr.x, tx)) break;
-      if (tryX(wr.x + wr.width / 2, tx)) break;
-      if (tryX(wr.x + wr.width, tx)) break;
-    }
-    for (const ty of snapYs) {
-      if (tryY(wr.y, ty)) break;
-      if (tryY(wr.y + wr.height / 2, ty)) break;
-      if (tryY(wr.y + wr.height, ty)) break;
-    }
-
-    setGuides(guides);
-    const fdx = worldX - base.x;
-    const fdy = worldY - base.y;
-    for (const sid of Object.keys(d.startWorld)) {
+    for (const sid of d.movingIds) {
       const sw = d.startWorld[sid]!;
-      const desired = { x: sw.x + fdx, y: sw.y + fdy };
+      const desired = { x: sw.x + fdx2, y: sw.y + fdy2 };
       const xy = worldOriginToNodeXY(sid, state.nodes, desired);
       updateNode(sid, { x: xy.x, y: xy.y }, { skipHistory: true });
     }

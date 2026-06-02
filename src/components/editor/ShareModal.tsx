@@ -101,24 +101,24 @@ export function ShareModal() {
       onMouseDown={onBackdrop}
     >
       <div
-        className="relative my-4 flex max-h-[min(calc(100vh-2rem),640px)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-white/[0.1] bg-gradient-to-b from-[#1c1c20] to-[#121214] shadow-2xl"
+        className="relative my-4 flex max-h-[min(calc(100vh-2rem),640px)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-app-border bg-gradient-to-b from-[#1c1c20] to-[#121214] shadow-2xl"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="h-0.5 w-full bg-gradient-to-r from-sky-400 via-indigo-500 to-violet-500" />
-        <header className="flex items-start justify-between gap-3 border-b border-white/[0.06] px-5 py-4">
+        <header className="flex items-start justify-between gap-3 border-b border-app-border-subtle px-5 py-4">
           <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.06] text-sky-300">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-app-hover text-sky-300">
               <Share2 className="h-5 w-5" strokeWidth={1.75} />
             </span>
             <div className="min-w-0">
               <h2 className="truncate text-[16px] font-semibold text-white">Share</h2>
-              <p className="text-[12px] text-[#9a9a9a]">Local preview — no backend or network.</p>
+              <p className="text-[12px] text-app-muted">Local preview — no backend or network.</p>
             </div>
           </div>
           <button
             type="button"
             onClick={close}
-            className="rounded-lg p-1.5 text-[#9a9a9a] transition-colors hover:bg-white/[0.06] hover:text-white"
+            className="rounded-lg p-1.5 text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
             aria-label="Close"
           >
             <X className="h-5 w-5" strokeWidth={1.75} />
@@ -127,17 +127,17 @@ export function ShareModal() {
 
         <div className="space-y-5 px-5 py-4">
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6b6b6b]">File</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-app-subtle">File</p>
             <p className="mt-1 truncate text-[14px] font-medium text-white">{fileName}</p>
-            <p className="mt-0.5 text-[12px] text-[#9a9a9a]">
-              Workspace: <span className="text-[#d4d4d4]">{workspace.name}</span>
+            <p className="mt-0.5 text-[12px] text-app-muted">
+              Workspace: <span className="text-app-fg">{workspace.name}</span>
             </p>
           </div>
 
-          <div className="flex flex-col gap-2 rounded-xl border border-white/[0.08] bg-black/25 p-3">
+          <div className="flex flex-col gap-2 rounded-xl border border-app-border bg-app-toolbar-well p-3">
             <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-[12px] font-medium text-[#d4d4d4]">
-                <Link2 className="h-3.5 w-3.5 text-[#8c8c8c]" strokeWidth={2} />
+              <div className="flex items-center gap-2 text-[12px] font-medium text-app-fg">
+                <Link2 className="h-3.5 w-3.5 text-app-subtle" strokeWidth={2} />
                 Anyone with the link
               </div>
               <button
@@ -149,7 +149,7 @@ export function ShareModal() {
                   "relative h-6 w-11 shrink-0 rounded-full border transition-colors",
                   anyoneWithLink
                     ? "border-sky-500/50 bg-sky-500/25"
-                    : "border-white/[0.1] bg-white/[0.06]",
+                    : "border-app-border bg-app-hover",
                 )}
               >
                 <span
@@ -160,7 +160,7 @@ export function ShareModal() {
                 />
               </button>
             </div>
-            <p className="text-[11px] leading-snug text-[#6b6b6b]">
+            <p className="text-[11px] leading-snug text-app-subtle">
               {anyoneWithLink
                 ? "Mock: link access would be on (stored only in this dialog for the session)."
                 : "Mock: restricted to people listed below."}
@@ -168,7 +168,7 @@ export function ShareModal() {
             <Button
               variant="toolbar"
               type="button"
-              className="h-8 justify-center gap-2 border border-white/[0.1] bg-white/[0.06] text-[12px] text-white hover:bg-white/[0.1]"
+              className="h-8 justify-center gap-2 border border-app-border bg-app-hover text-[12px] text-white hover:bg-white/[0.1]"
               onClick={onCopyLink}
             >
               {copied ? <Check className="h-3.5 w-3.5 text-emerald-300" strokeWidth={2} /> : <Copy className="h-3.5 w-3.5" strokeWidth={2} />}
@@ -177,20 +177,20 @@ export function ShareModal() {
           </div>
 
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6b6b6b]">People with access</p>
-            <ul className="mt-2 divide-y divide-white/[0.06] rounded-xl border border-white/[0.08] bg-black/20">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-app-subtle">People with access</p>
+            <ul className="mt-2 divide-y divide-white/[0.06] rounded-xl border border-app-border bg-app-toolbar-well">
               {people.map((p) => (
                 <li key={p.email} className="flex items-center justify-between gap-2 px-3 py-2.5">
                   <div className="flex min-w-0 items-center gap-2">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/[0.1] bg-white/[0.06] text-[11px] font-bold text-white">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-app-border bg-app-hover text-[11px] font-bold text-white">
                       {p.initials}
                     </span>
                     <div className="min-w-0">
                       <p className="truncate text-[13px] font-medium text-white">{p.name}</p>
-                      <p className="truncate text-[11px] text-[#8c8c8c]">{p.email}</p>
+                      <p className="truncate text-[11px] text-app-subtle">{p.email}</p>
                     </div>
                   </div>
-                  <span className="shrink-0 rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-0.5 text-[10px] font-semibold text-[#c4c4c4]">
+                  <span className="shrink-0 rounded-md border border-app-border bg-app-hover px-2 py-0.5 text-[10px] font-semibold text-app-muted">
                     {p.access}
                   </span>
                 </li>
@@ -199,18 +199,18 @@ export function ShareModal() {
           </div>
 
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6b6b6b]">Invite</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-app-subtle">Invite</p>
             <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
               <Input
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
                 placeholder="Email address"
-                className="h-9 flex-1 border-white/[0.08] bg-black/35 text-[13px] text-white placeholder:text-[#6b6b6b]"
+                className="h-9 flex-1 border-app-border bg-black/35 text-[13px] text-white placeholder:text-app-subtle"
               />
               <select
                 value={invitePermission}
                 onChange={(e) => setInvitePermission(e.target.value === "edit" ? "edit" : "view")}
-                className="h-9 shrink-0 rounded-md border border-white/[0.1] bg-black/40 px-2 text-[12px] text-[#e6e6e6] outline-none ring-sky-500/30 focus:ring-2"
+                className="h-9 shrink-0 rounded-md border border-app-border bg-black/40 px-2 text-[12px] text-app-fg outline-none ring-sky-500/30 focus:ring-2"
               >
                 <option value="view">Can view</option>
                 <option value="edit">Can edit</option>

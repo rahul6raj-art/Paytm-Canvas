@@ -1,12 +1,13 @@
 import type { EditorNode, NodeKind } from "@/stores/useEditorStore";
+import { maskGroupChildHitOrder } from "@/lib/booleanGeometry";
 import { isAncestorOf } from "@/lib/editorGraph";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import {
   applyMatrixToPoint,
+  getNodeTransformedWorldBounds,
   getNodeWorldInverseMatrix,
   getNodeWorldMatrix,
   pointInNodeWorldBounds,
-  worldRectSum,
   worldToParentLocal,
 } from "@/lib/transformMath";
 
@@ -14,7 +15,7 @@ export function worldRect(
   id: string,
   nodes: Record<string, EditorNode>,
 ): { x: number; y: number; width: number; height: number } {
-  return worldRectSum(id, nodes);
+  return getNodeTransformedWorldBounds(id, nodes);
 }
 
 /** World-space top-left for a new root-level layer centered on the click. */
@@ -44,6 +45,48 @@ export function centeredLocalPointInParent(
     x: local.x - nodeWidth / 2,
     y: local.y - nodeHeight / 2,
   };
+}
+
+/** Bounds for shape insert parenting (world-space top-left + size). */
+export type ShapeInsertBounds = { x: number; y: number; width: number; height: number };
+
+/**
+ * Frame to parent a newly drawn shape into.
+ * Tries shape center/corners, then the selected layer's parent frame.
+ */
+export function resolveFrameParentForShapeInsert(
+  bounds: ShapeInsertBounds,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  selectedIds: string[],
+): string | null {
+  const cx = bounds.x + bounds.width / 2;
+  const cy = bounds.y + bounds.height / 2;
+  const samplePoints = [
+    { x: cx, y: cy },
+    { x: bounds.x, y: bounds.y },
+    { x: bounds.x + bounds.width, y: bounds.y },
+    { x: bounds.x + bounds.width, y: bounds.y + bounds.height },
+    { x: bounds.x, y: bounds.y + bounds.height },
+  ];
+  for (const p of samplePoints) {
+    const frameId = frameParentAtWorldPoint(p.x, p.y, nodes, childOrder);
+    if (frameId) return frameId;
+  }
+
+  for (const sid of selectedIds) {
+    let walk: string | null = sid;
+    const seen = new Set<string>();
+    while (walk && !seen.has(walk)) {
+      seen.add(walk);
+      const n = nodes[walk];
+      if (!n) break;
+      if (n.type === "frame" && n.visible && !n.locked) return walk;
+      walk = n.parentId;
+    }
+  }
+
+  return null;
 }
 
 /** Deepest unlocked visible frame under the point, if any. */
@@ -119,12 +162,14 @@ export function pickDeepestFrameOrGroupAtWorldPoint(
 
   function dfs(nid: string): string | null {
     if (!inRect(nid) || skip(nid)) return null;
-    const kids = [...(childOrder[nid] ?? [])].reverse();
-    for (const k of kids) {
+    const n = nodes[nid];
+    const rawKids = childOrder[nid] ?? [];
+    const kids =
+      n?.type === "group" && n.maskId ? maskGroupChildHitOrder(n, rawKids) : rawKids;
+    for (const k of [...kids].reverse()) {
       const hit = dfs(k);
       if (hit) return hit;
     }
-    const n = nodes[nid];
     if (n?.type === "frame" || n?.type === "group") return nid;
     return null;
   }
@@ -168,8 +213,8 @@ export function pickDeepestNodeAtWorldPoint(
     const n = nodes[nid];
     if (!n?.visible) return null;
     if (!pointInNodeWorldBounds(worldX, worldY, nid, nodes)) return null;
-    const kids = [...(childOrder[nid] ?? [])].reverse();
-    for (const k of kids) {
+    const kids = maskGroupChildHitOrder(n, childOrder[nid] ?? []);
+    for (const k of [...kids].reverse()) {
       const h = dfs(k);
       if (h) return h;
     }

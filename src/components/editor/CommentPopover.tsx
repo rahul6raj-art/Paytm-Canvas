@@ -147,7 +147,7 @@ export function CommentPopover() {
       <button
         type="button"
         aria-label="Close comment"
-        className="fixed inset-0 z-[60] cursor-default bg-black/20"
+        className="fixed inset-0 z-[60] cursor-default bg-app-toolbar-well"
         onPointerDown={(e) => {
           e.preventDefault();
           finalizeClose();
@@ -156,7 +156,7 @@ export function CommentPopover() {
       <div
         role="dialog"
         aria-label="Comment"
-        className="fixed z-[61] flex max-h-[min(480px,calc(100vh-24px))] flex-col overflow-hidden rounded-lg border border-white/15 bg-[#2a2a2a] shadow-xl"
+        className="fixed z-[61] flex max-h-[min(480px,calc(100vh-24px))] flex-col overflow-hidden rounded-lg border border-white/15 bg-app-panel shadow-xl"
         style={{ left: pos.left, top: pos.top, width: pos.maxW }}
         onPointerDown={(e) => e.stopPropagation()}
       >
@@ -168,7 +168,7 @@ export function CommentPopover() {
           />
           <div className="min-w-0 flex-1">
             <div className="text-[12px] font-semibold text-white">{comment.author.name}</div>
-            <div className="text-[10px] text-[#8c8c8c]">
+            <div className="text-[10px] text-app-subtle">
               {new Date(comment.createdAt).toLocaleString(undefined, {
                 dateStyle: "medium",
                 timeStyle: "short",
@@ -177,7 +177,7 @@ export function CommentPopover() {
           </div>
           <button
             type="button"
-            className="rounded p-1 text-[#a3a3a3] hover:bg-white/10 hover:text-white"
+            className="rounded p-1 text-[#a3a3a3] hover:bg-white/10 hover:text-app-fg"
             title="Close"
             onClick={finalizeClose}
           >
@@ -188,7 +188,7 @@ export function CommentPopover() {
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
           <textarea
             ref={bodyRef}
-            className="min-h-[72px] w-full resize-y rounded-md border border-white/10 bg-[#1e1e1e] px-2 py-1.5 text-[12px] text-[#ececec] outline-none ring-0 placeholder:text-[#666] focus:border-[#0d99ff]/60"
+            className="min-h-[72px] w-full resize-y rounded-md border border-white/10 bg-app-surface px-2 py-1.5 text-[12px] text-app-fg outline-none ring-0 placeholder:text-[#666] focus:border-[#0d99ff]/60"
             placeholder="Write a comment…"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -197,29 +197,29 @@ export function CommentPopover() {
           />
 
           {comment.replies.length > 0 ? (
-            <ul className="mt-3 space-y-2 border-t border-white/[0.06] pt-3">
+            <ul className="mt-3 space-y-2 border-t border-app-border-subtle pt-3">
               {comment.replies.map((r) => (
-                <li key={r.id} className="rounded-md bg-black/20 px-2 py-1.5">
+                <li key={r.id} className="rounded-md bg-app-toolbar-well px-2 py-1.5">
                   <div className="flex items-center gap-2">
                     <span
                       className="h-2 w-2 shrink-0 rounded-full"
                       style={{ backgroundColor: r.author.color }}
                     />
-                    <span className="text-[11px] font-medium text-[#d4d4d4]">{r.author.name}</span>
-                    <span className="text-[10px] text-[#6b6b6b]">
+                    <span className="text-[11px] font-medium text-app-fg">{r.author.name}</span>
+                    <span className="text-[10px] text-app-subtle">
                       {new Date(r.createdAt).toLocaleTimeString(undefined, { timeStyle: "short" })}
                     </span>
                   </div>
-                  <p className="mt-1 whitespace-pre-wrap pl-4 text-[11px] leading-snug text-[#c4c4c4]">{r.body}</p>
+                  <p className="mt-1 whitespace-pre-wrap pl-4 text-[11px] leading-snug text-app-muted">{r.body}</p>
                 </li>
               ))}
             </ul>
           ) : null}
 
           {!comment.resolved ? (
-            <div className="mt-3 border-t border-white/[0.06] pt-3">
+            <div className="mt-3 border-t border-app-border-subtle pt-3">
               <textarea
-                className="min-h-[52px] w-full resize-y rounded-md border border-white/10 bg-[#1e1e1e] px-2 py-1.5 text-[12px] text-[#ececec] outline-none placeholder:text-[#666] focus:border-[#0d99ff]/60"
+                className="min-h-[52px] w-full resize-y rounded-md border border-white/10 bg-app-surface px-2 py-1.5 text-[12px] text-app-fg outline-none placeholder:text-[#666] focus:border-[#0d99ff]/60"
                 placeholder="Reply… (⌘↵)"
                 value={replyDraft}
                 onChange={(e) => setReplyDraft(e.target.value)}

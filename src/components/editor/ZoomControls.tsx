@@ -9,11 +9,11 @@ export function ZoomControls() {
   const pct = formatZoomPercent(zoom);
   return (
     <div className="flex items-center gap-1">
-      <span className="min-w-[36px] text-right text-[11px] tabular-nums text-[#8c8c8c]">{pct}%</span>
-      <div className="flex items-center overflow-hidden rounded border border-white/[0.08] bg-[#2c2c2c] text-[11px] font-medium">
+      <span className="min-w-[36px] text-right text-[11px] tabular-nums text-app-subtle">{pct}%</span>
+      <div className="flex items-center overflow-hidden rounded border border-app-border bg-app-panel text-[11px] font-medium">
         <button
           type="button"
-          className="px-2 py-0.5 text-[#c4c4c4] transition-colors hover:bg-white/[0.06] hover:text-white"
+          className="px-2 py-0.5 text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
           onClick={() => zoomCanvasAtViewportCenter(1 / KEYBOARD_ZOOM_STEP, { recordHistory: true })}
           title="Zoom out"
         >
@@ -21,7 +21,7 @@ export function ZoomControls() {
         </button>
         <button
           type="button"
-          className="border-x border-white/[0.08] px-2 py-0.5 text-[#c4c4c4] transition-colors hover:bg-white/[0.06] hover:text-white"
+          className="border-x border-app-border px-2 py-0.5 text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
           onClick={() => {
             const z = useEditorStore.getState().zoom;
             if (z <= 0) return;
@@ -33,7 +33,7 @@ export function ZoomControls() {
         </button>
         <button
           type="button"
-          className="px-2 py-0.5 text-[#c4c4c4] transition-colors hover:bg-white/[0.06] hover:text-white"
+          className="px-2 py-0.5 text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
           onClick={() => zoomCanvasAtViewportCenter(KEYBOARD_ZOOM_STEP, { recordHistory: true })}
           title="Zoom in"
         >
@@ -42,7 +42,7 @@ export function ZoomControls() {
       </div>
       <button
         type="button"
-        className="rounded border border-white/[0.08] bg-[#2c2c2c] px-1.5 py-0.5 text-[11px] font-medium text-[#a3a3a3] transition-colors hover:bg-white/[0.06] hover:text-white"
+        className="rounded border border-app-border bg-app-panel px-1.5 py-0.5 text-[11px] font-medium text-[#a3a3a3] transition-colors hover:bg-app-hover hover:text-app-fg"
         onClick={() => resetCanvasView()}
         title="Reset view (100% zoom, center artboard)"
       >

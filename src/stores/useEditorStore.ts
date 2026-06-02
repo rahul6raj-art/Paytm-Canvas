@@ -1,8 +1,10 @@
 import { create } from "zustand";
 import {
   centeredLocalPointInParent,
+  clampInsertLocalPoint,
   frameParentAtWorldPoint,
   pickDeepestFrameAtWorldPoint,
+  resolveFrameParentForShapeInsert,
   pickDeepestVisibleNodeAtWorldPoint,
   targetFrameForInsert,
   worldCenteredRootPoint,
@@ -10,8 +12,9 @@ import {
   worldRect,
 } from "@/lib/tree";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
-import { clampCanvasZoom } from "@/lib/canvasZoom";
+import { clampCanvasZoom, viewportForRootNodes } from "@/lib/canvasZoom";
 import { normalizeHex } from "@/lib/color";
+import { canvasChromeForeground } from "@/lib/canvasForeground";
 import {
   createEmptyDocumentFields,
   isWorkspaceEmpty,
@@ -19,8 +22,12 @@ import {
   readInitialDocumentFields,
 } from "@/lib/editorBootstrap";
 import {
+  applyLayoutPatchWithAutoLayout,
+  computeAutoLayout,
   computeAutoLayoutPatches,
   constraintResizeChildPatches,
+  markLayoutDirty,
+  relayoutDirtyTree,
   type ConstraintHorizontal,
   type ConstraintVertical,
   type ConstraintsPatch,
@@ -28,6 +35,7 @@ import {
   type LayoutMode,
   type LayoutNode,
   type LayoutPatch,
+  type LayoutPositioning,
   type PrimaryAxisAlign,
 } from "@/lib/autoLayout";
 import {
@@ -36,18 +44,29 @@ import {
 } from "@/lib/autoLayoutSelection";
 import {
   computeResizedBounds,
+  isProportionalResize,
   RESIZE_MIN_DIMENSION,
   type Bounds,
   type ResizeHandle,
   type ResizeKind,
   type ResizeModifiers,
 } from "@/lib/resize";
+import { clearPostCreationPointerSuppress } from "@/lib/canvasCreationGuard";
 import { warnInvalidNodeGeometry } from "@/lib/canvasGeometryDev";
+import type { CornerRadii } from "@/lib/cornerRadius";
+import {
+  alignNodesInDocument,
+  alignableSelectionIds,
+  distributeNodesInDocument,
+  relayoutParentKeysAfterManualPosition,
+} from "@/lib/alignSelection";
 import {
   collectSubtreeIds,
+  insertNodeInChildOrder,
   isAncestorOf,
   nextDuplicateName,
   nextFrameName,
+  repairNodeHierarchy,
   topLevelSelectedIds,
 } from "@/lib/editorGraph";
 import {
@@ -82,7 +101,12 @@ import {
   isSpacingValue,
   isEffectValue,
 } from "@/lib/designTokens";
-import { defaultNodeEffect, newNodeEffectId, type NodeEffectType } from "@/lib/nodeEffects";
+import {
+  defaultNodeEffect,
+  mergeNodeEffectPatch,
+  newNodeEffectId,
+  type NodeEffectType,
+} from "@/lib/nodeEffects";
 import { effectiveFillType, normalizeFillGradient } from "@/lib/fillGradient";
 import { buildPaletteTokens, createColorDesignToken, DEFAULT_COLOR_PALETTE } from "@/lib/designSystemPresets";
 import {
@@ -100,7 +124,7 @@ import {
 import { EMPTY_TEXT_PLACEHOLDER_WIDTH, MIN_TEXT_BOX } from "@/lib/text/textNodeModel";
 import { resolveTextTypo } from "@/lib/textTypography";
 import { createShapeNode } from "@/lib/shapes/shapeCreation";
-import type { ShapeType } from "@/lib/shapes/shapeModel";
+import { DEFAULT_SHAPE_FILL, DEFAULT_SHAPE_STROKE, type ShapeType } from "@/lib/shapes/shapeModel";
 import {
   BOOLEAN_OPERATION_LABELS,
   booleanResultToPathNode,
@@ -146,12 +170,15 @@ import {
   type EditorComment,
   type EditorCommentReply,
 } from "@/lib/comments";
+import { shouldSampleFreehandPoint, simplifyPolyline } from "@/lib/freehandPath";
 import {
   newPathPointId,
   normalizePathNode,
   rekeyPathPoints,
   type PathPoint,
 } from "@/lib/pathGeometry";
+import { mergePathPointHandles } from "@/lib/pathHandles";
+import { convertNodeToPath, ensureRoundedRectPathPoints } from "@/lib/shapes/shapeToPath";
 import { getPluginById, readInstalledPluginIds, writeInstalledPluginIds } from "@/lib/plugins";
 import { getEditorClipboardJson, setEditorClipboardJson } from "@/lib/editorClipboardBuffer";
 import { parseEditorClipboardPayload, type EditorClipboardPayloadV1 } from "@/lib/editorClipboardPayload";
@@ -200,6 +227,7 @@ export type Tool =
   | "polygon"
   | "star"
   | "triangle"
+  | "pencil"
   | "pen"
   | "text"
   | "comment"
@@ -212,6 +240,10 @@ export type RightTab = EditorMode;
 export type DocumentSaveStatus = "saved" | "unsaved" | "saving" | "saved-api" | "api-save-failed";
 
 export type LeftTab = "layers" | "components" | "assets" | "styles";
+
+export type RightPanelTab = "design" | "code";
+
+export type CodePanelFormat = "html" | "react";
 
 export type AlignDirection = "left" | "center-h" | "right" | "top" | "center-v" | "bottom";
 
@@ -239,6 +271,10 @@ export interface EditorNode {
   width: number;
   height: number;
   rotation: number;
+  /** Mirror layer horizontally (local X) around center. */
+  flipHorizontal?: boolean;
+  /** Mirror layer vertically (local Y) around center. */
+  flipVertical?: boolean;
   visible: boolean;
   locked: boolean;
   expanded: boolean;
@@ -253,8 +289,18 @@ export interface EditorNode {
   fillEnabled?: boolean;
   strokeColor?: string;
   strokeWidth?: number;
+  /** 0–1 stroke color opacity */
+  strokeOpacity?: number;
+  /** When false, stroke is hidden but settings are kept */
+  strokeEnabled?: boolean;
   strokePosition?: StrokePosition;
+  /** Line / open path start cap or arrow */
+  strokeStartPoint?: import("@/lib/strokeEndpoints").StrokeEndpoint;
+  /** Line / open path end cap or arrow */
+  strokeEndPoint?: import("@/lib/strokeEndpoints").StrokeEndpoint;
   cornerRadius?: number;
+  /** Per-corner radii [top-left, top-right, bottom-right, bottom-left]. */
+  cornerRadii?: CornerRadii;
   /** Text color; falls back to `fill` when unset */
   textColor?: string;
   fontFamily?: string;
@@ -266,6 +312,20 @@ export interface EditorNode {
   letterSpacing?: number;
   /** Stroke dash pattern */
   strokeStyle?: "solid" | "dashed" | "dotted";
+  /** Custom dash length (px) when dashed/dotted */
+  strokeDashLength?: number;
+  /** Custom gap length (px) when dashed/dotted */
+  strokeDashGap?: number;
+  /** SVG stroke-linecap */
+  strokeLinecap?: "butt" | "round" | "square";
+  /** SVG stroke-linejoin */
+  strokeLinejoin?: "miter" | "round" | "bevel";
+  /** Minimum corner angle (degrees) before miter becomes bevel */
+  strokeMiterAngle?: number;
+  /** Variable width profile (v1: uniform only) */
+  strokeWidthProfile?: "uniform";
+  /** Flip width profile along path */
+  strokeWidthProfileFlipped?: boolean;
   /** Regular polygon side count (path nodes) */
   polygonSides?: number;
   /** Star point count (path nodes) */
@@ -282,6 +342,8 @@ export interface EditorNode {
   /** Vector path (Pen tool); points are local to the node's bounds origin. */
   pathPoints?: PathPoint[];
   pathClosed?: boolean;
+  /** Bezier handle mirroring when editing vector paths. */
+  pathHandleMirroring?: import("@/lib/pathHandles").PathHandleMirroring;
 
   /** Embedded image layer; pixels come from `imageSrc` (and optionally `assets[assetId]`). */
   assetId?: string;
@@ -293,6 +355,8 @@ export interface EditorNode {
   /** Auto layout (frame/group only). Omitted or `"none"` = manual layout. */
   layoutMode?: LayoutMode;
   layoutGap?: number;
+  /** When true, gap is inferred from child spacing (Figma “Auto”). */
+  layoutGapAuto?: boolean;
   paddingTop?: number;
   paddingRight?: number;
   paddingBottom?: number;
@@ -303,6 +367,19 @@ export interface EditorNode {
   layoutSizingHorizontal?: LayoutSizingMode;
   /** Vertical sizing in parent auto layout. */
   layoutSizingVertical?: LayoutSizingMode;
+  /** Wrap children to new rows (horizontal) or columns (vertical). */
+  layoutWrap?: boolean;
+  /** In auto-layout parent: `auto` flows with siblings; `absolute` uses manual x/y. */
+  layoutPositioning?: LayoutPositioning;
+  minWidth?: number;
+  minHeight?: number;
+  maxWidth?: number;
+  maxHeight?: number;
+  /** Last layout pass (informational; mirrors width/height when hug/fill applied). */
+  computedWidth?: number;
+  computedHeight?: number;
+  /** Set when geometry or layout inputs change; cleared after relayout. */
+  layoutDirty?: boolean;
   /** Resizing a non-auto-layout parent can adjust children with these constraints. */
   constraintsHorizontal?: ConstraintHorizontal;
   constraintsVertical?: ConstraintVertical;
@@ -350,6 +427,13 @@ export interface EditorNode {
   isImportReference?: boolean;
   /** SVG path `d` for flattened boolean result */
   flattenedPathData?: string;
+
+  /** Design ↔ Code: original JSX tag (e.g. div, Header) for 1:1 React export */
+  codeJsxTag?: string;
+  /** Design ↔ Code: true for lowercase HTML elements */
+  codeJsxIntrinsic?: boolean;
+  /** Design ↔ Code: original className for export */
+  codeClassName?: string;
 }
 
 export type NodeStylePatch = Partial<
@@ -362,9 +446,22 @@ export type NodeStylePatch = Partial<
     | "fillEnabled"
     | "strokeColor"
     | "strokeWidth"
+    | "strokeOpacity"
+    | "strokeEnabled"
     | "strokePosition"
+    | "strokeStartPoint"
+    | "strokeEndPoint"
+    | "arrowHead"
     | "strokeStyle"
+    | "strokeDashLength"
+    | "strokeDashGap"
+    | "strokeLinecap"
+    | "strokeLinejoin"
+    | "strokeMiterAngle"
+    | "strokeWidthProfile"
+    | "strokeWidthProfileFlipped"
     | "cornerRadius"
+    | "cornerRadii"
     | "polygonSides"
     | "starPoints"
     | "starInnerRadius"
@@ -386,6 +483,24 @@ export type NodeStylePatch = Partial<
 export interface GuideLine {
   axis: "v" | "h";
   pos: number;
+  /** Span along the perpendicular axis (Figma-style segment, not full canvas). */
+  from?: number;
+  to?: number;
+}
+
+/** Persistent layout guide placed from rulers (Figma-style). */
+export interface LayoutGuide {
+  id: string;
+  axis: "v" | "h";
+  pos: number;
+}
+
+export interface DragMeasurementLine {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  distance: number;
 }
 
 export interface EditorState {
@@ -394,6 +509,9 @@ export interface EditorState {
   framePresetId: string;
   editorMode: EditorMode;
   leftTab: LeftTab;
+  /** Right sidebar: layer properties vs live HTML/React code */
+  rightPanelTab: RightPanelTab;
+  codePanelFormat: CodePanelFormat;
   selectedIds: string[];
   zoom: number;
   pan: { x: number; y: number };
@@ -402,11 +520,17 @@ export interface EditorState {
   assets: Record<string, EditorAsset>;
   designTokens: Record<string, DesignToken>;
   guides: GuideLine[];
+  dragMeasurements: DragMeasurementLine[];
+  layoutGuides: LayoutGuide[];
+  layoutGuideDraft: Pick<LayoutGuide, "axis" | "pos"> | null;
+  /** Selected violet ruler guide (layout guide line on canvas). */
+  selectedLayoutGuideId: string | null;
   fileName: string;
   pages: Record<string, EditorPage>;
   pageOrder: string[];
   activePageId: string;
   showGrid: boolean;
+  showRulers: boolean;
   canvasBackgroundColor: string;
   comments: EditorComment[];
   commentsPanelOpen: boolean;
@@ -414,6 +538,8 @@ export interface EditorState {
   isPlacingComment: boolean;
   /** In-progress pen path node id, or null. */
   penDrawingNodeId: string | null;
+  /** In-progress freehand (pencil) path node id, or null. */
+  pencilDrawingNodeId: string | null;
   /** Point-edit mode for a finished path (Backspace deletes selected anchor). */
   pathEditModeNodeId: string | null;
   /** Edit children inside a boolean group (Figma-style). */
@@ -476,6 +602,8 @@ export interface EditorState {
   /** @deprecated Use setEditorMode */
   setRightTab: (t: EditorMode) => void;
   setLeftTab: (t: LeftTab) => void;
+  setRightPanelTab: (t: RightPanelTab) => void;
+  setCodePanelFormat: (f: CodePanelFormat) => void;
 
   startPrototypeConnection: (sourceNodeId: string, pointerId: number, curWX: number, curWY: number) => void;
   updatePrototypeWirePointer: (curWX: number, curWY: number) => void;
@@ -562,6 +690,8 @@ export interface EditorState {
     opts?: { presetId?: string; name?: string },
   ) => void;
   duplicateSelection: () => void;
+  /** Clone current selection in place (no offset); selects clones. Does not push history. */
+  cloneSelectionInPlace: () => string[];
   deleteSelection: (opts?: { skipHistory?: boolean }) => void;
   alignSelection: (direction: AlignDirection) => void;
   distributeSelection: (axis: "horizontal" | "vertical") => void;
@@ -584,7 +714,14 @@ export interface EditorState {
   toggleSelectNode: (id: string) => void;
   setSelection: (ids: string[]) => void;
   setGuides: (g: GuideLine[]) => void;
+  setSnapOverlay: (guides: GuideLine[], measurements: DragMeasurementLine[]) => void;
+  setLayoutGuideDraft: (draft: Pick<LayoutGuide, "axis" | "pos"> | null) => void;
+  cancelLayoutGuideDraft: () => void;
+  commitLayoutGuide: () => void;
+  selectLayoutGuide: (id: string | null) => void;
+  removeLayoutGuide: (id: string) => void;
   toggleGrid: () => void;
+  toggleRulers: () => void;
   setCanvasBackgroundColor: (hex: string) => void;
 
   startPlacingComment: () => void;
@@ -603,6 +740,10 @@ export interface EditorState {
   /** Finish pen drawing. `true` = close path (click on first point); `false`/omit = open path. */
   finishPath: (asClosed?: boolean) => void;
   cancelPath: () => void;
+  startPencilStroke: (point: { x: number; y: number }) => void;
+  extendPencilStroke: (point: { x: number; y: number }) => void;
+  finishPencilStroke: () => void;
+  cancelPencilStroke: () => void;
   updatePathPoint: (
     nodeId: string,
     pointId: string,
@@ -612,6 +753,8 @@ export interface EditorState {
   deletePathPoint: (nodeId: string, pointId: string) => void;
   togglePathClosed: (nodeId: string) => void;
   setPathEditMode: (nodeId: string | null) => void;
+  enterVectorEditMode: (nodeId?: string) => void;
+  setPathHandleMirroring: (mode: import("@/lib/pathHandles").PathHandleMirroring) => void;
   setSelectedPathPointId: (id: string | null) => void;
   resizeNode: (
     id: string,
@@ -636,6 +779,12 @@ export interface EditorState {
   reorderNode: (id: string, targetParentId: string, targetIndex: number) => void;
   moveNodeToParent: (id: string, newParentId: string, index: number) => void;
   updateLayout: (id: string, patch: LayoutPatch) => void;
+  updateLayoutSizing: (
+    id: string,
+    axis: "horizontal" | "vertical",
+    mode: LayoutSizingMode,
+  ) => void;
+  updateLayoutPositioning: (id: string, positioning: LayoutPositioning) => void;
   updateConstraints: (id: string, patch: ConstraintsPatch) => void;
   applyAutoLayout: (parentId: string) => void;
 
@@ -731,18 +880,25 @@ export interface EditorState {
   importHubOpen: boolean;
   importWebModalOpen: boolean;
   importFigmaModalOpen: boolean;
+  codeRoundTripOpen: boolean;
+  codeRoundTripTab: "export" | "import";
+  /** Import lines preserved from uploaded React for 1:1 export */
+  codeRoundTripSourceHeader: string | null;
+  setCodeRoundTripSourceHeader: (header: string | null) => void;
   openImportHub: () => void;
   closeImportHub: () => void;
   openImportWebModal: () => void;
   closeImportWebModal: () => void;
   openImportFigmaModal: () => void;
   closeImportFigmaModal: () => void;
+  openCodeRoundTrip: (tab?: "export" | "import") => void;
+  closeCodeRoundTrip: () => void;
 
   applyGeneratedDesign: (
     slice: EditorPersistSlice,
     mode: "replace" | "append",
-    opts?: { recordHistory?: boolean },
-  ) => void;
+    opts?: { recordHistory?: boolean; zoomToFit?: boolean },
+  ) => Promise<void>;
 
   pluginMarketplaceOpen: boolean;
   installedPluginIds: string[];
@@ -843,8 +999,10 @@ function syncActivePageRecord(
     | "zoom"
     | "pan"
     | "showGrid"
+    | "showRulers"
     | "canvasBackgroundColor"
     | "selectedIds"
+    | "layoutGuides"
   >,
 ): Pick<EditorState, "pages"> {
   const active = captureActivePage(state);
@@ -871,7 +1029,7 @@ function applyMoveNodeToParent(
   if (id === newParentKey) return null;
   if (newParentKey !== ROOT && isAncestorOf(s.nodes, id, newParentKey)) return null;
 
-  const world = worldRect(id, s.nodes);
+  const origin = getNodeWorldOrigin(id, s.nodes);
   const co: Record<string, string[]> = { ...s.childOrder };
   const oldList = [...(co[oldKey] ?? [])];
   const oldIdx = oldList.indexOf(id);
@@ -896,12 +1054,12 @@ function applyMoveNodeToParent(
 
   if (parentChanged) {
     if (newParentNodeId) {
-      const pw = worldRect(newParentNodeId, s.nodes);
-      next.x = world.x - pw.x;
-      next.y = world.y - pw.y;
+      const local = worldPointToParentLocal(origin.x, origin.y, newParentNodeId, s.nodes);
+      next.x = local.x;
+      next.y = local.y;
     } else {
-      next.x = world.x;
-      next.y = world.y;
+      next.x = origin.x;
+      next.y = origin.y;
     }
   }
 
@@ -1351,6 +1509,101 @@ function parentListKey(parentId: string | null): string {
   return parentId ?? ROOT;
 }
 
+function editableTopLevelSelection(
+  s: Pick<EditorState, "selectedIds" | "nodes">,
+): string[] {
+  return topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+    const n = s.nodes[id];
+    return n && !n.locked && n.visible;
+  });
+}
+
+function cloneTopLevelSelectionState(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds">,
+  offset: number,
+): Pick<EditorState, "nodes" | "childOrder" | "selectedIds" | "tool" | "editingTextId"> | null {
+  const tops = editableTopLevelSelection(s);
+  if (tops.length === 0) return null;
+
+  const nodes: Record<string, EditorNode> = { ...s.nodes };
+  const childOrder: Record<string, string[]> = { ...s.childOrder };
+  const newRoots: string[] = [];
+
+  for (const rootId of tops) {
+    const rootOld = s.nodes[rootId];
+    if (!rootOld) continue;
+    const nameForRoot = nextDuplicateName(nodes);
+    const idMap = new Map<string, string>();
+
+    const cloneRecursive = (oldId: string, newParent: string | null): string => {
+      const old = s.nodes[oldId];
+      if (!old) return "";
+      const newId = `${old.type}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      idMap.set(oldId, newId);
+      const base: EditorNode = {
+        ...old,
+        id: newId,
+        parentId: newParent,
+        name: oldId === rootId ? nameForRoot : old.name,
+        x: old.x + offset,
+        y: old.y + offset,
+      };
+      let next: EditorNode =
+        old.type === "path" && old.pathPoints?.length
+          ? { ...base, pathPoints: rekeyPathPoints(old.pathPoints) }
+          : base;
+      if (old.effects?.length) {
+        next = { ...next, effects: old.effects.map((e) => ({ ...e, id: newNodeEffectId() })) };
+      }
+      nodes[newId] = next;
+      const newKids: string[] = [];
+      for (const k of s.childOrder[oldId] ?? []) {
+        newKids.push(cloneRecursive(k, newId));
+      }
+      childOrder[newId] = newKids;
+      return newId;
+    };
+
+    const newRootId = cloneRecursive(rootId, rootOld.parentId);
+    for (const nid of collectSubtreeIds(newRootId, childOrder)) {
+      const n = nodes[nid]!;
+      if (!n.prototypeLinks?.length) continue;
+      nodes[nid] = {
+        ...n,
+        prototypeLinks: n.prototypeLinks.map((l) => ({
+          ...l,
+          id: newPrototypeLinkId(),
+          sourceNodeId: idMap.get(l.sourceNodeId) ?? l.sourceNodeId,
+          targetFrameId:
+            l.targetFrameId && idMap.has(l.targetFrameId) ? idMap.get(l.targetFrameId)! : l.targetFrameId,
+        })),
+      };
+    }
+    const P = parentListKey(rootOld.parentId);
+    const list = [...(childOrder[P] ?? [])];
+    const curIdx = list.indexOf(rootId);
+    const insertAt = curIdx >= 0 ? curIdx + 1 : list.length;
+    list.splice(insertAt, 0, newRootId);
+    childOrder[P] = list;
+    newRoots.push(newRootId);
+  }
+
+  let nodesOut = nodes;
+  const relayoutKeys = new Set<string>();
+  for (const rootId of tops) {
+    relayoutKeys.add(parentListKey(s.nodes[rootId]!.parentId));
+  }
+  nodesOut = relayoutParentsWithAutoLayout(nodesOut, childOrder, relayoutKeys);
+
+  return {
+    nodes: nodesOut,
+    childOrder,
+    selectedIds: newRoots,
+    tool: "move",
+    editingTextId: null,
+  };
+}
+
 function removeNodeAndDescendants(
   s: Pick<EditorState, "nodes" | "childOrder">,
   rootId: string,
@@ -1371,12 +1624,21 @@ function removeNodeAndDescendants(
 const LAYOUT_FIELD_KEYS = new Set<string>([
   "layoutMode",
   "layoutGap",
+  "layoutGapAuto",
+  "layoutWrap",
   "paddingTop",
   "paddingRight",
   "paddingBottom",
   "paddingLeft",
   "primaryAxisAlign",
   "counterAxisAlign",
+  "layoutSizingHorizontal",
+  "layoutSizingVertical",
+  "layoutPositioning",
+  "minWidth",
+  "minHeight",
+  "maxWidth",
+  "maxHeight",
 ]);
 const GEOM_KEYS = new Set<string>(["x", "y", "width", "height"]);
 const INSTANCE_STYLE_KEYS = new Set<string>([
@@ -1389,6 +1651,7 @@ const INSTANCE_STYLE_KEYS = new Set<string>([
   "strokeWidth",
   "strokePosition",
   "cornerRadius",
+  "cornerRadii",
   "textColor",
   "fontFamily",
   "fontSize",
@@ -1416,6 +1679,8 @@ function toLayoutNode(n: EditorNode): LayoutNode {
     locked: n.locked,
     layoutMode: n.layoutMode,
     layoutGap: n.layoutGap,
+    layoutGapAuto: n.layoutGapAuto,
+    layoutWrap: n.layoutWrap,
     paddingTop: n.paddingTop,
     paddingRight: n.paddingRight,
     paddingBottom: n.paddingBottom,
@@ -1424,6 +1689,23 @@ function toLayoutNode(n: EditorNode): LayoutNode {
     counterAxisAlign: n.counterAxisAlign,
     constraintsHorizontal: n.constraintsHorizontal,
     constraintsVertical: n.constraintsVertical,
+    layoutSizingHorizontal: n.layoutSizingHorizontal,
+    layoutSizingVertical: n.layoutSizingVertical,
+    layoutPositioning: n.layoutPositioning,
+    minWidth: n.minWidth,
+    minHeight: n.minHeight,
+    maxWidth: n.maxWidth,
+    maxHeight: n.maxHeight,
+    computedWidth: n.computedWidth,
+    computedHeight: n.computedHeight,
+    layoutDirty: n.layoutDirty,
+    content: n.content,
+    fontFamily: n.fontFamily,
+    fontSize: n.fontSize,
+    fontWeight: n.fontWeight,
+    lineHeight: n.lineHeight,
+    letterSpacing: n.letterSpacing,
+    textResizeMode: n.textResizeMode,
   };
 }
 
@@ -1440,10 +1722,13 @@ function applyAutoLayoutMerge(
   childOrder: Record<string, string[]>,
   parentId: string,
 ): Record<string, EditorNode> {
-  const patches = computeAutoLayoutPatches(parentId, toLayoutMap(nodes), childOrder);
-  if (Object.keys(patches).length === 0) return nodes;
+  const result = computeAutoLayout(parentId, toLayoutMap(nodes), childOrder);
   const next = { ...nodes };
-  for (const [cid, p] of Object.entries(patches)) {
+  if (result.parent) {
+    const pn = next[parentId];
+    if (pn) next[parentId] = { ...pn, ...result.parent };
+  }
+  for (const [cid, p] of Object.entries(result.children)) {
     const cn = next[cid];
     if (!cn || cn.locked) continue;
     next[cid] = { ...cn, ...p };
@@ -1468,23 +1753,46 @@ function deepAutoLayout(
   return next;
 }
 
+function mergeLayoutMapIntoNodes(
+  nodes: Record<string, EditorNode>,
+  layoutMap: Record<string, LayoutNode>,
+): Record<string, EditorNode> {
+  const next = { ...nodes };
+  for (const id of Object.keys(layoutMap)) {
+    const l = layoutMap[id]!;
+    const e = next[id];
+    if (!e) continue;
+    next[id] = {
+      ...e,
+      x: l.x,
+      y: l.y,
+      width: l.width,
+      height: l.height,
+      computedWidth: l.computedWidth,
+      computedHeight: l.computedHeight,
+      layoutDirty: l.layoutDirty,
+    };
+  }
+  return next;
+}
+
 function relayoutParentsWithAutoLayout(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
   parentKeys: Iterable<string>,
 ): Record<string, EditorNode> {
-  let next = nodes;
+  let layoutMap = toLayoutMap(nodes);
   for (const pk of parentKeys) {
     if (pk === ROOT) continue;
-    const p = next[pk];
-    if (p && (p.type === "frame" || p.type === "group") && (p.layoutMode ?? "none") !== "none") {
-      next = deepAutoLayout(next, childOrder, pk);
-    }
+    layoutMap = markLayoutDirty(layoutMap, pk);
   }
-  return next;
+  layoutMap = relayoutDirtyTree(layoutMap, childOrder, parentKeys);
+  return mergeLayoutMapIntoNodes(nodes, layoutMap);
 }
 
-function textStyleFromSelection(s: Pick<EditorState, "nodes" | "selectedIds">) {
+function textStyleFromSelection(
+  s: Pick<EditorState, "nodes" | "selectedIds" | "canvasBackgroundColor">,
+) {
   for (const id of s.selectedIds) {
     const n = s.nodes[id];
     if (n?.type === "text") {
@@ -1499,14 +1807,15 @@ function textStyleFromSelection(s: Pick<EditorState, "nodes" | "selectedIds">) {
       };
     }
   }
+  const { defaultText } = canvasChromeForeground(s.canvasBackgroundColor);
   return {
     fontFamily: "Inter, system-ui, sans-serif",
     fontSize: 13,
     fontWeight: 500,
     lineHeight: 1.25,
     letterSpacing: 0,
-    fill: "#0f172a",
-    textColor: "#0f172a",
+    fill: defaultText,
+    textColor: defaultText,
   };
 }
 
@@ -1523,6 +1832,7 @@ export function toPersistSlice(s: EditorState): EditorPersistSlice {
     zoom: s.zoom,
     pan: s.pan,
     showGrid: s.showGrid,
+    showRulers: s.showRulers,
     canvasBackgroundColor: s.canvasBackgroundColor,
     comments: s.comments,
     pages,
@@ -1538,6 +1848,8 @@ function editorStateAfterDocumentImport(
   return {
     ...documentToEditorPatch(doc),
     guides: [],
+    layoutGuideDraft: null,
+    selectedLayoutGuideId: null,
     editingTextId: null,
     hoveredCanvasId: null,
     contextMenu: null,
@@ -1551,6 +1863,7 @@ function editorStateAfterDocumentImport(
     isPlacingComment: false,
     commentsPanelOpen: false,
     penDrawingNodeId: null,
+    pencilDrawingNodeId: null,
     pathEditModeNodeId: null,
     objectEditModeNodeId: null,
     selectedPathPointId: null,
@@ -1588,6 +1901,7 @@ function editorPartialFromPaytmCraftDocument(doc: PaytmCraftDocument, s: EditorS
   return {
     ...patch,
     guides: [],
+    layoutGuideDraft: null,
     editingTextId: null,
     hoveredCanvasId: null,
     contextMenu: null,
@@ -1601,6 +1915,7 @@ function editorPartialFromPaytmCraftDocument(doc: PaytmCraftDocument, s: EditorS
     isPlacingComment: false,
     commentsPanelOpen: false,
     penDrawingNodeId: null,
+    pencilDrawingNodeId: null,
     pathEditModeNodeId: null,
   objectEditModeNodeId: null,
     selectedPathPointId: null,
@@ -1691,6 +2006,7 @@ function resolvePasteParentId(s: Pick<EditorState, "nodes" | "childOrder" | "sel
 function pageSwitchUiReset(): Partial<EditorState> {
   return {
     guides: [],
+    layoutGuideDraft: null,
     editingTextId: null,
     hoveredCanvasId: null,
     contextMenu: null,
@@ -1703,6 +2019,7 @@ function pageSwitchUiReset(): Partial<EditorState> {
     activeCommentId: null,
     isPlacingComment: false,
     penDrawingNodeId: null,
+    pencilDrawingNodeId: null,
     pathEditModeNodeId: null,
   objectEditModeNodeId: null,
     selectedPathPointId: null,
@@ -1720,6 +2037,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
   framePresetId: DEFAULT_FRAME_PRESET_ID,
   editorMode: "design",
   leftTab: "layers",
+  rightPanelTab: "design",
+  codePanelFormat: "html",
   selectedIds: initialDoc.selectedIds,
   zoom: initialDoc.zoom,
   pan: initialDoc.pan,
@@ -1731,14 +2050,20 @@ export const useEditorStore = create<EditorState>((set, get) => {
   assets: initialDoc.assets,
   designTokens: initialDoc.designTokens,
   guides: [],
+  dragMeasurements: [],
+  layoutGuides: initialDoc.pages[initialDoc.activePageId]?.layoutGuides ?? [],
+  layoutGuideDraft: null,
+  selectedLayoutGuideId: null,
   fileName: initialDoc.fileName,
   showGrid: initialDoc.showGrid,
+  showRulers: initialDoc.showRulers ?? true,
   canvasBackgroundColor: initialDoc.canvasBackgroundColor,
   comments: initialDoc.comments,
   commentsPanelOpen: false,
   activeCommentId: null,
   isPlacingComment: false,
   penDrawingNodeId: null,
+  pencilDrawingNodeId: null,
   pathEditModeNodeId: null,
   objectEditModeNodeId: null,
   selectedPathPointId: null,
@@ -1851,11 +2176,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
   importHubOpen: false,
   importWebModalOpen: false,
   importFigmaModalOpen: false,
+  codeRoundTripOpen: false,
+  codeRoundTripTab: "export",
+  codeRoundTripSourceHeader: null,
+  setCodeRoundTripSourceHeader: (header) => set({ codeRoundTripSourceHeader: header }),
   openImportHub: () =>
     set(() => ({
       importHubOpen: true,
       importWebModalOpen: false,
       importFigmaModalOpen: false,
+      codeRoundTripOpen: false,
       aiModalOpen: false,
       aiModalSource: null,
       commandMenuOpen: false,
@@ -1872,6 +2202,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       importHubOpen: false,
       importWebModalOpen: true,
       importFigmaModalOpen: false,
+      codeRoundTripOpen: false,
     })),
   closeImportWebModal: () => set({ importWebModalOpen: false }),
   openImportFigmaModal: () =>
@@ -1879,8 +2210,21 @@ export const useEditorStore = create<EditorState>((set, get) => {
       importHubOpen: false,
       importWebModalOpen: false,
       importFigmaModalOpen: true,
+      codeRoundTripOpen: false,
     })),
   closeImportFigmaModal: () => set({ importFigmaModalOpen: false }),
+  openCodeRoundTrip: (tab = "export") =>
+    set(() => ({
+      codeRoundTripOpen: true,
+      codeRoundTripTab: tab,
+      importHubOpen: false,
+      importWebModalOpen: false,
+      importFigmaModalOpen: false,
+      commandMenuOpen: false,
+      aiModalOpen: false,
+      aiModalSource: null,
+    })),
+  closeCodeRoundTrip: () => set({ codeRoundTripOpen: false }),
 
   pluginMarketplaceOpen: false,
   installedPluginIds: readInstalledPluginIds(),
@@ -2077,10 +2421,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
         expanded: true,
         pathPoints: pts,
         pathClosed: true,
-        fill: "#38bdf8",
+        fill: DEFAULT_SHAPE_FILL,
         fillEnabled: true,
         fillOpacity: 1,
-        strokeColor: "#0f172a",
+        strokeColor: DEFAULT_SHAPE_STROKE,
         strokeWidth: 1.5,
         strokePosition: "center",
       };
@@ -2132,8 +2476,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
       zoom: s.zoom,
       pan: s.pan,
       showGrid: s.showGrid,
+      showRulers: s.showRulers,
       canvasBackgroundColor: s.canvasBackgroundColor,
       comments: s.comments,
+      layoutGuides: s.layoutGuides,
     });
     const MAX = 150;
     const nextPast = [...s.historyPast, snap];
@@ -2155,8 +2501,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
       zoom: s.zoom,
       pan: s.pan,
       showGrid: s.showGrid,
+      showRulers: s.showRulers,
       canvasBackgroundColor: s.canvasBackgroundColor,
       comments: s.comments,
+      layoutGuides: s.layoutGuides,
     });
     const patch = historySnapshotToEditorPatch(prevSnap);
     set((s) => {
@@ -2176,6 +2524,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         activeCommentId: null,
         isPlacingComment: false,
         penDrawingNodeId: null,
+        pencilDrawingNodeId: null,
         pathEditModeNodeId: null,
   objectEditModeNodeId: null,
         selectedPathPointId: null,
@@ -2203,8 +2552,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
       zoom: s.zoom,
       pan: s.pan,
       showGrid: s.showGrid,
+      showRulers: s.showRulers,
       canvasBackgroundColor: s.canvasBackgroundColor,
       comments: s.comments,
+      layoutGuides: s.layoutGuides,
     });
     const patch = historySnapshotToEditorPatch(nextSnap);
     set((s) => {
@@ -2224,6 +2575,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         activeCommentId: null,
         isPlacingComment: false,
         penDrawingNodeId: null,
+        pencilDrawingNodeId: null,
         pathEditModeNodeId: null,
   objectEditModeNodeId: null,
         selectedPathPointId: null,
@@ -2270,8 +2622,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   setTool: (tool) => {
     const before = get();
+    clearPostCreationPointerSuppress();
     if (before.tool === "pen" && tool !== "pen" && before.penDrawingNodeId) {
       get().cancelPath();
+    }
+    if (before.tool === "pencil" && tool !== "pencil" && before.pencilDrawingNodeId) {
+      get().cancelPencilStroke();
     }
     set((s) => {
       if (s.editorMode === "inspect" && tool !== "move" && tool !== "hand") return s;
@@ -2303,6 +2659,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
       activeCommentId: null,
       penDrawingNodeId:
         editorMode === "prototype" || editorMode === "inspect" ? null : s.penDrawingNodeId,
+      pencilDrawingNodeId:
+        editorMode === "prototype" || editorMode === "inspect" ? null : s.pencilDrawingNodeId,
       pathEditModeNodeId:
         editorMode === "prototype" || editorMode === "inspect" ? null : s.pathEditModeNodeId,
       selectedPathPointId:
@@ -2312,6 +2670,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     })),
   setRightTab: (editorMode) => set({ editorMode }),
   setLeftTab: (leftTab) => set({ leftTab }),
+  setRightPanelTab: (rightPanelTab) => set({ rightPanelTab }),
+  setCodePanelFormat: (codePanelFormat) => set({ codePanelFormat }),
 
   startPrototypeConnection: (sourceNodeId, pointerId, curWX, curWY) =>
     set({ prototypeWireDrag: { sourceNodeId, pointerId, curWX, curWY }, selectedPrototypeLinkId: null }),
@@ -2469,6 +2829,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (!id)
         return {
           selectedIds: [],
+          selectedLayoutGuideId: null,
           selectedPrototypeLinkId: null,
           pathEditModeNodeId: null,
   objectEditModeNodeId: null,
@@ -2478,17 +2839,25 @@ export const useEditorStore = create<EditorState>((set, get) => {
         const has = s.selectedIds.includes(id);
         return {
           selectedIds: has ? s.selectedIds.filter((x) => x !== id) : [...s.selectedIds, id],
+          selectedLayoutGuideId: null,
           selectedPrototypeLinkId: null,
           pathEditModeNodeId: null,
   objectEditModeNodeId: null,
           selectedPathPointId: null,
         };
       }
+      const preserveObjectEdit =
+        Boolean(
+          s.objectEditModeNodeId &&
+            id &&
+            isAncestorOf(s.nodes, s.objectEditModeNodeId, id),
+        );
       return {
         selectedIds: [id],
+        selectedLayoutGuideId: null,
         selectedPrototypeLinkId: null,
         pathEditModeNodeId: null,
-  objectEditModeNodeId: null,
+        objectEditModeNodeId: preserveObjectEdit ? s.objectEditModeNodeId : null,
         selectedPathPointId: null,
       };
     }),
@@ -2496,6 +2865,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   clearSelection: () =>
     set({
       selectedIds: [],
+      selectedLayoutGuideId: null,
       editingTextId: null,
       hoveredCanvasId: null,
       contextMenu: null,
@@ -2506,6 +2876,34 @@ export const useEditorStore = create<EditorState>((set, get) => {
   objectEditModeNodeId: null,
       selectedPathPointId: null,
     }),
+
+  selectLayoutGuide: (id) =>
+    set({
+      selectedLayoutGuideId: id,
+      selectedIds: [],
+      editingTextId: null,
+      hoveredCanvasId: null,
+      contextMenu: null,
+      selectedPrototypeLinkId: null,
+      pathEditModeNodeId: null,
+      objectEditModeNodeId: null,
+      selectedPathPointId: null,
+      prototypeWireDrag: null,
+    }),
+
+  removeLayoutGuide: (id) => {
+    get().pushHistory();
+    set((state) => {
+      const layoutGuides = state.layoutGuides.filter((g) => g.id !== id);
+      const next = {
+        ...state,
+        layoutGuides,
+        selectedLayoutGuideId:
+          state.selectedLayoutGuideId === id ? null : state.selectedLayoutGuideId,
+      };
+      return { layoutGuides, selectedLayoutGuideId: next.selectedLayoutGuideId, ...syncActivePageRecord(next) };
+    });
+  },
 
   setZoom: (zoom) => set({ zoom: clampCanvasZoom(zoom) }),
   setPan: (pan) => set({ pan }),
@@ -2620,11 +3018,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
         nodes = { ...s.nodes, [id]: { ...n, ...finalPatch } };
       }
 
-      if (n.type === "text" && patchAffectsTextLayout(patch) && n.parentId) {
-        const fp = finalPatch as Partial<EditorNode>;
-        if (fp.width != null || fp.height != null) {
-          nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId]);
-        }
+      const fp = finalPatch as Partial<EditorNode>;
+      if (
+        n.parentId &&
+        (fp.width != null || fp.height != null) &&
+        (n.type === "text" ? patchAffectsTextLayout(patch) : true)
+      ) {
+        nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId]);
       }
       return { nodes };
     });
@@ -2725,7 +3125,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         visible: true,
         locked: false,
         expanded: true,
-        fill: "#0d99ff",
+        fill: DEFAULT_SHAPE_FILL,
         cornerRadius: 8,
         fillEnabled: true,
         fillOpacity: 1,
@@ -2804,7 +3204,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         visible: true,
         locked: false,
         expanded: true,
-        fill: "#0d99ff",
+        fill: DEFAULT_SHAPE_FILL,
         cornerRadius: 8,
         fillEnabled: true,
         fillOpacity: 1,
@@ -3274,7 +3674,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const tok = s0.designTokens[tokId]!;
       if (!isEffectValue(tok.value)) return;
       const v = tok.value as EffectTokenValue;
-      const effs = (v.effects ?? []).map((e) => (e.id === effectId ? { ...e, ...patch } : e));
+      const effs = (v.effects ?? []).map((e) =>
+        e.id === effectId ? mergeNodeEffectPatch(e, patch) : e,
+      );
       get().updateDesignToken(tokId, { value: { ...v, effects: effs } });
       return;
     }
@@ -3282,7 +3684,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
     set((s) => {
       const nn = s.nodes[nodeId];
       if (!nn || nn.locked) return s;
-      const list = (nn.effects ?? []).map((e) => (e.id === effectId ? { ...e, ...patch } : e));
+      const list = (nn.effects ?? []).map((e) =>
+        e.id === effectId ? mergeNodeEffectPatch(e, patch) : e,
+      );
       return { nodes: { ...s.nodes, [nodeId]: { ...nn, effects: list } } };
     });
   },
@@ -3410,6 +3814,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         fillEnabled: true,
         fillOpacity: 1,
         strokePosition: "center",
+        clipChildren: true,
       };
       const roots = [...(s.childOrder[ROOT] ?? [])];
       roots.push(id);
@@ -3445,7 +3850,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         visible: true,
         locked: false,
         expanded: true,
-        fill: "#0d99ff",
+        fill: DEFAULT_SHAPE_FILL,
         cornerRadius: 0,
         fillEnabled: true,
         fillOpacity: 1,
@@ -3485,7 +3890,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         fill: "transparent",
         fillEnabled: false,
         fillOpacity: 0,
-        strokeColor: "#0d99ff",
+        strokeColor: DEFAULT_SHAPE_STROKE,
         strokeWidth: 3,
         strokePosition: "center",
       };
@@ -3527,10 +3932,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
         expanded: true,
         pathPoints: pts,
         pathClosed: true,
-        fill: "#0d99ff",
+        fill: DEFAULT_SHAPE_FILL,
         fillEnabled: true,
         fillOpacity: 1,
-        strokeColor: "#0f172a",
+        strokeColor: DEFAULT_SHAPE_STROKE,
         strokeWidth: 0,
         strokePosition: "center",
       };
@@ -3549,14 +3954,45 @@ export const useEditorStore = create<EditorState>((set, get) => {
     set((s) => {
       const draft = createShapeNode(shapeType, start, end, modifiers, style);
       const id = `${draft.type}-${Date.now()}`;
-      const node: EditorNode = { ...draft, id };
-      const roots = [...(s.childOrder[ROOT] ?? [])];
-      roots.push(id);
+      let node: EditorNode = { ...draft, id };
+
+      const frameId = resolveFrameParentForShapeInsert(
+        { x: node.x, y: node.y, width: node.width, height: node.height },
+        s.nodes,
+        s.childOrder,
+        s.selectedIds,
+      );
+
+      const nodes = { ...s.nodes, [id]: node };
+
+      if (frameId) {
+        const pw = worldRect(frameId, s.nodes);
+        const local = clampInsertLocalPoint(
+          node.x + node.width / 2,
+          node.y + node.height / 2,
+          pw,
+          node.width,
+          node.height,
+        );
+        node = { ...node, parentId: frameId, x: local.x, y: local.y };
+        nodes[id] = node;
+      } else {
+        node = { ...node, parentId: null };
+        nodes[id] = node;
+      }
+
+      let childOrder = insertNodeInChildOrder(s.childOrder, id, node.parentId);
+      const repaired = repairNodeHierarchy(nodes, childOrder);
+      nodes = repaired.nodes;
+      childOrder = repaired.childOrder;
+      const nodesOut = frameId
+        ? relayoutParentsWithAutoLayout(nodes, childOrder, [frameId])
+        : nodes;
+
       return {
-        nodes: { ...s.nodes, [id]: node },
-        childOrder: { ...s.childOrder, [ROOT]: roots },
+        nodes: nodesOut,
+        childOrder,
         selectedIds: [id],
-        tool: "move",
       };
     });
   },
@@ -3720,8 +4156,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
   },
 
   enterObjectEditMode: (nodeId) => {
-    const n = get().nodes[nodeId];
-    if (!n?.isBooleanGroup || n.locked) return;
+    const s = get();
+    const n = s.nodes[nodeId];
+    if (!n || n.locked) return;
+    const kids = s.childOrder[nodeId] ?? [];
+    const canEdit =
+      (n.isBooleanGroup && !n.maskId) ||
+      n.type === "group" ||
+      (n.type === "frame" && kids.some((cid) => s.nodes[cid]?.visible));
+    if (!canEdit) return;
     set({ objectEditModeNodeId: nodeId, selectedIds: [nodeId], pathEditModeNodeId: null });
   },
 
@@ -3804,10 +4247,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
       childOrder[P] = parentList.filter((id) => !allIds.includes(id));
       childOrder[P]!.splice(Math.max(0, insertAt), 0, gid);
       childOrder[gid] = [...contentIds, maskId];
+      const firstContent = contentIds[0];
       return {
         nodes: relayoutParentsWithAutoLayout(nodes, childOrder, [P]),
         childOrder,
-        selectedIds: [gid],
+        selectedIds: firstContent ? [firstContent] : [gid],
         tool: "move",
       };
     });
@@ -3866,171 +4310,27 @@ export const useEditorStore = create<EditorState>((set, get) => {
   },
 
   duplicateSelection: () => {
-    const s0 = get();
-    const tops0 = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
-      const n = s0.nodes[id];
-      return n && !n.locked && n.visible;
-    });
-    if (tops0.length === 0) return;
+    if (editableTopLevelSelection(get()).length === 0) return;
     get().pushHistory();
-    set((s) => {
-      const OFFSET = 24;
-      const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
-        const n = s.nodes[id];
-        return n && !n.locked && n.visible;
-      });
-      if (tops.length === 0) return s;
+    set((s) => cloneTopLevelSelectionState(s, 24) ?? s);
+  },
 
-      const nodes: Record<string, EditorNode> = { ...s.nodes };
-      const childOrder: Record<string, string[]> = { ...s.childOrder };
-      const newRoots: string[] = [];
-
-      for (const rootId of tops) {
-        const rootOld = s.nodes[rootId];
-        if (!rootOld) continue;
-        const nameForRoot = nextDuplicateName(nodes);
-        const idMap = new Map<string, string>();
-
-        const cloneRecursive = (oldId: string, newParent: string | null): string => {
-          const old = s.nodes[oldId];
-          if (!old) return "";
-          const newId = `${old.type}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-          idMap.set(oldId, newId);
-          const base: EditorNode = {
-            ...old,
-            id: newId,
-            parentId: newParent,
-            name: oldId === rootId ? nameForRoot : old.name,
-            x: old.x + OFFSET,
-            y: old.y + OFFSET,
-          };
-          let next: EditorNode =
-            old.type === "path" && old.pathPoints?.length
-              ? { ...base, pathPoints: rekeyPathPoints(old.pathPoints) }
-              : base;
-          if (old.effects?.length) {
-            next = { ...next, effects: old.effects.map((e) => ({ ...e, id: newNodeEffectId() })) };
-          }
-          nodes[newId] = next;
-          const newKids: string[] = [];
-          for (const k of s.childOrder[oldId] ?? []) {
-            newKids.push(cloneRecursive(k, newId));
-          }
-          childOrder[newId] = newKids;
-          return newId;
-        };
-
-        const newRootId = cloneRecursive(rootId, rootOld.parentId);
-        for (const nid of collectSubtreeIds(newRootId, childOrder)) {
-          const n = nodes[nid]!;
-          if (!n.prototypeLinks?.length) continue;
-          nodes[nid] = {
-            ...n,
-            prototypeLinks: n.prototypeLinks.map((l) => ({
-              ...l,
-              id: newPrototypeLinkId(),
-              sourceNodeId: idMap.get(l.sourceNodeId) ?? l.sourceNodeId,
-              targetFrameId:
-                l.targetFrameId && idMap.has(l.targetFrameId)
-                  ? idMap.get(l.targetFrameId)!
-                  : l.targetFrameId,
-            })),
-          };
-        }
-        const P = parentListKey(rootOld.parentId);
-        const list = [...(childOrder[P] ?? [])];
-        const curIdx = list.indexOf(rootId);
-        const insertAt = curIdx >= 0 ? curIdx + 1 : list.length;
-        list.splice(insertAt, 0, newRootId);
-        childOrder[P] = list;
-        newRoots.push(newRootId);
-      }
-
-      let nodesOut = nodes;
-      const relayoutKeys = new Set<string>();
-      for (const rootId of tops) {
-        relayoutKeys.add(parentListKey(s.nodes[rootId]!.parentId));
-      }
-      nodesOut = relayoutParentsWithAutoLayout(nodesOut, childOrder, relayoutKeys);
-
-      return {
-        nodes: nodesOut,
-        childOrder,
-        selectedIds: newRoots,
-        tool: "move",
-        editingTextId: null,
-      };
-    });
+  cloneSelectionInPlace: () => {
+    if (editableTopLevelSelection(get()).length === 0) return [];
+    set((s) => cloneTopLevelSelectionState(s, 0) ?? s);
+    return get().selectedIds;
   },
 
   alignSelection: (direction) => {
     const s0 = get();
-    const tops0 = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
-      const n = s0.nodes[id];
-      return n && !n.locked && n.visible;
-    });
+    const tops0 = alignableSelectionIds(s0.selectedIds, s0.nodes);
     if (tops0.length < 2) return;
     get().pushHistory();
     set((s) => {
-      const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
-        const n = s.nodes[id];
-        return n && !n.locked && n.visible;
-      });
+      const tops = alignableSelectionIds(s.selectedIds, s.nodes);
       if (tops.length < 2) return s;
-      let nodes: Record<string, EditorNode> = { ...s.nodes };
-      const rects = tops.map((id) => ({ id, wr: worldRect(id, nodes) }));
-
-      const applyDx = (id: string, d: number) => {
-        if (!d) return;
-        const n = nodes[id]!;
-        nodes[id] = { ...n, x: n.x + d };
-      };
-      const applyDy = (id: string, d: number) => {
-        if (!d) return;
-        const n = nodes[id]!;
-        nodes[id] = { ...n, y: n.y + d };
-      };
-
-      switch (direction) {
-        case "left": {
-          const t = Math.min(...rects.map((r) => r.wr.x));
-          for (const { id, wr } of rects) applyDx(id, t - wr.x);
-          break;
-        }
-        case "right": {
-          const t = Math.max(...rects.map((r) => r.wr.x + r.wr.width));
-          for (const { id, wr } of rects) applyDx(id, t - wr.x - wr.width);
-          break;
-        }
-        case "center-h": {
-          const minL = Math.min(...rects.map((r) => r.wr.x));
-          const maxR = Math.max(...rects.map((r) => r.wr.x + r.wr.width));
-          const c = (minL + maxR) / 2;
-          for (const { id, wr } of rects) applyDx(id, c - wr.x - wr.width / 2);
-          break;
-        }
-        case "top": {
-          const t = Math.min(...rects.map((r) => r.wr.y));
-          for (const { id, wr } of rects) applyDy(id, t - wr.y);
-          break;
-        }
-        case "bottom": {
-          const t = Math.max(...rects.map((r) => r.wr.y + r.wr.height));
-          for (const { id, wr } of rects) applyDy(id, t - wr.y - wr.height);
-          break;
-        }
-        case "center-v": {
-          const minT = Math.min(...rects.map((r) => r.wr.y));
-          const maxB = Math.max(...rects.map((r) => r.wr.y + r.wr.height));
-          const c = (minT + maxB) / 2;
-          for (const { id, wr } of rects) applyDy(id, c - wr.y - wr.height / 2);
-          break;
-        }
-        default:
-          break;
-      }
-
-      const relayoutKeys = new Set(tops.map((id) => parentListKey(nodes[id]!.parentId)));
+      let nodes = alignNodesInDocument(s.nodes, tops, direction);
+      const relayoutKeys = relayoutParentKeysAfterManualPosition(nodes, tops, parentListKey);
       nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, relayoutKeys);
       return { nodes };
     });
@@ -4038,56 +4338,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   distributeSelection: (axis) => {
     const s0 = get();
-    const tops0 = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
-      const n = s0.nodes[id];
-      return n && !n.locked && n.visible;
-    });
+    const tops0 = alignableSelectionIds(s0.selectedIds, s0.nodes);
     if (tops0.length < 3) return;
     get().pushHistory();
     set((s) => {
-      const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
-        const n = s.nodes[id];
-        return n && !n.locked && n.visible;
-      });
+      const tops = alignableSelectionIds(s.selectedIds, s.nodes);
       if (tops.length < 3) return s;
-      let nodes: Record<string, EditorNode> = { ...s.nodes };
-      const rects = tops.map((id) => ({ id, wr: worldRect(id, nodes) }));
-
-      if (axis === "horizontal") {
-        const sorted = [...rects].sort((a, b) => a.wr.x - b.wr.x);
-        const n = sorted.length;
-        const left0 = sorted[0]!.wr.x;
-        const rightLast = sorted[n - 1]!.wr.x + sorted[n - 1]!.wr.width;
-        const span = rightLast - left0;
-        const sumW = sorted.reduce((acc, r) => acc + r.wr.width, 0);
-        const gap = (span - sumW) / (n - 1);
-        let cur = left0;
-        for (let i = 0; i < n; i++) {
-          const { id, wr } = sorted[i]!;
-          const d = cur - wr.x;
-          const nn = nodes[id]!;
-          nodes[id] = { ...nn, x: nn.x + d };
-          cur += wr.width + gap;
-        }
-      } else {
-        const sorted = [...rects].sort((a, b) => a.wr.y - b.wr.y);
-        const n = sorted.length;
-        const top0 = sorted[0]!.wr.y;
-        const botLast = sorted[n - 1]!.wr.y + sorted[n - 1]!.wr.height;
-        const span = botLast - top0;
-        const sumH = sorted.reduce((acc, r) => acc + r.wr.height, 0);
-        const gap = (span - sumH) / (n - 1);
-        let cur = top0;
-        for (let i = 0; i < n; i++) {
-          const { id, wr } = sorted[i]!;
-          const d = cur - wr.y;
-          const nn = nodes[id]!;
-          nodes[id] = { ...nn, y: nn.y + d };
-          cur += wr.height + gap;
-        }
-      }
-
-      const relayoutKeys = new Set(tops.map((id) => parentListKey(nodes[id]!.parentId)));
+      let nodes = distributeNodesInDocument(s.nodes, tops, axis);
+      const relayoutKeys = relayoutParentKeysAfterManualPosition(nodes, tops, parentListKey);
       nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, relayoutKeys);
       return { nodes };
     });
@@ -4629,13 +4887,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const result = applyAutoLayoutToSelection(s0.nodes, s0.childOrder, s0.selectedIds);
     if (!result) return;
     get().pushHistory();
-    set((s) => ({
+    set({
       nodes: result.nodes,
       childOrder: result.childOrder,
       selectedIds: result.selectedIds,
       tool: "move",
       editingTextId: null,
-    }));
+    });
   },
 
   ungroupSelection: () => {
@@ -4698,6 +4956,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   setSelection: (ids) =>
     set({
       selectedIds: ids,
+      selectedLayoutGuideId: null,
       editingTextId: null,
       contextMenu: null,
       selectedPrototypeLinkId: null,
@@ -4706,7 +4965,25 @@ export const useEditorStore = create<EditorState>((set, get) => {
       selectedPathPointId: null,
     }),
 
-  setGuides: (guides) => set({ guides }),
+  setGuides: (guides) => set({ guides, dragMeasurements: [] }),
+  setSnapOverlay: (guides, dragMeasurements) => set({ guides, dragMeasurements }),
+  setLayoutGuideDraft: (layoutGuideDraft) => set({ layoutGuideDraft }),
+  cancelLayoutGuideDraft: () => set({ layoutGuideDraft: null }),
+  commitLayoutGuide: () => {
+    const s = get();
+    if (!s.layoutGuideDraft) return;
+    const guide: LayoutGuide = {
+      id: `lg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      axis: s.layoutGuideDraft.axis,
+      pos: s.layoutGuideDraft.pos,
+    };
+    get().pushHistory();
+    set((state) => {
+      const layoutGuides = [...state.layoutGuides, guide];
+      const next = { ...state, layoutGuides, layoutGuideDraft: null };
+      return { layoutGuides, layoutGuideDraft: null, ...syncActivePageRecord(next) };
+    });
+  },
 
   reorderNode: (id, targetParentId, targetIndex) =>
     set((s) => {
@@ -4748,8 +5025,50 @@ export const useEditorStore = create<EditorState>((set, get) => {
     set((s) => {
       const n = s.nodes[id];
       if (!n || n.locked || (n.type !== "frame" && n.type !== "group")) return s;
-      let nodes = { ...s.nodes, [id]: { ...n, ...patch } };
-      nodes = deepAutoLayout(nodes, s.childOrder, id);
+      const nodes = applyLayoutPatchWithAutoLayout(
+        s.nodes,
+        s.childOrder,
+        id,
+        patch,
+      ) as EditorState["nodes"];
+      return { nodes };
+    });
+  },
+
+  updateLayoutSizing: (id, axis, mode) => {
+    const s0 = get();
+    const n0 = s0.nodes[id];
+    if (!n0 || n0.locked) return;
+    get().pushHistory();
+    set((s) => {
+      const n = s.nodes[id];
+      if (!n || n.locked) return s;
+      const patch =
+        axis === "horizontal"
+          ? { layoutSizingHorizontal: mode }
+          : { layoutSizingVertical: mode };
+      let nodes = { ...s.nodes, [id]: { ...n, ...patch, layoutDirty: true } };
+      const refresh = new Set<string>();
+      if (n.parentId) refresh.add(n.parentId);
+      if ((n.type === "frame" || n.type === "group") && (n.layoutMode ?? "none") !== "none") {
+        refresh.add(id);
+      }
+      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
+      return { nodes };
+    });
+  },
+
+  updateLayoutPositioning: (id, positioning) => {
+    const s0 = get();
+    const n0 = s0.nodes[id];
+    if (!n0 || n0.locked) return;
+    get().pushHistory();
+    set((s) => {
+      const n = s.nodes[id];
+      if (!n || n.locked) return s;
+      let nodes = { ...s.nodes, [id]: { ...n, layoutPositioning: positioning, layoutDirty: true } };
+      const par = n.parentId;
+      if (par) nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [par]);
       return { nodes };
     });
   },
@@ -5159,7 +5478,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
       const sx = startBounds.width > 0 ? width / startBounds.width : 1;
       const sy = startBounds.height > 0 ? height / startBounds.height : 1;
-      const uniform = modifiers.shiftKey ? Math.max(sx, sy) : Math.sqrt(Math.max(0, sx * sy));
+      const uniform = isProportionalResize(handle, modifiers)
+        ? Math.max(sx, sy)
+        : Math.sqrt(Math.max(0, sx * sy));
 
       const isContainer = n.type === "frame" || n.type === "group";
       const layoutMode = n.layoutMode ?? "none";
@@ -5367,6 +5688,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
     get().pushHistory();
     set((s) => {
       const next = { showGrid: !s.showGrid };
+      return { ...next, ...syncActivePageRecord({ ...s, ...next }) };
+    });
+  },
+
+  toggleRulers: () => {
+    set((s) => {
+      const next = { showRulers: !s.showRulers };
       return { ...next, ...syncActivePageRecord({ ...s, ...next }) };
     });
   },
@@ -5739,18 +6067,173 @@ export const useEditorStore = create<EditorState>((set, get) => {
     });
   },
 
+  startPencilStroke: (worldPoint) => {
+    const s0 = get();
+    if (s0.editorMode !== "design" || s0.tool !== "pencil" || s0.pencilDrawingNodeId) return;
+    get().pushHistory();
+    set((s) => {
+      if (s.editorMode !== "design" || s.tool !== "pencil" || s.pencilDrawingNodeId) return s;
+      const id = `path-${Date.now()}`;
+      const roots = [...(s.childOrder[ROOT] ?? [])];
+      roots.push(id);
+      const pt0: PathPoint = { id: newPathPointId(), x: 0, y: 0 };
+      const node: EditorNode = {
+        id,
+        parentId: null,
+        type: "path",
+        name: "Freehand",
+        x: worldPoint.x,
+        y: worldPoint.y,
+        width: 1,
+        height: 1,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        expanded: true,
+        pathPoints: [pt0],
+        pathClosed: false,
+        fillEnabled: false,
+        fillOpacity: 1,
+        fill: "transparent",
+        strokeColor: "#0f172a",
+        strokeWidth: 2,
+        strokeLinecap: "round",
+        strokeLinejoin: "round",
+        strokePosition: "center",
+      };
+      const normalized = normalizePathNode(node);
+      return {
+        nodes: { ...s.nodes, [id]: normalized },
+        childOrder: { ...s.childOrder, [ROOT]: roots },
+        pencilDrawingNodeId: id,
+        selectedIds: [],
+        tool: "pencil",
+      };
+    });
+  },
+
+  extendPencilStroke: (worldPoint) => {
+    const s0 = get();
+    const drawId = s0.pencilDrawingNodeId;
+    if (!drawId || s0.tool !== "pencil") return;
+    const path = s0.nodes[drawId];
+    if (!path || path.type !== "path" || !path.pathPoints?.length) return;
+    const nwr = worldRect(drawId, s0.nodes);
+    const plx = worldPoint.x - nwr.x;
+    const ply = worldPoint.y - nwr.y;
+    const last = path.pathPoints[path.pathPoints.length - 1]!;
+    if (!shouldSampleFreehandPoint(last.x, last.y, plx, ply, s0.zoom)) return;
+    set((s) => {
+      const n = s.nodes[drawId];
+      if (!n || n.type !== "path" || !n.pathPoints) return s;
+      const wr = worldRect(drawId, s.nodes);
+      const lx = worldPoint.x - wr.x;
+      const ly = worldPoint.y - wr.y;
+      const pts = [...n.pathPoints, { id: newPathPointId(), x: lx, y: ly }];
+      let next: EditorNode = { ...n, pathPoints: pts };
+      next = normalizePathNode(next);
+      let nodes = { ...s.nodes, [drawId]: next };
+      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
+      return { nodes };
+    });
+  },
+
+  finishPencilStroke: () => {
+    const id = get().pencilDrawingNodeId;
+    if (!id) return;
+    const s0 = get();
+    const path = s0.nodes[id];
+    if (!path || path.type !== "path" || !path.pathPoints?.length) {
+      get().cancelPencilStroke();
+      return;
+    }
+    const epsilon = 1.5 / Math.max(s0.zoom, 0.01);
+    set((s) => {
+      const n = s.nodes[id];
+      if (!n || n.type !== "path" || !n.pathPoints) {
+        return { ...s, pencilDrawingNodeId: null, tool: "move" as Tool };
+      }
+      const simplified = simplifyPolyline(
+        n.pathPoints.map((p) => ({ x: p.x, y: p.y })),
+        epsilon,
+      );
+      if (simplified.length < 2) {
+        const parentRef = n.parentId;
+        const { nodes, childOrder } = removeNodeAndDescendants(s, id);
+        const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
+        return {
+          ...s,
+          nodes: nodes2,
+          childOrder,
+          pencilDrawingNodeId: null,
+          tool: "move" as Tool,
+          selectedIds: [],
+        };
+      }
+      const pts: PathPoint[] = simplified.map((p) => ({
+        id: newPathPointId(),
+        x: p.x,
+        y: p.y,
+      }));
+      let next: EditorNode = { ...n, pathPoints: pts, pathClosed: false };
+      next = normalizePathNode(next);
+      let nodes = { ...s.nodes, [id]: next };
+      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
+      return {
+        ...s,
+        nodes,
+        pencilDrawingNodeId: null,
+        tool: "move" as Tool,
+        selectedIds: [id],
+        pathEditModeNodeId: null,
+        objectEditModeNodeId: null,
+        selectedPathPointId: null,
+      };
+    });
+  },
+
+  cancelPencilStroke: () => {
+    const id = get().pencilDrawingNodeId;
+    if (!id) return;
+    set((s) => {
+      if (!s.nodes[id]) return { ...s, pencilDrawingNodeId: null, tool: "move" as Tool };
+      const parentRef = s.nodes[id]?.parentId;
+      const { nodes, childOrder } = removeNodeAndDescendants(s, id);
+      const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
+      return {
+        ...s,
+        nodes: nodes2,
+        childOrder,
+        pencilDrawingNodeId: null,
+        tool: "move" as Tool,
+        selectedIds: [],
+      };
+    });
+  },
+
   updatePathPoint: (nodeId, pointId, patch, opts) => {
     if (!opts?.skipHistory && !get().isApplyingHistory) get().pushHistory();
     set((s) => {
       const n = s.nodes[nodeId];
       if (!n || n.type !== "path" || !n.pathPoints) return s;
+      const mirroring = n.pathHandleMirroring ?? "none";
       const pts = n.pathPoints.map((p) => {
         if (p.id !== pointId) return p;
-        const merged: PathPoint = { ...p };
+        let merged: PathPoint = { ...p };
         if (patch.x !== undefined) merged.x = patch.x;
         if (patch.y !== undefined) merged.y = patch.y;
-        if ("handleIn" in patch) merged.handleIn = patch.handleIn;
-        if ("handleOut" in patch) merged.handleOut = patch.handleOut;
+        const handlePatch: Partial<PathPoint> = {};
+        if ("handleIn" in patch) handlePatch.handleIn = patch.handleIn;
+        if ("handleOut" in patch) handlePatch.handleOut = patch.handleOut;
+        if ("handleIn" in patch || "handleOut" in patch) {
+          const movedWhich =
+            "handleIn" in patch && !("handleOut" in patch)
+              ? "in"
+              : "handleOut" in patch && !("handleIn" in patch)
+                ? "out"
+                : undefined;
+          merged = mergePathPointHandles(merged, handlePatch, mirroring, movedWhich);
+        }
         return merged;
       });
       let next: EditorNode = { ...n, pathPoints: pts };
@@ -5802,6 +6285,54 @@ export const useEditorStore = create<EditorState>((set, get) => {
   },
 
   setPathEditMode: (nodeId) => set({ pathEditModeNodeId: nodeId, selectedPathPointId: null }),
+
+  enterVectorEditMode: (nodeId) => {
+    const s = get();
+    const id = nodeId ?? s.selectedIds[0];
+    if (!id) return;
+    const raw = s.nodes[id];
+    if (!raw || raw.locked || raw.visible === false) return;
+    if (
+      raw.type !== "rectangle" &&
+      raw.type !== "ellipse" &&
+      raw.type !== "line" &&
+      raw.type !== "path"
+    ) {
+      return;
+    }
+    if (s.editingTextId || s.penDrawingNodeId || s.pencilDrawingNodeId) return;
+    const needsConvert = raw.type !== "path";
+    if (needsConvert) get().pushHistory();
+    set((st) => {
+      const current = st.nodes[id];
+      if (!current) return st;
+      let converted = convertNodeToPath(current);
+      if (!converted) return st;
+      converted = ensureRoundedRectPathPoints(converted);
+      const nodes =
+        needsConvert || converted !== current
+          ? { ...st.nodes, [id]: converted }
+          : st.nodes;
+      return {
+        nodes,
+        pathEditModeNodeId: id,
+        selectedIds: [id],
+        selectedPathPointId: null,
+        objectEditModeNodeId: null,
+      };
+    });
+  },
+
+  setPathHandleMirroring: (mode) => {
+    const id = get().pathEditModeNodeId ?? get().selectedIds[0];
+    if (!id) return;
+    get().pushHistory();
+    set((s) => {
+      const n = s.nodes[id];
+      if (!n || n.type !== "path") return s;
+      return { nodes: { ...s.nodes, [id]: { ...n, pathHandleMirroring: mode } } };
+    });
+  },
 
   setSelectedPathPointId: (id) => set({ selectedPathPointId: id }),
 
@@ -5990,6 +6521,22 @@ export const useEditorStore = create<EditorState>((set, get) => {
       set({ placingComponentMasterId: null });
       return true;
     }
+    if (s.codeRoundTripOpen) {
+      set({ codeRoundTripOpen: false });
+      return true;
+    }
+    if (s.importHubOpen) {
+      set({ importHubOpen: false });
+      return true;
+    }
+    if (s.importWebModalOpen) {
+      set({ importWebModalOpen: false });
+      return true;
+    }
+    if (s.importFigmaModalOpen) {
+      set({ importFigmaModalOpen: false });
+      return true;
+    }
     return false;
   },
 
@@ -6065,6 +6612,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         isPlacingComment: false,
         commentsPanelOpen: false,
         penDrawingNodeId: null,
+        pencilDrawingNodeId: null,
         pathEditModeNodeId: null,
   objectEditModeNodeId: null,
         selectedPathPointId: null,
@@ -6176,6 +6724,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       zoom: sliceFromDoc.zoom,
       pan: sliceFromDoc.pan,
       showGrid: sliceFromDoc.showGrid,
+      showRulers: sliceFromDoc.showRulers,
       canvasBackgroundColor: sliceFromDoc.canvasBackgroundColor,
       comments: sliceFromDoc.comments,
       pages: sliceFromDoc.pages,
@@ -6257,6 +6806,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
       zoom: slice.zoom,
       pan: slice.pan,
       showGrid: slice.showGrid,
+      showRulers: slice.showRulers,
+      canvasBackgroundColor: slice.canvasBackgroundColor,
       comments: slice.comments,
       pages: slice.pages,
       pageOrder: slice.pageOrder,
@@ -6275,6 +6826,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       isPlacingComment: false,
       commentsPanelOpen: false,
       penDrawingNodeId: null,
+      pencilDrawingNodeId: null,
       pathEditModeNodeId: null,
   objectEditModeNodeId: null,
       selectedPathPointId: null,
@@ -6325,8 +6877,37 @@ export const useEditorStore = create<EditorState>((set, get) => {
       });
   },
 
-  applyGeneratedDesign: (slice, mode, opts) => {
+  applyGeneratedDesign: async (slice, mode, opts) => {
     const recordHistory = opts?.recordHistory !== false;
+    const zoomToFit = opts?.zoomToFit !== false;
+
+    let appliedSlice = slice;
+    if (zoomToFit) {
+      const el =
+        typeof document !== "undefined"
+          ? document.querySelector<HTMLElement>("[data-canvas-viewport]")
+          : null;
+      const vp = viewportForRootNodes(
+        slice.nodes,
+        slice.childOrder[ROOT] ?? [],
+        el?.clientWidth ?? 1200,
+        el?.clientHeight ?? 800,
+      );
+      if (vp) {
+        appliedSlice = {
+          ...slice,
+          zoom: vp.zoom,
+          pan: vp.pan,
+          pages: Object.fromEntries(
+            Object.entries(slice.pages).map(([id, page]) => [
+              id,
+              id === slice.activePageId ? { ...page, zoom: vp.zoom, pan: vp.pan } : page,
+            ]),
+          ),
+        };
+      }
+    }
+
     const uiReset = (s: EditorState) => ({
       guides: [],
       editingTextId: null,
@@ -6342,6 +6923,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       isPlacingComment: false,
       commentsPanelOpen: false,
       penDrawingNodeId: null,
+      pencilDrawingNodeId: null,
       pathEditModeNodeId: null,
   objectEditModeNodeId: null,
       selectedPathPointId: null,
@@ -6355,6 +6937,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       importHubOpen: false,
       importWebModalOpen: false,
       importFigmaModalOpen: false,
+      codeRoundTripOpen: false,
       pluginMarketplaceOpen: false,
       activePluginId: undefined,
       shareModalOpen: false,
@@ -6370,33 +6953,41 @@ export const useEditorStore = create<EditorState>((set, get) => {
       editorMode: "design" as EditorMode,
       tool: "move" as Tool,
       leftTab: "layers" as LeftTab,
-      documentSaveStatus: "saved" as DocumentSaveStatus,
+      documentSaveStatus: "saving" as DocumentSaveStatus,
       documentHydrationRevision: s.documentHydrationRevision + 1,
     });
 
     if (recordHistory) get().pushHistory();
 
     if (mode === "replace") {
-      set((s) => ({
-        nodes: slice.nodes,
-        childOrder: slice.childOrder,
-        assets: slice.assets ?? {},
-        designTokens: slice.designTokens ?? {},
-        fileName: slice.fileName,
-        selectedIds: slice.selectedIds,
-        zoom: slice.zoom,
-        pan: slice.pan,
-        showGrid: slice.showGrid,
-        comments: slice.comments,
-        pages: slice.pages,
-        pageOrder: slice.pageOrder,
-        activePageId: slice.activePageId,
-        ...uiReset(s),
-        ...(recordHistory ? {} : { historyPast: [], historyFuture: [] }),
-      }));
+      set((s) => {
+        const nextState = {
+          nodes: appliedSlice.nodes,
+          childOrder: appliedSlice.childOrder,
+          assets: appliedSlice.assets ?? {},
+          designTokens: appliedSlice.designTokens ?? {},
+          fileName: appliedSlice.fileName,
+          selectedIds: appliedSlice.selectedIds,
+          zoom: appliedSlice.zoom,
+          pan: appliedSlice.pan,
+          showGrid: appliedSlice.showGrid,
+          showRulers: appliedSlice.showRulers,
+          canvasBackgroundColor: appliedSlice.canvasBackgroundColor,
+          comments: appliedSlice.comments,
+          pages: appliedSlice.pages,
+          pageOrder: appliedSlice.pageOrder,
+          activePageId: appliedSlice.activePageId,
+          ...uiReset(s),
+          ...(recordHistory ? {} : { historyPast: [], historyFuture: [] }),
+        };
+        return {
+          ...nextState,
+          ...syncActivePageRecord({ ...s, ...nextState }),
+        };
+      });
     } else {
       set((s) => {
-        const merged = remapPersistSliceIds(slice);
+        const merged = remapPersistSliceIds(appliedSlice);
         const rootsExisting = [...(s.childOrder[ROOT] ?? [])];
         let maxRight = 80;
         for (const rid of rootsExisting) {
@@ -6441,12 +7032,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
         };
       });
     }
-    void getSyncProvider()
-      .saveDocument(editorStateToDocument(toPersistSlice(get())))
-      .catch((e) => {
-        console.warn("[Paytm Craft] persist save failed", e);
-        useEditorStore.setState({ documentSaveStatus: "unsaved" });
-      });
+
+    try {
+      await getSyncProvider().saveDocument(editorStateToDocument(toPersistSlice(get())));
+      useEditorStore.setState({ documentSaveStatus: "saved" });
+    } catch (e) {
+      console.warn("[Paytm Craft] persist save failed", e);
+      useEditorStore.setState({ documentSaveStatus: "unsaved" });
+    }
   },
 
   resetDocument: () => {
@@ -6459,6 +7052,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       zoom: 0.55,
       pan: { x: 40, y: 24 },
       showGrid: false,
+      showRulers: true,
     });
     set({
       nodes,
@@ -6473,11 +7067,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
       zoom: 0.55,
       pan: { x: 40, y: 24 },
       showGrid: false,
+      showRulers: true,
       comments: [],
       commentsPanelOpen: false,
       activeCommentId: null,
       isPlacingComment: false,
       penDrawingNodeId: null,
+      pencilDrawingNodeId: null,
       pathEditModeNodeId: null,
   objectEditModeNodeId: null,
       selectedPathPointId: null,
@@ -6578,7 +7174,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
       zoom: source.zoom,
       pan: { ...source.pan },
       showGrid: source.showGrid,
+      showRulers: source.showRulers,
       canvasBackgroundColor: source.canvasBackgroundColor,
+      layoutGuides: (source.layoutGuides ?? []).map((g) => ({
+        ...g,
+        id: `lg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      })),
     };
     set({
       pages: { ...captured.pages, [id]: page },

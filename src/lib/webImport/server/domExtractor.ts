@@ -102,6 +102,12 @@ export function extractDomTreeInBrowser(): DomSnapshotNode {
       if (w) children.push(w);
     }
 
+    const rawClass = (el as HTMLElement).className;
+    const className =
+      typeof rawClass === "string" && rawClass.trim()
+        ? rawClass.trim().replace(/\s+/g, " ").slice(0, 512)
+        : undefined;
+
     const text = leafText(el);
     const img = tag === "img" ? (el as HTMLImageElement).src : undefined;
     const href = tag === "a" ? (el as HTMLAnchorElement).href : undefined;
@@ -110,6 +116,7 @@ export function extractDomTreeInBrowser(): DomSnapshotNode {
     return {
       id: nextId(),
       tagName: tag,
+      className,
       text,
       href,
       src: img,

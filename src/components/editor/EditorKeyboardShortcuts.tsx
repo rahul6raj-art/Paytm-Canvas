@@ -1,24 +1,25 @@
 "use client";
 
 import { useEffect } from "react";
-import { useEditorStore, type Tool } from "@/stores/useEditorStore";
+import { useEditorStore } from "@/stores/useEditorStore";
 import { zoomCanvasAtViewportCenter } from "@/lib/viewportZoom";
 import { KEYBOARD_ZOOM_STEP } from "@/lib/canvasZoom";
 import { cancelActiveMarqueeFromKeyboard } from "@/lib/canvasMarqueeController";
 import { screenPxToWorld } from "@/lib/canvasVisual";
 import { topLevelSelectedIds } from "@/lib/editorGraph";
 import { canAddAutoLayoutToSelection } from "@/lib/autoLayoutSelection";
-import { isEditableFieldElement } from "@/lib/editorKeyboardFocus";
-
-function shouldIgnoreShortcutForTyping(target: EventTarget | null): boolean {
-  const st = useEditorStore.getState();
-  if (st.editingTextId) return true;
-  if (st.layerRenameId) return true;
-  return isEditableFieldElement(target);
-}
+import {
+  activateCanvasForShortcuts,
+  isMultilineEditableElement,
+  isShortcutOverlayOpen,
+  shouldYieldShortcutsToTyping,
+  toolFromShortcutKey,
+} from "@/lib/editorKeyboardFocus";
 
 export function EditorKeyboardShortcuts() {
   useEffect(() => {
+    const focusTimer = window.setTimeout(() => activateCanvasForShortcuts(), 0);
+
     const onKeyDown = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
 
@@ -51,20 +52,29 @@ export function EditorKeyboardShortcuts() {
           return;
         }
       }
-      if (stUi.shortcutOverlayOpen) {
+      if (isShortcutOverlayOpen(stUi)) {
         return;
       }
-      if (stUi.commandMenuOpen) {
-        return;
-      }
-      if (stUi.aiModalOpen) {
-        return;
-      }
-      if (stUi.pluginMarketplaceOpen || stUi.activePluginId) {
-        return;
-      }
-      if (stUi.shareModalOpen || stUi.workspacePickerOpen || stUi.teamInviteModalOpen) {
-        return;
+
+      if (!mod && !e.altKey && !isMultilineEditableElement(e.target)) {
+        const lineTool = e.key === "l" || e.key === "L";
+        const nextTool = lineTool ? (e.shiftKey ? "arrow" : "line") : toolFromShortcutKey(e.key);
+        if (nextTool) {
+          const stTool = useEditorStore.getState();
+          if (!stTool.editingTextId && !stTool.layerRenameId && !isShortcutOverlayOpen(stTool)) {
+            const allowedInInspect = nextTool === "move" || nextTool === "hand";
+            const modeOk =
+              stTool.editorMode === "design" ||
+              (stTool.editorMode === "inspect" && allowedInInspect);
+            if (modeOk && (nextTool !== "pen" || stTool.editorMode === "design")) {
+              e.preventDefault();
+              e.stopPropagation();
+              activateCanvasForShortcuts();
+              stTool.setTool(nextTool);
+              return;
+            }
+          }
+        }
       }
 
       if (e.key === "Escape") {
@@ -77,6 +87,11 @@ export function EditorKeyboardShortcuts() {
         if (stEsc.penDrawingNodeId) {
           e.preventDefault();
           stEsc.cancelPath();
+          return;
+        }
+        if (stEsc.pencilDrawingNodeId) {
+          e.preventDefault();
+          stEsc.cancelPencilStroke();
           return;
         }
         if (stEsc.pathEditModeNodeId) {
@@ -107,10 +122,61 @@ export function EditorKeyboardShortcuts() {
             st.setEditingTextId(id);
             return;
           }
+          if (
+            n &&
+            !n.locked &&
+            n.visible !== false &&
+            (n.type === "rectangle" ||
+              n.type === "ellipse" ||
+              n.type === "line" ||
+              n.type === "path") &&
+            !st.pathEditModeNodeId
+          ) {
+            e.preventDefault();
+            st.enterVectorEditMode(id);
+            return;
+          }
         }
       }
 
-      if (shouldIgnoreShortcutForTyping(e.target)) return;
+      if (e.code === "Backspace" || e.code === "Delete") {
+        const stDel = useEditorStore.getState();
+        if (!isShortcutOverlayOpen(stDel) && stDel.editorMode === "design") {
+          if (
+            e.code === "Backspace" &&
+            stDel.pathEditModeNodeId &&
+            stDel.selectedPathPointId &&
+            stDel.selectedIds.includes(stDel.pathEditModeNodeId)
+          ) {
+            e.preventDefault();
+            activateCanvasForShortcuts();
+            stDel.deletePathPoint(stDel.pathEditModeNodeId, stDel.selectedPathPointId);
+            return;
+          }
+          if (stDel.selectedLayoutGuideId && stDel.editorMode === "design") {
+            e.preventDefault();
+            activateCanvasForShortcuts();
+            stDel.removeLayoutGuide(stDel.selectedLayoutGuideId);
+            return;
+          }
+          const deletable = topLevelSelectedIds(stDel.selectedIds, stDel.nodes).filter((id) => {
+            const n = stDel.nodes[id];
+            return n && !n.locked && n.visible;
+          });
+          if (deletable.length > 0) {
+            e.preventDefault();
+            activateCanvasForShortcuts();
+            stDel.deleteSelection();
+            return;
+          }
+        }
+      }
+
+      if (shouldYieldShortcutsToTyping(e, e.target)) return;
+
+      if (mod) {
+        activateCanvasForShortcuts();
+      }
 
       if (mod && (e.code === "Equal" || e.code === "NumpadAdd")) {
         e.preventDefault();
@@ -236,28 +302,6 @@ export function EditorKeyboardShortcuts() {
         return;
       }
 
-      if (e.code === "Backspace" || e.code === "Delete") {
-        const st = useEditorStore.getState();
-        if (
-          e.code === "Backspace" &&
-          st.pathEditModeNodeId &&
-          st.selectedPathPointId &&
-          st.selectedIds.includes(st.pathEditModeNodeId)
-        ) {
-          e.preventDefault();
-          st.deletePathPoint(st.pathEditModeNodeId, st.selectedPathPointId);
-          return;
-        }
-        const deletable = topLevelSelectedIds(st.selectedIds, st.nodes).filter((id) => {
-          const n = st.nodes[id];
-          return n && !n.locked && n.visible;
-        });
-        if (deletable.length === 0) return;
-        e.preventDefault();
-        st.deleteSelection();
-        return;
-      }
-
       const stDesign = useEditorStore.getState();
       if (stDesign.editorMode === "design" && mod) {
         const bracketForward = e.code === "BracketRight" || e.key === "]";
@@ -357,46 +401,13 @@ export function EditorKeyboardShortcuts() {
         return;
       }
 
-      if (mod || e.altKey) return;
-
-      if (e.shiftKey && (e.key === "l" || e.key === "L")) {
-        e.preventDefault();
-        useEditorStore.getState().setTool("arrow");
-        return;
-      }
-      if (e.key === "l" || e.key === "L") {
-        e.preventDefault();
-        useEditorStore.getState().setTool("line");
-        return;
-      }
-
-      const map: Record<string, Tool> = {
-        v: "move",
-        V: "move",
-        f: "frame",
-        F: "frame",
-        r: "rect",
-        R: "rect",
-        o: "ellipse",
-        O: "ellipse",
-        t: "text",
-        T: "text",
-        p: "pen",
-        P: "pen",
-        h: "hand",
-        H: "hand",
-      };
-      const next = map[e.key];
-      if (next) {
-        e.preventDefault();
-        const st = useEditorStore.getState();
-        if (next === "pen" && st.editorMode !== "design") return;
-        useEditorStore.getState().setTool(next);
-      }
     };
 
     window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
   }, []);
 
   return null;

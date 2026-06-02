@@ -41,13 +41,13 @@ export function EditorMenuDropdown({
       ref={ref}
       role="menu"
       className={cn(
-        "absolute top-full z-[60] mt-0.5 min-w-[220px] max-h-[min(70vh,480px)] overflow-y-auto rounded-md border border-white/[0.1] bg-[#1e1e1e] py-1 shadow-xl thin-scroll",
+        "absolute top-full z-[60] mt-0.5 min-w-[220px] max-h-[min(70vh,480px)] overflow-y-auto rounded-md border border-app-border bg-app-surface py-1 shadow-xl thin-scroll",
         align === "right" ? "right-0" : "left-0",
       )}
     >
       {items.map((item, i) => {
         if (item === "divider") {
-          return <div key={`d-${i}`} className="my-1 border-t border-white/[0.08]" role="separator" />;
+          return <div key={`d-${i}`} className="my-1 border-t border-app-border" role="separator" />;
         }
         const shortcut = item.shortcut ? formatShortcutLabel(item.shortcut) : "";
         return (
@@ -59,8 +59,8 @@ export function EditorMenuDropdown({
             className={cn(
               "flex w-full items-center justify-between gap-4 px-3 py-1.5 text-left text-[11px]",
               item.disabled
-                ? "cursor-not-allowed text-[#5c5c5c]"
-                : "text-[#ececec] hover:bg-white/[0.08]",
+                ? "cursor-not-allowed text-app-subtle"
+                : "text-app-fg hover:bg-app-hover",
             )}
             onClick={() => {
               if (item.disabled) return;
@@ -70,7 +70,7 @@ export function EditorMenuDropdown({
           >
             <span>{item.label}</span>
             {shortcut ? (
-              <span className="shrink-0 font-mono text-[10px] tabular-nums text-[#6b6b6b]">{shortcut}</span>
+              <span className="shrink-0 font-mono text-[10px] tabular-nums text-app-subtle">{shortcut}</span>
             ) : null}
           </button>
         );

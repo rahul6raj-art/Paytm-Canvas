@@ -18,6 +18,39 @@ export function clampCanvasZoom(zoom: number): number {
   return Math.min(CANVAS_MAX_ZOOM, Math.max(CANVAS_MIN_ZOOM, zoom));
 }
 
+/** Pan/zoom so imported root frames are centered in the canvas viewport. */
+export function viewportForRootNodes(
+  nodes: Record<string, { x: number; y: number; width: number; height: number }>,
+  rootIds: string[],
+  viewportW = 1200,
+  viewportH = 800,
+): { zoom: number; pan: { x: number; y: number } } | null {
+  if (rootIds.length === 0) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const id of rootIds) {
+    const n = nodes[id];
+    if (!n) continue;
+    minX = Math.min(minX, n.x);
+    minY = Math.min(minY, n.y);
+    maxX = Math.max(maxX, n.x + n.width);
+    maxY = Math.max(maxY, n.y + n.height);
+  }
+  if (!Number.isFinite(minX)) return null;
+  const pad = 56;
+  const bw = Math.max(1, maxX - minX + pad * 2);
+  const bh = Math.max(1, maxY - minY + pad * 2);
+  const zoom = clampCanvasZoom(Math.min((viewportW * 0.92) / bw, (viewportH * 0.88) / bh, 1.25));
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  return {
+    zoom,
+    pan: { x: viewportW / 2 - cx * zoom, y: viewportH / 2 - cy * zoom },
+  };
+}
+
 /** Human-readable zoom percentage for UI labels. */
 export function formatZoomPercent(zoom: number): string {
   const pct = zoom * 100;

@@ -34,6 +34,47 @@ function fontWeightNum(w: string | undefined): number {
 }
 
 const INPUT_TAGS = new Set(["input", "textarea", "select"]);
+const INTRINSIC_TAGS = new Set([
+  "div",
+  "span",
+  "p",
+  "a",
+  "button",
+  "img",
+  "section",
+  "main",
+  "article",
+  "header",
+  "footer",
+  "nav",
+  "form",
+  "ul",
+  "ol",
+  "li",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "label",
+  "input",
+  "textarea",
+  "select",
+]);
+
+function codeFieldsFromDom(node: DomSnapshotNode): Pick<
+  ImportWebSceneNode,
+  "codeClassName" | "codeJsxTag" | "codeJsxIntrinsic"
+> {
+  const tag = node.tagName.toLowerCase();
+  const intrinsic = INTRINSIC_TAGS.has(tag);
+  return {
+    codeClassName: node.className,
+    codeJsxTag: intrinsic ? tag : undefined,
+    codeJsxIntrinsic: intrinsic ? true : undefined,
+  };
+}
 
 function mapTextAlign(v: string | undefined): "left" | "center" | "right" {
   if (v === "center") return "center";
@@ -120,7 +161,7 @@ function convertNode(
       ? `${node.componentHint}`
       : node.sectionHint
         ? node.sectionHint
-        : node.tagName,
+        : node.className?.split(/\s+/)[0] || node.tagName,
     x: localX,
     y: localY,
     width: w,
@@ -129,6 +170,7 @@ function convertNode(
     visible: true,
     locked: false,
     expanded: true,
+    ...codeFieldsFromDom(node),
     fill: fill ?? (type === "frame" ? "#ffffff" : type === "rectangle" ? fill : undefined),
     fillEnabled: type !== "text" ? Boolean(fill) || type === "frame" : false,
     fillOpacity: parseFloat(node.styles.opacity ?? "1") || 1,

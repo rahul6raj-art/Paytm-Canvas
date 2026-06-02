@@ -25,6 +25,7 @@ import {
 import { convertFigBytesToPaytmCraft, isFigmaFigFile } from "@/lib/figImport";
 import { AIGenerateModal } from "@/components/ai/AIGenerateModal";
 import { ImportHub } from "@/components/import/ImportHub";
+import { CodeRoundTripModal } from "@/components/code/CodeRoundTripModal";
 import { ImportFigmaModal } from "@/components/import/ImportFigmaModal";
 import { ImportWebModal } from "@/components/import/ImportWebModal";
 import {
@@ -51,6 +52,7 @@ import {
   ownerMemberFromCraftUser,
 } from "@/lib/dashboardApiAdapters";
 import { PaytmCraftApiModeBanner } from "@/components/PaytmCraftApiModeBanner";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 function matchesSearch(q: string, ...parts: string[]) {
   const s = q.trim().toLowerCase();
@@ -67,7 +69,7 @@ function roleBadgeClass(role: MockMemberRole): string {
     case "editor":
       return "border-sky-200 bg-sky-50 text-sky-900";
     default:
-      return "border-slate-200 bg-slate-100 text-slate-700";
+      return "border-app-border bg-app-inset text-app-fg";
   }
 }
 
@@ -99,15 +101,15 @@ function DashboardTeamView({ workspace }: { workspace: MockWorkspace }) {
 
   return (
     <section>
-      <h2 className="mb-1 text-[12px] font-semibold uppercase tracking-wide text-slate-500">Team</h2>
-      <p className="mb-4 text-[13px] text-slate-600">
-        Members and invites for <span className="font-semibold text-slate-900">{ws.name}</span>. Everything stays in this
+      <h2 className="mb-1 text-[12px] font-semibold uppercase tracking-wide text-app-muted">Team</h2>
+      <p className="mb-4 text-[13px] text-app-muted">
+        Members and invites for <span className="font-semibold text-app-fg">{ws.name}</span>. Everything stays in this
         browser — no API calls.
       </p>
 
-      <div className="mb-6 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="mb-6 overflow-hidden rounded-xl border border-app-border bg-app-card shadow-sm">
         <table className="w-full text-left text-[13px]">
-          <thead className="border-b border-slate-100 bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          <thead className="border-b border-app-border-subtle bg-app-raised text-[11px] font-semibold uppercase tracking-wide text-app-muted">
             <tr>
               <th className="px-4 py-2.5">Member</th>
               <th className="px-4 py-2.5">Email</th>
@@ -116,16 +118,16 @@ function DashboardTeamView({ workspace }: { workspace: MockWorkspace }) {
           </thead>
           <tbody>
             {ws.members.map((m) => (
-              <tr key={m.userId} className="border-b border-slate-100 last:border-0">
+              <tr key={m.userId} className="border-b border-app-border-subtle last:border-0">
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-2">
-                    <span className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-slate-100 text-[10px] font-bold text-slate-700">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full border border-app-border bg-app-inset text-[10px] font-bold text-app-fg">
                       {m.initials}
                     </span>
-                    <span className="font-medium text-slate-900">{m.name}</span>
+                    <span className="font-medium text-app-fg">{m.name}</span>
                   </div>
                 </td>
-                <td className="px-4 py-3 text-slate-600">{m.email}</td>
+                <td className="px-4 py-3 text-app-muted">{m.email}</td>
                 <td className="px-4 py-3">
                   <span className={cn("inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold", roleBadgeClass(m.role))}>
                     {roleLabel(m.role)}
@@ -137,15 +139,15 @@ function DashboardTeamView({ workspace }: { workspace: MockWorkspace }) {
         </table>
       </div>
 
-      <div className="mb-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h3 className="text-[12px] font-semibold text-slate-900">Invite by email</h3>
-        <p className="mt-1 text-[12px] text-slate-500">Creates a pending invite row stored in localStorage.</p>
+      <div className="mb-6 rounded-xl border border-app-border bg-app-card p-4 shadow-sm">
+        <h3 className="text-[12px] font-semibold text-app-fg">Invite by email</h3>
+        <p className="mt-1 text-[12px] text-app-muted">Creates a pending invite row stored in localStorage.</p>
         <div className="mt-3 flex flex-col gap-2 sm:flex-row">
           <input
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="teammate@paytm.com"
-            className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-[13px] text-slate-900 outline-none ring-slate-900/10 placeholder:text-slate-400 focus:border-slate-300 focus:ring-2"
+            className="h-9 min-w-0 flex-1 rounded-lg border border-app-border bg-app-card px-3 text-[13px] text-app-fg outline-none ring-slate-900/10 placeholder:text-app-subtle focus:border-slate-300 focus:ring-2"
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 const row = inviteMockMember(email);
@@ -165,23 +167,23 @@ function DashboardTeamView({ workspace }: { workspace: MockWorkspace }) {
                 setEmail("");
               } else window.alert("Enter a valid email.");
             }}
-            className="h-9 shrink-0 rounded-lg bg-slate-900 px-4 text-[13px] font-semibold text-white hover:bg-slate-800"
+            className="h-9 shrink-0 rounded-lg bg-app-fg px-4 text-[13px] font-semibold text-app-bg hover:bg-app-muted"
           >
             Send invite
           </button>
         </div>
       </div>
 
-      <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-4">
-        <h3 className="text-[12px] font-semibold text-slate-900">Pending invites</h3>
+      <div className="rounded-xl border border-dashed border-app-border bg-app-raised/50 p-4">
+        <h3 className="text-[12px] font-semibold text-app-fg">Pending invites</h3>
         {pending.length === 0 ? (
-          <p className="mt-2 text-[13px] text-slate-500">No pending invites for this workspace.</p>
+          <p className="mt-2 text-[13px] text-app-muted">No pending invites for this workspace.</p>
         ) : (
-          <ul className="mt-3 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
+          <ul className="mt-3 divide-y divide-slate-200 rounded-lg border border-app-border bg-app-card">
             {pending.map((p) => (
               <li key={p.id} className="flex items-center justify-between gap-2 px-3 py-2.5 text-[13px]">
-                <span className="font-medium text-slate-800">{p.email}</span>
-                <span className="shrink-0 text-[11px] text-slate-500">Pending · local only</span>
+                <span className="font-medium text-app-fg">{p.email}</span>
+                <span className="shrink-0 text-[11px] text-app-muted">Pending · local only</span>
               </li>
             ))}
           </ul>
@@ -472,17 +474,17 @@ export function DashboardShell() {
 
   if (isApi && apiLoading) {
     return (
-      <div className="flex min-h-dvh bg-[#f4f5f7] text-slate-900 antialiased [color-scheme:light]">
-        <aside className="hidden w-[240px] shrink-0 border-r border-slate-200 bg-white md:block" aria-hidden />
+      <div className="flex min-h-dvh bg-app-bg text-app-fg antialiased">
+        <aside className="hidden w-[240px] shrink-0 border-r border-app-border bg-app-card md:block" aria-hidden />
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="border-b border-slate-200 bg-white px-6 py-4">
+          <header className="border-b border-app-border bg-app-card px-6 py-4">
             <PaytmCraftApiModeBanner />
             <div className="mt-3 h-5 w-48 animate-pulse rounded bg-slate-200" />
-            <div className="mt-2 h-3 w-72 max-w-full animate-pulse rounded bg-slate-100" />
+            <div className="mt-2 h-3 w-72 max-w-full animate-pulse rounded bg-app-inset" />
           </header>
           <main className="flex-1 px-6 py-6">
             <div className="mx-auto max-w-6xl">
-              <p className="mb-4 text-[13px] font-medium text-slate-600">Loading workspaces and files…</p>
+              <p className="mb-4 text-[13px] font-medium text-app-muted">Loading workspaces and files…</p>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {Array.from({ length: 6 }, (_, i) => (
                   <FileCardSkeleton key={i} />
@@ -497,14 +499,14 @@ export function DashboardShell() {
 
   if (isApi && apiError) {
     return (
-      <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-[#f4f5f7] px-6 text-slate-900 antialiased [color-scheme:light]">
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-app-bg px-6 text-app-fg antialiased">
         <PaytmCraftApiModeBanner />
         <p className="text-[14px] font-semibold text-red-800">Could not load dashboard</p>
-        <p className="max-w-md text-center text-[13px] text-slate-600">{apiError}</p>
+        <p className="max-w-md text-center text-[13px] text-app-muted">{apiError}</p>
         <button
           type="button"
           onClick={() => setApiRefreshKey((k) => k + 1)}
-          className="rounded-lg bg-slate-900 px-4 py-2 text-[13px] font-semibold text-white hover:bg-slate-800"
+          className="rounded-lg bg-app-fg px-4 py-2 text-[13px] font-semibold text-app-bg hover:bg-app-muted"
         >
           Retry
         </button>
@@ -513,9 +515,10 @@ export function DashboardShell() {
   }
 
   return (
-    <div className="flex min-h-dvh bg-[#f4f5f7] text-slate-900 antialiased [color-scheme:light]">
+    <div className="flex min-h-dvh bg-app-bg text-app-fg antialiased">
       <AIGenerateModal />
       <ImportHub />
+      <CodeRoundTripModal />
       <ImportFigmaModal onImportFigFile={onImportFile} />
       <ImportWebModal />
       <DashboardSidebar
@@ -534,36 +537,37 @@ export function DashboardShell() {
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-6 py-3">
+        <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-app-border bg-app-card px-6 py-3">
           <div className="min-w-0 flex-1">
-            <h1 className="text-[15px] font-semibold tracking-tight text-slate-900">Paytm Craft</h1>
-            <p className="text-[12px] text-slate-500">
-              <span className="font-medium text-slate-700">{activeWorkspace.name}</span>
-              <span className="text-slate-400"> · </span>
+            <h1 className="text-[15px] font-semibold tracking-tight text-app-fg">Paytm Craft</h1>
+            <p className="text-[12px] text-app-muted">
+              <span className="font-medium text-app-fg">{activeWorkspace.name}</span>
+              <span className="text-app-subtle"> · </span>
               Design, prototype, and ship product UI.
             </p>
           </div>
           {isApi ? <PaytmCraftApiModeBanner /> : null}
           <div className="relative hidden max-w-md flex-1 basis-[200px] md:block">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" strokeWidth={2} />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-app-subtle" strokeWidth={2} />
             <input
               type="search"
               placeholder="Search files and templates…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-[13px] text-slate-900 outline-none ring-slate-900/10 placeholder:text-slate-400 focus:border-slate-300 focus:bg-white focus:ring-2"
+              className="h-9 w-full rounded-lg border border-app-border bg-app-raised pl-9 pr-3 text-[13px] text-app-fg outline-none placeholder:text-app-subtle focus:border-accent/40 focus:bg-app-card focus:ring-1 focus:ring-accent/30"
             />
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            <ThemeToggle size="sm" />
             <Link
               href="/demo-checklist"
               target="_blank"
               rel="noopener noreferrer"
-              className="hidden rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600 transition-colors hover:border-slate-300 hover:bg-white sm:inline"
+              className="hidden rounded-lg border border-app-border bg-app-raised px-2.5 py-1 text-[11px] font-medium text-app-muted transition-colors hover:border-slate-300 hover:bg-app-card sm:inline"
             >
               Demo checklist
             </Link>
-            <span className="hidden rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600 sm:inline">
+            <span className="hidden rounded-full border border-app-border bg-app-raised px-2.5 py-1 text-[11px] font-medium text-app-muted sm:inline">
               {activeWorkspace.slug}
             </span>
           </div>
@@ -575,7 +579,7 @@ export function DashboardShell() {
               <button
                 type="button"
                 onClick={() => void onNewDesign()}
-                className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-[13px] font-semibold text-white shadow-sm transition-colors hover:bg-slate-800"
+                className="inline-flex items-center gap-2 rounded-lg bg-app-fg px-4 py-2 text-[13px] font-semibold text-app-bg shadow-sm transition-colors hover:bg-app-muted"
               >
                 <Plus className="h-4 w-4" strokeWidth={2} />
                 Create new design
@@ -583,7 +587,7 @@ export function DashboardShell() {
               <button
                 type="button"
                 onClick={() => openAIModal("dashboard")}
-                className="inline-flex items-center gap-2 rounded-lg border border-violet-200 bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2 text-[13px] font-semibold text-white shadow-sm transition-opacity hover:opacity-95"
+                className="inline-flex items-center gap-2 rounded-lg border border-violet-200 bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2 text-[13px] font-semibold text-app-bg shadow-sm transition-opacity hover:opacity-95"
               >
                 <Sparkles className="h-4 w-4" strokeWidth={2} />
                 Generate with AI
@@ -599,7 +603,7 @@ export function DashboardShell() {
               <button
                 type="button"
                 onClick={() => importRef.current?.click()}
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-[13px] font-medium text-slate-800 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50"
+                className="inline-flex items-center gap-2 rounded-lg border border-app-border bg-app-card px-4 py-2 text-[13px] font-medium text-app-fg shadow-sm transition-colors hover:border-slate-300 hover:bg-app-raised"
               >
                 <Upload className="h-4 w-4" strokeWidth={2} />
                 Import file…
@@ -618,7 +622,7 @@ export function DashboardShell() {
               />
               <Link
                 href="/editor"
-                className="text-[12px] font-medium text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline"
+                className="text-[12px] font-medium text-app-muted underline-offset-2 hover:text-app-fg hover:underline"
               >
                 Open last editor session
               </Link>
@@ -626,7 +630,7 @@ export function DashboardShell() {
 
             {hasLocalDoc ? (
               <section>
-                <h2 className="mb-3 text-[12px] font-semibold uppercase tracking-wide text-slate-500">Recovered</h2>
+                <h2 className="mb-3 text-[12px] font-semibold uppercase tracking-wide text-app-muted">Recovered</h2>
                 <div className="max-w-sm rounded-xl border border-amber-200/80 bg-amber-50/80 p-4 shadow-sm">
                   <p className="text-[13px] font-medium text-amber-950">Recovered local document</p>
                   <p className="mt-1 text-[12px] leading-relaxed text-amber-900/80">
@@ -649,7 +653,7 @@ export function DashboardShell() {
 
             {nav !== "templates" && nav !== "trash" && nav !== "team" ? (
               <section>
-                <h2 className="mb-3 text-[12px] font-semibold uppercase tracking-wide text-slate-500">{sectionTitle}</h2>
+                <h2 className="mb-3 text-[12px] font-semibold uppercase tracking-wide text-app-muted">{sectionTitle}</h2>
                 {isApi ? (
                   nav === "home" ? (
                     <div className="flex flex-col gap-8">
@@ -659,9 +663,9 @@ export function DashboardShell() {
                         const files = apiFilesFilteredInWorkspace(ws.id);
                         return (
                           <div key={ws.id}>
-                            <h3 className="mb-2 text-[13px] font-semibold text-slate-800">{ws.name}</h3>
+                            <h3 className="mb-2 text-[13px] font-semibold text-app-fg">{ws.name}</h3>
                             {files.length === 0 ? (
-                              <p className="rounded-lg border border-dashed border-slate-200 bg-white px-4 py-6 text-[13px] text-slate-500">
+                              <p className="rounded-lg border border-dashed border-app-border bg-app-card px-4 py-6 text-[13px] text-app-muted">
                                 No files in this workspace match your search.
                               </p>
                             ) : (
@@ -687,7 +691,7 @@ export function DashboardShell() {
                       })}
                     </div>
                   ) : apiFilesForActiveNav.length === 0 ? (
-                    <p className="rounded-lg border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-[13px] text-slate-500">
+                    <p className="rounded-lg border border-dashed border-app-border bg-app-card px-4 py-8 text-center text-[13px] text-app-muted">
                       No files match your search in this workspace.
                     </p>
                   ) : (
@@ -716,9 +720,9 @@ export function DashboardShell() {
                       const files = filesBySectionForHome.get(ws.id) ?? [];
                       return (
                         <div key={ws.id}>
-                          <h3 className="mb-2 text-[13px] font-semibold text-slate-800">{ws.name}</h3>
+                          <h3 className="mb-2 text-[13px] font-semibold text-app-fg">{ws.name}</h3>
                           {files.length === 0 ? (
-                            <p className="rounded-lg border border-dashed border-slate-200 bg-white px-4 py-6 text-[13px] text-slate-500">
+                            <p className="rounded-lg border border-dashed border-app-border bg-app-card px-4 py-6 text-[13px] text-app-muted">
                               No files in this workspace match your search.
                             </p>
                           ) : (
@@ -747,7 +751,7 @@ export function DashboardShell() {
                     })}
                   </div>
                 ) : filesForNav.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-[13px] text-slate-500">
+                  <p className="rounded-lg border border-dashed border-app-border bg-app-card px-4 py-8 text-center text-[13px] text-app-muted">
                     No files match your search in this workspace.
                   </p>
                 ) : (
@@ -776,9 +780,9 @@ export function DashboardShell() {
 
             {(nav === "home" || nav === "templates") && (
               <section>
-                <h2 className="mb-3 text-[12px] font-semibold uppercase tracking-wide text-slate-500">Templates</h2>
+                <h2 className="mb-3 text-[12px] font-semibold uppercase tracking-wide text-app-muted">Templates</h2>
                 {templatesFiltered.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-[13px] text-slate-500">
+                  <p className="rounded-lg border border-dashed border-app-border bg-app-card px-4 py-8 text-center text-[13px] text-app-muted">
                     No templates match your search.
                   </p>
                 ) : (
@@ -802,10 +806,10 @@ export function DashboardShell() {
 
             {nav === "trash" ? (
               <section>
-                <h2 className="mb-3 text-[12px] font-semibold uppercase tracking-wide text-slate-500">Trash</h2>
-                <div className="rounded-xl border border-dashed border-slate-200 bg-white px-6 py-16 text-center shadow-sm">
-                  <p className="text-[14px] font-medium text-slate-800">Trash is empty</p>
-                  <p className="mx-auto mt-2 max-w-md text-[13px] leading-relaxed text-slate-500">
+                <h2 className="mb-3 text-[12px] font-semibold uppercase tracking-wide text-app-muted">Trash</h2>
+                <div className="rounded-xl border border-dashed border-app-border bg-app-card px-6 py-16 text-center shadow-sm">
+                  <p className="text-[14px] font-medium text-app-fg">Trash is empty</p>
+                  <p className="mx-auto mt-2 max-w-md text-[13px] leading-relaxed text-app-muted">
                     Deleted files will appear here. This demo does not persist trash — connect a backend to sync deleted
                     projects.
                   </p>

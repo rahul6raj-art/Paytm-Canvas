@@ -7,6 +7,7 @@ import type {
   ImportWebScreenshot,
 } from "@/lib/webImport/types";
 import { IMPORT_WEB_LIMITS } from "@/lib/webImport/types";
+import { validateReactPreviewUrl } from "@/lib/codeRoundTrip/reactPreviewUrlValidation";
 import { validateImportWebUrl } from "@/lib/webImport/urlValidation";
 import { filterDomSnapshotTree, countDomNodes, pruneDomTreeByLimit } from "@/lib/webImport/domFilter";
 import { normalizeDomSnapshot } from "@/lib/webImport/domNormalizer";
@@ -39,7 +40,10 @@ export async function runImportWebCapture(
 
   let targetUrl: string | null = null;
   if (body.url?.trim()) {
-    const v = validateImportWebUrl(body.url);
+    const v =
+      body.urlPolicy === "react-preview"
+        ? validateReactPreviewUrl(body.url)
+        : validateImportWebUrl(body.url);
     if (!v.ok) throw new Error(v.error);
     targetUrl = v.url;
   }

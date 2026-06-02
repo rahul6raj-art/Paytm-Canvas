@@ -55,7 +55,7 @@ export function CanvasDebugReadout() {
 
   return (
     <div
-      className="hidden min-w-0 flex-1 items-center justify-center gap-3 truncate font-mono text-[10px] text-[#6b6b6b] md:flex"
+      className="hidden min-w-0 flex-1 items-center justify-center gap-3 truncate font-mono text-[10px] text-app-subtle md:flex"
       title="Canvas debug (NEXT_PUBLIC_PAYTM_CRAFT_DEBUG_CANVAS=true)"
     >
       <span>zoom {fmt(zoom * 100, 0)}%</span>

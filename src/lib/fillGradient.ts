@@ -396,6 +396,19 @@ export function positionFromLocalPoint(g: FillGradient, x: number, y: number, wi
   return Math.min(100, Math.max(0, rel * 100));
 }
 
+/** Resolved gradient for editing (includes linked gradient styles). */
+export function resolveEditableFillGradient(
+  node: FillPaintNode & { fillTokenId?: string },
+  designTokens: Record<string, { type?: string; value?: unknown }>,
+): FillGradient | null {
+  if (effectiveFillType(node) !== "gradient") return null;
+  const tok = node.fillTokenId ? designTokens[node.fillTokenId] : undefined;
+  if (tok?.type === "gradient" && tok.value && typeof tok.value === "object") {
+    return normalizeFillGradient(tok.value as FillGradient, node.fill);
+  }
+  return normalizeFillGradient(node.fillGradient, node.fill);
+}
+
 export function cloneFillGradient(g: FillGradient): FillGradient {
   const n = normalizeFillGradient(g);
   return {

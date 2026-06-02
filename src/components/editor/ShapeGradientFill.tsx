@@ -1,6 +1,13 @@
 "use client";
 
 import { effectiveFillType, svgFillPaint } from "@/lib/fillGradient";
+import {
+  clampCornerRadii,
+  getNodeCornerRadii,
+  isUniformCornerRadii,
+  roundedRectPathD,
+  uniformCornerRadiusForRect,
+} from "@/lib/cornerRadius";
 import type { EditorNode } from "@/stores/useEditorStore";
 
 type ShapeKind = "rect" | "ellipse" | "path";
@@ -29,7 +36,10 @@ export function ShapeGradientFill({
     },
   });
 
-  const r = node.cornerRadius ?? 0;
+  const radii = clampCornerRadii(getNodeCornerRadii(node), node.width, node.height);
+  const uniform = isUniformCornerRadii(radii);
+  const r = uniformCornerRadiusForRect(node, node.width, node.height);
+  const rectPathD = uniform ? null : roundedRectPathD(node.width, node.height, radii);
   const closed = node.pathClosed ?? false;
 
   return (
@@ -50,6 +60,8 @@ export function ShapeGradientFill({
         />
       ) : shape === "path" && pathD ? (
         <path d={pathD} fill={closed ? fillRef : "none"} />
+      ) : rectPathD ? (
+        <path d={rectPathD} fill={fillRef} />
       ) : (
         <rect x={0} y={0} width={node.width} height={node.height} rx={r} fill={fillRef} />
       )}

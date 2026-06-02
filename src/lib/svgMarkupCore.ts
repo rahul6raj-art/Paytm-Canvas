@@ -2,9 +2,16 @@ import type { EditorAsset } from "@/lib/documentPersistence";
 import type { DesignToken } from "@/lib/designTokens";
 import { legacyEffectShadowAppend, resolveEffectBoxShadow, resolveNodeWithDesignTokens } from "@/lib/designTokens";
 import { fillPaintCss, svgFillPaint } from "@/lib/fillGradient";
-import { pathToSvgD } from "@/lib/pathGeometry";
+import { pathOutlineD } from "@/lib/shapes/shapeToPath";
 import type { NodeEffect } from "@/lib/nodeEffects";
 import { buildNodeEffectRenderStyle, effectColorToRgba } from "@/lib/nodeEffects";
+import {
+  getNodeCornerRadii,
+  isUniformCornerRadii,
+  roundedRectPathD,
+  uniformCornerRadiusForRect,
+} from "@/lib/cornerRadius";
+import { strokeAttrsForSvgMarkup } from "@/lib/stroke";
 import type { EditorNode, ImageFitMode } from "@/stores/useEditorStore";
 
 export function escXml(s: string): string {
@@ -56,14 +63,22 @@ export function svgRectLike(
   const fillAttr = fill.startsWith("url(") ? fill : escXml(fill);
   const sw = opts?.strokeWidthOverride ?? n.strokeWidth ?? 0;
   const sc = opts?.strokeOverride ?? n.strokeColor ?? "none";
-  const r = n.cornerRadius ?? 0;
   const filter = opts?.filterRef ? ` filter="url(#${opts.filterRef})"` : "";
+  const strokeExtra = sw > 0 ? ` ${strokeAttrsForSvgMarkup(n)}` : "";
   if (n.type === "ellipse") {
-    return `<ellipse cx="${w / 2}" cy="${h / 2}" rx="${w / 2}" ry="${h / 2}" fill="${fillAttr}" stroke="${sw > 0 ? escXml(sc) : "none"}" stroke-width="${sw}"${filter} />`;
+    return `<ellipse cx="${w / 2}" cy="${h / 2}" rx="${w / 2}" ry="${h / 2}" fill="${fillAttr}" stroke="${sw > 0 ? escXml(sc) : "none"}" stroke-width="${sw}"${strokeExtra}${filter} />`;
   }
   if (n.type === "rectangle" || n.type === "frame" || n.type === "group") {
-    const rad = n.type === "frame" || n.type === "rectangle" ? r : 0;
-    return `<rect x="0" y="0" width="${w}" height="${h}" rx="${rad}" fill="${fillAttr}" stroke="${sw > 0 ? escXml(sc) : "none"}" stroke-width="${sw}"${filter} />`;
+    if (n.type === "frame" || n.type === "rectangle") {
+      const radii = getNodeCornerRadii(n);
+      if (!isUniformCornerRadii(radii)) {
+        const d = roundedRectPathD(w, h, radii);
+        return `<path d="${d}" fill="${fillAttr}" stroke="${sw > 0 ? escXml(sc) : "none"}" stroke-width="${sw}"${strokeExtra}${filter} />`;
+      }
+      const rad = uniformCornerRadiusForRect(n, w, h);
+      return `<rect x="0" y="0" width="${w}" height="${h}" rx="${rad}" fill="${fillAttr}" stroke="${sw > 0 ? escXml(sc) : "none"}" stroke-width="${sw}"${strokeExtra}${filter} />`;
+    }
+    return `<rect x="0" y="0" width="${w}" height="${h}" fill="${fillAttr}" stroke="${sw > 0 ? escXml(sc) : "none"}" stroke-width="${sw}"${strokeExtra}${filter} />`;
   }
   return "";
 }
@@ -72,7 +87,8 @@ export function svgLine(n: EditorNode): string {
   const lw = n.strokeWidth ?? 2;
   const lc = n.strokeColor ?? "#0f172a";
   const y = n.height / 2;
-  return `<line x1="0" y1="${y}" x2="${n.width}" y2="${y}" stroke="${escXml(lc)}" stroke-width="${lw}" />`;
+  const strokeExtra = lw > 0 ? ` ${strokeAttrsForSvgMarkup(n)}` : "";
+  return `<line x1="0" y1="${y}" x2="${n.width}" y2="${y}" stroke="${escXml(lc)}" stroke-width="${lw}"${strokeExtra} />`;
 }
 
 export function svgTextMarkup(n: EditorNode): string {
@@ -183,9 +199,24 @@ export function registerClipRect(
   clipId: string,
   w: number,
   h: number,
-  rx = 0,
+  node?: Pick<EditorNode, "cornerRadius" | "cornerRadii">,
 ): void {
-  defs.push(`<clipPath id="${clipId}"><rect x="0" y="0" width="${w}" height="${h}" rx="${rx}" /></clipPath>`);
+  const width = Math.max(1, w);
+  const height = Math.max(1, h);
+  if (node) {
+    const radii = getNodeCornerRadii(node);
+    if (!isUniformCornerRadii(radii)) {
+      const d = roundedRectPathD(width, height, radii);
+      defs.push(`<clipPath id="${clipId}"><path d="${d}" /></clipPath>`);
+      return;
+    }
+    const rx = uniformCornerRadiusForRect(node, width, height);
+    defs.push(
+      `<clipPath id="${clipId}"><rect x="0" y="0" width="${width}" height="${height}" rx="${rx}" /></clipPath>`,
+    );
+    return;
+  }
+  defs.push(`<clipPath id="${clipId}"><rect x="0" y="0" width="${width}" height="${height}" /></clipPath>`);
 }
 
 export function registerRootArtboardShadow(defs: string[], nodeId: string): string {
@@ -231,7 +262,7 @@ export function svgPathMarkup(
     registerGradient?: (id: string, markup: string) => void;
   },
 ): string {
-  const d = resolved.flattenedPathData ?? pathToSvgD(resolved.pathPoints ?? [], resolved.pathClosed ?? false);
+  const d = resolved.flattenedPathData ?? pathOutlineD(resolved);
   const w = Math.max(1, resolved.width);
   const h = Math.max(1, resolved.height);
   let f = "none";
@@ -251,5 +282,6 @@ export function svgPathMarkup(
   const sw = resolved.strokeWidth ?? 2;
   const fillAttr = f === "transparent" || f === "none" ? "none" : f.startsWith("url(") ? f : escXml(f);
   const filter = opts?.filterRef ? ` filter="url(#${opts.filterRef})"` : "";
-  return `<path d="${escXml(d)}" fill="${fillAttr}" stroke="${sc}" stroke-width="${sw}"${filter} />`;
+  const strokeExtra = sw > 0 ? ` ${strokeAttrsForSvgMarkup(resolved)}` : "";
+  return `<path d="${escXml(d)}" fill="${fillAttr}" stroke="${sc}" stroke-width="${sw}"${strokeExtra}${filter} />`;
 }

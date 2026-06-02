@@ -10,9 +10,14 @@ export function isCanvasChromeTarget(target: EventTarget | null): boolean {
   if (!el?.closest) return false;
   return Boolean(
     el.closest("[data-grid-toggle]") ||
+      el.closest("[data-rulers-toggle]") ||
+      el.closest("[data-ruler-zone]") ||
+      el.closest("[data-canvas-rulers]") ||
       el.closest("[data-comment-pin]") ||
       el.closest("[data-prototype-handle]") ||
       el.closest("[data-resize-handle]") ||
+      el.closest("[data-rotate-handle]") ||
+      el.closest("[data-rotate-zone]") ||
       el.closest('[role="menu"]') ||
       el.closest("[data-text-editor]") ||
       el.closest("[data-svg-hit]"),
@@ -45,6 +50,7 @@ export function isCanvasBgCreationTool(
     tool === "polygon" ||
     tool === "star" ||
     tool === "triangle" ||
+    tool === "pencil" ||
     tool === "text"
   ) {
     return true;
@@ -80,6 +86,7 @@ export function canCanvasObjectInteract(opts: {
   const st = useEditorStore.getState();
   if (st.editingTextId) return false;
   if (st.penDrawingNodeId) return false;
+  if (st.pencilDrawingNodeId) return false;
   if (st.prototypeWireDrag) return false;
   if (st.isPlacingComment) return false;
   if (opts.spaceDown || opts.canvasPanning) return false;
@@ -93,6 +100,7 @@ export function canCanvasObjectDrag(): boolean {
   if (st.tool !== "move" && st.tool !== "frame") return false;
   if (st.editingTextId) return false;
   if (st.penDrawingNodeId) return false;
+  if (st.pencilDrawingNodeId) return false;
   if (st.prototypeWireDrag) return false;
   if (st.isPlacingComment) return false;
   return true;
@@ -110,6 +118,7 @@ export function isCanvasSelectTool(): boolean {
     tool === "polygon" ||
     tool === "star" ||
     tool === "triangle" ||
+    tool === "pencil" ||
     tool === "text" ||
     tool === "pen"
   );

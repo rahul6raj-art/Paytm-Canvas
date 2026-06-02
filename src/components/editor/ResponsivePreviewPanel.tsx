@@ -48,10 +48,10 @@ export function ResponsivePreviewPanel() {
   const frameName = frame.name ?? "Frame";
 
   return (
-    <div className="shrink-0 border-t border-black/30 bg-[#2a2a2a] p-2 shadow-[0_-4px_12px_rgba(0,0,0,0.25)]">
+    <div className="shrink-0 border-t border-app-border bg-app-panel p-2 shadow-[0_-4px_12px_rgba(0,0,0,0.25)]">
       <div className="mb-1.5 flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-[#9a9a9a]">Responsive preview</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-app-muted">Responsive preview</p>
           <p className="truncate text-[12px] font-medium text-white" title={frameName}>
             {frameName}
           </p>
@@ -67,7 +67,7 @@ export function ResponsivePreviewPanel() {
 
       <div className="mb-2 grid grid-cols-2 gap-2">
         <label className="block">
-          <span className="mb-0.5 block text-[10px] font-medium text-[#8c8c8c]">Width</span>
+          <span className="mb-0.5 block text-[10px] font-medium text-app-subtle">Width</span>
           <input
             type="range"
             min={RESIZE_MIN_DIMENSION}
@@ -76,10 +76,10 @@ export function ResponsivePreviewPanel() {
             onChange={(e) => onWidthInput(Number(e.target.value))}
             className="w-full accent-sky-500"
           />
-          <span className="mt-0.5 block text-right font-mono text-[10px] text-[#c4c4c4]">{Math.round(dw)}</span>
+          <span className="mt-0.5 block text-right font-mono text-[10px] text-app-muted">{Math.round(dw)}</span>
         </label>
         <label className="block">
-          <span className="mb-0.5 block text-[10px] font-medium text-[#8c8c8c]">Height</span>
+          <span className="mb-0.5 block text-[10px] font-medium text-app-subtle">Height</span>
           <input
             type="range"
             min={RESIZE_MIN_DIMENSION}
@@ -88,12 +88,12 @@ export function ResponsivePreviewPanel() {
             onChange={(e) => onHeightInput(Number(e.target.value))}
             className="w-full accent-sky-500"
           />
-          <span className="mt-0.5 block text-right font-mono text-[10px] text-[#c4c4c4]">{Math.round(dh)}</span>
+          <span className="mt-0.5 block text-right font-mono text-[10px] text-app-muted">{Math.round(dh)}</span>
         </label>
       </div>
 
       <div className="mb-2">
-        <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-[#6b6b6b]">Presets</p>
+        <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-app-subtle">Presets</p>
         <div className="flex flex-wrap gap-1">
           {RESPONSIVE_DEVICE_PRESETS.map((p) => (
             <button
@@ -102,7 +102,7 @@ export function ResponsivePreviewPanel() {
               onClick={() => updateResponsivePreviewBounds(p.width, p.height)}
               className={cn(
                 "rounded border px-2 py-1 text-[10px] font-medium transition-colors",
-                "border-white/[0.1] bg-[#333] text-[#e6e6e6] hover:border-sky-500/40 hover:bg-sky-500/10",
+                "border-app-border bg-[#333] text-app-fg hover:border-sky-500/40 hover:bg-sky-500/10",
               )}
             >
               {p.label}
@@ -115,14 +115,14 @@ export function ResponsivePreviewPanel() {
         <button
           type="button"
           onClick={() => resetResponsivePreview()}
-          className="rounded border border-white/[0.12] bg-white/[0.06] px-2 py-1.5 text-[11px] font-medium text-[#ececec] hover:bg-white/[0.1]"
+          className="rounded border border-app-border bg-app-hover px-2 py-1.5 text-[11px] font-medium text-app-fg hover:bg-white/[0.1]"
         >
           Reset
         </button>
         <button
           type="button"
           onClick={() => cancelResponsivePreview()}
-          className="rounded border border-white/[0.12] px-2 py-1.5 text-[11px] font-medium text-[#c4c4c4] hover:bg-white/[0.05]"
+          className="rounded border border-app-border px-2 py-1.5 text-[11px] font-medium text-app-muted hover:bg-white/[0.05]"
         >
           Cancel
         </button>

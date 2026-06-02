@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback } from "react";
-import { pathToSvgD } from "@/lib/pathGeometry";
+import { pathOutlineD } from "@/lib/shapes/shapeToPath";
 import { screenPxToWorld } from "@/lib/canvasVisual";
 import { beginCanvasNodeDrag, type ClientToWorldFn } from "@/lib/canvasNodeDrag";
+import { prepareAltDragDuplicate } from "@/lib/canvasAltDrag";
 import {
   canCanvasObjectDrag,
   canCanvasObjectInteract,
@@ -18,6 +19,12 @@ import {
 } from "@/lib/transformMath";
 import { useCanvasToWorld } from "@/components/editor/CanvasToWorldContext";
 import { useCanvasInteraction } from "@/components/editor/CanvasInteractionContext";
+import { maskGroupChildHitOrder } from "@/lib/booleanGeometry";
+import {
+  drillTargetForDoubleClick,
+  selectionTargetForClick,
+  shouldCollapseContainerHits,
+} from "@/lib/containerSelection";
 import { pickDeepestNodeAtWorldPoint } from "@/lib/tree";
 import type { SceneRendererProps } from "./RendererTypes";
 
@@ -95,8 +102,7 @@ function HitShape({
   }
 
   if (node.type === "path") {
-    const pts = node.pathPoints ?? [];
-    const d = pathToSvgD(pts, node.pathClosed ?? false);
+    const d = pathOutlineD(node);
     const hitW = Math.max(
       screenPxToWorld(LINE_HIT_SCREEN_PX, zoom),
       (node.strokeWidth ?? 2) + screenPxToWorld(4, zoom),
@@ -149,6 +155,31 @@ function HitSubtree({
   const node = nodes[nodeId];
   if (!node?.visible) return null;
   const kids = childOrder[nodeId] ?? [];
+  const objectEditModeNodeId = useEditorStore((s) => s.objectEditModeNodeId);
+  const collapseChildren = shouldCollapseContainerHits(
+    nodeId,
+    nodes,
+    childOrder,
+    objectEditModeNodeId,
+  );
+
+  if (collapseChildren) {
+    return (
+      <g data-hit-subtree={nodeId}>
+        <HitShape
+          node={node}
+          zoom={zoom}
+          onPointerDown={onPointerDown}
+          onDoubleClick={onDoubleClick}
+          onContextMenu={onContextMenu}
+          onEnter={onEnter}
+          onLeave={onLeave}
+        />
+      </g>
+    );
+  }
+
+  const hitKids = maskGroupChildHitOrder(node, kids);
 
   return (
     <g data-hit-subtree={nodeId}>
@@ -161,7 +192,7 @@ function HitSubtree({
         onEnter={onEnter}
         onLeave={onLeave}
       />
-      {kids.map((cid) => {
+      {hitKids.map((cid) => {
         const c = nodes[cid];
         if (!c?.visible) return null;
         return (
@@ -233,9 +264,28 @@ export function SvgHitLayer({
       if (!node?.visible || node.locked) return;
       if (st.editorMode === "inspect") return;
 
+      if (st.pathEditModeNodeId && st.pathEditModeNodeId !== nodeId) {
+        st.setPathEditMode(null);
+      }
+
+      const w = clientToWorld(e.clientX, e.clientY);
+      const drill = drillTargetForDoubleClick(
+        nodeId,
+        w.x,
+        w.y,
+        st.nodes,
+        st.childOrder,
+        st.objectEditModeNodeId,
+        (x, y) => pickDeepestNodeAtWorldPoint(x, y, st.nodes, st.childOrder),
+      );
+      if (drill) {
+        st.enterObjectEditMode(drill.containerId);
+        st.select(drill.selectId);
+        return;
+      }
+
       let editTextId: string | null = node.type === "text" ? nodeId : null;
       if (!editTextId) {
-        const w = clientToWorld(e.clientX, e.clientY);
         editTextId = pickDeepestNodeAtWorldPoint(w.x, w.y, st.nodes, st.childOrder, { types: ["text"] });
       }
       if (editTextId) {
@@ -268,43 +318,51 @@ export function SvgHitLayer({
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent, nodeId: string) => {
-      const node = useEditorStore.getState().nodes[nodeId];
+      const st = useEditorStore.getState();
+      const node = st.nodes[nodeId];
       if (!node?.visible) return;
 
       if (!canCanvasObjectInteract({ spaceDown, canvasPanning })) return;
 
-      const st = useEditorStore.getState();
+      const targetId = selectionTargetForClick(
+        nodeId,
+        st.nodes,
+        st.childOrder,
+        st.objectEditModeNodeId,
+      );
       const { select, editorMode, tool } = st;
 
       if (editorMode === "inspect") {
         e.stopPropagation();
-        if (tool === "comment" || tool === "pen" || e.button === 1) return;
-        select(nodeId, e.shiftKey);
+        if (tool === "comment" || tool === "pen" || tool === "pencil" || e.button === 1) return;
+        select(targetId, e.shiftKey);
         return;
       }
 
       if (node.locked) {
         e.stopPropagation();
-        if (isCanvasSelectTool()) select(nodeId, e.shiftKey);
+        if (isCanvasSelectTool()) select(targetId, e.shiftKey);
         return;
       }
 
       e.stopPropagation();
 
-      if (tool === "comment" || tool === "pen" || e.button === 1) return;
+      if (tool === "comment" || tool === "pen" || tool === "pencil" || e.button === 1) return;
 
       if (tool !== "move" && tool !== "frame") {
-        select(nodeId, e.shiftKey);
+        select(targetId, e.shiftKey);
         return;
       }
 
-      select(nodeId, e.shiftKey);
+      select(targetId, e.shiftKey);
 
       if (e.button !== 0) return;
       if (!canCanvasObjectDrag()) return;
 
+      if (e.altKey && !prepareAltDragDuplicate(targetId)) return;
+
       beginCanvasNodeDrag({
-        nodeId,
+        nodeId: targetId,
         pointerId: e.pointerId,
         clientX: e.clientX,
         clientY: e.clientY,

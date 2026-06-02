@@ -29,10 +29,10 @@ import { isAncestorOf } from "@/lib/editorGraph";
 import { BOOLEAN_OPERATION_LABELS, isMaskGroup } from "@/lib/booleanGeometry";
 
 function KindIcon({ node }: { node: EditorNode }) {
-  const c = "h-3.5 w-3.5 shrink-0 text-[#6b6b6b]";
+  const c = "h-3.5 w-3.5 shrink-0 text-app-subtle";
   if (node.isBooleanGroup) return <Combine className={c} strokeWidth={1.75} />;
   if (isMaskGroup(node)) return <Layers2 className={c} strokeWidth={1.75} />;
-  if (node.isMask) return <Layers2 className={c} strokeWidth={1.75} />;
+  if (node.isMask) return <Circle className={c} strokeWidth={1.75} strokeDasharray="3 2" />;
   if (node.type === "frame") return <Frame className={c} strokeWidth={1.75} />;
   if (node.type === "group") return <Group className={c} strokeWidth={1.75} />;
   if (node.type === "text") return <Type className={c} strokeWidth={1.75} />;
@@ -130,6 +130,9 @@ function LayerRow({
   const childOrder = useEditorStore((s) => s.childOrder);
   const nodes = useEditorStore((s) => s.nodes);
   const instRoot = findInstanceRoot(nodes, node.id);
+  const parentNode = nodes[parentId];
+  const inMaskGroup = Boolean(parentNode && isMaskGroup(parentNode));
+  const maskGroupMaskId = inMaskGroup ? parentNode!.maskId : undefined;
   const openContextMenu = useEditorStore((s) => s.openContextMenu);
   const layerRenameId = useEditorStore((s) => s.layerRenameId);
   const setLayerRenameId = useEditorStore((s) => s.setLayerRenameId);
@@ -223,16 +226,23 @@ function LayerRow({
         className={cn(
           "group flex h-7 items-center gap-0.5 rounded pr-1 text-ui-sm transition-colors",
           active
-            ? "bg-[rgba(24,160,251,0.14)] text-[#f0f0f0]"
-            : "text-[#d4d4d4] hover:bg-white/[0.04]",
+            ? "bg-[rgba(24,160,251,0.14)] text-app-fg"
+            : "text-app-fg hover:bg-app-hover",
           nestHighlight && "bg-[rgba(24,160,251,0.1)]",
         )}
         style={{ paddingLeft: 6 + depth * 14 }}
       >
+        {inMaskGroup && node.id !== maskGroupMaskId ? (
+          <span
+            className="w-3 shrink-0 border-l border-b border-purple-400/50"
+            style={{ marginLeft: 2, height: 10, marginBottom: 4 }}
+            aria-hidden
+          />
+        ) : null}
         {hasKids ? (
           <button
             type="button"
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[#6b6b6b] transition-colors hover:bg-white/[0.06] hover:text-white"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-subtle transition-colors hover:bg-app-hover hover:text-app-fg"
             onClick={(e) => {
               e.stopPropagation();
               toggleExpanded(node.id);
@@ -279,7 +289,7 @@ function LayerRow({
           ) : null}
           {isRenaming ? (
             <input
-              className="min-w-0 flex-1 rounded border border-accent/50 bg-[#1f1f1f] px-1 py-0 text-[12px] font-medium text-white outline-none"
+              className="min-w-0 flex-1 rounded border border-accent/50 bg-app-field px-1 py-0 text-[12px] font-medium text-app-field-fg outline-none"
               value={draftName}
               autoFocus
               onChange={(e) => setDraftName(e.target.value)}
@@ -312,7 +322,7 @@ function LayerRow({
                   ? node.type === "frame"
                     ? "text-[#18a0fb]"
                     : "text-[#f0f0f0]"
-                  : "text-[#d4d4d4]",
+                  : "text-app-fg",
               )}
               onDoubleClick={(e) => {
                 e.stopPropagation();
@@ -322,14 +332,21 @@ function LayerRow({
                 }
               }}
             >
-              {node.name}
+              {node.isBooleanGroup && node.booleanOperation
+                ? BOOLEAN_OPERATION_LABELS[node.booleanOperation]
+                : node.name}
+              {node.isMask ? (
+                <span className="ml-1 shrink-0 text-[9px] font-normal uppercase text-purple-300/90">
+                  Mask
+                </span>
+              ) : null}
             </span>
           )}
         </button>
         <button
           type="button"
           className={cn(
-            "flex h-6 w-6 shrink-0 items-center justify-center rounded text-[#6b6b6b] transition-opacity hover:bg-white/[0.06] hover:text-white",
+            "flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-subtle transition-opacity hover:bg-app-hover hover:text-app-fg",
             active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
           )}
           onClick={(e) => {
@@ -343,7 +360,7 @@ function LayerRow({
         <button
           type="button"
           className={cn(
-            "flex h-6 w-6 shrink-0 items-center justify-center rounded text-[#6b6b6b] transition-opacity hover:bg-white/[0.06] hover:text-white",
+            "flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-subtle transition-opacity hover:bg-app-hover hover:text-app-fg",
             active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
           )}
           onClick={(e) => {
@@ -480,8 +497,8 @@ export function LayersPanel() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex h-7 shrink-0 items-center gap-1.5 border-b border-black/30 px-2 text-[11px] font-semibold uppercase tracking-wide text-[#7a7a7a]">
-        <Layers className="h-3.5 w-3.5 text-[#6b6b6b]" strokeWidth={2} />
+      <div className="flex h-7 shrink-0 items-center gap-1.5 border-b border-app-border px-2 text-[11px] font-semibold uppercase tracking-wide text-app-subtle">
+        <Layers className="h-3.5 w-3.5 text-app-subtle" strokeWidth={2} />
         Layers
       </div>
       <div
@@ -505,11 +522,11 @@ export function LayersPanel() {
           onDragStartRow={onDragStartRow}
         />
         {(childOrder[ROOT] ?? []).length === 0 ? (
-          <div className="mx-2 mt-4 rounded-lg border border-dashed border-white/[0.08] bg-white/[0.02] px-3 py-6 text-center">
+          <div className="mx-2 mt-4 rounded-lg border border-dashed border-app-border bg-white/[0.02] px-3 py-6 text-center">
             <Layers className="mx-auto mb-2 h-8 w-8 text-[#4a4a4a]" strokeWidth={1.25} />
-            <p className="text-[12px] font-medium text-[#9a9a9a]">No layers yet</p>
-            <p className="mt-1 text-[11px] leading-relaxed text-[#6b6b6b]">
-              Press <span className="font-medium text-[#8c8c8c]">F</span> for a frame or use the toolbar to add shapes and text.
+            <p className="text-[12px] font-medium text-app-muted">No layers yet</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-app-subtle">
+              Press <span className="font-medium text-app-subtle">F</span> for a frame or use the toolbar to add shapes and text.
             </p>
           </div>
         ) : null}

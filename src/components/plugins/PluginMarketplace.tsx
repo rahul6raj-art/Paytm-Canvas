@@ -85,38 +85,38 @@ export function PluginMarketplace() {
       onMouseDown={onBackdrop}
     >
       <div
-        className="relative my-4 flex max-h-[min(calc(100vh-2rem),720px)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-white/[0.1] bg-gradient-to-b from-[#1c1c20] to-[#121214] shadow-2xl"
+        className="relative my-4 flex max-h-[min(calc(100vh-2rem),720px)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-app-border bg-gradient-to-b from-[#1c1c20] to-[#121214] shadow-2xl"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="h-0.5 w-full bg-gradient-to-r from-emerald-400 via-sky-500 to-violet-500" />
-        <header className="flex items-start justify-between gap-3 border-b border-white/[0.06] px-5 py-4">
+        <header className="flex items-start justify-between gap-3 border-b border-app-border-subtle px-5 py-4">
           <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.06] text-emerald-300">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-app-hover text-emerald-300">
               <Plug2 className="h-5 w-5" strokeWidth={1.75} />
             </span>
             <div>
               <h2 className="text-[16px] font-semibold text-white">Plugins</h2>
-              <p className="text-[12px] text-[#9a9a9a]">Mock marketplace — no network, no third-party scripts.</p>
+              <p className="text-[12px] text-app-muted">Mock marketplace — no network, no third-party scripts.</p>
             </div>
           </div>
           <button
             type="button"
             onClick={close}
-            className="rounded-lg p-1.5 text-[#9a9a9a] transition-colors hover:bg-white/[0.06] hover:text-white"
+            className="rounded-lg p-1.5 text-app-muted transition-colors hover:bg-app-hover hover:text-white"
             aria-label="Close"
           >
             <X className="h-5 w-5" strokeWidth={1.75} />
           </button>
         </header>
 
-        <div className="border-b border-white/[0.06] px-5 py-3">
+        <div className="border-b border-app-border-subtle px-5 py-3">
           <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#6b6b6b]" />
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-app-subtle" />
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search plugins…"
-              className="h-9 border-white/[0.08] bg-black/35 pl-8 text-[13px]"
+              className="h-9 border-app-border bg-black/35 pl-8 text-[13px]"
             />
           </div>
           <div className="mt-2.5 flex flex-wrap gap-1">
@@ -129,7 +129,7 @@ export function PluginMarketplace() {
                   "rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors",
                   cat === c
                     ? "border-sky-500/45 bg-sky-500/15 text-sky-100"
-                    : "border-white/[0.08] bg-white/[0.04] text-[#b8b8b8] hover:border-white/[0.14]",
+                    : "border-app-border bg-app-hover text-app-muted hover:border-white/[0.14]",
                 )}
               >
                 {c === "all" ? "All" : c}
@@ -140,7 +140,7 @@ export function PluginMarketplace() {
 
         <div className="max-h-[min(70vh,560px)] overflow-y-auto px-5 py-4">
           {filtered.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-white/[0.1] bg-black/20 py-10 text-center text-[13px] text-[#8c8c8c]">
+            <p className="rounded-xl border border-dashed border-app-border bg-black/20 py-10 text-center text-[13px] text-app-subtle">
               No plugins match your filters.
             </p>
           ) : (
@@ -148,16 +148,16 @@ export function PluginMarketplace() {
               {filtered.map((p) => (
                 <article
                   key={p.id}
-                  className="flex flex-col rounded-xl border border-white/[0.08] bg-black/25 p-3.5 shadow-inner"
+                  className="flex flex-col rounded-xl border border-app-border bg-black/25 p-3.5 shadow-inner"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-2">
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/[0.06] text-[18px] leading-none">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-app-hover text-[18px] leading-none">
                         {p.icon}
                       </span>
                       <div className="min-w-0">
                         <h3 className="truncate text-[13px] font-semibold text-white">{p.name}</h3>
-                        <p className="text-[10px] font-medium uppercase tracking-wide text-[#6b6b6b]">{p.category}</p>
+                        <p className="text-[10px] font-medium uppercase tracking-wide text-app-subtle">{p.category}</p>
                       </div>
                     </div>
                     {p.installed ? (
@@ -167,7 +167,7 @@ export function PluginMarketplace() {
                     ) : null}
                   </div>
                   <p className="mt-2 line-clamp-3 text-[12px] leading-snug text-[#a3a3a3]">{p.description}</p>
-                  <p className="mt-1 text-[11px] text-[#6b6b6b]">by {p.author}</p>
+                  <p className="mt-1 text-[11px] text-app-subtle">by {p.author}</p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {p.installed ? (
                       <>
@@ -181,7 +181,7 @@ export function PluginMarketplace() {
                         <button
                           type="button"
                           onClick={() => uninstall(p.id)}
-                          className="rounded-lg border border-white/[0.1] bg-white/[0.04] px-3 py-1.5 text-[12px] font-medium text-[#d4d4d4] hover:bg-white/[0.08]"
+                          className="rounded-lg border border-app-border bg-app-hover px-3 py-1.5 text-[12px] font-medium text-app-fg hover:bg-app-hover"
                         >
                           Uninstall
                         </button>

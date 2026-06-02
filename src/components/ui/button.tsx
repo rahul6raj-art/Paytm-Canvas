@@ -15,9 +15,9 @@ export function Button({
       type="button"
       className={cn(
         "inline-flex items-center justify-center gap-1 rounded-md text-ui font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:pointer-events-none disabled:opacity-40",
-        variant === "ghost" && "text-[#c4c4c4] hover:bg-white/10 hover:text-white",
+        variant === "ghost" && "text-app-muted hover:bg-app-hover hover:text-app-fg",
         variant === "toolbar" &&
-          "border border-transparent text-[#c4c4c4] hover:border-white/10 hover:bg-white/5 hover:text-white data-[active=true]:border-white/15 data-[active=true]:bg-white/10 data-[active=true]:text-white",
+          "border border-transparent text-app-muted hover:border-app-border hover:bg-app-hover hover:text-app-fg data-[active=true]:border-app-border data-[active=true]:bg-app-hover data-[active=true]:text-app-fg",
         variant === "primary" && "bg-accent text-white hover:bg-[#0b87e0]",
         size === "sm" && "h-7 px-2",
         size === "icon" && "h-7 w-7",

@@ -1,8 +1,5 @@
 /**
- * Figma-style “Add auto layout” (⇧A): wrap any selection in an auto-layout frame,
- * or enable auto layout on an existing frame/group.
- *
- * @see https://help.figma.com/hc/en-us/articles/360040451373-Guide-to-auto-layout
+ * Figma-style “Add auto layout” (⇧A): wrap selection or enable on frame/group.
  */
 
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
@@ -10,6 +7,11 @@ import { topLevelSelectedIds } from "@/lib/editorGraph";
 import { worldRect } from "@/lib/tree";
 import {
   applyDeepAutoLayout,
+  defaultHugSizingForContainer,
+  inferAutoLayoutGap,
+  inferAutoLayoutFlow,
+  inferAutoLayoutPadding,
+  sortIdsForAutoLayoutFlow,
   type LayoutFields,
   type LayoutMode,
   type LayoutNode,
@@ -18,11 +20,13 @@ import type { EditorNode } from "@/stores/useEditorStore";
 
 export const DEFAULT_AUTO_LAYOUT_FIELDS: Required<LayoutFields> = {
   layoutMode: "horizontal",
-  layoutGap: 8,
-  paddingTop: 12,
-  paddingRight: 12,
-  paddingBottom: 12,
-  paddingLeft: 12,
+  layoutGap: 0,
+  layoutGapAuto: false,
+  layoutWrap: false,
+  paddingTop: 0,
+  paddingRight: 0,
+  paddingBottom: 0,
+  paddingLeft: 0,
   primaryAxisAlign: "start",
   counterAxisAlign: "start",
 };
@@ -35,7 +39,6 @@ function isContainer(n: EditorNode): boolean {
   return n.type === "frame" || n.type === "group";
 }
 
-/** Whether ⇧A can run on the current selection (design mode). */
 export function canAddAutoLayoutToSelection(
   selectedIds: string[],
   nodes: Record<string, EditorNode>,
@@ -49,72 +52,96 @@ export function canAddAutoLayoutToSelection(
   return tops.every((id) => nodes[id]!.parentId === parentId);
 }
 
-/** Guess horizontal vs vertical flow from child arrangement (Figma infers direction). */
-export function inferAutoLayoutFlow(
-  nodes: Record<string, LayoutNode>,
-  childIds: string[],
-): LayoutMode {
-  if (childIds.length < 2) return "horizontal";
-
-  let minCx = Infinity;
-  let maxCx = -Infinity;
-  let minCy = Infinity;
-  let maxCy = -Infinity;
-
-  for (const id of childIds) {
-    const n = nodes[id];
-    if (!n) continue;
-    const cx = n.x + n.width / 2;
-    const cy = n.y + n.height / 2;
-    minCx = Math.min(minCx, cx);
-    maxCx = Math.max(maxCx, cx);
-    minCy = Math.min(minCy, cy);
-    maxCy = Math.max(maxCy, cy);
-  }
-
-  const spreadX = maxCx - minCx;
-  const spreadY = maxCy - minCy;
-  return spreadX >= spreadY ? "horizontal" : "vertical";
-}
-
 function layoutFieldsForChildren(
   nodes: Record<string, EditorNode>,
   childIds: string[],
-): LayoutFields {
-  const mode = inferAutoLayoutFlow(nodes, childIds);
-  return { ...DEFAULT_AUTO_LAYOUT_FIELDS, layoutMode: mode };
+  frameW: number,
+  frameH: number,
+): LayoutFields & Pick<EditorNode, "layoutSizingHorizontal" | "layoutSizingVertical"> {
+  const mode = inferAutoLayoutFlow(nodes as Record<string, LayoutNode>, childIds);
+  const gap = inferAutoLayoutGap(nodes as Record<string, LayoutNode>, childIds, mode);
+  const padding = inferAutoLayoutPadding(
+    nodes as Record<string, LayoutNode>,
+    childIds,
+    frameW,
+    frameH,
+  );
+  return {
+    ...DEFAULT_AUTO_LAYOUT_FIELDS,
+    layoutMode: mode,
+    layoutGap: gap,
+    layoutGapAuto: childIds.length >= 2,
+    ...padding,
+    ...defaultHugSizingForContainer(mode),
+  };
+}
+
+function sortChildOrderInPlace(
+  childOrder: Record<string, string[]>,
+  parentId: string,
+  nodes: Record<string, EditorNode>,
+  mode: Exclude<LayoutMode, "none">,
+): void {
+  const list = childOrder[parentId];
+  if (!list?.length) return;
+  const sorted = sortIdsForAutoLayoutFlow(
+    list.filter((id) => {
+      const c = nodes[id];
+      return c && c.visible && !c.locked;
+    }),
+    nodes as Record<string, LayoutNode>,
+    mode,
+  );
+  const lockedTail = list.filter((id) => {
+    const c = nodes[id];
+    return !c || !c.visible || c.locked;
+  });
+  childOrder[parentId] = [...sorted, ...lockedTail];
 }
 
 function enableAutoLayoutOnContainer(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
   containerId: string,
-): Record<string, EditorNode> {
+): { nodes: Record<string, EditorNode>; childOrder: Record<string, string[]> } {
   const n = nodes[containerId];
-  if (!n || !isContainer(n)) return nodes;
-  if ((n.layoutMode ?? "none") !== "none") {
-    return applyDeepAutoLayout(nodes as Record<string, LayoutNode>, childOrder, containerId) as Record<
-      string,
-      EditorNode
-    >;
-  }
+  if (!n || !isContainer(n)) return { nodes, childOrder };
 
-  const kids = (childOrder[containerId] ?? []).filter((cid) => {
+  const nextOrder = { ...childOrder };
+  const kids = (nextOrder[containerId] ?? []).filter((cid) => {
     const c = nodes[cid];
     return c && c.visible && !c.locked;
   });
-  const layout = layoutFieldsForChildren(nodes, kids);
-  let next = {
-    ...nodes,
-    [containerId]: { ...n, ...layout },
-  };
-  return applyDeepAutoLayout(next as Record<string, LayoutNode>, childOrder, containerId) as Record<
-    string,
-    EditorNode
-  >;
+
+  const mode =
+    (n.layoutMode ?? "none") !== "none"
+      ? (n.layoutMode as Exclude<LayoutMode, "none">)
+      : inferAutoLayoutFlow(nodes as Record<string, LayoutNode>, kids);
+
+  if ((n.layoutMode ?? "none") === "none") {
+    sortChildOrderInPlace(nextOrder, containerId, nodes, mode);
+    const layout = layoutFieldsForChildren(nodes, kids, n.width, n.height);
+    let next = {
+      ...nodes,
+      [containerId]: { ...n, ...layout },
+    };
+    next = applyDeepAutoLayout(
+      next as Record<string, LayoutNode>,
+      nextOrder,
+      containerId,
+    ) as Record<string, EditorNode>;
+    return { nodes: next, childOrder: nextOrder };
+  }
+
+  sortChildOrderInPlace(nextOrder, containerId, nodes, mode);
+  const next = applyDeepAutoLayout(
+    nodes as Record<string, LayoutNode>,
+    nextOrder,
+    containerId,
+  ) as Record<string, EditorNode>;
+  return { nodes: next, childOrder: nextOrder };
 }
 
-/** Wrap top-level siblings in a new auto-layout frame. */
 function wrapInAutoLayoutFrame(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
@@ -152,7 +179,21 @@ function wrapInAutoLayoutFrame(
     const c = nextNodes[id];
     return c && c.visible && !c.locked;
   });
-  const layout = layoutFieldsForChildren(nextNodes, kids);
+
+  for (const id of topIds) {
+    const w = worldRect(id, nodes);
+    const cn = nextNodes[id]!;
+    nextNodes[id] = {
+      ...cn,
+      parentId: fid,
+      x: w.x - minX,
+      y: w.y - minY,
+      layoutSizingHorizontal: cn.layoutSizingHorizontal ?? "fixed",
+      layoutSizingVertical: cn.layoutSizingVertical ?? "fixed",
+    };
+  }
+
+  const layout = layoutFieldsForChildren(nextNodes, kids, fw, fh);
 
   nextNodes[fid] = {
     id: fid,
@@ -169,19 +210,9 @@ function wrapInAutoLayoutFrame(
     expanded: true,
     fillEnabled: false,
     fill: "#ffffff",
+    clipChildren: true,
     ...layout,
   };
-
-  for (const id of topIds) {
-    const w = worldRect(id, nodes);
-    const n = nextNodes[id]!;
-    nextNodes[id] = {
-      ...n,
-      parentId: fid,
-      x: w.x - minX,
-      y: w.y - minY,
-    };
-  }
 
   const list = [...(nextOrder[P] ?? [])];
   const ixs = topIds.map((id) => list.indexOf(id)).sort((a, b) => a - b);
@@ -189,7 +220,11 @@ function wrapInAutoLayoutFrame(
   const newList = list.filter((id) => !topIds.includes(id));
   newList.splice(insertAt, 0, fid);
   nextOrder[P] = newList;
-  nextOrder[fid] = topIds;
+  nextOrder[fid] = sortIdsForAutoLayoutFlow(
+    topIds,
+    nextNodes as Record<string, LayoutNode>,
+    layout.layoutMode as Exclude<LayoutMode, "none">,
+  );
 
   const laidOut = applyDeepAutoLayout(
     nextNodes as Record<string, LayoutNode>,
@@ -205,12 +240,6 @@ export type ApplyAutoLayoutSelectionResult = {
   selectedIds: string[];
 };
 
-/**
- * Apply Figma-style auto layout to the current selection.
- * - One shape → wrap in auto-layout frame
- * - One frame/group → enable auto layout
- * - Multiple layers → wrap in one auto-layout frame
- */
 export function applyAutoLayoutToSelection(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
@@ -228,8 +257,8 @@ export function applyAutoLayoutToSelection(
     const id = tops[0]!;
     const n = nodes[id]!;
     if (isContainer(n)) {
-      const nextNodes = enableAutoLayoutOnContainer(nodes, childOrder, id);
-      return { nodes: nextNodes, childOrder, selectedIds: [id] };
+      const result = enableAutoLayoutOnContainer(nodes, childOrder, id);
+      return { nodes: result.nodes, childOrder: result.childOrder, selectedIds: [id] };
     }
     const wrapped = wrapInAutoLayoutFrame(nodes, childOrder, tops);
     if (!wrapped) return null;

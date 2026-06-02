@@ -151,24 +151,24 @@ export function AIGenerateModal() {
       }}
     >
       <div
-        className="relative flex w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-white/[0.12] bg-gradient-to-b from-[#1e1e22] to-[#141416] shadow-2xl"
+        className="relative flex w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-app-border bg-gradient-to-b from-[#1e1e22] to-[#141416] shadow-2xl"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="h-1 w-full bg-gradient-to-r from-violet-500 via-sky-400 to-emerald-400" />
-        <div className="flex items-start justify-between gap-3 border-b border-white/[0.06] px-5 py-4">
+        <div className="flex items-start justify-between gap-3 border-b border-app-border-subtle px-5 py-4">
           <div className="flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/[0.06] text-violet-300">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-app-hover text-violet-300">
               <Sparkles className="h-5 w-5" strokeWidth={1.75} />
             </span>
             <div>
               <h2 className="text-[15px] font-semibold text-white">Generate with AI</h2>
-              <p className="text-[12px] text-[#9a9a9a]">Pick an OpenAI model, then describe your screen.</p>
+              <p className="text-[12px] text-app-muted">Pick an OpenAI model, then describe your screen.</p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1.5 text-[#9a9a9a] transition-colors hover:bg-white/[0.06] hover:text-white"
+            className="rounded-lg p-1.5 text-app-muted transition-colors hover:bg-app-hover hover:text-white"
             aria-label="Close"
           >
             <X className="h-5 w-5" strokeWidth={1.75} />
@@ -178,7 +178,7 @@ export function AIGenerateModal() {
         <div className="max-h-[min(72vh,640px)] overflow-y-auto px-5 py-4">
           {!result ? (
             <>
-              <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-[#7a7a7a]">
+              <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-app-subtle">
                 Prompt
               </label>
               <textarea
@@ -187,10 +187,10 @@ export function AIGenerateModal() {
                 placeholder="Describe the screen you want — e.g. “UPI checkout with order summary”"
                 rows={4}
                 disabled={loading}
-                className="mb-4 w-full resize-none rounded-xl border border-white/[0.08] bg-black/30 px-3 py-2.5 text-[13px] leading-relaxed text-[#ececec] outline-none ring-0 placeholder:text-[#5c5c5c] focus:border-violet-500/40"
+                className="mb-4 w-full resize-none rounded-xl border border-app-border bg-black/30 px-3 py-2.5 text-[13px] leading-relaxed text-app-fg outline-none ring-0 placeholder:text-app-subtle focus:border-violet-500/40"
               />
 
-              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-[#7a7a7a]">Model</p>
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-app-subtle">Model</p>
               <select
                 value={modelId}
                 disabled={loading}
@@ -199,7 +199,7 @@ export function AIGenerateModal() {
                   setModelId(next);
                   setStoredOpenAIModelId(next);
                 }}
-                className="mb-1.5 w-full rounded-xl border border-white/[0.08] bg-black/30 px-3 py-2.5 text-[13px] text-[#ececec] outline-none focus:border-violet-500/40 disabled:opacity-50"
+                className="mb-1.5 w-full rounded-xl border border-app-border bg-black/30 px-3 py-2.5 text-[13px] text-app-fg outline-none focus:border-violet-500/40 disabled:opacity-50"
                 aria-label="OpenAI model"
               >
                 {modelGroups.map((group) => (
@@ -220,7 +220,7 @@ export function AIGenerateModal() {
                 <p className="mb-4 text-[11px] text-[#8a8a8a]">Unknown model — using default.</p>
               )}
 
-              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-[#7a7a7a]">Presets</p>
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-app-subtle">Presets</p>
               <div className="mb-4 flex flex-wrap gap-1.5">
                 {PRESETS.map((p) => (
                   <button
@@ -232,7 +232,7 @@ export function AIGenerateModal() {
                       "rounded-full border px-2.5 py-1 text-[12px] font-medium transition-colors",
                       preset === p
                         ? "border-violet-500/50 bg-violet-500/20 text-violet-100"
-                        : "border-white/[0.08] bg-white/[0.04] text-[#c4c4c4] hover:border-white/[0.14]",
+                        : "border-app-border bg-app-hover text-app-muted hover:border-white/[0.14]",
                     )}
                   >
                     {p}
@@ -240,7 +240,7 @@ export function AIGenerateModal() {
                 ))}
               </div>
 
-              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-[#7a7a7a]">Style</p>
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-app-subtle">Style</p>
               <div className="mb-5 flex flex-wrap gap-1.5">
                 {STYLES.map(({ id, label }) => (
                   <button
@@ -252,7 +252,7 @@ export function AIGenerateModal() {
                       "rounded-full border px-2.5 py-1 text-[12px] font-medium transition-colors",
                       style === id
                         ? "border-sky-500/50 bg-sky-500/15 text-sky-100"
-                        : "border-white/[0.08] bg-white/[0.04] text-[#c4c4c4] hover:border-white/[0.14]",
+                        : "border-app-border bg-app-hover text-app-muted hover:border-white/[0.14]",
                     )}
                   >
                     {label}
@@ -261,10 +261,10 @@ export function AIGenerateModal() {
               </div>
 
               {loading ? (
-                <div className="rounded-xl border border-white/[0.06] bg-black/25 px-4 py-6 text-center">
+                <div className="rounded-xl border border-app-border-subtle bg-black/25 px-4 py-6 text-center">
                   <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-violet-400/30 border-t-violet-400" />
                   <p className="text-[13px] font-medium text-white">{LOADING_STEPS[loadStep] ?? LOADING_STEPS[0]}</p>
-                  <p className="mt-1 text-[11px] text-[#7a7a7a]">
+                  <p className="mt-1 text-[11px] text-app-subtle">
                     Generating with {selectedModel?.label ?? modelId}…
                   </p>
                 </div>
@@ -286,7 +286,7 @@ export function AIGenerateModal() {
         </div>
 
         {result ? (
-          <div className="flex flex-col gap-2 border-t border-white/[0.06] bg-black/20 px-5 py-4">
+          <div className="flex flex-col gap-2 border-t border-app-border-subtle bg-black/20 px-5 py-4">
             {source === "dashboard" ? (
               <button
                 type="button"
@@ -318,7 +318,7 @@ export function AIGenerateModal() {
               onClick={() => {
                 setResult(null);
               }}
-              className="text-center text-[12px] font-medium text-[#8c8c8c] hover:text-white"
+              className="text-center text-[12px] font-medium text-app-subtle hover:text-white"
             >
               ← Edit prompt
             </button>
@@ -331,21 +331,21 @@ export function AIGenerateModal() {
 
 function PreviewPanel({ preview }: { preview: AIGeneratePreview }) {
   return (
-    <div className="rounded-xl border border-white/[0.08] bg-black/25 p-4">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-[#6b6b6b]">Preview</p>
+    <div className="rounded-xl border border-app-border bg-black/25 p-4">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-app-subtle">Preview</p>
       <p className="mt-2 text-[14px] font-semibold text-white">{preview.fileName}</p>
       <p className="mt-1 text-[12px] text-[#a3a3a3]">{preview.flowLabel}</p>
       {preview.modelLabel ? (
-        <p className="mt-1 text-[11px] text-[#7a7a7a]">
-          Model: <span className="text-[#b8b8b8]">{preview.modelLabel}</span>
+        <p className="mt-1 text-[11px] text-app-subtle">
+          Model: <span className="text-app-muted">{preview.modelLabel}</span>
         </p>
       ) : null}
       <div className="mt-3 flex flex-wrap items-center gap-3">
-        <span className="text-[12px] text-[#8c8c8c]">
-          <span className="font-medium text-[#d4d4d4]">{preview.frameCount}</span> frames
+        <span className="text-[12px] text-app-subtle">
+          <span className="font-medium text-app-fg">{preview.frameCount}</span> frames
         </span>
         <div className="flex items-center gap-1.5">
-          <span className="text-[11px] text-[#6b6b6b]">Palette</span>
+          <span className="text-[11px] text-app-subtle">Palette</span>
           {preview.palette.map((c) => (
             <span
               key={c}

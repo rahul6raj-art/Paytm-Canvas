@@ -182,10 +182,10 @@ export function CommandMenu() {
       }}
     >
       <div
-        className="flex max-h-[min(90vh,640px)] w-full max-w-lg flex-col overflow-hidden rounded-lg border border-white/[0.1] bg-[#1a1a1a]/95 shadow-2xl backdrop-blur-md"
+        className="flex max-h-[min(90vh,640px)] w-full max-w-lg flex-col overflow-hidden rounded-lg border border-app-border bg-app-panel/95 shadow-2xl backdrop-blur-md"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="border-b border-white/[0.06] px-2 py-1.5">
+        <div className="border-b border-app-border-subtle px-2 py-1.5">
           <input
             ref={inputRef}
             type="search"
@@ -194,18 +194,18 @@ export function CommandMenu() {
             placeholder="Search commands…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="h-8 w-full rounded-md border border-transparent bg-white/[0.04] px-2 text-[12px] text-[#ececec] outline-none ring-0 placeholder:text-[#6b6b6b] focus:border-accent/40"
+            className="h-8 w-full rounded-md border border-transparent bg-app-hover px-2 text-[12px] text-app-fg outline-none ring-0 placeholder:text-app-subtle focus:border-accent/40"
           />
         </div>
         <div ref={listRef} className="max-h-[min(52vh,420px)] overflow-y-auto py-1">
           {groupedRows.length === 0 ? (
-            <p className="px-3 py-4 text-center text-[12px] text-[#7a7a7a]">No matching commands.</p>
+            <p className="px-3 py-4 text-center text-[12px] text-app-subtle">No matching commands.</p>
           ) : (
             groupedRows.map((row, idx) =>
               row.type === "header" ? (
                 <div
                   key={`h-${row.label}-${idx}`}
-                  className="sticky top-0 z-[1] bg-[#1a1a1a]/95 px-3 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wide text-[#6b6b6b]"
+                  className="sticky top-0 z-[1] bg-app-panel/95 px-3 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wide text-app-subtle"
                 >
                   {row.label}
                 </div>
@@ -219,16 +219,16 @@ export function CommandMenu() {
                   disabled={!row.cmd.enabled(snapshot())}
                   className={cn(
                     "flex w-full items-start gap-2 px-3 py-1.5 text-left text-[12px] leading-snug transition-colors",
-                    row.cmd.id === selectedId ? "bg-accent/18 text-white" : "text-[#d4d4d4] hover:bg-white/[0.05]",
+                    row.cmd.id === selectedId ? "bg-accent/18 text-white" : "text-app-fg hover:bg-white/[0.05]",
                     !row.cmd.enabled(snapshot()) && "cursor-not-allowed opacity-40 hover:bg-transparent",
                   )}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="font-medium">{row.cmd.title}</div>
-                    <div className="text-[11px] text-[#7a7a7a]">{row.cmd.subtitle}</div>
+                    <div className="text-[11px] text-app-subtle">{row.cmd.subtitle}</div>
                   </div>
                   {row.cmd.shortcut ? (
-                    <span className="shrink-0 pt-0.5 text-[10px] tabular-nums text-[#6b6b6b]">
+                    <span className="shrink-0 pt-0.5 text-[10px] tabular-nums text-app-subtle">
                       {formatShortcutLabel(row.cmd.shortcut)}
                     </span>
                   ) : null}
@@ -237,7 +237,7 @@ export function CommandMenu() {
             )
           )}
         </div>
-        <div className="flex items-center justify-between border-t border-white/[0.06] px-3 py-1 text-[10px] text-[#5c5c5c]">
+        <div className="flex items-center justify-between border-t border-app-border-subtle px-3 py-1 text-[10px] text-app-subtle">
           <span>↑↓ navigate · ↵ run · esc close</span>
           <span>{ALL_COMMANDS.length} commands</span>
         </div>

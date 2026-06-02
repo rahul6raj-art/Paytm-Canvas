@@ -20,7 +20,7 @@ type Item =
   | { type: "sep" };
 
 const rowCls =
-  "flex w-full items-center justify-between gap-3 px-2 py-[5px] text-left text-[12px] leading-4 text-[#e6e6e6] hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent";
+  "flex w-full items-center justify-between gap-3 px-2 py-[5px] text-left text-[12px] leading-4 text-app-fg hover:bg-app-hover disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent";
 
 export function EditorContextMenu() {
   const contextMenu = useEditorStore((s) => s.contextMenu);
@@ -439,13 +439,13 @@ export function EditorContextMenu() {
   return createPortal(
     <div
       ref={menuRef}
-      className="fixed z-[200] min-w-[200px] rounded-md border border-white/[0.1] bg-[#2c2c2c] py-0.5 shadow-xl"
+      className="fixed z-[200] min-w-[200px] rounded-md border border-app-border bg-app-panel py-0.5 shadow-xl"
       style={{ left: 0, top: 0 }}
       role="menu"
     >
       {items.map((it, i) =>
         it.type === "sep" ? (
-          <div key={`s-${i}`} className="my-0.5 h-px bg-white/[0.08]" />
+          <div key={`s-${i}`} className="my-0.5 h-px bg-app-hover" />
         ) : (
           <button
             key={it.id}
@@ -460,7 +460,7 @@ export function EditorContextMenu() {
             }}
           >
             <span>{it.label}</span>
-            {it.hint ? <span className="shrink-0 font-mono text-[10px] text-[#6b6b6b]">{it.hint}</span> : null}
+            {it.hint ? <span className="shrink-0 font-mono text-[10px] text-app-subtle">{it.hint}</span> : null}
           </button>
         ),
       )}

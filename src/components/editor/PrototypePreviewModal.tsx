@@ -178,24 +178,24 @@ export function PrototypePreviewModal() {
         if (e.target === e.currentTarget) closePrototypePreview();
       }}
     >
-      <div className="relative flex max-h-[90vh] w-full max-w-[min(96vw,520px)] flex-col overflow-hidden rounded-xl border border-white/10 bg-[#2a2a2a] shadow-2xl">
+      <div className="relative flex max-h-[90vh] w-full max-w-[min(96vw,520px)] flex-col overflow-hidden rounded-xl border border-white/10 bg-app-panel shadow-2xl">
         <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
           <div className="min-w-0 text-[12px] font-medium text-white">
-            <span className="text-[#9a9a9a]">Present · </span>
+            <span className="text-app-muted">Present · </span>
             <span className="truncate">{nodes[activeFrameId]?.name ?? "Frame"}</span>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             <button
               type="button"
               onClick={() => prototypePreviewBack()}
-              className="rounded-md border border-white/10 px-2 py-1 text-[11px] font-medium text-[#e6e6e6] hover:bg-white/[0.06]"
+              className="rounded-md border border-white/10 px-2 py-1 text-[11px] font-medium text-app-fg hover:bg-app-hover"
             >
               Back
             </button>
             <button
               type="button"
               onClick={() => closePrototypePreview()}
-              className="rounded-md p-1.5 text-[#b8b8b8] hover:bg-white/[0.08] hover:text-white"
+              className="rounded-md p-1.5 text-app-muted hover:bg-app-hover hover:text-app-fg"
               aria-label="Close preview"
             >
               <X className="h-4 w-4" strokeWidth={2} />
@@ -207,7 +207,7 @@ export function PrototypePreviewModal() {
           <div
             key={`${activeFrameId}-${displayTick}`}
             ref={clipRef}
-            className="relative overflow-hidden rounded-lg border border-white/[0.08] bg-white shadow-inner"
+            className="relative overflow-hidden rounded-lg border border-app-border bg-white shadow-inner"
             style={{ width: wr.width, height: wr.height, ...previewMotionStyle }}
           >
             <div

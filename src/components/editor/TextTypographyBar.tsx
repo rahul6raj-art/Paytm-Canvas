@@ -47,10 +47,10 @@ export function TextTypographyBar() {
   const fontWeight = node.fontWeight ?? 500;
 
   const field =
-    "h-7 rounded-md border border-white/[0.1] bg-[#262626] text-[11px] text-[#f0f0f0] focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-45";
+    "h-7 rounded-md border border-app-border bg-app-field text-[11px] text-app-field-fg focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-45";
 
   return (
-    <div className="flex h-9 min-w-0 items-center border-t border-white/[0.06] px-2">
+    <div className="flex h-9 min-w-0 items-center border-t border-app-border-subtle px-2">
       <div
         className="flex min-w-0 flex-1 items-center justify-center gap-1.5 px-1"
         role="toolbar"
@@ -111,7 +111,7 @@ export function TextTypographyBar() {
               "flex h-7 min-w-7 items-center justify-center rounded-md border text-[10px] font-semibold transition-colors",
               fontWeight === w.value
                 ? "border-[rgba(13,153,255,0.45)] bg-[rgba(13,153,255,0.15)] text-white"
-                : "border-white/[0.08] bg-black/25 text-[#b8b8b8] hover:border-white/15 hover:bg-white/[0.06] hover:text-white",
+                : "border-app-border bg-app-toolbar-well text-app-muted hover:border-white/15 hover:bg-app-hover hover:text-app-fg",
               w.value >= 700 && "px-1.5",
             )}
           >

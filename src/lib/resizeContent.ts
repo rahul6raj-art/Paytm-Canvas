@@ -1,5 +1,7 @@
+import { cornerRadiiMax, getNodeCornerRadii, hasIndependentCornerRadii, type CornerRadii } from "@/lib/cornerRadius";
 import type { EditorNode } from "@/stores/useEditorStore";
 import type { Bounds, ResizeHandle, ResizeModifiers } from "@/lib/resize";
+import { isProportionalResize } from "@/lib/resize";
 import { isCornerHandle } from "@/lib/resizeTransform";
 
 function uniformScaleFactor(
@@ -8,14 +10,14 @@ function uniformScaleFactor(
   handle: ResizeHandle,
   modifiers: ResizeModifiers,
 ): number {
-  if (modifiers.shiftKey) return Math.max(sx, sy);
+  if (isProportionalResize(handle, modifiers)) return Math.max(sx, sy);
   if (isCornerHandle(handle)) return Math.sqrt(Math.max(0, sx * sy));
   return Math.max(sx, sy);
 }
 
 function shouldScaleTextContent(handle: ResizeHandle, modifiers: ResizeModifiers): boolean {
   if (isCornerHandle(handle)) return true;
-  return modifiers.shiftKey;
+  return isProportionalResize(handle, modifiers);
 }
 
 /** Scale nested content when proportional resize is applied to a container. */
@@ -57,8 +59,17 @@ export function scaleSubtreeContentPatches(
       }));
     }
 
-    if ((n.type === "rectangle" || n.type === "frame") && (n.cornerRadius ?? 0) > 0) {
-      patch.cornerRadius = Math.max(0, (n.cornerRadius ?? 0) * uniform);
+    if (n.type === "rectangle" || n.type === "frame") {
+      const radii = getNodeCornerRadii(n);
+      if (cornerRadiiMax(radii) > 0) {
+        const scaled = radii.map((r) => Math.max(0, r * uniform)) as CornerRadii;
+        if (hasIndependentCornerRadii(n) || n.cornerRadii) {
+          patch.cornerRadii = scaled;
+          patch.cornerRadius = undefined;
+        } else {
+          patch.cornerRadius = scaled[0];
+        }
+      }
     }
 
     out[id] = patch;
@@ -97,9 +108,16 @@ export function buildResizeContentPatches(
     }));
   }
 
-  if ((node.type === "rectangle" || node.type === "frame") && (node.cornerRadius ?? 0) > 0) {
-    if (shouldScaleTextContent(handle, modifiers)) {
-      patches.cornerRadius = Math.max(0, (node.cornerRadius ?? 0) * uniform);
+  if (node.type === "rectangle" || node.type === "frame") {
+    const radii = getNodeCornerRadii(node);
+    if (cornerRadiiMax(radii) > 0 && shouldScaleTextContent(handle, modifiers)) {
+      const scaled = radii.map((r) => Math.max(0, r * uniform)) as CornerRadii;
+      if (hasIndependentCornerRadii(node) || node.cornerRadii) {
+        patches.cornerRadii = scaled;
+        patches.cornerRadius = undefined;
+      } else {
+        patches.cornerRadius = scaled[0];
+      }
     }
   }
 
@@ -107,5 +125,5 @@ export function buildResizeContentPatches(
 }
 
 export function shouldProportionalFrameScale(handle: ResizeHandle, modifiers: ResizeModifiers): boolean {
-  return modifiers.shiftKey && isCornerHandle(handle);
+  return isProportionalResize(handle, modifiers);
 }

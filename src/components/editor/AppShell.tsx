@@ -25,9 +25,14 @@ import { PluginRunner } from "@/components/plugins/PluginRunner";
 import { ShareModal } from "./ShareModal";
 import { WorkspaceTeamModals } from "./WorkspaceTeamModals";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
+import { CodeRoundTripModal } from "@/components/code/CodeRoundTripModal";
 import { TextEditPortal } from "./TextEditPortal";
 import { UiChromeHiddenHint } from "./UiChromeHiddenHint";
+import { useTheme } from "@/components/ThemeProvider";
+import { displayCanvasBackground } from "@/lib/canvasVisual";
+import { activateCanvasForShortcuts, isEditableFieldElement } from "@/lib/editorKeyboardFocus";
 import { cn } from "@/lib/utils";
+import { useMemo } from "react";
 
 function TextEditLayer() {
   const editingTextId = useEditorStore((s) => s.editingTextId);
@@ -36,7 +41,12 @@ function TextEditLayer() {
 }
 
 function CanvasWorkspaceChrome() {
-  const canvasBackgroundColor = useEditorStore((s) => s.canvasBackgroundColor);
+  const storedCanvasBg = useEditorStore((s) => s.canvasBackgroundColor);
+  const { resolved } = useTheme();
+  const canvasBackgroundColor = useMemo(
+    () => displayCanvasBackground(storedCanvasBg, resolved),
+    [storedCanvasBg, resolved],
+  );
   return (
     <main
       className="relative min-h-0 min-w-0 flex-1"
@@ -50,10 +60,18 @@ function CanvasWorkspaceChrome() {
 
 function EditorChromeRightColumn() {
   const commentsPanelOpen = useEditorStore((s) => s.commentsPanelOpen);
+  const rightPanelTab = useEditorStore((s) => s.rightPanelTab);
   return (
     <div className="flex min-h-0 shrink-0">
       {commentsPanelOpen ? <CommentsPanel /> : null}
-      <div className="flex min-h-0 w-[min(260px,32vw)] min-w-[200px] max-w-[280px] shrink-0 flex-col">
+      <div
+        className={cn(
+          "flex min-h-0 shrink-0 flex-col",
+          rightPanelTab === "code"
+            ? "w-[min(360px,42vw)] min-w-[280px] max-w-[420px]"
+            : "w-[min(260px,32vw)] min-w-[200px] max-w-[280px]",
+        )}
+      >
         <RightPropertiesPanel />
       </div>
     </div>
@@ -73,9 +91,9 @@ function AppShellChrome() {
         {uiChromeVisible ? <EditorChromeRightColumn /> : null}
       </div>
       {uiChromeVisible ? (
-        <footer className="flex h-9 shrink-0 items-stretch border-t border-black/25 bg-chrome-raised text-[11px] text-[#8c8c8c] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+        <footer className="flex h-9 shrink-0 items-stretch border-t border-app-border bg-chrome-raised text-[11px] text-app-subtle shadow-app-raised">
           <PageTabsBar />
-          <div className="flex shrink-0 items-center gap-3 border-l border-white/[0.08] px-3">
+          <div className="flex shrink-0 items-center gap-3 border-l border-app-border px-3">
             <ZoomControls />
             <CanvasDebugReadout />
             <PresenceActivityFeed />
@@ -94,13 +112,19 @@ export function AppShell() {
   return (
     <div
       className={cn(
-        "flex h-dvh flex-col overflow-hidden bg-chrome font-sans text-[#e6e6e6]",
+        "flex h-dvh flex-col overflow-hidden bg-chrome font-sans text-app-fg",
       )}
+      onPointerDownCapture={(e) => {
+        if (!isEditableFieldElement(e.target)) {
+          activateCanvasForShortcuts();
+        }
+      }}
     >
       <EditorMockPresence />
       <CommandMenu />
       <ShortcutOverlay />
       <AIGenerateModal />
+      <CodeRoundTripModal />
       <PluginMarketplace />
       <ShareModal />
       <WorkspaceTeamModals />

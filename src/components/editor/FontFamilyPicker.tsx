@@ -164,10 +164,10 @@ export function FontFamilyPicker({
         role="listbox"
         aria-label="Font family"
         onKeyDown={onMenuKeyDown}
-        className="fixed z-[120] flex w-[min(280px,calc(100vw-16px))] flex-col overflow-hidden rounded-md border border-white/[0.08] bg-[#2a2a2a] shadow-xl"
+        className="fixed z-[120] flex w-[min(280px,calc(100vw-16px))] flex-col overflow-hidden rounded-md border border-app-border bg-app-panel shadow-xl"
         style={anchoredMenuStyle(position)}
       >
-        <div className="shrink-0 border-b border-white/[0.06] p-2">
+        <div className="shrink-0 border-b border-app-border-subtle p-2">
           <label htmlFor={inputId} className="sr-only">
             Search fonts
           </label>
@@ -188,14 +188,14 @@ export function FontFamilyPicker({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onMenuKeyDown}
-            className="h-8 w-full rounded-md border border-white/[0.1] bg-[#1f1f1f] px-2.5 text-[12px] text-white placeholder:text-[#888] focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            className="h-8 w-full rounded-md border border-app-border bg-app-field px-2.5 text-[12px] text-app-field-fg placeholder:text-app-subtle focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           />
           {localFontsSupported ? (
             <button
               type="button"
               disabled={localStatus === "loading"}
               onClick={() => void refreshInstalled()}
-              className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md py-1 text-[10px] text-[#aaa] hover:bg-white/[0.06] hover:text-white disabled:opacity-50"
+              className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md py-1 text-[10px] text-[#aaa] hover:bg-app-hover hover:text-app-fg disabled:opacity-50"
             >
               <RefreshCw className={cn("h-3 w-3", localStatus === "loading" && "animate-spin")} />
               {localStatus === "loading"
@@ -213,7 +213,7 @@ export function FontFamilyPicker({
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-1">
           {!matchFontOption(value) && value ? (
-            <div className="border-b border-white/[0.06] px-2 pb-2">
+            <div className="border-b border-app-border-subtle px-2 pb-2">
               <p className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-[#888]">
                 Current
               </p>
@@ -238,7 +238,7 @@ export function FontFamilyPicker({
               return filteredGroups.map((group) =>
               group.fonts.length === 0 ? null : (
                 <div key={group.id} className="mb-1">
-                  <p className="sticky top-0 z-[1] bg-[#2a2a2a] px-3 py-1 text-[10px] font-medium uppercase tracking-wide text-[#888]">
+                  <p className="sticky top-0 z-[1] bg-app-panel px-3 py-1 text-[10px] font-medium uppercase tracking-wide text-[#888]">
                     {group.label}
                     {group.id === "google" ? ` (${group.fonts.length})` : null}
                   </p>
@@ -257,9 +257,9 @@ export function FontFamilyPicker({
                         role="option"
                         aria-selected={selected}
                         className={cn(
-                          "flex w-full items-center rounded-md px-3 py-1.5 text-left text-[12px] text-[#e8e8e8] hover:bg-white/[0.08]",
+                          "flex w-full items-center rounded-md px-3 py-1.5 text-left text-[12px] text-[#e8e8e8] hover:bg-app-hover",
                           selected && "bg-[rgba(13,153,255,0.15)] text-white",
-                          active && !selected && "bg-white/[0.06]",
+                          active && !selected && "bg-app-hover",
                         )}
                         style={{ fontFamily: opt.value }}
                         onMouseEnter={() => setActiveIndex(idx)}
@@ -299,7 +299,7 @@ export function FontFamilyPicker({
           }
         }}
         className={cn(
-          "flex h-7 max-w-full items-center gap-1 rounded-md border border-white/[0.1] bg-[#262626] pl-2 pr-1 text-[11px] text-[#f0f0f0] hover:border-white/20 disabled:opacity-45",
+          "flex h-7 max-w-full items-center gap-1 rounded-md border border-app-border bg-app-field pl-2 pr-1 text-[11px] text-app-field-fg hover:border-app-border disabled:opacity-45",
           buttonClassName,
         )}
         style={{ fontFamily: value }}

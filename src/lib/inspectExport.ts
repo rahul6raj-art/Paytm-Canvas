@@ -11,7 +11,7 @@ import { fillCss, normalizeHex } from "@/lib/color";
 import { effectiveFillType } from "@/lib/fillGradient";
 import { paintFillOnCanvas, resolveSolidFillCss } from "@/lib/canvasGradientPaint";
 import { pathToSvgD } from "@/lib/pathGeometry";
-import { composeSvgTransform, wrapSvgNodeRotation } from "@/lib/transformMath";
+import { buildLayerCssTransform, composeSvgTransform, wrapSvgNodeRotation } from "@/lib/transformMath";
 import {
   collectNodeEffects,
   createSvgFilterRegistry,
@@ -26,6 +26,14 @@ import {
   svgTextMarkup,
 } from "@/lib/svgMarkupCore";
 import { nodeToLocalSvgSubpath } from "@/lib/booleanGeometry";
+import {
+  clampCornerRadii,
+  cornerRadiiMax,
+  cornerRadiiToCss,
+  getNodeCornerRadii,
+  isUniformCornerRadii,
+  roundedRectPathD,
+} from "@/lib/cornerRadius";
 import type { LayoutMode } from "@/lib/autoLayout";
 
 export function nearestAncestorFrameId(
@@ -108,6 +116,39 @@ function addRoundedRectPath(ctx: CanvasRenderingContext2D, x: number, y: number,
   ctx.closePath();
 }
 
+function addNodeRoundedRectPath(
+  ctx: CanvasRenderingContext2D,
+  node: Pick<EditorNode, "cornerRadius" | "cornerRadii">,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+) {
+  const radii = clampCornerRadii(getNodeCornerRadii(node), w, h);
+  if (cornerRadiiMax(radii) <= 0) {
+    ctx.rect(x, y, w, h);
+    return;
+  }
+  if (isUniformCornerRadii(radii)) {
+    addRoundedRectPath(ctx, x, y, w, h, radii[0]!);
+    return;
+  }
+  if (typeof ctx.roundRect === "function") {
+    ctx.roundRect(x, y, w, h, radii);
+    return;
+  }
+  const p = new Path2D(roundedRectPathD(w, h, radii));
+  const ctxWithPath = ctx as CanvasRenderingContext2D & { addPath?: (path: Path2D) => void };
+  ctx.save();
+  ctx.translate(x, y);
+  if (typeof ctxWithPath.addPath === "function") {
+    ctxWithPath.addPath(p);
+  } else {
+    addRoundedRectPath(ctx, 0, 0, w, h, cornerRadiiMax(radii));
+  }
+  ctx.restore();
+}
+
 function px(n: number): string {
   return `${Math.round(n * 100) / 100}px`;
 }
@@ -130,8 +171,9 @@ export function nodeToCss(node: EditorNode, designTokens?: Record<string, Design
   const lines: string[] = [];
   lines.push(`width: ${px(node.width)};`);
   lines.push(`height: ${px(node.height)};`);
-  if (node.rotation) {
-    lines.push(`transform: rotate(${node.rotation}deg);`);
+  const transform = buildLayerCssTransform(node);
+  if (transform) {
+    lines.push(`transform: ${transform};`);
     lines.push(`transform-origin: center center;`);
   }
 
@@ -167,9 +209,18 @@ export function nodeToCss(node: EditorNode, designTokens?: Record<string, Design
     lines.push(`border: 1px solid #e5e5e5;`);
   }
 
-  const cr = node.cornerRadius ?? 0;
-  if (cr > 0) {
-    lines.push(`border-radius: ${node.type === "ellipse" ? "9999px" : px(cr)};`);
+  if (node.type === "ellipse" && (node.cornerRadius ?? 0) > 0) {
+    lines.push(`border-radius: 9999px;`);
+  } else if (node.type === "rectangle" || node.type === "frame") {
+    const radii = getNodeCornerRadii(node);
+    if (cornerRadiiMax(radii) > 0) {
+      const css = cornerRadiiToCss(radii);
+      lines.push(
+        typeof css === "number"
+          ? `border-radius: ${px(css)};`
+          : `border-radius: ${css};`,
+      );
+    }
   }
 
   const layoutMode: LayoutMode = node.layoutMode ?? "none";
@@ -274,9 +325,18 @@ export function nodeToTailwind(node: EditorNode, designTokens?: Record<string, D
     parts.push("border", "border-solid", "border-[#e5e5e5]");
   }
 
-  const cr = node.cornerRadius ?? 0;
-  if (cr > 0) {
-    parts.push(node.type === "ellipse" ? "rounded-full" : `rounded-[${Math.round(cr)}px]`);
+  if (node.type === "ellipse" && (node.cornerRadius ?? 0) > 0) {
+    parts.push("rounded-full");
+  } else if (node.type === "rectangle" || node.type === "frame") {
+    const radii = getNodeCornerRadii(node);
+    if (cornerRadiiMax(radii) > 0) {
+      const css = cornerRadiiToCss(radii);
+      if (typeof css === "number") {
+        parts.push(`rounded-[${Math.round(css)}px]`);
+      } else {
+        parts.push(`rounded-[${css.replace(/\s+/g, "_")}]`);
+      }
+    }
   }
 
   const layoutMode: LayoutMode = node.layoutMode ?? "none";
@@ -416,9 +476,12 @@ async function renderNodeToCanvas(
   };
 
   if (drawNode.type === "rectangle" || drawNode.type === "frame" || drawNode.type === "group") {
-    const r = drawNode.cornerRadius ?? 0;
     ctx.beginPath();
-    addRoundedRectPath(ctx, 0, 0, drawNode.width, drawNode.height, r);
+    if (drawNode.type === "group") {
+      ctx.rect(0, 0, drawNode.width, drawNode.height);
+    } else {
+      addNodeRoundedRectPath(ctx, drawNode, 0, 0, drawNode.width, drawNode.height);
+    }
     paintShapeFill(drawNode.width, drawNode.height);
     if (sw > 0 && sc) {
       ctx.strokeStyle = sc;
@@ -497,7 +560,7 @@ async function renderNodeToCanvas(
     ctx.save();
     if (drawNode.type === "frame") {
       ctx.beginPath();
-      addRoundedRectPath(ctx, 0, 0, drawNode.width, drawNode.height, drawNode.cornerRadius ?? 0);
+      addNodeRoundedRectPath(ctx, drawNode, 0, 0, drawNode.width, drawNode.height);
       ctx.clip();
     }
     for (const cid of childOrder[drawNode.id] ?? []) {

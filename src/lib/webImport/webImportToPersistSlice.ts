@@ -50,6 +50,9 @@ function sceneNodeToEditor(
     counterAxisAlign: node.counterAxisAlign,
     clipChildren: node.clipChildren,
     isImportReference: node.isImportReference,
+    codeClassName: node.codeClassName,
+    codeJsxTag: node.codeJsxTag,
+    codeJsxIntrinsic: node.codeJsxIntrinsic,
   };
 
   nodes[id] = editorNode;
@@ -154,6 +157,7 @@ export function importWebResponseToPersistSlice(response: ImportWebResponse): Ed
     zoom: 0.5,
     pan: { x: 40, y: 24 },
     showGrid: false,
+    showRulers: true,
     canvasBackgroundColor: "#e5e5e5",
     comments: [],
   });

@@ -84,7 +84,7 @@ export function ColorInput({
         ref={menuRef}
         role="dialog"
         aria-label="Choose library color"
-        className="fixed z-[120] w-[min(240px,calc(100vw-16px))] overflow-hidden rounded-md border border-white/[0.08] bg-[#2a2a2a] shadow-xl"
+        className="fixed z-[120] w-[min(240px,calc(100vw-16px))] overflow-hidden rounded-md border border-app-border bg-app-panel shadow-xl"
         style={anchoredMenuStyle(position)}
       >
         <LibraryColorPickerMenu
@@ -97,7 +97,7 @@ export function ColorInput({
   return (
     <div>
       {label ? (
-        <div className="mb-0.5 text-[11px] font-medium leading-4 text-[#8c8c8c]">{label}</div>
+        <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">{label}</div>
       ) : null}
       <div className="flex gap-1.5">
         <input
@@ -109,11 +109,11 @@ export function ColorInput({
             onCommitHex(v);
             setText(v);
           }}
-          className="h-6 w-9 shrink-0 cursor-pointer rounded border border-white/[0.1] bg-transparent p-px disabled:opacity-45"
+          className="h-6 w-9 shrink-0 cursor-pointer rounded border border-app-border bg-transparent p-px disabled:opacity-45"
         />
         <div
           className={cn(
-            "flex h-6 min-h-[24px] min-w-0 flex-1 overflow-hidden rounded border border-white/[0.1] bg-[#262626] focus-within:border-accent focus-within:ring-1 focus-within:ring-accent",
+            "flex h-6 min-h-[24px] min-w-0 flex-1 overflow-hidden rounded border border-app-border bg-app-field focus-within:border-accent focus-within:ring-1 focus-within:ring-accent",
             disabled && "opacity-45",
             pickerOpen && canPickLibrary && "border-accent ring-1 ring-accent",
           )}
@@ -126,7 +126,7 @@ export function ColorInput({
                 disabled={disabled}
                 onClick={() => setPickerOpen((o) => !o)}
                 className={cn(
-                  "flex max-w-[55%] shrink-0 items-center gap-0.5 truncate border-r border-white/[0.08] bg-[#1e1e1e] px-1.5 text-left text-[11px] font-medium leading-4 text-accent transition-colors hover:bg-white/[0.06]",
+                  "flex max-w-[55%] shrink-0 items-center gap-0.5 truncate border-r border-app-border bg-app-surface px-1.5 text-left text-[11px] font-medium leading-4 text-accent transition-colors hover:bg-app-hover",
                   pickerOpen && "bg-accent/10",
                 )}
                 title={`${libraryName} — click to change library color`}
@@ -144,7 +144,7 @@ export function ColorInput({
               </button>
             ) : (
               <span
-                className="flex max-w-[55%] shrink-0 items-center truncate border-r border-white/[0.08] bg-[#1e1e1e] px-1.5 text-[11px] font-medium leading-4 text-accent"
+                className="flex max-w-[55%] shrink-0 items-center truncate border-r border-app-border bg-app-surface px-1.5 text-[11px] font-medium leading-4 text-accent"
                 title={libraryName}
               >
                 {libraryName}
@@ -155,7 +155,7 @@ export function ColorInput({
             type="text"
             disabled={disabled}
             className={cn(
-              "h-full min-w-0 flex-1 border-0 bg-transparent px-1.5 py-0 font-mono text-[12px] leading-4 text-[#f5f5f5] focus-visible:outline-none disabled:opacity-45",
+              "h-full min-w-0 flex-1 border-0 bg-transparent px-1.5 py-0 font-mono text-[12px] leading-4 text-app-field-fg focus-visible:outline-none disabled:opacity-45",
               libraryName && "max-w-[45%]",
             )}
             value={text}

@@ -1,7 +1,7 @@
 import type { EditorComment } from "@/lib/comments";
 import type { EditorAsset } from "@/lib/documentPersistence";
 import type { DesignToken } from "@/lib/designTokens";
-import type { EditorNode } from "@/stores/useEditorStore";
+import type { EditorNode, LayoutGuide } from "@/stores/useEditorStore";
 
 /** Persisted document slice for undo/redo (not written to localStorage). */
 export interface PersistedEditorSnapshot {
@@ -15,8 +15,10 @@ export interface PersistedEditorSnapshot {
   zoom: number;
   pan: { x: number; y: number };
   showGrid: boolean;
+  showRulers?: boolean;
   canvasBackgroundColor: string;
   comments: EditorComment[];
+  layoutGuides?: LayoutGuide[];
 }
 
 export type HistorySnapshotInput = Pick<
@@ -29,8 +31,10 @@ export type HistorySnapshotInput = Pick<
   | "zoom"
   | "pan"
   | "showGrid"
+  | "showRulers"
   | "canvasBackgroundColor"
   | "comments"
+  | "layoutGuides"
 > & { fileName: string };
 
 export function editorStateToHistorySnapshot(s: HistorySnapshotInput): PersistedEditorSnapshot {
@@ -44,8 +48,10 @@ export function editorStateToHistorySnapshot(s: HistorySnapshotInput): Persisted
     zoom: s.zoom,
     pan: { ...s.pan },
     showGrid: s.showGrid,
+    showRulers: s.showRulers,
     canvasBackgroundColor: s.canvasBackgroundColor,
     comments: structuredClone(s.comments),
+    layoutGuides: structuredClone(s.layoutGuides),
   };
 }
 
@@ -60,8 +66,10 @@ export function clonePersistedEditorSnapshot(s: PersistedEditorSnapshot): Persis
     zoom: s.zoom,
     pan: s.pan,
     showGrid: s.showGrid,
+    showRulers: s.showRulers,
     canvasBackgroundColor: s.canvasBackgroundColor,
     comments: s.comments,
+    layoutGuides: s.layoutGuides ?? [],
   });
 }
 
@@ -90,7 +98,9 @@ export function historySnapshotToEditorPatch(snap: PersistedEditorSnapshot) {
     zoom: snap.zoom,
     pan: { ...snap.pan },
     showGrid: snap.showGrid,
+    showRulers: snap.showRulers ?? true,
     canvasBackgroundColor: snap.canvasBackgroundColor,
     comments,
+    layoutGuides: structuredClone(snap.layoutGuides ?? []),
   };
 }

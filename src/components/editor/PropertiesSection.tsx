@@ -20,14 +20,14 @@ export function PropertiesSection({
   const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <section className={cn("border-b border-white/[0.06]", className)}>
+    <section className={cn("border-b border-app-border-subtle", className)}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-1 px-2 py-1.5 text-left text-[11px] font-semibold uppercase tracking-[0.05em] text-[#8c8c8c] transition-colors hover:bg-white/[0.04] hover:text-[#c4c4c4]"
+        className="flex w-full items-center gap-1 px-2 py-2 text-left text-[11px] font-semibold text-app-fg transition-colors hover:bg-app-hover"
       >
         <ChevronRight
-          className={cn("h-3 w-3 shrink-0 text-[#6b6b6b] transition-transform", open && "rotate-90")}
+          className={cn("h-3 w-3 shrink-0 text-app-subtle transition-transform", open && "rotate-90")}
           strokeWidth={2}
         />
         {title}

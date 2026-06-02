@@ -1,3 +1,4 @@
+import { getNodeCornerRadii, roundedRectPathD, roundedRectPolygonPoints } from "@/lib/cornerRadius";
 import type { EditorNode } from "@/stores/useEditorStore";
 import { ROOT } from "@/stores/useEditorStore";
 import { topLevelSelectedIds } from "@/lib/editorGraph";
@@ -8,7 +9,7 @@ import {
   getNodeTransformedWorldBounds,
   getNodeWorldMatrix,
 } from "@/lib/transformMath";
-import { editorNodeToShape } from "@/lib/shapes/shapeModel";
+import { DEFAULT_SHAPE_FILL, editorNodeToShape } from "@/lib/shapes/shapeModel";
 import { worldRect } from "@/lib/tree";
 
 export type BooleanOperation = "union" | "subtract" | "intersect" | "exclude";
@@ -51,6 +52,17 @@ export function isMaskGroup(node: EditorNode | undefined): boolean {
   return Boolean(node?.type === "group" && node.maskId);
 }
 
+/** Paint-order for hit tests: masked content above mask shape (Figma). */
+export function maskGroupChildHitOrder(
+  parent: Pick<EditorNode, "type" | "maskId">,
+  childIds: string[],
+): string[] {
+  if (parent.type !== "group" || !parent.maskId) return childIds;
+  const maskId = parent.maskId;
+  const content = childIds.filter((id) => id !== maskId);
+  return [...content, maskId];
+}
+
 export function getBooleanEligibleSelection(
   selectedIds: string[],
   nodes: Record<string, EditorNode>,
@@ -79,19 +91,6 @@ export function topmostAmongSiblings(
   return best;
 }
 
-function rectPolygon(w: number, h: number, r = 0): { x: number; y: number }[] {
-  if (r <= 0) {
-    return [
-      { x: 0, y: 0 },
-      { x: w, y: 0 },
-      { x: w, y: h },
-      { x: 0, y: h },
-    ];
-  }
-  const pts = generatePolygonPoints(4, w, h);
-  return pts.map((p) => ({ x: p.x, y: p.y }));
-}
-
 /** Local-space SVG subpath for a shape node (inside its own box). */
 export function nodeToLocalSvgSubpath(node: EditorNode): string {
   const w = Math.max(1, node.width);
@@ -107,12 +106,8 @@ export function nodeToLocalSvgSubpath(node: EditorNode): string {
     return `${d} Z`;
   }
   if (node.type === "rectangle") {
-    const r = Math.min(node.cornerRadius ?? 0, w / 2, h / 2);
-    if (r <= 0) return `M 0 0 H ${w} V ${h} H 0 Z`;
-    const pts = rectPolygon(w, h, r);
-    let d = `M ${pts[0]!.x} ${pts[0]!.y}`;
-    for (let i = 1; i < pts.length; i++) d += ` L ${pts[i]!.x} ${pts[i]!.y}`;
-    return `${d} Z`;
+    const radii = getNodeCornerRadii(node);
+    return roundedRectPathD(w, h, radii);
   }
   return "";
 }
@@ -147,7 +142,7 @@ export function shapeNodeToWorldPolygon(
       return generatePolygonPoints(segs, w, h).map((p) => ({ x: p.x, y: p.y }));
     }
     if (node.type === "rectangle") {
-      return rectPolygon(w, h, node.cornerRadius ?? 0);
+      return roundedRectPolygonPoints(w, h, getNodeCornerRadii(node));
     }
     if (node.type === "group" && node.isBooleanGroup) {
       const wb = getNodeTransformedWorldBounds(nodeId, nodes);
@@ -176,7 +171,7 @@ export function shapesToBooleanInput(
       return {
         id,
         polygon,
-        fill: node.fillEnabled === false ? "transparent" : (node.fill ?? "#0d99ff"),
+        fill: node.fillEnabled === false ? "transparent" : (node.fill ?? DEFAULT_SHAPE_FILL),
       };
     })
     .filter(Boolean) as BooleanInput[];
@@ -202,7 +197,7 @@ export function buildCompositePathDForGroup(
   const originX = groupW.x;
   const originY = groupW.y;
   const parts: string[] = [];
-  let fill = "#0d99ff";
+  let fill = DEFAULT_SHAPE_FILL;
 
   for (const cid of childIds) {
     const node = nodes[cid];

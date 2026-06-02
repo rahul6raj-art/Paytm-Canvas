@@ -13,8 +13,8 @@ export function LeftSidebar() {
   const setLeftTab = useEditorStore((s) => s.setLeftTab);
 
   return (
-    <aside className="flex w-[min(240px,28vw)] min-w-[180px] max-w-[260px] shrink-0 flex-col border-r border-black/30 bg-chrome-panel shadow-panel">
-      <div className="flex h-8 shrink-0 border-b border-black/30">
+    <aside className="flex w-[min(240px,28vw)] min-w-[180px] max-w-[260px] shrink-0 flex-col border-r border-app-border bg-chrome-panel shadow-app-panel">
+      <div className="flex h-8 shrink-0 border-b border-app-border">
         {(["layers", "components", "assets", "styles"] as const).map((t) => (
           <button
             key={t}
@@ -23,8 +23,8 @@ export function LeftSidebar() {
             className={cn(
               "relative flex-1 text-[10px] font-semibold uppercase tracking-wide transition-colors",
               leftTab === t
-                ? "text-white after:absolute after:bottom-0 after:left-1 after:right-1 after:h-0.5 after:rounded-full after:bg-accent"
-                : "text-[#7a7a7a] hover:text-[#d4d4d4]",
+                ? "text-app-fg after:absolute after:bottom-0 after:left-1 after:right-1 after:h-0.5 after:rounded-full after:bg-accent"
+                : "text-app-subtle hover:text-app-fg",
             )}
           >
             {t === "layers"

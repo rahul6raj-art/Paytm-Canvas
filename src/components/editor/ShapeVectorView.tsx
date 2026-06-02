@@ -1,36 +1,60 @@
 "use client";
 
-import { pathToSvgD } from "@/lib/pathGeometry";
+import { pathOutlineD } from "@/lib/shapes/shapeToPath";
 import { effectiveFillType, fillPaintCss } from "@/lib/fillGradient";
 import { ShapeGradientFill } from "./ShapeGradientFill";
+import {
+  clampCornerRadii,
+  getNodeCornerRadii,
+  isUniformCornerRadii,
+  roundedRectPathD,
+  uniformCornerRadiusForRect,
+} from "@/lib/cornerRadius";
+import {
+  resolveStrokeEndPoint,
+  resolveStrokeStartPoint,
+  strokeEndpointMarkerDefs,
+  strokeMarkerRefs,
+  unifiedLineCap,
+} from "@/lib/strokeEndpoints";
+import {
+  resolveStrokeColor,
+  strokeIsVisible,
+  svgStrokePropsFromNode,
+} from "@/lib/stroke";
 import type { EditorNode } from "@/stores/useEditorStore";
 
-function strokeDashArray(style: EditorNode["strokeStyle"], sw: number): string | undefined {
-  if (style === "dashed") return `${sw * 4} ${sw * 2}`;
-  if (style === "dotted") return `${sw} ${sw * 1.5}`;
-  return undefined;
-}
-
 /** SVG vector body for shapes — sharper than CSS borders under canvas zoom transforms. */
-export function ShapeVectorView({ node, nodeId }: { node: EditorNode; nodeId: string }) {
+export function ShapeVectorView({
+  node,
+  nodeId,
+  strokeOnly = false,
+}: {
+  node: EditorNode;
+  nodeId: string;
+  /** Draw stroke only (frame fill stays on the HTML shell). */
+  strokeOnly?: boolean;
+}) {
   const sw = node.strokeWidth ?? 0;
-  const sc = node.strokeColor ?? "#0f172a";
+  const sc = resolveStrokeColor(node);
+  const showStroke = strokeIsVisible(node);
   const fill = fillPaintCss(node);
   const isGradientFill = effectiveFillType(node) === "gradient";
-  const showShapeFill = node.fillEnabled !== false && isGradientFill;
-  const fillVisible = node.fillEnabled !== false;
+  const showShapeFill = !strokeOnly && node.fillEnabled !== false && isGradientFill;
+  const fillVisible = !strokeOnly && node.fillEnabled !== false;
   const solidFill = fillVisible && !showShapeFill ? fill : "none";
-  const dash = strokeDashArray(node.strokeStyle, sw);
+  const strokePresentation = svgStrokePropsFromNode(node);
   const strokeProps = {
-    stroke: sw > 0 ? sc : "none",
-    strokeWidth: sw,
-    strokeDasharray: dash,
-    strokeLinejoin: "round" as const,
-    strokeLinecap: "round" as const,
+    stroke: showStroke ? sc : "none",
+    strokeWidth: showStroke ? sw : 0,
+    ...strokePresentation,
   };
 
-  if (node.type === "rectangle") {
-    const r = Math.min(node.cornerRadius ?? 0, node.width / 2, node.height / 2);
+  if (node.type === "rectangle" || node.type === "frame") {
+    const radii = clampCornerRadii(getNodeCornerRadii(node), node.width, node.height);
+    const uniform = isUniformCornerRadii(radii);
+    const r = uniformCornerRadiusForRect(node, node.width, node.height);
+    const pathD = uniform ? null : roundedRectPathD(node.width, node.height, radii);
     return (
       <>
         {showShapeFill ? <ShapeGradientFill node={node} nodeId={nodeId} shape="rect" /> : null}
@@ -40,16 +64,20 @@ export function ShapeVectorView({ node, nodeId }: { node: EditorNode; nodeId: st
           height={node.height}
           aria-hidden
         >
-          <rect
-            x={0}
-            y={0}
-            width={node.width}
-            height={node.height}
-            rx={r}
-            ry={r}
-            fill={solidFill}
-            {...strokeProps}
-          />
+          {pathD ? (
+            <path d={pathD} fill={solidFill} {...strokeProps} />
+          ) : (
+            <rect
+              x={0}
+              y={0}
+              width={node.width}
+              height={node.height}
+              rx={r}
+              ry={r}
+              fill={solidFill}
+              {...strokeProps}
+            />
+          )}
         </svg>
       </>
     );
@@ -76,21 +104,32 @@ export function ShapeVectorView({ node, nodeId }: { node: EditorNode; nodeId: st
   if (node.type === "line") {
     const mid = node.height / 2;
     return (
-      <svg
-        className="pointer-events-none absolute inset-0 block overflow-visible"
+      <StrokedLineSvg
+        nodeId={nodeId}
         width={node.width}
         height={node.height}
-        aria-hidden
-      >
-        <line x1={0} y1={mid} x2={node.width} y2={mid} fill="none" {...strokeProps} />
-      </svg>
+        x1={0}
+        y1={mid}
+        x2={node.width}
+        y2={mid}
+        strokeColor={sc}
+        strokeWidth={sw}
+        showStroke={showStroke}
+        node={node}
+        strokeProps={strokeProps}
+      />
     );
   }
 
   if (node.type === "path") {
-    const pts = node.pathPoints ?? [];
     const closed = node.pathClosed ?? false;
-    const d = node.flattenedPathData ?? pathToSvgD(pts, closed);
+    const d = node.flattenedPathData ?? pathOutlineD(node);
+    const start = resolveStrokeStartPoint(node);
+    const end = resolveStrokeEndPoint(node);
+    const markerPrefix = `pc-stroke-${nodeId}`;
+    const markers = !closed ? strokeEndpointMarkerDefs(markerPrefix, start, end, sc, sw) : "";
+    const markerRefs = !closed ? strokeMarkerRefs(start, end, markerPrefix) : {};
+    const lineCap = !closed ? unifiedLineCap(start, end) : undefined;
     return (
       <>
         {showShapeFill && d ? (
@@ -102,10 +141,14 @@ export function ShapeVectorView({ node, nodeId }: { node: EditorNode; nodeId: st
           height={node.height}
           aria-hidden
         >
+          {markers ? <defs dangerouslySetInnerHTML={{ __html: markers }} /> : null}
           <path
             d={d || "M0 0"}
             fill={closed && fillVisible && !showShapeFill ? solidFill : "none"}
             {...strokeProps}
+            {...(lineCap ? { strokeLinecap: lineCap } : {})}
+            markerStart={markerRefs.markerStart}
+            markerEnd={markerRefs.markerEnd}
           />
         </svg>
       </>
@@ -113,4 +156,61 @@ export function ShapeVectorView({ node, nodeId }: { node: EditorNode; nodeId: st
   }
 
   return null;
+}
+
+function StrokedLineSvg({
+  nodeId,
+  width,
+  height,
+  x1,
+  y1,
+  x2,
+  y2,
+  strokeColor,
+  strokeWidth,
+  showStroke,
+  node,
+  strokeProps,
+}: {
+  nodeId: string;
+  width: number;
+  height: number;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  strokeColor: string;
+  strokeWidth: number;
+  showStroke: boolean;
+  node: EditorNode;
+  strokeProps: Record<string, unknown>;
+}) {
+  const start = resolveStrokeStartPoint(node);
+  const end = resolveStrokeEndPoint(node);
+  const prefix = `pc-stroke-${nodeId}`;
+  const markers = strokeEndpointMarkerDefs(prefix, start, end, strokeColor, strokeWidth);
+  const markerRefs = strokeMarkerRefs(start, end, prefix);
+  const lineCap = unifiedLineCap(start, end);
+
+  return (
+    <svg
+      className="pointer-events-none absolute inset-0 block overflow-visible"
+      width={width}
+      height={height}
+      aria-hidden
+    >
+      {markers ? <defs dangerouslySetInnerHTML={{ __html: markers }} /> : null}
+      <line
+        x1={x1}
+        y1={y1}
+        x2={x2}
+        y2={y2}
+        fill="none"
+        {...strokeProps}
+        {...(lineCap ? { strokeLinecap: lineCap } : {})}
+        markerStart={showStroke ? markerRefs.markerStart : undefined}
+        markerEnd={showStroke ? markerRefs.markerEnd : undefined}
+      />
+    </svg>
+  );
 }

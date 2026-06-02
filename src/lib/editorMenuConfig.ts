@@ -1,5 +1,6 @@
 import type { EditorState } from "@/stores/useEditorStore";
 import { COMMAND_BY_ID } from "@/lib/commands";
+import { applyThemePreference } from "@/lib/theme";
 
 export type MenuItemDef =
   | { type: "command"; commandId: string }
@@ -45,6 +46,8 @@ export const EDITOR_MENUS: EditorMenuDef[] = [
       action("Import file…", () => {
         document.querySelector<HTMLInputElement>("[data-editor-import-input]")?.click();
       }),
+      action("Design ↔ Code (export)…", (s) => s.openCodeRoundTrip("export")),
+      action("Design ↔ Code (import)…", (s) => s.openCodeRoundTrip("import")),
       div(),
       cmd("open-version-history"),
       div(),
@@ -104,6 +107,11 @@ export const EDITOR_MENUS: EditorMenuDef[] = [
       }),
       div(),
       cmd("toggle-ui-chrome"),
+      div(),
+      action("Appearance: Light", () => applyThemePreference("light")),
+      action("Appearance: Dark", () => applyThemePreference("dark")),
+      action("Appearance: System", () => applyThemePreference("system")),
+      div(),
       cmd("toggle-grid"),
       cmd("toggle-comments-panel"),
       cmd("toggle-presence"),

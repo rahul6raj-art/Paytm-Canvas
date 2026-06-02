@@ -42,11 +42,11 @@ export function PrototypeInspector({ node }: { node: EditorNode }) {
   return (
     <div className="space-y-3 p-3">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-[#8c8c8c]">Interactions</p>
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-app-subtle">Interactions</p>
         <button
           type="button"
           onClick={addInteraction}
-          className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] font-medium text-[#e6e6e6] transition-colors hover:border-accent/40 hover:bg-accent/10"
+          className="rounded-md border border-white/10 bg-app-hover px-2 py-1 text-[11px] font-medium text-app-fg transition-colors hover:border-accent/40 hover:bg-accent/10"
         >
           Add interaction
         </button>
@@ -63,7 +63,7 @@ export function PrototypeInspector({ node }: { node: EditorNode }) {
                   l.id === selectedPrototypeLinkId ||
                   (!selectedPrototypeLinkId && links[0]?.id === l.id)
                     ? "w-full rounded-md border border-accent/45 bg-accent/10 px-2 py-1.5 text-left text-[11px] text-white"
-                    : "w-full rounded-md border border-transparent px-2 py-1.5 text-left text-[11px] text-[#c4c4c4] hover:border-white/10 hover:bg-white/[0.04]"
+                    : "w-full rounded-md border border-transparent px-2 py-1.5 text-left text-[11px] text-app-muted hover:border-white/10 hover:bg-app-hover"
                 }
               >
                 {l.trigger} → {l.action}
@@ -73,17 +73,17 @@ export function PrototypeInspector({ node }: { node: EditorNode }) {
           ))}
         </ul>
       ) : (
-        <p className="text-[12px] leading-relaxed text-[#8c8c8c]">No interactions yet. Drag the blue handle on the canvas to wire to a frame, or add one here.</p>
+        <p className="text-[12px] leading-relaxed text-app-subtle">No interactions yet. Drag the blue handle on the canvas to wire to a frame, or add one here.</p>
       )}
 
       {displayLink ? (
-        <div className="space-y-2 border-t border-white/[0.06] pt-3">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6b6b6b]">Selected interaction</p>
+        <div className="space-y-2 border-t border-app-border-subtle pt-3">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-app-subtle">Selected interaction</p>
 
           <label className="block space-y-1">
-            <span className="text-[10px] text-[#8c8c8c]">Trigger</span>
+            <span className="text-[10px] text-app-subtle">Trigger</span>
             <select
-              className="h-8 w-full rounded-md border border-white/10 bg-[#2c2c2c] px-2 text-[12px] text-[#ececec] outline-none focus:border-accent/50"
+              className="h-8 w-full rounded-md border border-white/10 bg-app-panel px-2 text-[12px] text-app-fg outline-none focus:border-accent/50"
               value={displayLink.trigger}
               onChange={(e) =>
                 updatePrototypeLink(displayLink.id, { trigger: e.target.value as PrototypeTrigger })
@@ -95,9 +95,9 @@ export function PrototypeInspector({ node }: { node: EditorNode }) {
           </label>
 
           <label className="block space-y-1">
-            <span className="text-[10px] text-[#8c8c8c]">Action</span>
+            <span className="text-[10px] text-app-subtle">Action</span>
             <select
-              className="h-8 w-full rounded-md border border-white/10 bg-[#2c2c2c] px-2 text-[12px] text-[#ececec] outline-none focus:border-accent/50"
+              className="h-8 w-full rounded-md border border-white/10 bg-app-panel px-2 text-[12px] text-app-fg outline-none focus:border-accent/50"
               value={displayLink.action}
               onChange={(e) =>
                 updatePrototypeLink(displayLink.id, { action: e.target.value as PrototypeAction })
@@ -111,9 +111,9 @@ export function PrototypeInspector({ node }: { node: EditorNode }) {
 
           {displayLink.action !== "back" ? (
             <label className="block space-y-1">
-              <span className="text-[10px] text-[#8c8c8c]">Destination frame</span>
+              <span className="text-[10px] text-app-subtle">Destination frame</span>
               <select
-                className="h-8 w-full rounded-md border border-white/10 bg-[#2c2c2c] px-2 text-[12px] text-[#ececec] outline-none focus:border-accent/50"
+                className="h-8 w-full rounded-md border border-white/10 bg-app-panel px-2 text-[12px] text-app-fg outline-none focus:border-accent/50"
                 value={displayLink.targetFrameId ?? ""}
                 onChange={(e) =>
                   updatePrototypeLink(displayLink.id, {
@@ -132,9 +132,9 @@ export function PrototypeInspector({ node }: { node: EditorNode }) {
           ) : null}
 
           <label className="block space-y-1">
-            <span className="text-[10px] text-[#8c8c8c]">Transition</span>
+            <span className="text-[10px] text-app-subtle">Transition</span>
             <select
-              className="h-8 w-full rounded-md border border-white/10 bg-[#2c2c2c] px-2 text-[12px] text-[#ececec] outline-none focus:border-accent/50"
+              className="h-8 w-full rounded-md border border-white/10 bg-app-panel px-2 text-[12px] text-app-fg outline-none focus:border-accent/50"
               value={displayLink.transition}
               onChange={(e) =>
                 updatePrototypeLink(displayLink.id, { transition: e.target.value as PrototypeTransition })
