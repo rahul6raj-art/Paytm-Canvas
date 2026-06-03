@@ -24,6 +24,16 @@ export function viewportToWorld(
   return { x: (vx - pan.x) / zoom, y: (vy - pan.y) / zoom };
 }
 
+/** World (canvas) space → viewport-local pixels (screen-stable overlays). */
+export function worldToViewport(
+  worldX: number,
+  worldY: number,
+  pan: { x: number; y: number },
+  zoom: number,
+): { x: number; y: number } {
+  return { x: worldX * zoom + pan.x, y: worldY * zoom + pan.y };
+}
+
 /** Client → world using a known viewport rect and pan/zoom. */
 export function clientToWorldFromRect(
   clientX: number,

@@ -10,6 +10,7 @@ import {
   isCanvasSelectTool,
 } from "@/lib/canvasInteractionGuards";
 import { CANVAS_VISUAL, screenPxToWorld } from "@/lib/canvasVisual";
+import { getRenderedWorldTopLeft } from "@/lib/editorGraph";
 import { releaseFieldFocusForCanvas } from "@/lib/editorKeyboardFocus";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/useEditorStore";
@@ -21,6 +22,7 @@ type RootFrameLabelsProps = {
 
 export function RootFrameLabels({ rootIds }: RootFrameLabelsProps) {
   const nodes = useEditorStore((s) => s.nodes);
+  const childOrder = useEditorStore((s) => s.childOrder);
   const zoom = useEditorStore((s) => s.zoom);
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const layerRenameId = useEditorStore((s) => s.layerRenameId);
@@ -40,13 +42,15 @@ export function RootFrameLabels({ rootIds }: RootFrameLabelsProps) {
         const selected = selectedIds.includes(rid);
         const renaming = layerRenameId === rid;
 
+        const origin = getRenderedWorldTopLeft(rid, nodes, childOrder);
+
         return (
           <FrameLabel
             key={rid}
             frameId={rid}
             name={node.name}
-            left={node.x}
-            top={node.y - labelOffset}
+            left={origin.x}
+            top={origin.y - labelOffset}
             fontSize={labelFontSize}
             selected={selected}
             locked={node.locked}

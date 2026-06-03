@@ -3,6 +3,7 @@ import {
   centeredLocalPointInParent,
   clampInsertLocalPoint,
   frameParentAtWorldPoint,
+  insertNodeWithFrameParenting,
   pickDeepestFrameAtWorldPoint,
   resolveFrameParentForShapeInsert,
   pickDeepestVisibleNodeAtWorldPoint,
@@ -61,8 +62,12 @@ import {
   relayoutParentKeysAfterManualPosition,
 } from "@/lib/alignSelection";
 import {
+  clonedNodePosition,
   collectSubtreeIds,
+  getRenderedWorldTopLeft,
   insertNodeInChildOrder,
+  buildParentMapFromChildOrder,
+  worldPointToParentLocalFromChildOrder,
   isAncestorOf,
   nextDuplicateName,
   nextFrameName,
@@ -114,7 +119,8 @@ import {
   scaleSubtreeContentPatches,
   shouldProportionalFrameScale,
 } from "@/lib/resizeContent";
-import { convertFigBytesToPaytmCraft, isFigmaFigFile } from "@/lib/figImport";
+import { convertFigFileAsync, isFigmaFigFile } from "@/lib/figImport";
+import { startTransition } from "react";
 import {
   computeTextBoxSize,
   patchAffectsTextLayout,
@@ -720,6 +726,7 @@ export interface EditorState {
   commitLayoutGuide: () => void;
   selectLayoutGuide: (id: string | null) => void;
   removeLayoutGuide: (id: string) => void;
+  updateLayoutGuidePosition: (id: string, pos: number, opts?: { skipHistory?: boolean }) => void;
   toggleGrid: () => void;
   toggleRulers: () => void;
   setCanvasBackgroundColor: (hex: string) => void;
@@ -737,6 +744,8 @@ export interface EditorState {
   focusComment: (id: string) => void;
   startPathAt: (point: { x: number; y: number }) => void;
   addPathPoint: (point: { x: number; y: number }) => void;
+  /** Figma-style click-drag: anchor at click, symmetric handles from drag vector. */
+  addPathPointDrag: (anchorWorld: { x: number; y: number }, dragWorld: { x: number; y: number }) => void;
   /** Finish pen drawing. `true` = close path (click on first point); `false`/omit = open path. */
   finishPath: (asClosed?: boolean) => void;
   cancelPath: () => void;
@@ -880,6 +889,8 @@ export interface EditorState {
   importHubOpen: boolean;
   importWebModalOpen: boolean;
   importFigmaModalOpen: boolean;
+  /** True while a .fig file is being parsed (worker or main thread). */
+  figImportInProgress: boolean;
   codeRoundTripOpen: boolean;
   codeRoundTripTab: "export" | "import";
   /** Import lines preserved from uploaded React for 1:1 export */
@@ -1029,7 +1040,7 @@ function applyMoveNodeToParent(
   if (id === newParentKey) return null;
   if (newParentKey !== ROOT && isAncestorOf(s.nodes, id, newParentKey)) return null;
 
-  const origin = getNodeWorldOrigin(id, s.nodes);
+  const origin = getRenderedWorldTopLeft(id, s.nodes, s.childOrder);
   const co: Record<string, string[]> = { ...s.childOrder };
   const oldList = [...(co[oldKey] ?? [])];
   const oldIdx = oldList.indexOf(id);
@@ -1054,7 +1065,13 @@ function applyMoveNodeToParent(
 
   if (parentChanged) {
     if (newParentNodeId) {
-      const local = worldPointToParentLocal(origin.x, origin.y, newParentNodeId, s.nodes);
+      const local = worldPointToParentLocalFromChildOrder(
+        origin.x,
+        origin.y,
+        newParentNodeId,
+        nodes,
+        co,
+      );
       next.x = local.x;
       next.y = local.y;
     } else {
@@ -1064,7 +1081,8 @@ function applyMoveNodeToParent(
   }
 
   nodes[id] = next;
-  return { nodes, childOrder: co };
+  const repaired = repairNodeHierarchy(nodes, co);
+  return { nodes: repaired.nodes, childOrder: repaired.childOrder };
 }
 
 function buildMock(): Pick<EditorState, "nodes" | "childOrder"> {
@@ -1528,25 +1546,36 @@ function cloneTopLevelSelectionState(
   const nodes: Record<string, EditorNode> = { ...s.nodes };
   const childOrder: Record<string, string[]> = { ...s.childOrder };
   const newRoots: string[] = [];
+  const parentOf = buildParentMapFromChildOrder(s.childOrder);
 
   for (const rootId of tops) {
     const rootOld = s.nodes[rootId];
     if (!rootOld) continue;
     const nameForRoot = nextDuplicateName(nodes);
     const idMap = new Map<string, string>();
+    const renderParent = parentOf.get(rootId) ?? null;
 
     const cloneRecursive = (oldId: string, newParent: string | null): string => {
       const old = s.nodes[oldId];
       if (!old) return "";
       const newId = `${old.type}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       idMap.set(oldId, newId);
+      const pos = clonedNodePosition(
+        oldId,
+        oldId === rootId,
+        offset,
+        s.nodes,
+        s.childOrder,
+        newParent,
+        old,
+      );
       const base: EditorNode = {
         ...old,
         id: newId,
         parentId: newParent,
         name: oldId === rootId ? nameForRoot : old.name,
-        x: old.x + offset,
-        y: old.y + offset,
+        x: pos.x,
+        y: pos.y,
       };
       let next: EditorNode =
         old.type === "path" && old.pathPoints?.length
@@ -1564,7 +1593,7 @@ function cloneTopLevelSelectionState(
       return newId;
     };
 
-    const newRootId = cloneRecursive(rootId, rootOld.parentId);
+    const newRootId = cloneRecursive(rootId, renderParent);
     for (const nid of collectSubtreeIds(newRootId, childOrder)) {
       const n = nodes[nid]!;
       if (!n.prototypeLinks?.length) continue;
@@ -1579,7 +1608,7 @@ function cloneTopLevelSelectionState(
         })),
       };
     }
-    const P = parentListKey(rootOld.parentId);
+    const P = parentListKey(renderParent);
     const list = [...(childOrder[P] ?? [])];
     const curIdx = list.indexOf(rootId);
     const insertAt = curIdx >= 0 ? curIdx + 1 : list.length;
@@ -1591,13 +1620,15 @@ function cloneTopLevelSelectionState(
   let nodesOut = nodes;
   const relayoutKeys = new Set<string>();
   for (const rootId of tops) {
-    relayoutKeys.add(parentListKey(s.nodes[rootId]!.parentId));
+    relayoutKeys.add(parentListKey(parentOf.get(rootId) ?? null));
   }
   nodesOut = relayoutParentsWithAutoLayout(nodesOut, childOrder, relayoutKeys);
 
+  const repaired = repairNodeHierarchy(nodesOut, childOrder);
+
   return {
-    nodes: nodesOut,
-    childOrder,
+    nodes: repaired.nodes,
+    childOrder: repaired.childOrder,
     selectedIds: newRoots,
     tool: "move",
     editingTextId: null,
@@ -2176,6 +2207,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   importHubOpen: false,
   importWebModalOpen: false,
   importFigmaModalOpen: false,
+  figImportInProgress: false,
   codeRoundTripOpen: false,
   codeRoundTripTab: "export",
   codeRoundTripSourceHeader: null,
@@ -2905,6 +2937,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
     });
   },
 
+  updateLayoutGuidePosition: (id, pos, opts) => {
+    if (!opts?.skipHistory) get().pushHistory();
+    set((state) => {
+      const layoutGuides = state.layoutGuides.map((g) =>
+        g.id === id ? { ...g, pos } : g,
+      );
+      const next = { ...state, layoutGuides };
+      return { layoutGuides, ...syncActivePageRecord(next) };
+    });
+  },
+
   setZoom: (zoom) => set({ zoom: clampCanvasZoom(zoom) }),
   setPan: (pan) => set({ pan }),
   patchPan: (d) => set((s) => ({ pan: { x: s.pan.x + d.x, y: s.pan.y + d.y } })),
@@ -3189,8 +3232,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const h = 80;
       const { x, y } = worldCenteredRootPoint(worldX, worldY, w, h);
       const id = `rect-${Date.now()}`;
-      const roots = [...(s.childOrder[ROOT] ?? [])];
-      roots.push(id);
       const node: EditorNode = {
         id,
         parentId: null,
@@ -3210,9 +3251,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
         fillOpacity: 1,
         strokePosition: "center",
       };
+      const inserted = insertNodeWithFrameParenting(
+        node,
+        { x, y, width: w, height: h },
+        s.nodes,
+        s.childOrder,
+        s.selectedIds,
+      );
       return {
-        nodes: { ...s.nodes, [id]: node },
-        childOrder: { ...s.childOrder, [ROOT]: roots },
+        nodes: inserted.nodes,
+        childOrder: inserted.childOrder,
         selectedIds: [id],
         tool: "move",
         editingTextId: null,
@@ -3235,8 +3283,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const boxW = Math.max(tw, EMPTY_TEXT_PLACEHOLDER_WIDTH);
       const { x, y } = worldCenteredRootPoint(worldX, worldY, boxW, th);
       const id = `text-${Date.now()}`;
-      const roots = [...(s.childOrder[ROOT] ?? [])];
-      roots.push(id);
       const node: EditorNode = {
         id,
         parentId: null,
@@ -3257,9 +3303,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
         fillEnabled: true,
         fillOpacity: 1,
       };
+      const inserted = insertNodeWithFrameParenting(
+        node,
+        { x, y, width: boxW, height: th },
+        s.nodes,
+        s.childOrder,
+        s.selectedIds,
+      );
       return {
-        nodes: { ...s.nodes, [id]: node },
-        childOrder: { ...s.childOrder, [ROOT]: roots },
+        nodes: inserted.nodes,
+        childOrder: inserted.childOrder,
         selectedIds: [id],
         tool: "move",
         editingTextId: id,
@@ -3305,8 +3358,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const cy = worldY ?? 200;
       const { x, y } = worldCenteredRootPoint(cx, cy, w, h);
       const id = `image-${Date.now()}`;
-      const roots = [...(s.childOrder[ROOT] ?? [])];
-      roots.push(id);
       const baseName = (asset.name || "Image").replace(/\.[^.]+$/, "") || "Image";
       const node: EditorNode = {
         id,
@@ -3329,9 +3380,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
         fillOpacity: 1,
         fillEnabled: true,
       };
+      const inserted = insertNodeWithFrameParenting(
+        node,
+        { x, y, width: w, height: h },
+        s.nodes,
+        s.childOrder,
+        s.selectedIds,
+      );
       return {
-        nodes: { ...s.nodes, [id]: node },
-        childOrder: { ...s.childOrder, [ROOT]: roots },
+        nodes: inserted.nodes,
+        childOrder: inserted.childOrder,
         selectedIds: [id],
         tool: "move" as Tool,
       };
@@ -3797,13 +3855,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const name = opts?.name ?? nextFrameName(s.nodes);
       const W = Math.max(RESIZE_MIN_DIMENSION, Math.round(width));
       const H = Math.max(RESIZE_MIN_DIMENSION, Math.round(height));
+      const bx = Math.round(x);
+      const by = Math.round(y);
       const node: EditorNode = {
         id,
         parentId: null,
         type: "frame",
         name,
-        x: Math.round(x),
-        y: Math.round(y),
+        x: bx,
+        y: by,
         width: W,
         height: H,
         rotation: 0,
@@ -3816,11 +3876,20 @@ export const useEditorStore = create<EditorState>((set, get) => {
         strokePosition: "center",
         clipChildren: true,
       };
-      const roots = [...(s.childOrder[ROOT] ?? [])];
-      roots.push(id);
+      const inserted = insertNodeWithFrameParenting(
+        node,
+        { x: bx, y: by, width: W, height: H },
+        s.nodes,
+        s.childOrder,
+        s.selectedIds,
+      );
+      const childOrder = {
+        ...inserted.childOrder,
+        [id]: inserted.childOrder[id] ?? [],
+      };
       return {
-        nodes: { ...s.nodes, [id]: node },
-        childOrder: { ...s.childOrder, [ROOT]: roots, [id]: [] },
+        nodes: inserted.nodes,
+        childOrder,
         selectedIds: [id],
         tool: "move",
         editingTextId: null,
@@ -3835,8 +3904,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const h = 80;
       const { x, y } = worldCenteredRootPoint(worldX, worldY, w, h);
       const id = `ellipse-${Date.now()}`;
-      const roots = [...(s.childOrder[ROOT] ?? [])];
-      roots.push(id);
       const node: EditorNode = {
         id,
         parentId: null,
@@ -3856,9 +3923,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
         fillOpacity: 1,
         strokePosition: "center",
       };
+      const inserted = insertNodeWithFrameParenting(
+        node,
+        { x, y, width: w, height: h },
+        s.nodes,
+        s.childOrder,
+        s.selectedIds,
+      );
       return {
-        nodes: { ...s.nodes, [id]: node },
-        childOrder: { ...s.childOrder, [ROOT]: roots },
+        nodes: inserted.nodes,
+        childOrder: inserted.childOrder,
         selectedIds: [id],
         tool: "move",
       };
@@ -3872,8 +3946,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const h = 8;
       const { x, y } = worldCenteredRootPoint(worldX, worldY, w, h);
       const id = `line-${Date.now()}`;
-      const roots = [...(s.childOrder[ROOT] ?? [])];
-      roots.push(id);
       const node: EditorNode = {
         id,
         parentId: null,
@@ -3894,9 +3966,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
         strokeWidth: 3,
         strokePosition: "center",
       };
+      const inserted = insertNodeWithFrameParenting(
+        node,
+        { x, y, width: w, height: h },
+        s.nodes,
+        s.childOrder,
+        s.selectedIds,
+      );
       return {
-        nodes: { ...s.nodes, [id]: node },
-        childOrder: { ...s.childOrder, [ROOT]: roots },
+        nodes: inserted.nodes,
+        childOrder: inserted.childOrder,
         selectedIds: [id],
         tool: "move",
       };
@@ -3910,8 +3989,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const h = 104;
       const { x, y } = worldCenteredRootPoint(worldX, worldY, w, h);
       const id = `tri-${Date.now()}`;
-      const roots = [...(s.childOrder[ROOT] ?? [])];
-      roots.push(id);
       const pts: PathPoint[] = [
         { id: newPathPointId(), x: w / 2, y: 0 },
         { id: newPathPointId(), x: w, y: h },
@@ -3940,9 +4017,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
         strokePosition: "center",
       };
       node = normalizePathNode(node);
+      const inserted = insertNodeWithFrameParenting(
+        node,
+        { x, y, width: node.width, height: node.height },
+        s.nodes,
+        s.childOrder,
+        s.selectedIds,
+      );
       return {
-        nodes: { ...s.nodes, [id]: node },
-        childOrder: { ...s.childOrder, [ROOT]: roots },
+        nodes: inserted.nodes,
+        childOrder: inserted.childOrder,
         selectedIds: [id],
         tool: "move",
       };
@@ -3954,44 +4038,23 @@ export const useEditorStore = create<EditorState>((set, get) => {
     set((s) => {
       const draft = createShapeNode(shapeType, start, end, modifiers, style);
       const id = `${draft.type}-${Date.now()}`;
-      let node: EditorNode = { ...draft, id };
-
-      const frameId = resolveFrameParentForShapeInsert(
-        { x: node.x, y: node.y, width: node.width, height: node.height },
+      const node: EditorNode = { ...draft, id };
+      const bounds = { x: node.x, y: node.y, width: node.width, height: node.height };
+      const inserted = insertNodeWithFrameParenting(
+        node,
+        bounds,
         s.nodes,
         s.childOrder,
         s.selectedIds,
       );
-
-      const nodes = { ...s.nodes, [id]: node };
-
-      if (frameId) {
-        const pw = worldRect(frameId, s.nodes);
-        const local = clampInsertLocalPoint(
-          node.x + node.width / 2,
-          node.y + node.height / 2,
-          pw,
-          node.width,
-          node.height,
-        );
-        node = { ...node, parentId: frameId, x: local.x, y: local.y };
-        nodes[id] = node;
-      } else {
-        node = { ...node, parentId: null };
-        nodes[id] = node;
-      }
-
-      let childOrder = insertNodeInChildOrder(s.childOrder, id, node.parentId);
-      const repaired = repairNodeHierarchy(nodes, childOrder);
-      nodes = repaired.nodes;
-      childOrder = repaired.childOrder;
+      const frameId = inserted.nodes[id]?.parentId;
       const nodesOut = frameId
-        ? relayoutParentsWithAutoLayout(nodes, childOrder, [frameId])
-        : nodes;
+        ? relayoutParentsWithAutoLayout(inserted.nodes, inserted.childOrder, [frameId])
+        : inserted.nodes;
 
       return {
         nodes: nodesOut,
-        childOrder,
+        childOrder: inserted.childOrder,
         selectedIds: [id],
       };
     });
@@ -5159,7 +5222,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const master = s.nodes[masterId];
       if (!master?.isComponent || !master.componentId) return s;
       const pid = frameParentAtWorldPoint(worldX, worldY, s.nodes, s.childOrder);
-      const pos = centeredLocalPointInParent(worldX, worldY, pid, s.nodes, master.width, master.height);
+      const pos = centeredLocalPointInParent(
+        worldX,
+        worldY,
+        pid,
+        s.nodes,
+        master.width,
+        master.height,
+        s.childOrder,
+      );
       const parentKey = parentListKey(pid);
       const res = cloneEditorSubtree(
         s.nodes,
@@ -5180,9 +5251,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (!res) return s;
       let { nodes, childOrder, newRootId } = res;
       if (pid) nodes = relayoutParentsWithAutoLayout(nodes, childOrder, [pid]);
+      const repaired = repairNodeHierarchy(nodes, childOrder);
       return {
-        nodes,
-        childOrder,
+        nodes: repaired.nodes,
+        childOrder: repaired.childOrder,
         selectedIds: [newRootId],
         tool: "move",
         placingComponentMasterId: null,
@@ -5315,65 +5387,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return nn && !nn.locked && nn.visible;
     });
     if (tops0.length === 0) return;
-    const rootOld0 = s0.nodes[tops0[0]!];
-    if (!rootOld0) return;
+    if (!s0.nodes[tops0[0]!]) return;
     get().pushHistory();
     set((s) => {
-      const OFFSET = 24;
-      const tops = topLevelSelectedIds([id], s.nodes).filter((tid) => {
-        const nn = s.nodes[tid];
-        return nn && !nn.locked && nn.visible;
-      });
-      if (tops.length === 0) return s;
-      const rootId = tops[0]!;
-      const rootOld = s.nodes[rootId];
-      if (!rootOld) return s;
-
-      const nodes: Record<string, EditorNode> = { ...s.nodes };
-      const childOrder: Record<string, string[]> = { ...s.childOrder };
-      const nameForRoot = nextDuplicateName(nodes);
-
-      const cloneRecursive = (oldId: string, newParent: string | null): string => {
-        const old = s.nodes[oldId];
-        if (!old) return "";
-        const newId = `${old.type}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-        const base: EditorNode = {
-          ...old,
-          id: newId,
-          parentId: newParent,
-          name: oldId === rootId ? nameForRoot : old.name,
-          x: old.x + OFFSET,
-          y: old.y + OFFSET,
-        };
-        nodes[newId] =
-          old.type === "path" && old.pathPoints?.length
-            ? { ...base, pathPoints: rekeyPathPoints(old.pathPoints) }
-            : base;
-        const newKids: string[] = [];
-        for (const k of s.childOrder[oldId] ?? []) {
-          newKids.push(cloneRecursive(k, newId));
-        }
-        childOrder[newId] = newKids;
-        return newId;
-      };
-
-      const newRootId = cloneRecursive(rootId, rootOld.parentId);
-      const P = parentListKey(rootOld.parentId);
-      const list = [...(childOrder[P] ?? [])];
-      const curIdx = list.indexOf(rootId);
-      const insertAt = curIdx >= 0 ? curIdx + 1 : list.length;
-      list.splice(insertAt, 0, newRootId);
-      childOrder[P] = list;
-
-      let nodesOut = nodes;
-      nodesOut = relayoutParentsWithAutoLayout(nodesOut, childOrder, [P]);
-
+      const cloned = cloneTopLevelSelectionState({ ...s, selectedIds: [id] }, 24);
+      if (!cloned) return s;
       return {
-        nodes: nodesOut,
-        childOrder,
-        selectedIds: [newRootId],
-        tool: "move" as Tool,
-        editingTextId: null,
+        ...cloned,
         contextMenu: null,
       };
     });
@@ -5940,18 +5960,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
     get().pushHistory();
     set((s) => {
       if (s.editorMode !== "design" || s.tool !== "pen" || s.penDrawingNodeId) return s;
-      const { x, y } = worldCenteredRootPoint(worldPoint.x, worldPoint.y, 1, 1);
+
       const id = `path-${Date.now()}`;
-      const roots = [...(s.childOrder[ROOT] ?? [])];
-      roots.push(id);
       const pt0: PathPoint = { id: newPathPointId(), x: 0, y: 0 };
-      const node: EditorNode = {
+      let node: EditorNode = {
         id,
         parentId: null,
         type: "path",
-        name: "Path",
-        x,
-        y,
+        name: "Vector",
+        x: 0,
+        y: 0,
         width: 1,
         height: 1,
         rotation: 0,
@@ -5967,10 +5985,18 @@ export const useEditorStore = create<EditorState>((set, get) => {
         strokeWidth: 2,
         strokePosition: "center",
       };
-      const normalized = normalizePathNode(node);
+      node = normalizePathNode(node);
+      const inserted = insertNodeWithFrameParenting(
+        node,
+        { x: worldPoint.x, y: worldPoint.y, width: node.width, height: node.height },
+        s.nodes,
+        s.childOrder,
+        s.selectedIds,
+      );
+
       return {
-        nodes: { ...s.nodes, [id]: normalized },
-        childOrder: { ...s.childOrder, [ROOT]: roots },
+        nodes: inserted.nodes,
+        childOrder: inserted.childOrder,
         penDrawingNodeId: id,
         selectedIds: [],
         tool: "pen",
@@ -5984,10 +6010,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
     if (!drawId || s0.tool !== "pen") return;
     const path = s0.nodes[drawId];
     if (!path || path.type !== "path" || !path.pathPoints?.length) return;
-    const wr = worldRect(drawId, s0.nodes);
+    const origin = getRenderedWorldTopLeft(drawId, s0.nodes, s0.childOrder);
     const first = path.pathPoints[0]!;
-    const wfx = wr.x + first.x;
-    const wfy = wr.y + first.y;
+    const wfx = origin.x + first.x;
+    const wfy = origin.y + first.y;
     if (path.pathPoints.length >= 2 && Math.hypot(worldPoint.x - wfx, worldPoint.y - wfy) <= 12) {
       get().finishPath(true);
       return;
@@ -5995,15 +6021,72 @@ export const useEditorStore = create<EditorState>((set, get) => {
     set((s) => {
       const n = s.nodes[drawId];
       if (!n || n.type !== "path" || !n.pathPoints) return s;
-      const nwr = worldRect(drawId, s.nodes);
-      const plx = worldPoint.x - nwr.x;
-      const ply = worldPoint.y - nwr.y;
+      const nOrigin = getRenderedWorldTopLeft(drawId, s.nodes, s.childOrder);
+      const plx = worldPoint.x - nOrigin.x;
+      const ply = worldPoint.y - nOrigin.y;
       const pts = [...n.pathPoints, { id: newPathPointId(), x: plx, y: ply }];
       let next: EditorNode = { ...n, pathPoints: pts };
       next = normalizePathNode(next);
       let nodes = { ...s.nodes, [drawId]: next };
       nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
-      return { nodes };
+      const repaired = repairNodeHierarchy(nodes, s.childOrder);
+      return { nodes: repaired.nodes, childOrder: repaired.childOrder };
+    });
+  },
+
+  addPathPointDrag: (anchorWorld, dragWorld) => {
+    const s0 = get();
+    const drawId = s0.penDrawingNodeId;
+    if (!drawId || s0.tool !== "pen") return;
+    const path = s0.nodes[drawId];
+    if (!path || path.type !== "path" || !path.pathPoints?.length) return;
+
+    const origin = getRenderedWorldTopLeft(drawId, s0.nodes, s0.childOrder);
+    const first = path.pathPoints[0]!;
+    const wfx = origin.x + first.x;
+    const wfy = origin.y + first.y;
+    if (path.pathPoints.length >= 2 && Math.hypot(anchorWorld.x - wfx, anchorWorld.y - wfy) <= 12) {
+      get().finishPath(true);
+      return;
+    }
+
+    set((s) => {
+      const n = s.nodes[drawId];
+      if (!n || n.type !== "path" || !n.pathPoints?.length) return s;
+      const nOrigin = getRenderedWorldTopLeft(drawId, s.nodes, s.childOrder);
+      const anchorLocal = {
+        x: anchorWorld.x - nOrigin.x,
+        y: anchorWorld.y - nOrigin.y,
+      };
+      const dragLocal = {
+        x: dragWorld.x - nOrigin.x,
+        y: dragWorld.y - nOrigin.y,
+      };
+      const hx = dragLocal.x - anchorLocal.x;
+      const hy = dragLocal.y - anchorLocal.y;
+
+      const pts = [...n.pathPoints];
+      const prevIdx = pts.length - 1;
+      const prev = pts[prevIdx]!;
+      pts[prevIdx] = {
+        ...prev,
+        handleOut: { x: hx, y: hy },
+      };
+
+      const newPt: PathPoint = {
+        id: newPathPointId(),
+        x: anchorLocal.x,
+        y: anchorLocal.y,
+        handleIn: { x: -hx, y: -hy },
+      };
+      pts.push(newPt);
+
+      let next: EditorNode = { ...n, pathPoints: pts };
+      next = normalizePathNode(next);
+      let nodes = { ...s.nodes, [drawId]: next };
+      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
+      const repaired = repairNodeHierarchy(nodes, s.childOrder);
+      return { nodes: repaired.nodes, childOrder: repaired.childOrder };
     });
   },
 
@@ -6013,7 +6096,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const closed = Boolean(asClosed);
     set((s) => {
       const n = s.nodes[id];
-      if (!n || n.type !== "path") return { ...s, penDrawingNodeId: null, tool: "move" as Tool };
+      if (!n || n.type !== "path") return { ...s, penDrawingNodeId: null };
       const pts = n.pathPoints ?? [];
       if (pts.length < 2) {
         const parentRef = n.parentId;
@@ -6024,10 +6107,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
           nodes: nodes2,
           childOrder,
           penDrawingNodeId: null,
-          tool: "move" as Tool,
           selectedIds: [],
           pathEditModeNodeId: null,
-  objectEditModeNodeId: null,
+          objectEditModeNodeId: null,
           selectedPathPointId: null,
         };
       }
@@ -6035,14 +6117,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
       next = normalizePathNode(next);
       let nodes = { ...s.nodes, [id]: next };
       nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
+      const repaired = repairNodeHierarchy(nodes, s.childOrder);
       return {
         ...s,
-        nodes,
+        nodes: repaired.nodes,
+        childOrder: repaired.childOrder,
         penDrawingNodeId: null,
-        tool: "move" as Tool,
         selectedIds: [id],
         pathEditModeNodeId: null,
-  objectEditModeNodeId: null,
+        objectEditModeNodeId: null,
         selectedPathPointId: null,
       };
     });
@@ -6052,7 +6135,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const id = get().penDrawingNodeId;
     if (!id) return;
     set((s) => {
-      if (!s.nodes[id]) return { ...s, penDrawingNodeId: null, tool: "move" as Tool };
+      if (!s.nodes[id]) return { ...s, penDrawingNodeId: null };
       const parentRef = s.nodes[id]?.parentId;
       const { nodes, childOrder } = removeNodeAndDescendants(s, id);
       const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
@@ -6061,7 +6144,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
         nodes: nodes2,
         childOrder,
         penDrawingNodeId: null,
-        tool: "move" as Tool,
         selectedIds: [],
       };
     });
@@ -6074,16 +6156,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
     set((s) => {
       if (s.editorMode !== "design" || s.tool !== "pencil" || s.pencilDrawingNodeId) return s;
       const id = `path-${Date.now()}`;
-      const roots = [...(s.childOrder[ROOT] ?? [])];
-      roots.push(id);
       const pt0: PathPoint = { id: newPathPointId(), x: 0, y: 0 };
-      const node: EditorNode = {
+      let node: EditorNode = {
         id,
         parentId: null,
         type: "path",
         name: "Freehand",
-        x: worldPoint.x,
-        y: worldPoint.y,
+        x: 0,
+        y: 0,
         width: 1,
         height: 1,
         rotation: 0,
@@ -6101,10 +6181,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
         strokeLinejoin: "round",
         strokePosition: "center",
       };
-      const normalized = normalizePathNode(node);
+      node = normalizePathNode(node);
+      const inserted = insertNodeWithFrameParenting(
+        node,
+        { x: worldPoint.x, y: worldPoint.y, width: node.width, height: node.height },
+        s.nodes,
+        s.childOrder,
+        s.selectedIds,
+      );
       return {
-        nodes: { ...s.nodes, [id]: normalized },
-        childOrder: { ...s.childOrder, [ROOT]: roots },
+        nodes: inserted.nodes,
+        childOrder: inserted.childOrder,
         pencilDrawingNodeId: id,
         selectedIds: [],
         tool: "pencil",
@@ -6118,23 +6205,24 @@ export const useEditorStore = create<EditorState>((set, get) => {
     if (!drawId || s0.tool !== "pencil") return;
     const path = s0.nodes[drawId];
     if (!path || path.type !== "path" || !path.pathPoints?.length) return;
-    const nwr = worldRect(drawId, s0.nodes);
-    const plx = worldPoint.x - nwr.x;
-    const ply = worldPoint.y - nwr.y;
+    const origin = getRenderedWorldTopLeft(drawId, s0.nodes, s0.childOrder);
+    const plx = worldPoint.x - origin.x;
+    const ply = worldPoint.y - origin.y;
     const last = path.pathPoints[path.pathPoints.length - 1]!;
     if (!shouldSampleFreehandPoint(last.x, last.y, plx, ply, s0.zoom)) return;
     set((s) => {
       const n = s.nodes[drawId];
       if (!n || n.type !== "path" || !n.pathPoints) return s;
-      const wr = worldRect(drawId, s.nodes);
-      const lx = worldPoint.x - wr.x;
-      const ly = worldPoint.y - wr.y;
+      const nOrigin = getRenderedWorldTopLeft(drawId, s.nodes, s.childOrder);
+      const lx = worldPoint.x - nOrigin.x;
+      const ly = worldPoint.y - nOrigin.y;
       const pts = [...n.pathPoints, { id: newPathPointId(), x: lx, y: ly }];
       let next: EditorNode = { ...n, pathPoints: pts };
       next = normalizePathNode(next);
       let nodes = { ...s.nodes, [drawId]: next };
       nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
-      return { nodes };
+      const repaired = repairNodeHierarchy(nodes, s.childOrder);
+      return { nodes: repaired.nodes, childOrder: repaired.childOrder };
     });
   },
 
@@ -6179,9 +6267,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
       next = normalizePathNode(next);
       let nodes = { ...s.nodes, [id]: next };
       nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
+      const repaired = repairNodeHierarchy(nodes, s.childOrder);
       return {
         ...s,
-        nodes,
+        nodes: repaired.nodes,
+        childOrder: repaired.childOrder,
         pencilDrawingNodeId: null,
         tool: "move" as Tool,
         selectedIds: [id],
@@ -6765,14 +6855,35 @@ export const useEditorStore = create<EditorState>((set, get) => {
   },
 
   importFigmaFile: async (file) => {
+    set({ figImportInProgress: true });
     try {
+      await new Promise<void>((resolve) => {
+        if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => resolve());
+        else setTimeout(resolve, 0);
+      });
       const bytes = new Uint8Array(await file.arrayBuffer());
-      const result = convertFigBytesToPaytmCraft(bytes, file.name);
+      const result = await convertFigFileAsync(bytes, file.name);
       if (!result.ok) {
         window.alert(result.error);
         return;
       }
-      set((s) => editorStateAfterDocumentImport(result.document, s));
+      startTransition(() => {
+        set((s) => {
+          const base = editorStateAfterDocumentImport(result.document, s);
+          const roots = base.childOrder?.[ROOT] ?? [];
+          const vp = viewportForRootNodes(base.nodes ?? {}, roots);
+          if (!vp) return base;
+          const pages = base.pages
+            ? Object.fromEntries(
+                Object.entries(base.pages).map(([id, page]) => [
+                  id,
+                  { ...page, zoom: vp.zoom, pan: vp.pan },
+                ]),
+              )
+            : base.pages;
+          return { ...base, zoom: vp.zoom, pan: vp.pan, pages };
+        });
+      });
       void getSyncProvider()
         .saveDocument(editorStateToDocument(toPersistSlice(get())))
         .catch((e) => {
@@ -6781,6 +6892,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
         });
     } catch (e) {
       window.alert(e instanceof Error ? e.message : "Could not import Figma file.");
+    } finally {
+      set({ figImportInProgress: false });
     }
   },
 

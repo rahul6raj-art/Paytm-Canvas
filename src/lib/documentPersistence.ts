@@ -12,7 +12,8 @@ import {
   type EditorPageSnapshot,
 } from "@/lib/editorPages";
 import { DEFAULT_CANVAS_BACKGROUND } from "@/lib/canvasVisual";
-import { repairNodeHierarchy } from "@/lib/editorGraph";
+import { repairNodeHierarchyIfNeeded } from "@/lib/editorGraph";
+import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import type { EditorNode, LayoutGuide } from "@/stores/useEditorStore";
 
 export type { EditorPage, EditorPageSnapshot };
@@ -193,7 +194,7 @@ export function documentToEditorPatch(doc: PaytmCraftDocument): EditorPersistSli
     };
   }
 
-  const repaired = repairNodeHierarchy(doc.nodes, doc.childOrder);
+  const repaired = repairNodeHierarchyIfNeeded(doc.nodes, doc.childOrder);
   const pageMeta = initialPagesFromCanvas(repaired.nodes, repaired.childOrder, {
     zoom: doc.canvas?.zoom ?? 0.55,
     pan: { x: doc.canvas?.panX ?? 40, y: doc.canvas?.panY ?? 24 },
@@ -307,6 +308,26 @@ export function readLocalDocument(): PaytmCraftDocument | null {
   } catch {
     return null;
   }
+}
+
+export function clearLocalDocument(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(PAYTM_CRAFT_DOCUMENT_STORAGE_KEY);
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+/** Fig/import glitches can leave thousands of nodes with an empty canvas root — loading that freezes the editor. */
+export function isBrokenOrphanedLocalDocument(doc: PaytmCraftDocument): boolean {
+  const activeSnap =
+    doc.pages?.find((p) => p.id === doc.activePageId) ?? doc.pages?.[0];
+  const nodes = activeSnap?.nodes ?? doc.nodes;
+  const childOrder = activeSnap?.childOrder ?? doc.childOrder;
+  const rootCount = (childOrder[EDITOR_ROOT_KEY] ?? []).length;
+  const nodeCount = Object.keys(nodes).length;
+  return nodeCount > 400 && rootCount === 0;
 }
 
 export function writeLocalDocument(doc: PaytmCraftDocument): void {

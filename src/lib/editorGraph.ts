@@ -1,9 +1,10 @@
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import {
   applyMatrixToPoint,
-  getNodeTransformedWorldBounds,
-  getNodeWorldInverseMatrix,
-  worldRectSum,
+  getNodeLocalMatrix,
+  invertMatrix,
+  multiplyMatrix,
+  type Matrix2D,
 } from "@/lib/transformMath";
 import type { EditorNode } from "@/stores/useEditorStore";
 
@@ -94,6 +95,32 @@ export function insertNodeInChildOrder(
   return co;
 }
 
+/** Hit test in world space using the childOrder render tree (matches canvas). */
+export function pointInNodeRenderedWorldBounds(
+  worldX: number,
+  worldY: number,
+  nodeId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): boolean {
+  const n = nodes[nodeId];
+  if (!n) return false;
+  const inv = getNodeWorldInverseMatrixFromChildOrder(nodeId, nodes, childOrder);
+  if (!inv) {
+    const b = getRenderedWorldBounds(nodeId, nodes, childOrder);
+    return (
+      worldX >= b.x &&
+      worldX <= b.x + b.width &&
+      worldY >= b.y &&
+      worldY <= b.y + b.height
+    );
+  }
+  const local = applyMatrixToPoint(inv, { x: worldX, y: worldY });
+  const w = Math.max(1, n.width);
+  const h = Math.max(1, n.height);
+  return local.x >= 0 && local.x <= w && local.y >= 0 && local.y <= h;
+}
+
 /** Parent map from childOrder (matches what DomSceneRenderer actually mounts). */
 export function buildParentMapFromChildOrder(
   childOrder: Record<string, string[]>,
@@ -106,6 +133,101 @@ export function buildParentMapFromChildOrder(
     }
   }
   return parentOf;
+}
+
+/** World matrix for a node using the childOrder tree (same tree as CanvasObject / DomSceneRenderer). */
+export function getNodeWorldMatrixFromChildOrder(
+  nodeId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): Matrix2D | null {
+  const n = nodes[nodeId];
+  if (!n) return null;
+  try {
+    const local = getNodeLocalMatrix(n);
+    const parentOf = buildParentMapFromChildOrder(childOrder);
+    const parentId = parentOf.get(nodeId) ?? null;
+    if (!parentId || !nodes[parentId]) return local;
+    const parentWorld = getNodeWorldMatrixFromChildOrder(parentId, nodes, childOrder);
+    if (!parentWorld) return local;
+    return multiplyMatrix(parentWorld, local);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * World top-left of a node as rendered by the DOM tree (childOrder), ignoring nodes[].parentId.
+ */
+export function getRenderedWorldTopLeft(
+  nodeId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): { x: number; y: number } {
+  const wm = getNodeWorldMatrixFromChildOrder(nodeId, nodes, childOrder);
+  if (wm) return applyMatrixToPoint(wm, { x: 0, y: 0 });
+  const n = nodes[nodeId];
+  return { x: n?.x ?? 0, y: n?.y ?? 0 };
+}
+
+/** Axis-aligned world bounds using the childOrder render tree (matches what you see on canvas). */
+export function getRenderedWorldBounds(
+  nodeId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): { x: number; y: number; width: number; height: number } {
+  const n = nodes[nodeId];
+  if (!n) return { x: 0, y: 0, width: 0, height: 0 };
+  const wm = getNodeWorldMatrixFromChildOrder(nodeId, nodes, childOrder);
+  if (!wm) {
+    return { x: n.x, y: n.y, width: n.width, height: n.height };
+  }
+  const w = Math.max(1, n.width);
+  const h = Math.max(1, n.height);
+  const corners = [
+    { x: 0, y: 0 },
+    { x: w, y: 0 },
+    { x: w, y: h },
+    { x: 0, y: h },
+  ].map((p) => applyMatrixToPoint(wm, p));
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of corners) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+/** Inverse world matrix using the childOrder render tree. */
+export function getNodeWorldInverseMatrixFromChildOrder(
+  nodeId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): Matrix2D | null {
+  const wm = getNodeWorldMatrixFromChildOrder(nodeId, nodes, childOrder);
+  if (!wm) return null;
+  return invertMatrix(wm);
+}
+
+/** World point → parent-local using the same tree as DomSceneRenderer. */
+export function worldPointToParentLocalFromChildOrder(
+  worldX: number,
+  worldY: number,
+  parentId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): { x: number; y: number } {
+  const inv = getNodeWorldInverseMatrixFromChildOrder(parentId, nodes, childOrder);
+  if (!inv) {
+    const pw = getRenderedWorldTopLeft(parentId, nodes, childOrder);
+    return { x: worldX - pw.x, y: worldY - pw.y };
+  }
+  return applyMatrixToPoint(inv, { x: worldX, y: worldY });
 }
 
 /** Align nodes[].parentId with where the layer appears in childOrder. */
@@ -126,28 +248,16 @@ export function syncParentIdsFromChildOrder(
   return out;
 }
 
-function worldPointToParentLocalGraph(
-  worldX: number,
-  worldY: number,
-  parentId: string,
-  nodes: Record<string, EditorNode>,
-): { x: number; y: number } {
-  const inv = getNodeWorldInverseMatrix(parentId, nodes);
-  if (!inv) {
-    const pw = worldRectSum(parentId, nodes);
-    return { x: worldX - pw.x, y: worldY - pw.y };
-  }
-  return applyMatrixToPoint(inv, { x: worldX, y: worldY });
-}
-
 function nodeCenterLooksLikeWorldCoordsInParent(
   node: EditorNode,
   parentId: string,
   nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
 ): boolean {
-  const pb = getNodeTransformedWorldBounds(parentId, nodes);
-  const cx = node.x + node.width / 2;
-  const cy = node.y + node.height / 2;
+  const pb = getRenderedWorldBounds(parentId, nodes, childOrder);
+  const origin = getRenderedWorldTopLeft(node.id, nodes, childOrder);
+  const cx = origin.x + node.width / 2;
+  const cy = origin.y + node.height / 2;
   return (
     cx >= pb.x &&
     cy >= pb.y &&
@@ -174,8 +284,9 @@ export function syncParentIdsFromChildOrderIfNull(
     if (want == null) continue;
     if (!isValidParentContainer(nodes, want)) continue;
 
-    if (nodeCenterLooksLikeWorldCoordsInParent(n, want, out)) {
-      const local = worldPointToParentLocalGraph(n.x, n.y, want, out);
+    if (nodeCenterLooksLikeWorldCoordsInParent(n, want, out, childOrder)) {
+      const world = getRenderedWorldTopLeft(id, out, childOrder);
+      const local = worldPointToParentLocalFromChildOrder(world.x, world.y, want, out, childOrder);
       out[id] = { ...n, parentId: want, x: local.x, y: local.y };
     } else {
       out[id] = { ...n, parentId: want };
@@ -223,18 +334,224 @@ export function dedupeChildOrderLists(
   return out;
 }
 
+/** Rewrite node x/y as parent-local coords for `parentId`, preserving world top-left. */
+export function nodeWithWorldTopLeftAsParentLocal(
+  node: EditorNode,
+  parentId: string | null,
+  worldTopLeft: { x: number; y: number },
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): EditorNode {
+  return nodeWithWorldBoundsAsParentLocal(
+    node,
+    parentId,
+    { x: worldTopLeft.x, y: worldTopLeft.y, width: node.width, height: node.height },
+    nodes,
+    childOrder,
+  );
+}
+
+/** Rewrite node x/y/width/height to match axis-aligned world bounds in the render tree. */
+export function nodeWithWorldBoundsAsParentLocal(
+  node: EditorNode,
+  parentId: string | null,
+  worldBounds: { x: number; y: number; width: number; height: number },
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): EditorNode {
+  const w = Math.max(1, worldBounds.width);
+  const h = Math.max(1, worldBounds.height);
+  if (!parentId) {
+    return {
+      ...node,
+      parentId: null,
+      x: worldBounds.x,
+      y: worldBounds.y,
+      width: w,
+      height: h,
+    };
+  }
+  const tl = worldPointToParentLocalFromChildOrder(
+    worldBounds.x,
+    worldBounds.y,
+    parentId,
+    nodes,
+    childOrder,
+  );
+  const br = worldPointToParentLocalFromChildOrder(
+    worldBounds.x + w,
+    worldBounds.y + h,
+    parentId,
+    nodes,
+    childOrder,
+  );
+  return {
+    ...node,
+    parentId,
+    x: tl.x,
+    y: tl.y,
+    width: Math.max(1, br.x - tl.x),
+    height: Math.max(1, br.y - tl.y),
+  };
+}
+
+/** World origin (0,0) of a node as rendered on canvas (childOrder tree). */
+export function getRenderedWorldOrigin(
+  nodeId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): { x: number; y: number } {
+  return getRenderedWorldTopLeft(nodeId, nodes, childOrder);
+}
+
+/** Clone positioning: only offset the duplicated tree root in world space; keep child locals. */
+export function clonedNodePosition(
+  oldId: string,
+  isTreeRoot: boolean,
+  offset: number,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  newParentId: string | null,
+  oldNode: EditorNode,
+): { x: number; y: number } {
+  if (!isTreeRoot || offset === 0) {
+    return { x: oldNode.x, y: oldNode.y };
+  }
+  const topLeft = getRenderedWorldTopLeft(oldId, nodes, childOrder);
+  const wx = topLeft.x + offset;
+  const wy = topLeft.y + offset;
+  if (!newParentId) {
+    return { x: wx, y: wy };
+  }
+  return worldPointToParentLocalFromChildOrder(wx, wy, newParentId, nodes, childOrder);
+}
+
+/** Sort ids so parents are updated before descendants (stable by depth). */
+export function sortNodeIdsParentsBeforeChildren(
+  ids: string[],
+  parentOf: Map<string, string | null>,
+): string[] {
+  const depth = new Map<string, number>();
+  const getDepth = (id: string): number => {
+    const cached = depth.get(id);
+    if (cached !== undefined) return cached;
+    const p = parentOf.get(id) ?? null;
+    const d = p ? getDepth(p) + 1 : 0;
+    depth.set(id, d);
+    return d;
+  };
+  for (const id of ids) getDepth(id);
+  return [...ids].sort((a, b) => (depth.get(a) ?? 0) - (depth.get(b) ?? 0));
+}
+
+/** Set node x/y so its rendered origin matches a world point (childOrder tree). */
+export function worldOriginToNodeXYFromChildOrder(
+  nodeId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  desiredWorldOrigin: { x: number; y: number },
+): { x: number; y: number } {
+  const n = nodes[nodeId];
+  if (!n) return desiredWorldOrigin;
+  const parentOf = buildParentMapFromChildOrder(childOrder);
+  const parentId = parentOf.get(nodeId) ?? null;
+  if (!parentId) {
+    return { x: desiredWorldOrigin.x, y: desiredWorldOrigin.y };
+  }
+  return worldPointToParentLocalFromChildOrder(
+    desiredWorldOrigin.x,
+    desiredWorldOrigin.y,
+    parentId,
+    nodes,
+    childOrder,
+  );
+}
+
+function rectOverlapArea(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+): number {
+  const x0 = Math.max(a.x, b.x);
+  const y0 = Math.max(a.y, b.y);
+  const x1 = Math.min(a.x + a.width, b.x + b.width);
+  const y1 = Math.min(a.y + a.height, b.y + b.height);
+  if (x1 <= x0 || y1 <= y0) return 0;
+  return (x1 - x0) * (y1 - y0);
+}
+
+/**
+ * Move frames that sit almost entirely outside their parent to the canvas root (Figma-like).
+ * Fixes frames wrongly nested via “selected frame” fallback when drawn beside another frame.
+ */
+export function liftFramesMostlyOutsideParent(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): { nodes: Record<string, EditorNode>; childOrder: Record<string, string[]> } {
+  const parentOf = buildParentMapFromChildOrder(childOrder);
+  let co = { ...childOrder };
+  const out = { ...nodes };
+  const toLift: string[] = [];
+
+  for (const id of Object.keys(out)) {
+    const n = out[id];
+    if (!n || n.type !== "frame") continue;
+    const parentId = parentOf.get(id) ?? null;
+    if (!parentId) continue;
+    const childB = getRenderedWorldBounds(id, out, co);
+    const parentB = getRenderedWorldBounds(parentId, out, co);
+    const area = Math.max(1, childB.width * childB.height);
+    const overlap = rectOverlapArea(childB, parentB);
+    if (overlap / area < 0.25) toLift.push(id);
+  }
+
+  if (toLift.length === 0) return { nodes: out, childOrder: co };
+
+  for (const id of toLift) {
+    const wb = getRenderedWorldBounds(id, out, co);
+    const parentId = parentOf.get(id) ?? null;
+    if (!parentId) continue;
+    const listKey = parentListKeyForNode(parentId);
+    co[listKey] = (co[listKey] ?? []).filter((x) => x !== id);
+    const roots = [...(co[EDITOR_ROOT_KEY] ?? [])];
+    if (!roots.includes(id)) roots.push(id);
+    co[EDITOR_ROOT_KEY] = roots;
+    co[id] = co[id] ?? [];
+    out[id] = nodeWithWorldBoundsAsParentLocal(out[id]!, null, wb, out, co);
+  }
+
+  return { nodes: out, childOrder: co };
+}
+
 /**
  * Fix hierarchy desync: childOrder drives rendering; parentId drives world bounds / selection.
- * Prefer nodes[].parentId for placement; only copy from childOrder when parentId is null.
+ * Preserves on-canvas world position while aligning parentId, childOrder, and parent-local x/y.
  */
 export function repairNodeHierarchy(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
 ): { nodes: Record<string, EditorNode>; childOrder: Record<string, string[]> } {
-  const deduped = dedupeChildOrderLists(nodes, childOrder);
-  const nodesSynced = syncParentIdsFromChildOrderIfNull(nodes, deduped);
+  const lifted = liftFramesMostlyOutsideParent(nodes, childOrder);
+  const deduped = dedupeChildOrderLists(lifted.nodes, lifted.childOrder);
+
+  const renderBounds = new Map<string, { x: number; y: number; width: number; height: number }>();
+  for (const id of Object.keys(lifted.nodes)) {
+    renderBounds.set(id, getRenderedWorldBounds(id, lifted.nodes, deduped));
+  }
+
+  const nodesSynced = syncParentIdsFromChildOrderIfNull(lifted.nodes, deduped);
   const co = reconcileChildOrderWithParents(nodesSynced, deduped);
-  return { nodes: nodesSynced, childOrder: co };
+  const parentOf = buildParentMapFromChildOrder(co);
+
+  const out: Record<string, EditorNode> = { ...nodesSynced };
+  const orderedIds = sortNodeIdsParentsBeforeChildren(Object.keys(out), parentOf);
+  for (const id of orderedIds) {
+    const wb = renderBounds.get(id);
+    if (!wb) continue;
+    const wantParent = parentOf.has(id) ? parentOf.get(id)! : null;
+    out[id] = nodeWithWorldBoundsAsParentLocal(out[id]!, wantParent, wb, out, co);
+  }
+
+  return { nodes: out, childOrder: co };
 }
 
 /** True when childOrder disagrees with nodes[].parentId (e.g. child listed at root and under a frame). */
@@ -258,11 +575,78 @@ export function needsChildOrderReconcile(
   return false;
 }
 
+/** True when stored x/y/width/height disagree with the childOrder render tree. */
+export function needsNodeGeometryRepair(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  epsilon = 2,
+): boolean {
+  const parentOf = buildParentMapFromChildOrder(childOrder);
+  for (const id of Object.keys(nodes)) {
+    const n = nodes[id];
+    if (!n) continue;
+    const rendered = getRenderedWorldBounds(id, nodes, childOrder);
+    const parentId = parentOf.get(id) ?? null;
+    let expectedOrigin = { x: n.x, y: n.y };
+    if (parentId) {
+      const po = getRenderedWorldTopLeft(parentId, nodes, childOrder);
+      expectedOrigin = { x: po.x + n.x, y: po.y + n.y };
+    }
+    if (Math.hypot(rendered.x - expectedOrigin.x, rendered.y - expectedOrigin.y) > epsilon) {
+      return true;
+    }
+    if (Math.abs(rendered.width - Math.max(1, n.width)) > epsilon) return true;
+    if (Math.abs(rendered.height - Math.max(1, n.height)) > epsilon) return true;
+  }
+  return false;
+}
+
 export function needsNodeHierarchyRepair(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
 ): boolean {
-  return needsChildOrderReconcile(nodes, childOrder);
+  return needsChildOrderReconcile(nodes, childOrder) || needsNodeGeometryRepair(nodes, childOrder);
+}
+
+/** Skip full geometry repair above this count (keeps editor responsive after large imports). */
+export const HIERARCHY_REPAIR_NODE_SOFT_CAP = 8_000;
+
+/**
+ * Reconcile parentId/childOrder only — no world-bounds rewrite (cheap for large documents).
+ */
+export function reconcileHierarchyLight(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): { nodes: Record<string, EditorNode>; childOrder: Record<string, string[]> } {
+  if (!needsChildOrderReconcile(nodes, childOrder)) {
+    return { nodes, childOrder };
+  }
+  const nodesSynced = syncParentIdsFromChildOrder(nodes, childOrder);
+  const co = reconcileChildOrderWithParents(nodesSynced, childOrder);
+  return { nodes: nodesSynced, childOrder: dedupeChildOrderLists(nodesSynced, co) };
+}
+
+/**
+ * Full hierarchy repair when needed; large docs only get light reconcile to avoid UI freezes.
+ */
+export function repairNodeHierarchyIfNeeded(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  opts?: { maxNodesForFullRepair?: number },
+): { nodes: Record<string, EditorNode>; childOrder: Record<string, string[]> } {
+  const count = Object.keys(nodes).length;
+  if (count === 0) return { nodes, childOrder };
+
+  const cap = opts?.maxNodesForFullRepair ?? HIERARCHY_REPAIR_NODE_SOFT_CAP;
+  if (count > cap) {
+    return reconcileHierarchyLight(nodes, childOrder);
+  }
+
+  if (!needsNodeHierarchyRepair(nodes, childOrder)) {
+    return { nodes, childOrder };
+  }
+
+  return repairNodeHierarchy(nodes, childOrder);
 }
 
 export function isAncestorOf(

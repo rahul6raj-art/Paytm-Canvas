@@ -40,11 +40,19 @@ export function startRulerGuideDragSession(opts: {
   pan: { x: number; y: number };
   zoom: number;
 }): void {
-  const { axis, pointerId, captureTarget, viewportEl, pan, zoom } = opts;
+  const { axis, pointerId, captureTarget, viewportEl } = opts;
 
   const updatePos = (clientX: number, clientY: number) => {
-    const pos = worldPosFromClientForGuide(axis, clientX, clientY, viewportEl, pan, zoom);
-    useEditorStore.getState().setLayoutGuideDraft({ axis, pos });
+    const st = useEditorStore.getState();
+    const pos = worldPosFromClientForGuide(
+      axis,
+      clientX,
+      clientY,
+      viewportEl,
+      st.pan,
+      st.zoom,
+    );
+    st.setLayoutGuideDraft({ axis, pos });
   };
 
   updatePos(opts.clientX, opts.clientY);

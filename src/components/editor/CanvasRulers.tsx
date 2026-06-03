@@ -7,6 +7,7 @@ import {
 } from "@/lib/canvasRulers";
 import { useCanvasChromeForeground } from "@/hooks/useCanvasChromeForeground";
 import { startRulerGuideDragSession } from "@/lib/rulerGuideDrag";
+import { worldToViewport } from "@/lib/canvasCoordinates";
 import { useEditorStore } from "@/stores/useEditorStore";
 
 type CanvasRulersProps = {
@@ -17,6 +18,7 @@ type CanvasRulersProps = {
 
 export function CanvasRulers({ zoom, pan, viewportRef }: CanvasRulersProps) {
   const editorMode = useEditorStore((s) => s.editorMode);
+  const layoutGuideDraft = useEditorStore((s) => s.layoutGuideDraft);
   const chrome = useCanvasChromeForeground();
   const [size, setSize] = useState({ width: 0, height: 0 });
 
@@ -67,6 +69,15 @@ export function CanvasRulers({ zoom, pan, viewportRef }: CanvasRulersProps) {
 
   if (size.width < 1 || size.height < 1) return null;
 
+  const draftH =
+    layoutGuideDraft?.axis === "v"
+      ? worldToViewport(layoutGuideDraft.pos, 0, pan, zoom).x
+      : null;
+  const draftV =
+    layoutGuideDraft?.axis === "h"
+      ? worldToViewport(0, layoutGuideDraft.pos, pan, zoom).y
+      : null;
+
   return (
     <div className="pointer-events-none absolute inset-0 z-[55]" aria-hidden data-canvas-rulers>
       <div
@@ -84,6 +95,16 @@ export function CanvasRulers({ zoom, pan, viewportRef }: CanvasRulersProps) {
         }}
         onPointerDown={(e) => onRulerPointerDown("h", e)}
       >
+        {draftH != null && draftH >= CANVAS_RULER_SIZE ? (
+          <div
+            className="pointer-events-none absolute bottom-0 top-0 w-0.5"
+            style={{
+              left: draftH - CANVAS_RULER_SIZE,
+              transform: "translateX(-50%)",
+              backgroundColor: "#9747ff",
+            }}
+          />
+        ) : null}
         {horizontalTicks.map((t) => (
           <div
             key={`h-${t.label}-${t.position}`}
@@ -111,6 +132,16 @@ export function CanvasRulers({ zoom, pan, viewportRef }: CanvasRulersProps) {
         }}
         onPointerDown={(e) => onRulerPointerDown("v", e)}
       >
+        {draftV != null && draftV >= CANVAS_RULER_SIZE ? (
+          <div
+            className="pointer-events-none absolute left-0 right-0 h-0.5"
+            style={{
+              top: draftV - CANVAS_RULER_SIZE,
+              transform: "translateY(-50%)",
+              backgroundColor: "#9747ff",
+            }}
+          />
+        ) : null}
         {verticalTicks.map((t) => (
           <div
             key={`v-${t.label}-${t.position}`}

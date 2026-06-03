@@ -1,30 +1,76 @@
 import {
-  extractRenderableGradientFill,
   nodeId,
   parseFig,
   resolveVectorNodePaths,
   type FigDocument,
   type FigNode,
   type FigPaint,
+  type ResolvedVectorNodePaths,
 } from "openfig-core";
+import { newComponentId } from "@/lib/componentModel";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import { newPathPointId, normalizePathNode, type PathPoint } from "@/lib/pathGeometry";
 import type { EditorAsset, PaytmCraftDocument } from "@/lib/documentPersistence";
-import type { EditorNode, NodeKind } from "@/stores/useEditorStore";
+import {
+  designTokenTimestamp,
+  newDesignTokenId,
+  type DesignToken,
+} from "@/lib/designTokens";
+import type {
+  ConstraintHorizontal,
+  ConstraintVertical,
+  EditorNode,
+  LayoutPositioning,
+  LayoutSizingMode,
+  NodeKind,
+} from "@/stores/useEditorStore";
 import { applyDeepAutoLayoutAll, type CrossAxisAlign, type LayoutFields, type LayoutNode, type PrimaryAxisAlign } from "@/lib/autoLayout";
+import { viewportForRootNodes } from "@/lib/canvasZoom";
+import { CANVAS_FRAME_ORIGIN } from "@/lib/codeExport/frameRelativeExport";
 import { DEFAULT_CANVAS_BACKGROUND } from "@/lib/canvasVisual";
-import { DEFAULT_GRADIENT_TRANSFORM, newGradientStopId, type FillGradient } from "@/lib/fillGradient";
-import { newNodeEffectId, type NodeEffect } from "@/lib/nodeEffects";
+import {
+  dedupeChildOrderLists,
+  reconcileChildOrderWithParents,
+  syncParentIdsFromChildOrder,
+} from "@/lib/editorGraph";
 import {
   applyFigBooleanToNode,
   figContainerClipChildren,
   finalizeFigContainer,
 } from "@/lib/figImport/figMaskImport";
+import {
+  figNodeVisible,
+  figTextResizeMode,
+  placementFromFigNode,
+  sortedFigChildren,
+} from "@/lib/figImport/figNodeGeometry";
+import {
+  buildTokensByVariableKey,
+  effectiveNodeFillPaints,
+  effectsFromFigNode,
+  figFontWeight,
+  fillTokenIdForPaints,
+  gradientFillFromPaints,
+  imageFitFromPaint,
+  imagePaintFromPaints,
+  instanceOverridesFromSymbol,
+  resolvePaintList,
+  rgbaToHex,
+  solidFillFromPaints,
+  strokesFromFigNode,
+  type FigColor,
+} from "@/lib/figImport/figImportProperties";
+import { figStyleOverrideTable } from "@/lib/figImport/figPaintCore";
+import { importFigmaComponentLibrary, symbolRootKey } from "@/lib/figImport/figComponentLibrary";
+import type { ImportCtx } from "@/lib/figImport/figImportTypes";
 
 const ROOT = EDITOR_ROOT_KEY;
 
 /** Figma containers we descend through without creating an editor node. */
 const PASS_THROUGH_TYPES = new Set(["SECTION", "DOCUMENT"]);
+
+/** Skip embedding huge binaries as data URLs during import (keeps UI responsive). */
+const MAX_EMBED_IMAGE_BYTES = 8 * 1024 * 1024;
 
 const SKIP_TYPES = new Set([
   "CANVAS",
@@ -35,17 +81,6 @@ const SKIP_TYPES = new Set([
   "STICKY",
   "SHAPE_WITH_TEXT",
 ]);
-
-type FigColor = { r: number; g: number; b: number; a?: number };
-
-type ImportCtx = {
-  nodes: Record<string, EditorNode>;
-  childOrder: Record<string, string[]>;
-  assets: Record<string, EditorAsset>;
-  idMap: Map<string, string>;
-  variableColors: Map<string, FigColor>;
-  seq: number;
-};
 
 export type FigImportResult =
   | { ok: true; document: PaytmCraftDocument }
@@ -62,14 +97,6 @@ function paytmId(ctx: ImportCtx, figKey: string): string {
   const id = `fig-${figKey.replace(/:/g, "-")}`;
   ctx.idMap.set(figKey, id);
   return id;
-}
-
-function rgbaToHex(c: FigColor): string {
-  const r = Math.round(Math.max(0, Math.min(1, c.r)) * 255);
-  const g = Math.round(Math.max(0, Math.min(1, c.g)) * 255);
-  const b = Math.round(Math.max(0, Math.min(1, c.b)) * 255);
-  const hex = `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
-  return hex;
 }
 
 function guidKey(guid?: { sessionID?: number; localID?: number }): string | null {
@@ -97,56 +124,254 @@ function buildVariableColorMap(fig: FigDocument): Map<string, FigColor> {
   return map;
 }
 
-function normalizeFigColor(c: FigColor): FigColor {
-  return { r: c.r, g: c.g, b: c.b, a: c.a ?? 1 };
+function fillsForFigNode(node: FigNode, doc: FigDocument, ctx: ImportCtx): FigPaint[] | undefined {
+  return effectiveNodeFillPaints(node, () => {
+    const paths = cachedVectorPaths(doc, node, ctx);
+    if (!paths) return undefined;
+    for (const path of [...paths.fill, ...paths.stroke]) {
+      if (path.paints?.length) return path.paints;
+    }
+    return undefined;
+  });
 }
 
-function resolveFigColor(
-  color: FigColor | undefined,
-  colorVar: unknown,
-  variableColors: Map<string, FigColor>,
-): FigColor | undefined {
-  if (color && (color.a ?? 1) > 0) return normalizeFigColor(color);
-  if (!colorVar || typeof colorVar !== "object") return color;
+const DETACHED_STYLE_GUID = 4_294_967_295;
 
-  const cv = colorVar as {
-    value?: {
-      alias?: { guid?: { sessionID?: number; localID?: number } };
-      colorValue?: FigColor;
-    };
-    variableData?: { value?: { colorValue?: FigColor } };
+function isDetachedTextStyle(node: FigNode): boolean {
+  const ext = node as FigNode & { styleIdForText?: { guid?: { sessionID?: number; localID?: number } } };
+  const g = ext.styleIdForText?.guid;
+  return g?.sessionID === DETACHED_STYLE_GUID && g?.localID === DETACHED_STYLE_GUID;
+}
+
+/** Apply named text style fields when the node only references styleIdForText. */
+function mergeTextStyleFromLibrary(doc: FigDocument, node: FigNode): FigNode {
+  if (isDetachedTextStyle(node)) return node;
+  const ext = node as FigNode & { styleIdForText?: { guid?: { sessionID?: number; localID?: number } } };
+  const styleKey = guidKey(ext.styleIdForText?.guid);
+  if (!styleKey) return node;
+  const styleNode = doc.nodeMap.get(styleKey);
+  if (!styleNode || styleNode.type !== "TEXT") return node;
+
+  return {
+    ...node,
+    fontName: node.fontName ?? styleNode.fontName,
+    fontSize: node.fontSize ?? styleNode.fontSize,
+    fillPaints: node.fillPaints?.length ? node.fillPaints : styleNode.fillPaints,
+    lineHeight: (node as { lineHeight?: unknown }).lineHeight ?? (styleNode as { lineHeight?: unknown }).lineHeight,
+    letterSpacing:
+      (node as { letterSpacing?: unknown }).letterSpacing ??
+      (styleNode as { letterSpacing?: unknown }).letterSpacing,
+    textAlignHorizontal: node.textAlignHorizontal ?? styleNode.textAlignHorizontal,
   };
+}
 
-  const aliasKey = guidKey(cv.value?.alias?.guid);
-  if (aliasKey) {
-    const resolved = variableColors.get(aliasKey);
-    if (resolved) return normalizeFigColor(resolved);
+function applySymbolOverrides(node: FigNode, instance: FigNode): FigNode {
+  const overrides = (instance as FigNode & { symbolData?: { symbolOverrides?: unknown[] } }).symbolData
+    ?.symbolOverrides;
+  if (!Array.isArray(overrides) || overrides.length === 0) return node;
+
+  const nodeKey = guidKey(node.guid);
+  if (!nodeKey) return node;
+
+  let merged: FigNode = { ...node };
+  for (const raw of overrides) {
+    const ov = raw as {
+      guidPath?: { guids?: { sessionID?: number; localID?: number }[] };
+      textData?: { characters?: string };
+      fillPaints?: FigPaint[];
+      strokePaints?: FigPaint[];
+      name?: string;
+      fontName?: FigNode["fontName"];
+      fontSize?: number;
+    };
+    const path = ov.guidPath?.guids;
+    if (!path?.length) continue;
+    const last = path[path.length - 1]!;
+    if (guidKey(last) !== nodeKey) continue;
+
+    if (ov.name) merged = { ...merged, name: ov.name };
+    if (ov.fillPaints) merged = { ...merged, fillPaints: ov.fillPaints };
+    if (ov.strokePaints) merged = { ...merged, strokePaints: ov.strokePaints };
+    if (ov.fontName) merged = { ...merged, fontName: ov.fontName };
+    if (ov.fontSize != null) merged = { ...merged, fontSize: ov.fontSize };
+    if (ov.textData?.characters != null && merged.textData) {
+      const chars = ov.textData.characters === "" ? " " : ov.textData.characters;
+      merged = { ...merged, textData: { ...merged.textData, characters: chars } };
+    }
+  }
+  return merged;
+}
+
+function figDisplayName(node: FigNode): string {
+  const trimmed = (node.name ?? "").trim();
+  if (trimmed) return trimmed;
+  const key = guidKey(node.guid);
+  const suffix = key ? key.split(":")[1] ?? key : "";
+  switch (node.type) {
+    case "FRAME":
+      return "Frame";
+    case "TEXT":
+      return "Text";
+    case "RECTANGLE":
+    case "ROUNDED_RECTANGLE":
+      return "Rectangle";
+    case "ELLIPSE":
+      return "Ellipse";
+    case "VECTOR":
+      return "Vector";
+    case "INSTANCE":
+      return "Instance";
+    default:
+      return suffix ? `${node.type} ${suffix}` : node.type;
+  }
+}
+
+function figLineHeightMultiplier(node: FigNode): number | undefined {
+  const lh = (node as { lineHeight?: { value?: number; units?: string } }).lineHeight;
+  if (lh?.value == null) return undefined;
+  const units = (lh.units ?? "RAW").toUpperCase();
+  if (units === "PIXELS" && node.fontSize) return lh.value / node.fontSize;
+  if (units === "PERCENT") return lh.value / 100;
+  return lh.value;
+}
+
+function figLetterSpacingPx(node: FigNode): number | undefined {
+  const tracking = (node as { textTracking?: number }).textTracking;
+  if (tracking != null && node.fontSize) return node.fontSize * tracking;
+  const ls = (node as { letterSpacing?: { value?: number; units?: string } }).letterSpacing;
+  if (ls?.value == null) return undefined;
+  const units = (ls.units ?? "PERCENT").toUpperCase();
+  const size = node.fontSize ?? 13;
+  if (units === "PIXELS") return ls.value;
+  return (size * ls.value) / 100;
+}
+
+function dominantTextFillFromRuns(
+  node: FigNode,
+  variableColors: Map<string, FigColor>,
+): { fill?: string; fillOpacity?: number } {
+  const charIds = node.textData?.characterStyleIDs as number[] | undefined;
+  const table = figStyleOverrideTable(node);
+  if (!charIds?.length || !table.length) return {};
+
+  const dominantId = charIds.find((id) => id !== 0) ?? 0;
+  if (!dominantId) return {};
+
+  const override = table.find((e) => e.styleID === dominantId);
+  if (!override?.fillPaints?.length) return {};
+
+  const resolved = resolvePaintList(override.fillPaints, variableColors);
+  return solidFillFromPaints(resolved);
+}
+
+function textFieldsFromFigNode(
+  node: FigNode,
+  doc: FigDocument,
+  variableColors: Map<string, FigColor>,
+  defaultFill?: string,
+): Pick<
+  EditorNode,
+  | "content"
+  | "textColor"
+  | "fontFamily"
+  | "fontSize"
+  | "fontWeight"
+  | "lineHeight"
+  | "letterSpacing"
+  | "textAlign"
+  | "textResizeMode"
+> {
+  const styled = mergeTextStyleFromLibrary(doc, node);
+  const runFill = dominantTextFillFromRuns(styled, variableColors);
+
+  let fontName = styled.fontName;
+  let fontSize = styled.fontSize;
+  let fontWeight = figFontWeight(fontName?.style);
+
+  const charIds = styled.textData?.characterStyleIDs as number[] | undefined;
+  const table = figStyleOverrideTable(styled);
+  if (charIds?.length && table.length) {
+    const dominantId = charIds.find((id) => id !== 0) ?? 0;
+    if (dominantId) {
+      const ov = table.find((e) => e.styleID === dominantId);
+      if (ov?.fontName) {
+        fontName = ov.fontName;
+        fontWeight = figFontWeight(ov.fontName.style);
+      }
+      if (ov?.fontSize != null) fontSize = ov.fontSize;
+    }
   }
 
-  const direct = cv.value?.colorValue ?? cv.variableData?.value?.colorValue;
-  return direct ? normalizeFigColor(direct) : color ? normalizeFigColor(color) : undefined;
+  return {
+    content: styled.textData?.characters ?? "",
+    textColor: runFill.fill ?? defaultFill ?? "#111111",
+    fontFamily: fontName?.family ? `"${fontName.family}", system-ui, sans-serif` : undefined,
+    fontSize: fontSize ?? 13,
+    fontWeight,
+    lineHeight: figLineHeightMultiplier(styled),
+    letterSpacing: figLetterSpacingPx(styled),
+    textAlign:
+      styled.textAlignHorizontal === "CENTER"
+        ? "center"
+        : styled.textAlignHorizontal === "RIGHT"
+          ? "right"
+          : "left",
+    textResizeMode: figTextResizeMode(styled) ?? "auto-height",
+  };
 }
 
-function resolvePaintList(paints: FigPaint[] | undefined, variableColors: Map<string, FigColor>): FigPaint[] | undefined {
-  if (!paints?.length) return paints;
-  return paints.map((paint) => {
-    if (paint.visible === false) return paint;
-    const resolved = resolveFigColor(paint.color, (paint as { colorVar?: unknown }).colorVar, variableColors);
-    let next = resolved ? ({ ...paint, color: resolved as FigPaint["color"] } as FigPaint) : paint;
-    if (Array.isArray(paint.stops)) {
-      const stops = paint.stops.map((stop) => {
-        const stopColor = resolveFigColor(
-          stop.color,
-          (stop as { colorVar?: unknown }).colorVar,
-          variableColors,
-        );
-        if (!stopColor) return stop;
-        return { ...stop, color: stopColor as FigPaint["color"] };
-      }) as FigPaint["stops"];
-      next = { ...next, stops };
+function buildDesignTokensFromFig(fig: FigDocument): Record<string, DesignToken> {
+  const tokens: Record<string, DesignToken> = {};
+  const now = designTokenTimestamp();
+
+  for (const node of fig.nodes) {
+    if (node.type !== "VARIABLE") continue;
+    const key = nodeId(node);
+    if (!key) continue;
+
+    const name = (node.name ?? "").trim() || key;
+
+    if (node.variableResolvedType === "COLOR") {
+      const entries = node.variableDataValues?.entries;
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries) {
+        const cv = entry?.variableData?.value?.colorValue as FigColor | undefined;
+        if (!cv) continue;
+        const id = newDesignTokenId("fig-color");
+        tokens[id] = {
+          id,
+          name,
+          type: "color",
+          value: { hex: rgbaToHex(cv), opacity: cv.a ?? 1 },
+          createdAt: now,
+          updatedAt: now,
+        };
+        break;
+      }
+      continue;
     }
-    return next;
-  });
+
+    if (node.variableResolvedType === "FLOAT") {
+      const entries = node.variableDataValues?.entries;
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries) {
+        const num = entry?.variableData?.value?.numValue as number | undefined;
+        if (num == null) continue;
+        const id = newDesignTokenId("fig-spacing");
+        tokens[id] = {
+          id,
+          name,
+          type: "spacing",
+          value: { value: num },
+          createdAt: now,
+          updatedAt: now,
+        };
+        break;
+      }
+    }
+  }
+
+  return tokens;
 }
 
 function inferCanvasBackground(fig: FigDocument, rootFrameFills: string[]): string {
@@ -173,9 +398,29 @@ function hashToHex(hash: Uint8Array | string): string {
 }
 
 function bytesToDataUrl(bytes: Uint8Array, mimeType: string): string {
+  const chunk = 0x8000;
   let binary = "";
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(
+      null,
+      bytes.subarray(i, i + chunk) as unknown as number[],
+    );
+  }
   return `data:${mimeType};base64,${btoa(binary)}`;
+}
+
+function cachedVectorPaths(doc: FigDocument, node: FigNode, ctx: ImportCtx): ResolvedVectorNodePaths | null {
+  const key = nodeId(node);
+  if (!key) return null;
+  const hit = ctx.vectorPathsCache.get(key);
+  if (hit) return hit;
+  try {
+    const paths = resolveVectorNodePaths(doc, node);
+    ctx.vectorPathsCache.set(key, paths);
+    return paths;
+  } catch {
+    return null;
+  }
 }
 
 function mimeFromFilename(name: string): string {
@@ -208,6 +453,7 @@ function registerImageAsset(
 ): { assetId: string; imageSrc: string } | null {
   const hit = imageBytesForPaint(doc, paint);
   if (!hit) return null;
+  if (hit.bytes.length > MAX_EMBED_IMAGE_BYTES) return null;
   const dataUrl = bytesToDataUrl(hit.bytes, mimeFromFilename(hit.name));
   const assetId = nextId(ctx, "asset");
   ctx.assets[assetId] = {
@@ -218,73 +464,6 @@ function registerImageAsset(
     createdAt: new Date().toISOString(),
   };
   return { assetId, imageSrc: dataUrl };
-}
-
-function rotationDeg(t?: { m00: number; m01: number; m10: number; m11: number }): number {
-  if (!t) return 0;
-  const deg = (Math.atan2(t.m10, t.m00) * 180) / Math.PI;
-  return Math.abs(deg) < 0.01 ? 0 : Math.round(deg * 100) / 100;
-}
-
-function figFontWeight(style?: string): number {
-  const s = (style ?? "").toLowerCase();
-  if (s.includes("black") || s.includes("heavy")) return 900;
-  if (s.includes("extrabold") || s.includes("ultra")) return 800;
-  if (s.includes("bold")) return 700;
-  if (s.includes("semibold") || s.includes("demi")) return 600;
-  if (s.includes("medium")) return 500;
-  if (s.includes("light") || s.includes("thin")) return 300;
-  return 400;
-}
-
-function solidFill(paints?: FigPaint[]): { fill?: string; fillOpacity?: number } {
-  const p = paints?.find((x) => x.visible !== false && x.type === "SOLID" && x.color);
-  if (!p?.color) return {};
-  return {
-    fill: rgbaToHex(p.color),
-    fillOpacity: p.opacity ?? p.color.a ?? 1,
-  };
-}
-
-function gradientFill(paints?: FigPaint[]): {
-  fillType?: "gradient";
-  fillGradient?: FillGradient;
-} {
-  const g = extractRenderableGradientFill(paints);
-  if (!g) return {};
-  const stops = g.stops.map((s) => ({
-    id: newGradientStopId(),
-    position: Math.max(0, Math.min(100, s.position * 100)),
-    color: rgbaToHex(s.color),
-  }));
-  if (stops.length < 2) return {};
-  return {
-    fillType: "gradient",
-    fillGradient: {
-      kind: g.type === "radial" ? "radial" : "linear",
-      transform: { ...DEFAULT_GRADIENT_TRANSFORM, rotation: g.type === "linear" ? 180 : 0 },
-      stops,
-    },
-  };
-}
-
-function strokeFromNode(
-  node: FigNode,
-  variableColors: Map<string, FigColor>,
-): Pick<EditorNode, "strokeColor" | "strokeWidth" | "strokeStyle"> {
-  const strokes = resolvePaintList(node.strokePaints, variableColors);
-  const stroke = strokes?.find((x) => x.visible !== false && x.type === "SOLID" && x.color);
-  const width = node.strokeWeight ?? 0;
-  if (!stroke?.color || width <= 0) return {};
-  return {
-    strokeColor: rgbaToHex(stroke.color),
-    strokeWidth: width,
-    strokeStyle: "solid",
-  };
-}
-
-function hasImageFill(paints?: FigPaint[]): FigPaint | null {
-  return paints?.find((x) => x.visible !== false && x.type === "IMAGE") ?? null;
 }
 
 function mapPrimaryAxisAlign(raw: string | undefined): PrimaryAxisAlign {
@@ -316,14 +495,90 @@ function mapCounterAxisAlign(raw: string | undefined): CrossAxisAlign {
   }
 }
 
-/** Map Figma auto-layout (stack) fields to Paytm Craft layout properties. */
-function autoLayoutFromFigNode(node: FigNode): LayoutFields {
-  const stackMode = node.stackMode;
-  if (!stackMode || stackMode === "NONE" || stackMode === "GRID") {
-    return { layoutMode: "none" };
-  }
+function mapFigSizingMode(raw: string | undefined): LayoutSizingMode | undefined {
+  if (!raw) return undefined;
+  const v = raw.toUpperCase();
+  if (v === "RESIZE_TO_FIT" || v === "AUTO" || v === "HUG" || v === "MIN") return "hug";
+  if (v === "FILL" || v === "STRETCH" || v === "MAX") return "fill";
+  if (v === "FIXED") return "fixed";
+  return undefined;
+}
 
-  const n = node as FigNode & {
+function mapFigConstraintH(raw: string | undefined): ConstraintHorizontal | undefined {
+  switch (raw?.toUpperCase()) {
+    case "MIN":
+    case "LEFT":
+      return "left";
+    case "MAX":
+    case "RIGHT":
+      return "right";
+    case "CENTER":
+      return "center";
+    case "STRETCH":
+    case "LEFT_RIGHT":
+      return "left-right";
+    case "SCALE":
+      return "scale";
+    default:
+      return undefined;
+  }
+}
+
+function mapFigConstraintV(raw: string | undefined): ConstraintVertical | undefined {
+  switch (raw?.toUpperCase()) {
+    case "MIN":
+    case "TOP":
+      return "top";
+    case "MAX":
+    case "BOTTOM":
+      return "bottom";
+    case "CENTER":
+      return "center";
+    case "STRETCH":
+    case "TOP_BOTTOM":
+      return "top-bottom";
+    case "SCALE":
+      return "scale";
+    default:
+      return undefined;
+  }
+}
+
+function constraintsFromFigNode(node: FigNode): Pick<
+  EditorNode,
+  "constraintsHorizontal" | "constraintsVertical"
+> {
+  const ext = node as FigNode & {
+    horizontalConstraint?: string;
+    verticalConstraint?: string;
+  };
+  return {
+    constraintsHorizontal: mapFigConstraintH(ext.horizontalConstraint),
+    constraintsVertical: mapFigConstraintV(ext.verticalConstraint),
+  };
+}
+
+function cornerRadiusFromFigNode(node: FigNode): Pick<EditorNode, "cornerRadius" | "cornerRadii"> {
+  const ext = node as FigNode & { rectangleCornerRadii?: number[] };
+  const corners = ext.rectangleCornerRadii;
+  if (corners?.length === 4) {
+    const [tl, tr, br, bl] = corners;
+    if (tl === tr && tr === br && br === bl) return { cornerRadius: tl };
+    return { cornerRadii: [tl, tr, br, bl] };
+  }
+  if (node.cornerRadius != null) return { cornerRadius: node.cornerRadius };
+  return {};
+}
+
+/** Map Figma auto-layout (stack) fields to Paytm Craft layout properties. */
+function autoLayoutFromFigNode(node: FigNode): LayoutFields & {
+  layoutSizingHorizontal?: LayoutSizingMode;
+  layoutSizingVertical?: LayoutSizingMode;
+  layoutWrap?: boolean;
+  layoutPositioning?: LayoutPositioning;
+} {
+  const stackMode = node.stackMode;
+  const ext = node as FigNode & {
     stackSpacing?: number;
     stackVerticalPadding?: number;
     stackHorizontalPadding?: number;
@@ -331,78 +586,152 @@ function autoLayoutFromFigNode(node: FigNode): LayoutFields {
     stackPaddingRight?: number;
     stackPrimaryAlignItems?: string;
     stackCounterAlignItems?: string;
+    stackPrimarySizing?: string;
+    stackCounterSizing?: string;
+    stackWrap?: boolean;
+    stackPositioning?: string;
+    stackChildPrimaryGrow?: number;
+    stackChildCounterGrow?: number;
+    stackChildAlignSelf?: string;
   };
 
-  const padTop = n.stackVerticalPadding ?? 0;
-  const padBottom = n.stackPaddingBottom ?? n.stackVerticalPadding ?? 0;
-  const padLeft = n.stackHorizontalPadding ?? 0;
-  const padRight = n.stackPaddingRight ?? n.stackHorizontalPadding ?? 0;
+  const layoutPositioning: LayoutPositioning | undefined =
+    ext.stackPositioning?.toUpperCase() === "ABSOLUTE" ? "absolute" : undefined;
 
-  return {
-    layoutMode: stackMode === "HORIZONTAL" ? "horizontal" : "vertical",
-    layoutGap: Math.max(0, n.stackSpacing ?? 0),
+  if (!stackMode || stackMode === "NONE" || stackMode === "GRID") {
+    const childSizing: {
+      layoutSizingHorizontal?: LayoutSizingMode;
+      layoutSizingVertical?: LayoutSizingMode;
+    } = {};
+    if (ext.stackChildPrimaryGrow === 1) {
+      childSizing.layoutSizingHorizontal = "fill";
+      childSizing.layoutSizingVertical = "fill";
+    }
+    if (ext.stackChildAlignSelf?.toUpperCase() === "STRETCH") {
+      childSizing.layoutSizingHorizontal = "fill";
+      childSizing.layoutSizingVertical = "fill";
+    }
+    return { layoutMode: "none", layoutPositioning, ...childSizing };
+  }
+
+  const padTop = ext.stackVerticalPadding ?? 0;
+  const padBottom = ext.stackPaddingBottom ?? ext.stackVerticalPadding ?? 0;
+  const padLeft = ext.stackHorizontalPadding ?? 0;
+  const padRight = ext.stackPaddingRight ?? ext.stackHorizontalPadding ?? 0;
+
+  const layoutMode = stackMode === "HORIZONTAL" ? "horizontal" : "vertical";
+  const primarySizing = mapFigSizingMode(ext.stackPrimarySizing);
+  const counterSizing = mapFigSizingMode(ext.stackCounterSizing);
+
+  const fields: LayoutFields & {
+    layoutSizingHorizontal?: LayoutSizingMode;
+    layoutSizingVertical?: LayoutSizingMode;
+    layoutWrap?: boolean;
+    layoutPositioning?: LayoutPositioning;
+  } = {
+    layoutMode,
+    layoutGap: Math.max(0, ext.stackSpacing ?? 0),
     paddingTop: padTop,
     paddingRight: padRight,
     paddingBottom: padBottom,
     paddingLeft: padLeft,
-    primaryAxisAlign: mapPrimaryAxisAlign(n.stackPrimaryAlignItems),
-    counterAxisAlign: mapCounterAxisAlign(n.stackCounterAlignItems),
+    primaryAxisAlign: mapPrimaryAxisAlign(ext.stackPrimaryAlignItems),
+    counterAxisAlign: mapCounterAxisAlign(ext.stackCounterAlignItems),
+    layoutWrap: ext.stackWrap === true,
+    layoutPositioning,
   };
-}
 
-function figBlurRadius(radius: number | undefined): number {
-  const r = radius ?? 0;
-  if (r <= 0) return 0;
-  // Figma stores a smaller kernel sigma for light blurs; scale to approximate CSS px.
-  return r < 16 ? Math.max(1, Math.round(r * 4)) : Math.round(r);
-}
-
-function effectsFromFigNode(
-  node: FigNode,
-  variableColors: Map<string, FigColor>,
-): NodeEffect[] | undefined {
-  const raw = node.effects;
-  if (!Array.isArray(raw) || raw.length === 0) return undefined;
-
-  const out: NodeEffect[] = [];
-  for (const e of raw) {
-    if (e.visible === false) continue;
-    const type = String(e.type ?? "");
-
-    if (type === "DROP_SHADOW" || type === "INNER_SHADOW") {
-      const color = resolveFigColor(
-        e.color as FigColor | undefined,
-        (e as { colorVar?: unknown }).colorVar,
-        variableColors,
-      );
-      const opacity = e.opacity ?? color?.a ?? 0.25;
-      out.push({
-        id: newNodeEffectId(),
-        type: type === "INNER_SHADOW" ? "inner-shadow" : "drop-shadow",
-        visible: true,
-        x: e.offset?.x ?? 0,
-        y: e.offset?.y ?? 0,
-        blur: Math.max(0, e.radius ?? 0),
-        spread: e.spread ?? 0,
-        color: color ? rgbaToHex(color) : "#000000",
-        opacity,
-      });
-      continue;
-    }
-
-    if (type === "FOREGROUND_BLUR" || type === "BACKGROUND_BLUR") {
-      const blur = figBlurRadius(e.radius);
-      if (blur <= 0) continue;
-      out.push({
-        id: newNodeEffectId(),
-        type: type === "BACKGROUND_BLUR" ? "background-blur" : "layer-blur",
-        visible: true,
-        blur,
-      });
-    }
+  if (layoutMode === "horizontal") {
+    if (primarySizing) fields.layoutSizingHorizontal = primarySizing;
+    if (counterSizing) fields.layoutSizingVertical = counterSizing;
+  } else {
+    if (primarySizing) fields.layoutSizingVertical = primarySizing;
+    if (counterSizing) fields.layoutSizingHorizontal = counterSizing;
   }
 
-  return out.length > 0 ? out : undefined;
+  if (ext.stackChildPrimaryGrow === 1) {
+    if (layoutMode === "horizontal") fields.layoutSizingHorizontal = "fill";
+    else fields.layoutSizingVertical = "fill";
+  }
+  if (ext.stackChildCounterGrow === 1) {
+    if (layoutMode === "horizontal") fields.layoutSizingVertical = "fill";
+    else fields.layoutSizingHorizontal = "fill";
+  }
+  if (ext.stackChildAlignSelf?.toUpperCase() === "STRETCH") {
+    if (layoutMode === "horizontal") fields.layoutSizingVertical = "fill";
+    else fields.layoutSizingHorizontal = "fill";
+  }
+
+  return fields;
+}
+
+/** Move root frames to a visible canvas origin (fig files often use large internal coords). */
+function normalizeFigRootFramesOnCanvas(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): Record<string, EditorNode> {
+  const roots = childOrder[ROOT] ?? [];
+  if (roots.length === 0) return nodes;
+
+  let minX = Infinity;
+  let minY = Infinity;
+  for (const id of roots) {
+    const n = nodes[id];
+    if (!n) continue;
+    minX = Math.min(minX, n.x);
+    minY = Math.min(minY, n.y);
+  }
+  if (!Number.isFinite(minX)) return nodes;
+
+  const dx = CANVAS_FRAME_ORIGIN.x - minX;
+  const dy = CANVAS_FRAME_ORIGIN.y - minY;
+  if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return nodes;
+
+  const out = { ...nodes };
+  for (const id of roots) {
+    const n = out[id];
+    if (!n) continue;
+    out[id] = { ...n, x: n.x + dx, y: n.y + dy };
+  }
+  return out;
+}
+
+/**
+ * Align parentId/childOrder without re-running auto-layout or lifting frames.
+ * Preserves Figma transform positions for 1:1 visual import.
+ */
+function finalizeFigPageImport(ctx: ImportCtx): void {
+  ctx.childOrder = reconcileChildOrderWithParents(ctx.nodes, ctx.childOrder);
+  ctx.nodes = syncParentIdsFromChildOrder(ctx.nodes, ctx.childOrder);
+  ctx.childOrder = dedupeChildOrderLists(ctx.nodes, ctx.childOrder);
+  ctx.nodes = normalizeFigRootFramesOnCanvas(ctx.nodes, ctx.childOrder);
+}
+
+/** Run auto-layout after import on idle time (import skips this for responsiveness). */
+export function applyFigDocumentPostImportLayout(doc: PaytmCraftDocument): PaytmCraftDocument {
+  if (!doc.pages?.length) {
+    const nodes = applyDeepAutoLayoutAll(
+      doc.nodes as Record<string, LayoutNode>,
+      doc.childOrder,
+    ) as PaytmCraftDocument["nodes"];
+    return { ...doc, nodes };
+  }
+
+  const pages = doc.pages.map((page) => ({
+    ...page,
+    nodes: applyDeepAutoLayoutAll(
+      page.nodes as Record<string, LayoutNode>,
+      page.childOrder,
+    ) as typeof page.nodes,
+  }));
+
+  const active = pages.find((p) => p.id === doc.activePageId) ?? pages[0]!;
+  return {
+    ...doc,
+    pages,
+    nodes: active.nodes,
+    childOrder: active.childOrder,
+  };
 }
 
 function mapNodeKind(node: FigNode): NodeKind | null {
@@ -426,8 +755,11 @@ function mapNodeKind(node: FigNode): NodeKind | null {
     case "TEXT":
       return "text";
     case "VECTOR":
+    case "STAR":
+    case "POLYGON":
       return "path";
     case "BOOLEAN_OPERATION":
+    case "BOOLEAN_GROUP":
       return "group";
     case "INSTANCE":
     case "COMPONENT":
@@ -441,6 +773,7 @@ function mapNodeKind(node: FigNode): NodeKind | null {
 
 function isImportableNode(node: FigNode): boolean {
   if (node.phase === "REMOVED") return false;
+  if (!figNodeVisible(node)) return false;
   if (SKIP_TYPES.has(node.type)) return false;
   if (node.type === "CANVAS" && /internal only/i.test(node.name)) return false;
   return mapNodeKind(node) !== null;
@@ -522,50 +855,62 @@ function convertFigNode(
   doc: FigDocument,
   ctx: ImportCtx,
   paytmParentId: string | null,
+  instanceForOverrides?: FigNode | null,
 ): EditorNode | null {
-  const figKey = nodeId(node);
-  if (!figKey || !isImportableNode(node)) return null;
+  const source = instanceForOverrides ? applySymbolOverrides(node, instanceForOverrides) : node;
+  const figKey = nodeId(source);
+  if (!figKey || !isImportableNode(source)) return null;
 
-  const kind = mapNodeKind(node);
+  const kind = mapNodeKind(source);
   if (!kind) return null;
 
-  const w = Math.max(1, node.size?.x ?? 1);
-  const h = Math.max(1, node.size?.y ?? 1);
-  const x = node.transform?.m02 ?? 0;
-  const y = node.transform?.m12 ?? 0;
+  const placement = placementFromFigNode(source);
   const id = paytmId(ctx, figKey);
-  const resolvedFills = resolvePaintList(node.fillPaints, ctx.variableColors);
-  const imagePaint = hasImageFill(resolvedFills);
-  const solid = solidFill(resolvedFills);
-  const gradient = gradientFill(resolvedFills);
+  const rawFills = fillsForFigNode(source, doc, ctx);
+  const resolvedFills = resolvePaintList(rawFills, ctx.variableColors);
+  const imagePaint = imagePaintFromPaints(resolvedFills);
+  const solid = solidFillFromPaints(resolvedFills);
+  const gradient = gradientFillFromPaints(resolvedFills, placement.width, placement.height);
+  const fillTokenId = fillTokenIdForPaints(rawFills, ctx.tokensByVariableKey);
 
+  const ext = source as FigNode & { locked?: boolean; textAlignVertical?: string };
   const base: EditorNode = {
     id,
     parentId: paytmParentId,
     type: kind,
-    name: node.name || node.type,
-    x,
-    y,
-    width: w,
-    height: h,
-    rotation: rotationDeg(node.transform),
+    name: figDisplayName(source),
+    x: placement.x,
+    y: placement.y,
+    width: placement.width,
+    height: placement.height,
+    rotation: placement.rotation,
+    flipHorizontal: placement.flipHorizontal,
+    flipVertical: placement.flipVertical,
     visible: true,
-    locked: false,
+    locked: ext.locked === true,
     expanded: true,
     fillEnabled: Boolean(solid.fill || gradient.fillType || imagePaint),
+    fillTokenId,
     ...solid,
     ...gradient,
-    ...strokeFromNode(node, ctx.variableColors),
-    ...autoLayoutFromFigNode(node),
-    cornerRadius: node.cornerRadius,
-    opacity: node.opacity,
-    effects: effectsFromFigNode(node, ctx.variableColors),
+    ...strokesFromFigNode(source, ctx.variableColors),
+    ...autoLayoutFromFigNode(source),
+    ...constraintsFromFigNode(source),
+    ...cornerRadiusFromFigNode(source),
+    opacity: source.opacity,
+    effects: effectsFromFigNode(source, ctx.variableColors),
   };
 
-  const clipChildren = figContainerClipChildren(node);
+  if (source.type === "COMPONENT" || source.type === "SYMBOL") {
+    base.isComponent = true;
+    base.componentId = newComponentId();
+    ctx.componentMasters.set(figKey, id);
+  }
+
+  const clipChildren = figContainerClipChildren(source);
   if (clipChildren !== undefined) base.clipChildren = clipChildren;
 
-  applyFigBooleanToNode(node, base);
+  applyFigBooleanToNode(source, base);
 
   if (imagePaint) {
     const img = registerImageAsset(doc, imagePaint, ctx);
@@ -575,32 +920,48 @@ function convertFigNode(
       base.imageSrc = img.imageSrc;
       base.imageName = base.name;
       base.imageMimeType = ctx.assets[img.assetId]?.mimeType;
-      base.imageFitMode = "fill";
+      base.imageFitMode = imageFitFromPaint(imagePaint);
     }
   }
 
   if (base.type === "text") {
-    base.content = node.textData?.characters ?? "";
-    base.textColor = base.fill ?? "#111111";
-    base.fontFamily = node.fontName?.family
-      ? `"${node.fontName.family}", system-ui, sans-serif`
-      : undefined;
-    base.fontSize = node.fontSize ?? 13;
-    base.fontWeight = figFontWeight(node.fontName?.style);
-    base.textAlign =
-      node.textAlignHorizontal === "CENTER"
-        ? "center"
-        : node.textAlignHorizontal === "RIGHT"
-          ? "right"
-          : "left";
-    base.textResizeMode = "auto-height";
+    Object.assign(base, textFieldsFromFigNode(source, doc, ctx.variableColors, base.fill));
+    const vAlign = ext.textAlignVertical?.toUpperCase();
+    if (vAlign === "CENTER") base.textAlign = base.textAlign ?? "left";
+    if (!base.fill && base.textColor) {
+      base.fill = base.textColor;
+      base.fillEnabled = true;
+    }
   }
 
-  if (base.type === "path" && node.type === "VECTOR") {
-    try {
-      const paths = resolveVectorNodePaths(doc, node);
+  if (
+    base.type === "path" &&
+    (source.type === "VECTOR" || source.type === "STAR" || source.type === "POLYGON")
+  ) {
+    const paths = cachedVectorPaths(doc, source, ctx);
+    if (paths) {
       const svg = paths.fill[0]?.svgPath ?? paths.stroke[0]?.svgPath;
       if (svg) {
+        if (!solid.fill) {
+          for (const path of paths.fill) {
+            if (!path.paints?.length) continue;
+            const pathFills = resolvePaintList(path.paints, ctx.variableColors);
+            const pathSolid = solidFillFromPaints(pathFills);
+            const pathGradient = gradientFillFromPaints(pathFills, placement.width, placement.height);
+            if (pathSolid.fill) {
+              base.fill = pathSolid.fill;
+              base.fillOpacity = pathSolid.fillOpacity;
+              base.fillEnabled = true;
+              break;
+            }
+            if (pathGradient.fillType) {
+              base.fillType = pathGradient.fillType;
+              base.fillGradient = pathGradient.fillGradient;
+              base.fillEnabled = true;
+              break;
+            }
+          }
+        }
         const pts = svgPathToPathPoints(svg);
         if (pts.length >= 2) {
           base.pathPoints = pts;
@@ -612,8 +973,6 @@ function convertFigNode(
           return normalized;
         }
       }
-    } catch {
-      /* fall through to bbox rectangle */
     }
     base.type = "rectangle";
     delete base.pathPoints;
@@ -631,21 +990,60 @@ function walkFigTree(
   paytmParentId: string | null,
   doc: FigDocument,
   ctx: ImportCtx,
+  instanceForOverrides?: FigNode | null,
 ): void {
-  const children = doc.childrenMap.get(figParentId) ?? [];
-  for (const child of children) {
+  for (const child of sortedFigChildren(doc, figParentId)) {
     const figKey = nodeId(child);
     if (!figKey || child.phase === "REMOVED") continue;
 
     if (PASS_THROUGH_TYPES.has(child.type)) {
-      walkFigTree(figKey, paytmParentId, doc, ctx);
+      walkFigTree(figKey, paytmParentId, doc, ctx, instanceForOverrides);
       continue;
     }
 
     if (!isImportableNode(child)) continue;
-    const converted = convertFigNode(child, doc, ctx, paytmParentId);
+
+    if (child.type === "INSTANCE") {
+      const converted = convertFigNode(child, doc, ctx, paytmParentId);
+      if (!converted) continue;
+
+      const symId = symbolRootKey(child);
+      const masterId = symId ? ctx.componentMasters.get(symId) : undefined;
+      const overrides = instanceOverridesFromSymbol(child, ctx.idMap, ctx.variableColors);
+
+      const instanceNode: EditorNode = {
+        ...ctx.nodes[converted.id]!,
+        ...(masterId ? { sourceComponentId: masterId } : {}),
+        ...(Object.keys(overrides).length > 0 ? { instanceOverrides: overrides } : {}),
+      };
+      ctx.nodes[converted.id] = instanceNode;
+
+      let contentParentId = converted.id;
+      if (symId) {
+        const symNode = doc.nodeMap.get(symId);
+        if (symNode && isImportableNode(symNode) && symNode.type !== "INSTANCE") {
+          const symRoot = convertFigNode(
+            applySymbolOverrides(symNode, child),
+            doc,
+            ctx,
+            converted.id,
+            child,
+          );
+          if (symRoot) contentParentId = symRoot.id;
+        }
+        walkFigTree(symId, contentParentId, doc, ctx, child);
+      } else {
+        walkFigTree(figKey, converted.id, doc, ctx, child);
+      }
+      if (converted.type === "frame" || converted.type === "group") {
+        finalizeFigContainer(figKey, converted.id, doc, ctx, isImportableNode);
+      }
+      continue;
+    }
+
+    const converted = convertFigNode(child, doc, ctx, paytmParentId, instanceForOverrides);
     if (!converted) continue;
-    walkFigTree(figKey, converted.id, doc, ctx);
+    walkFigTree(figKey, converted.id, doc, ctx, instanceForOverrides);
     if (converted.type === "frame" || converted.type === "group") {
       finalizeFigContainer(figKey, converted.id, doc, ctx, isImportableNode);
     }
@@ -683,6 +1081,8 @@ export function convertFigBytesToPaytmCraft(
     const pages: NonNullable<PaytmCraftDocument["pages"]> = [];
     const mergedAssets: Record<string, EditorAsset> = {};
     const variableColors = buildVariableColorMap(fig);
+    const designTokens = buildDesignTokensFromFig(fig);
+    const tokensByVariableKey = buildTokensByVariableKey(designTokens, variableColors);
     const rootFrameFills: string[] = [];
     let pageIndex = 0;
 
@@ -696,15 +1096,21 @@ export function convertFigBytesToPaytmCraft(
         assets: {},
         idMap: new Map(),
         variableColors,
+        vectorPathsCache: new Map(),
+        componentMasters: new Map(),
+        tokensByVariableKey,
         seq: pageIndex * 10_000,
       };
 
-      walkFigTree(canvasId, null, fig, ctx);
+      importFigmaComponentLibrary(fig, ctx, {
+        walkFigTree,
+        convertFigNode,
+        nextId,
+        appendChild,
+      });
 
-      ctx.nodes = applyDeepAutoLayoutAll(
-        ctx.nodes as Record<string, LayoutNode>,
-        ctx.childOrder,
-      ) as typeof ctx.nodes;
+      walkFigTree(canvasId, null, fig, ctx);
+      finalizeFigPageImport(ctx);
 
       if ((ctx.childOrder[ROOT] ?? []).length === 0) continue;
 
@@ -739,6 +1145,8 @@ export function convertFigBytesToPaytmCraft(
     }
 
     const first = pages[0]!;
+    const rootIds = first.childOrder[ROOT] ?? [];
+    const viewport = viewportForRootNodes(first.nodes, rootIds);
 
     const document: PaytmCraftDocument = {
       version: 1,
@@ -749,10 +1157,26 @@ export function convertFigBytesToPaytmCraft(
       pages,
       activePageId: first.id,
       assets: mergedAssets,
-      designTokens: {},
-      selectedIds: [],
-      canvas: first.canvas,
+      designTokens,
+      selectedIds: rootIds.slice(0, 1),
+      canvas: {
+        ...first.canvas,
+        zoom: viewport?.zoom ?? first.canvas.zoom,
+        panX: viewport?.pan.x ?? first.canvas.panX,
+        panY: viewport?.pan.y ?? first.canvas.panY,
+      },
     };
+
+    if (viewport) {
+      for (const page of pages) {
+        page.canvas = {
+          ...page.canvas,
+          zoom: viewport.zoom,
+          panX: viewport.pan.x,
+          panY: viewport.pan.y,
+        };
+      }
+    }
 
     return { ok: true, document };
   } catch (e) {
@@ -762,3 +1186,15 @@ export function convertFigBytesToPaytmCraft(
     };
   }
 }
+
+/** @internal Exported for unit tests only. */
+export const __figImportTest = {
+  applySymbolOverrides,
+  figDisplayName,
+  figLineHeightMultiplier,
+  figLetterSpacingPx,
+  dominantTextFillFromRuns,
+  fillsForFigNode,
+  resolvePaintList,
+  solidFillFromPaints,
+};

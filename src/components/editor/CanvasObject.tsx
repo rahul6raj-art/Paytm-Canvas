@@ -15,7 +15,7 @@ import {
   worldToLocalForNode,
 } from "@/lib/tree";
 import { insertIndexInAutoLayout, type LayoutNode } from "@/lib/autoLayout";
-import { isAncestorOf } from "@/lib/editorGraph";
+import { buildParentMapFromChildOrder, isAncestorOf } from "@/lib/editorGraph";
 import { mergeInstanceOverrides } from "@/lib/componentModel";
 import { legacyEffectShadowAppend, resolveEffectBoxShadow, resolveNodeWithDesignTokens } from "@/lib/designTokens";
 import { buildNodeEffectRenderStyle, firstVisibleDropShadowFilter } from "@/lib/nodeEffects";
@@ -382,7 +382,11 @@ export function CanvasObject({ id }: { id: string }) {
   const fill = fillPaintCss(node);
   const isGradientFill = effectiveFillType(node) === "gradient";
   const showShapeFill = node.fillEnabled !== false && isGradientFill;
-  const isRootFrame = node.type === "frame" && node.parentId === null;
+  const renderParentId = useMemo(() => {
+    const parentOf = buildParentMapFromChildOrder(childOrder);
+    return parentOf.get(id) ?? null;
+  }, [childOrder, id]);
+  const isRootFrame = node.type === "frame" && renderParentId === null;
   const showInspectHover =
     editorMode === "inspect" && hoveredCanvasId === id && !selectedIds.includes(id) && node.visible;
   const showDesignHover =
@@ -558,7 +562,7 @@ export function CanvasObject({ id }: { id: string }) {
   return (
     <div
       data-canvas-node={id}
-      className="absolute relative box-border select-none"
+      className="absolute box-border select-none"
       style={{
         left: node.x,
         top: node.y,

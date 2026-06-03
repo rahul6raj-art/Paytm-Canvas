@@ -36,6 +36,9 @@ import {
   isCanvasChromeTarget,
 } from "@/lib/canvasInteractionGuards";
 import { boundsFromDrag, lineGeometryFromDrag, toolToShapeType, type ShapeType } from "@/lib/shapes";
+import { getRenderedWorldTopLeft } from "@/lib/editorGraph";
+
+const PEN_CURVE_DRAG_THRESHOLD = 4;
 import { wheelZoomFactor, zoomAtScreenPoint } from "@/lib/canvasZoom";
 import {
   activateCanvasForShortcuts,
@@ -48,42 +51,98 @@ import {
   suppressPostCreationPointer,
 } from "@/lib/canvasCreationGuard";
 
+function penPreviewPathD(
+  points: { x: number; y: number; handleIn?: { x: number; y: number }; handleOut?: { x: number; y: number } }[],
+): string {
+  if (points.length === 0) return "";
+  const first = points[0]!;
+  let d = `M ${first.x} ${first.y}`;
+  for (let i = 1; i < points.length; i++) {
+    const p0 = points[i - 1]!;
+    const p1 = points[i]!;
+    const hasCurve = Boolean(p0.handleOut || p1.handleIn);
+    if (hasCurve) {
+      const c1x = p0.x + (p0.handleOut?.x ?? 0);
+      const c1y = p0.y + (p0.handleOut?.y ?? 0);
+      const c2x = p1.x + (p1.handleIn?.x ?? 0);
+      const c2y = p1.y + (p1.handleIn?.y ?? 0);
+      d += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p1.x} ${p1.y}`;
+    } else {
+      d += ` L ${p1.x} ${p1.y}`;
+    }
+  }
+  return d;
+}
+
 function PenStrokePreview({
   drawId,
   hover,
+  placement,
   nodes,
+  childOrder,
 }: {
   drawId: string;
   hover: { x: number; y: number };
+  placement: { anchor: { x: number; y: number }; drag: { x: number; y: number } } | null;
   nodes: Record<string, EditorNode>;
+  childOrder: Record<string, string[]>;
 }) {
   const n = nodes[drawId];
   const pts = n?.pathPoints ?? [];
   if (!pts.length) return null;
-  const wr = worldRect(drawId, nodes);
-  const last = pts[pts.length - 1]!;
-  const lx = wr.x + last.x;
-  const ly = wr.y + last.y;
-  const first = pts[0]!;
-  const fx = wr.x + first.x;
-  const fy = wr.y + first.y;
-  const canClose = pts.length >= 2 && Math.hypot(hover.x - fx, hover.y - fy) <= 12;
+  const origin = getRenderedWorldTopLeft(drawId, nodes, childOrder);
+  const worldPts = pts.map((p) => ({
+    x: origin.x + p.x,
+    y: origin.y + p.y,
+    handleIn: p.handleIn,
+    handleOut: p.handleOut,
+  }));
+  const previewPts = [...worldPts];
+  if (placement) {
+    const hx = placement.drag.x - placement.anchor.x;
+    const hy = placement.drag.y - placement.anchor.y;
+    const last = previewPts[previewPts.length - 1]!;
+    previewPts[previewPts.length - 1] = { ...last, handleOut: { x: hx, y: hy } };
+    previewPts.push({
+      x: placement.anchor.x,
+      y: placement.anchor.y,
+      handleIn: { x: -hx, y: -hy },
+      handleOut: undefined,
+    });
+  }
+  const d = penPreviewPathD(previewPts);
+  const last = worldPts[worldPts.length - 1]!;
+  const target = placement?.drag ?? hover;
+  const first = worldPts[0]!;
+  const canClose =
+    pts.length >= 2 && !placement && Math.hypot(target.x - first.x, target.y - first.y) <= 12;
   return (
     <svg className="pointer-events-none absolute inset-0 z-[17] h-full w-full overflow-visible">
-      <line
-        x1={lx}
-        y1={ly}
-        x2={hover.x}
-        y2={hover.y}
-        stroke={canClose ? "#22c55e" : CANVAS_VISUAL.selection}
-        strokeWidth={2}
-        strokeDasharray="6 4"
-        vectorEffect="non-scaling-stroke"
-      />
+      {d ? (
+        <path
+          d={d}
+          fill="none"
+          stroke={CANVAS_VISUAL.selection}
+          strokeWidth={2}
+          vectorEffect="non-scaling-stroke"
+        />
+      ) : null}
+      {!placement ? (
+        <line
+          x1={last.x}
+          y1={last.y}
+          x2={target.x}
+          y2={target.y}
+          stroke={canClose ? "#22c55e" : CANVAS_VISUAL.selection}
+          strokeWidth={2}
+          strokeDasharray="6 4"
+          vectorEffect="non-scaling-stroke"
+        />
+      ) : null}
       {canClose ? (
         <circle
-          cx={fx}
-          cy={fy}
+          cx={first.x}
+          cy={first.y}
           r={10}
           fill="none"
           stroke="#22c55e"
@@ -230,6 +289,13 @@ export function Canvas() {
   const nodes = useEditorStore((s) => s.nodes);
 
   const [penHoverWorld, setPenHoverWorld] = useState<{ x: number; y: number } | null>(null);
+  const [penPlacement, setPenPlacement] = useState<{
+    anchor: { x: number; y: number };
+    drag: { x: number; y: number };
+  } | null>(null);
+  const penPlacementRef = useRef<{ anchor: { x: number; y: number }; drag: { x: number; y: number } } | null>(
+    null,
+  );
   const [spaceDown, setSpaceDown] = useState(false);
   const [optionDown, setOptionDown] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
@@ -258,6 +324,7 @@ export function Canvas() {
   } | null>(null);
   const shapeSessionCleanupRef = useRef<(() => void) | null>(null);
   const pencilSessionCleanupRef = useRef<(() => void) | null>(null);
+  const penSessionCleanupRef = useRef<(() => void) | null>(null);
   const frameSessionCleanupRef = useRef<(() => void) | null>(null);
   const panDrag = useRef<{ pointerId: number; sx: number; sy: number; px: number; py: number } | null>(
     null,
@@ -268,6 +335,7 @@ export function Canvas() {
       frameSessionCleanupRef.current?.();
       shapeSessionCleanupRef.current?.();
       pencilSessionCleanupRef.current?.();
+      penSessionCleanupRef.current?.();
     });
     return () => {
       registerMarqueeAbortHandler(null);
@@ -275,6 +343,22 @@ export function Canvas() {
       shapeSessionCleanupRef.current?.();
     };
   }, []);
+
+  useEffect(() => {
+    if (!penDrawingNodeId) {
+      penSessionCleanupRef.current?.();
+      penPlacementRef.current = null;
+      setPenPlacement(null);
+    }
+  }, [penDrawingNodeId]);
+
+  useEffect(() => {
+    if (tool !== "pen") {
+      penSessionCleanupRef.current?.();
+      penPlacementRef.current = null;
+      setPenPlacement(null);
+    }
+  }, [tool]);
 
   useEffect(() => {
     const syncOption = (e: KeyboardEvent) => setOptionDown(e.altKey);
@@ -695,11 +779,75 @@ export function Canvas() {
       }
       if (activeTool === "pen") {
         creationBranch = "pen";
-        if (st.penDrawingNodeId) {
-          st.addPathPoint(w);
-        } else {
+        if (!st.penDrawingNodeId) {
           st.startPathAt(w);
+          return;
         }
+
+        penSessionCleanupRef.current?.();
+        const anchor = w;
+        const placement0 = { anchor, drag: anchor };
+        penPlacementRef.current = placement0;
+        setPenPlacement(placement0);
+
+        const target = pointerCaptureTarget();
+        const capId = e.pointerId;
+        try {
+          target.setPointerCapture(capId);
+        } catch {
+          /* ignore */
+        }
+        let ended = false;
+
+        const removeListeners = () => {
+          window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("pointerup", onPointerEnd);
+          window.removeEventListener("pointercancel", onPointerEnd);
+        };
+
+        const finish = (commit: boolean) => {
+          if (ended) return;
+          ended = true;
+          penSessionCleanupRef.current = null;
+          removeListeners();
+          const placement = penPlacementRef.current;
+          penPlacementRef.current = null;
+          setPenPlacement(null);
+          try {
+            target.releasePointerCapture(capId);
+          } catch {
+            /* ignore */
+          }
+          if (!commit) return;
+          const drag = placement?.drag ?? anchor;
+          const st2 = useEditorStore.getState();
+          if (!st2.penDrawingNodeId || st2.tool !== "pen") return;
+          const dist = Math.hypot(drag.x - anchor.x, drag.y - anchor.y);
+          if (dist >= PEN_CURVE_DRAG_THRESHOLD) {
+            st2.addPathPointDrag(anchor, drag);
+          } else {
+            st2.addPathPoint(anchor);
+          }
+        };
+
+        penSessionCleanupRef.current = () => finish(false);
+
+        const onMove = (ev: PointerEvent) => {
+          if (ev.pointerId !== capId) return;
+          const ww = toWorld(ev.clientX, ev.clientY);
+          const next = { anchor, drag: ww };
+          penPlacementRef.current = next;
+          setPenPlacement(next);
+        };
+
+        const onPointerEnd = (ev: PointerEvent) => {
+          if (ev.pointerId !== capId) return;
+          finish(ev.type === "pointerup");
+        };
+
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onPointerEnd);
+        window.addEventListener("pointercancel", onPointerEnd);
         return;
       }
       if (activeTool === "comment" && activePlacingComment) {
@@ -989,8 +1137,14 @@ export function Canvas() {
           <div className="pointer-events-none absolute inset-0 z-[20]">
             <RootFrameLabels rootIds={rootIds} />
           </div>
-          {editorMode === "design" && tool === "pen" && penDrawingNodeId && penHoverWorld ? (
-            <PenStrokePreview drawId={penDrawingNodeId} hover={penHoverWorld} nodes={nodes} />
+          {editorMode === "design" && tool === "pen" && penDrawingNodeId && (penHoverWorld || penPlacement) ? (
+            <PenStrokePreview
+              drawId={penDrawingNodeId}
+              hover={penPlacement?.drag ?? penHoverWorld!}
+              placement={penPlacement}
+              nodes={nodes}
+              childOrder={childOrder}
+            />
           ) : null}
           {editorMode === "design" ? <CommentPinLayer /> : null}
           {frameDraft ? (
@@ -1020,7 +1174,6 @@ export function Canvas() {
             />
           ) : null}
           <SelectionBox />
-          <LayoutGuidesOverlay zoom={zoom} />
           <DragSnapOverlay />
           <AltMeasureLayer />
           <ComponentPlacementPreview />
@@ -1029,6 +1182,8 @@ export function Canvas() {
           <InspectMeasurementsLayer />
         </div>
       </div>
+
+      <LayoutGuidesOverlay zoom={zoom} pan={pan} viewportRef={viewportRef} />
 
       <div className="absolute bottom-3 left-3 z-50 flex items-center gap-1">
         <button

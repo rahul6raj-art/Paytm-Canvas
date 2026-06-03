@@ -28,6 +28,8 @@ import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { CodeRoundTripModal } from "@/components/code/CodeRoundTripModal";
 import { TextEditPortal } from "./TextEditPortal";
 import { UiChromeHiddenHint } from "./UiChromeHiddenHint";
+import { FigImportOverlay } from "@/components/import/FigImportOverlay";
+import { DocumentHydrationOverlay } from "@/components/editor/DocumentHydrationOverlay";
 import { useTheme } from "@/components/ThemeProvider";
 import { displayCanvasBackground } from "@/lib/canvasVisual";
 import { activateCanvasForShortcuts, isEditableFieldElement } from "@/lib/editorKeyboardFocus";
@@ -131,6 +133,8 @@ export function AppShell() {
       <VersionHistoryPanel />
       <PluginRunner />
       <EditorDocumentPersistence />
+      <DocumentHydrationOverlay />
+      <FigImportOverlay />
       <PrototypePreviewModal />
       <EditorKeyboardShortcuts />
       <EditorContextMenu />

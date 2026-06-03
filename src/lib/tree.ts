@@ -1,6 +1,14 @@
 import type { EditorNode, NodeKind } from "@/stores/useEditorStore";
 import { maskGroupChildHitOrder } from "@/lib/booleanGeometry";
-import { isAncestorOf } from "@/lib/editorGraph";
+import {
+  buildParentMapFromChildOrder,
+  getRenderedWorldBounds,
+  insertNodeInChildOrder,
+  isAncestorOf,
+  pointInNodeRenderedWorldBounds,
+  repairNodeHierarchy,
+  worldPointToParentLocalFromChildOrder,
+} from "@/lib/editorGraph";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import {
   applyMatrixToPoint,
@@ -39,8 +47,21 @@ export function centeredLocalPointInParent(
   nodes: Record<string, EditorNode>,
   nodeWidth: number,
   nodeHeight: number,
+  childOrder: Record<string, string[]>,
 ): { x: number; y: number } {
-  const local = worldPointToParentLocal(worldX, worldY, parentId, nodes);
+  if (!parentId) {
+    return {
+      x: worldX - nodeWidth / 2,
+      y: worldY - nodeHeight / 2,
+    };
+  }
+  const local = worldPointToParentLocalFromChildOrder(
+    worldX,
+    worldY,
+    parentId,
+    nodes,
+    childOrder,
+  );
   return {
     x: local.x - nodeWidth / 2,
     y: local.y - nodeHeight / 2,
@@ -51,8 +72,72 @@ export function centeredLocalPointInParent(
 export type ShapeInsertBounds = { x: number; y: number; width: number; height: number };
 
 /**
+ * Insert a new layer at world bounds, parenting into the frame under the click when possible.
+ * Aligns childOrder, parentId, and parent-local x/y with the render tree.
+ */
+export function insertNodeWithFrameParenting(
+  node: EditorNode,
+  worldBounds: ShapeInsertBounds,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  selectedIds: string[],
+): { nodes: Record<string, EditorNode>; childOrder: Record<string, string[]> } {
+  const frameId = resolveFrameParentForShapeInsert(worldBounds, nodes, childOrder, selectedIds);
+  const w = Math.max(1, worldBounds.width);
+  const h = Math.max(1, worldBounds.height);
+  let placed = node;
+
+  if (frameId) {
+    const local = worldPointToParentLocalFromChildOrder(
+      worldBounds.x,
+      worldBounds.y,
+      frameId,
+      nodes,
+      childOrder,
+    );
+    placed = {
+      ...node,
+      parentId: frameId,
+      x: local.x,
+      y: local.y,
+      width: w,
+      height: h,
+    };
+  } else {
+    placed = {
+      ...node,
+      parentId: null,
+      x: worldBounds.x,
+      y: worldBounds.y,
+      width: w,
+      height: h,
+    };
+  }
+
+  const nodesDraft = { ...nodes, [placed.id]: placed };
+  let co = insertNodeInChildOrder(childOrder, placed.id, placed.parentId);
+  return repairNodeHierarchy(nodesDraft, co);
+}
+
+/** True when `bounds` overlaps a frame's rendered world rect (childOrder tree). */
+export function shapeBoundsOverlapRenderedFrame(
+  bounds: ShapeInsertBounds,
+  frameId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): boolean {
+  const fb = getRenderedWorldBounds(frameId, nodes, childOrder);
+  return !(
+    bounds.x + bounds.width <= fb.x ||
+    bounds.x >= fb.x + fb.width ||
+    bounds.y + bounds.height <= fb.y ||
+    bounds.y >= fb.y + fb.height
+  );
+}
+
+/**
  * Frame to parent a newly drawn shape into.
- * Tries shape center/corners, then the selected layer's parent frame.
+ * Uses hit-testing on the shape bounds, then selected frames only when bounds overlap them.
  */
 export function resolveFrameParentForShapeInsert(
   bounds: ShapeInsertBounds,
@@ -81,7 +166,12 @@ export function resolveFrameParentForShapeInsert(
       seen.add(walk);
       const n = nodes[walk];
       if (!n) break;
-      if (n.type === "frame" && n.visible && !n.locked) return walk;
+      if (n.type === "frame" && n.visible && !n.locked) {
+        if (shapeBoundsOverlapRenderedFrame(bounds, walk, nodes, childOrder)) {
+          return walk;
+        }
+        break;
+      }
       walk = n.parentId;
     }
   }
@@ -156,7 +246,8 @@ export function pickDeepestFrameOrGroupAtWorldPoint(
   opts: { excludeDescendantsOf?: string | null },
 ): string | null {
   const ex = opts.excludeDescendantsOf;
-  const inRect = (nid: string) => pointInNodeWorldBounds(worldX, worldY, nid, nodes);
+  const inRect = (nid: string) =>
+    pointInNodeRenderedWorldBounds(worldX, worldY, nid, nodes, childOrder);
   const skip = (nid: string) =>
     Boolean(ex && (nid === ex || isAncestorOf(nodes, ex, nid)));
 
@@ -191,11 +282,12 @@ export function pickDeepestFrameAtWorldPoint(
 ): string | null {
   const hit = pickDeepestFrameOrGroupAtWorldPoint(worldX, worldY, nodes, childOrder, opts);
   if (!hit) return null;
+  const parentOf = buildParentMapFromChildOrder(childOrder);
   let cur: string | null = hit;
   while (cur) {
     const n: EditorNode | undefined = nodes[cur];
     if (n?.type === "frame") return cur;
-    cur = n?.parentId ?? null;
+    cur = parentOf.get(cur) ?? null;
   }
   return null;
 }
@@ -212,7 +304,7 @@ export function pickDeepestNodeAtWorldPoint(
   function dfs(nid: string): string | null {
     const n = nodes[nid];
     if (!n?.visible) return null;
-    if (!pointInNodeWorldBounds(worldX, worldY, nid, nodes)) return null;
+    if (!pointInNodeRenderedWorldBounds(worldX, worldY, nid, nodes, childOrder)) return null;
     const kids = maskGroupChildHitOrder(n, childOrder[nid] ?? []);
     for (const k of [...kids].reverse()) {
       const h = dfs(k);

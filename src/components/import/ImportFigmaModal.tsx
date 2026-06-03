@@ -345,7 +345,7 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
               loading && "opacity-70",
             )}
           >
-            {loading ? "Importing…" : "Import design"}
+            {loading ? (figFile ? "Parsing .fig file…" : "Importing…") : "Import design"}
           </button>
         </div>
       </div>

@@ -520,6 +520,22 @@ export function getNodeTransformedWorldBounds(
   return boundsFromCorners(corners);
 }
 
+/** World-space resize handle centers from a world matrix and local box size. */
+export function getWorldHandlesFromMatrix(
+  wm: Matrix2D,
+  width: number,
+  height: number,
+): { handle: ResizeHandle; x: number; y: number }[] {
+  const w = Math.max(1, width);
+  const h = Math.max(1, height);
+  const box: RectBounds = { x: 0, y: 0, width: w, height: h };
+  return HANDLE_ORDER.map((handle) => {
+    const p = LOCAL_HANDLE_POINTS[handle](box);
+    const world = applyMatrixToPoint(wm, p);
+    return { handle, x: world.x, y: world.y };
+  });
+}
+
 /** World-space resize handle centers for a node (includes parent rotation). */
 export function getNodeTransformedWorldHandles(
   nodeId: string,
@@ -529,14 +545,7 @@ export function getNodeTransformedWorldHandles(
   if (!n) return null;
   const wm = getNodeWorldMatrix(nodeId, nodes);
   if (!wm) return null;
-  const w = Math.max(1, n.width);
-  const h = Math.max(1, n.height);
-  const box: RectBounds = { x: 0, y: 0, width: w, height: h };
-  return HANDLE_ORDER.map((handle) => {
-    const p = LOCAL_HANDLE_POINTS[handle](box);
-    const world = applyMatrixToPoint(wm, p);
-    return { handle, x: world.x, y: world.y };
-  });
+  return getWorldHandlesFromMatrix(wm, n.width, n.height);
 }
 
 export function nodeNeedsOrientedOverlay(

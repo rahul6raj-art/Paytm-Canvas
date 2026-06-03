@@ -22,7 +22,8 @@ import {
   readLocalDocument,
   validatePaytmCraftDocument,
 } from "@/lib/documentPersistence";
-import { convertFigBytesToPaytmCraft, isFigmaFigFile } from "@/lib/figImport";
+import { convertFigFileAsync, isFigmaFigFile } from "@/lib/figImport";
+import { FigImportOverlay } from "@/components/import/FigImportOverlay";
 import { AIGenerateModal } from "@/components/ai/AIGenerateModal";
 import { ImportHub } from "@/components/import/ImportHub";
 import { CodeRoundTripModal } from "@/components/code/CodeRoundTripModal";
@@ -336,11 +337,13 @@ export function DashboardShell() {
   const onImportFile = useCallback(
     async (file: File | null) => {
       if (!file) return;
+      const isFig = isFigmaFigFile(file);
+      if (isFig) useEditorStore.setState({ figImportInProgress: true });
       try {
         let doc;
-        if (isFigmaFigFile(file)) {
+        if (isFig) {
           const bytes = new Uint8Array(await file.arrayBuffer());
-          const result = convertFigBytesToPaytmCraft(bytes, file.name);
+          const result = await convertFigFileAsync(bytes, file.name);
           if (!result.ok) {
             window.alert(result.error);
             return;
@@ -378,6 +381,8 @@ export function DashboardShell() {
         await openEditor({ ...patch });
       } catch {
         window.alert("Could not read that file.");
+      } finally {
+        if (isFig) useEditorStore.setState({ figImportInProgress: false });
       }
     },
     [openEditor],
@@ -520,6 +525,7 @@ export function DashboardShell() {
       <ImportHub />
       <CodeRoundTripModal />
       <ImportFigmaModal onImportFigFile={onImportFile} />
+      <FigImportOverlay />
       <ImportWebModal />
       <DashboardSidebar
         active={nav}

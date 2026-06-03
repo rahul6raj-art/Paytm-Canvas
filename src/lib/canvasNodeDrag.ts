@@ -6,12 +6,13 @@ import {
   proposedBoundsForMoving,
   type WorldRect,
 } from "@/lib/dragSmartGuides";
+import { getNodeTransformedWorldBounds, getNodeWorldOrigin } from "@/lib/transformMath";
 import {
-  getNodeTransformedWorldBounds,
-  getNodeWorldOrigin,
-  worldOriginToNodeXY,
-} from "@/lib/transformMath";
-import { isAncestorOf } from "@/lib/editorGraph";
+  getRenderedWorldBounds,
+  getRenderedWorldOrigin,
+  isAncestorOf,
+  worldOriginToNodeXYFromChildOrder,
+} from "@/lib/editorGraph";
 import { pickDeepestFrameAtWorldPoint, worldToLocalForNode } from "@/lib/tree";
 
 export type ClientToWorldFn = (clientX: number, clientY: number) => { x: number; y: number };
@@ -91,8 +92,8 @@ export function beginCanvasNodeDrag(opts: {
   const startWorld: Record<string, { x: number; y: number }> = {};
   const startBounds: Record<string, WorldRect> = {};
   for (const sid of dragTargets) {
-    startWorld[sid] = getNodeWorldOrigin(sid, s1.nodes);
-    startBounds[sid] = getNodeTransformedWorldBounds(sid, s1.nodes);
+    startWorld[sid] = getRenderedWorldOrigin(sid, s1.nodes, s1.childOrder);
+    startBounds[sid] = getRenderedWorldBounds(sid, s1.nodes, s1.childOrder);
   }
 
   const pAl = s1.nodes[primaryId]!.parentId;
@@ -179,7 +180,7 @@ export function beginCanvasNodeDrag(opts: {
     for (const sid of d.movingIds) {
       const sw = d.startWorld[sid]!;
       const desired = { x: sw.x + fdx2, y: sw.y + fdy2 };
-      const xy = worldOriginToNodeXY(sid, state.nodes, desired);
+      const xy = worldOriginToNodeXYFromChildOrder(sid, state.nodes, state.childOrder, desired);
       updateNode(sid, { x: xy.x, y: xy.y }, { skipHistory: true });
     }
   };

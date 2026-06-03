@@ -11,17 +11,19 @@ import {
 } from "@/lib/canvasVisual";
 import {
   getMatrixRotationDegrees,
-  getNodeTransformedWorldBounds,
   getNodeTransformedWorldCorners,
-  getNodeTransformedWorldHandles,
   getNodeWorldInverseMatrix,
-  getNodeWorldMatrix,
+  getWorldHandlesFromMatrix,
+  matrixHasRotation,
   matrixToCssTransform,
-  nodeNeedsOrientedOverlay,
   resizeCursorForRotatedHandle,
   normalizeRotationDegrees,
   worldToParentLocal,
 } from "@/lib/transformMath";
+import {
+  getNodeWorldMatrixFromChildOrder,
+  getRenderedWorldBounds,
+} from "@/lib/editorGraph";
 import {
   CANVAS_ROTATE_CURSOR,
   rotateZonesForAxisBounds,
@@ -48,6 +50,7 @@ const CURSOR: Record<ResizeHandle, string> = {
 export function SelectionBox() {
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const nodes = useEditorStore((s) => s.nodes);
+  const childOrder = useEditorStore((s) => s.childOrder);
   const zoom = useEditorStore((s) => s.zoom);
   const resizeNode = useEditorStore((s) => s.resizeNode);
   const updateNode = useEditorStore((s) => s.updateNode);
@@ -81,29 +84,34 @@ export function SelectionBox() {
     let maxX = -Infinity;
     let maxY = -Infinity;
     for (const sid of visibleSelected) {
-      const tb = getNodeTransformedWorldBounds(sid, nodes);
+      const tb = getRenderedWorldBounds(sid, nodes, childOrder);
       minX = Math.min(minX, tb.x);
       minY = Math.min(minY, tb.y);
       maxX = Math.max(maxX, tb.x + tb.width);
       maxY = Math.max(maxY, tb.y + tb.height);
     }
     return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
-  }, [visibleSelected, nodes]);
+  }, [visibleSelected, nodes, childOrder]);
 
   const id = visibleSelected.length === 1 ? visibleSelected[0]! : null;
   const node = id ? nodes[id] : null;
 
-  const oriented = Boolean(id && node && visibleSelected.length === 1 && nodeNeedsOrientedOverlay(id, nodes));
-
   const worldMatrix = useMemo(() => {
-    if (!oriented || !id) return null;
-    return getNodeWorldMatrix(id, nodes);
-  }, [oriented, id, nodes]);
+    if (!id) return null;
+    return getNodeWorldMatrixFromChildOrder(id, nodes, childOrder);
+  }, [id, nodes, childOrder]);
+
+  const oriented = Boolean(
+    id &&
+      node &&
+      visibleSelected.length === 1 &&
+      (worldMatrix ? matrixHasRotation(worldMatrix) : false),
+  );
 
   const orientedHandles = useMemo(() => {
-    if (!oriented || !id) return null;
-    return getNodeTransformedWorldHandles(id, nodes);
-  }, [oriented, id, nodes]);
+    if (!oriented || !id || !node || !worldMatrix) return null;
+    return getWorldHandlesFromMatrix(worldMatrix, node.width, node.height);
+  }, [oriented, id, node, worldMatrix]);
 
   const worldRotation = worldMatrix ? getMatrixRotationDegrees(worldMatrix) : 0;
 
@@ -231,7 +239,8 @@ export function SelectionBox() {
       document.body.style.userSelect = "none";
       document.body.style.cursor = CANVAS_ROTATE_CURSOR;
       useEditorStore.getState().pushHistory();
-      const tb = getNodeTransformedWorldBounds(id, useEditorStore.getState().nodes);
+      const st = useEditorStore.getState();
+      const tb = getRenderedWorldBounds(id, st.nodes, st.childOrder);
       const centerWorld = { x: tb.x + tb.width / 2, y: tb.y + tb.height / 2 };
       const w0 = clientToWorld(e.clientX, e.clientY);
       rotateDragRef.current = {

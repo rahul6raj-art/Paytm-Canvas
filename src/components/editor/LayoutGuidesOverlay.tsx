@@ -1,15 +1,29 @@
 "use client";
 
+import type { RefObject } from "react";
+import { worldToViewport } from "@/lib/canvasCoordinates";
 import { CANVAS_VISUAL } from "@/lib/canvasVisual";
-import { layoutGuideHitThresholdWorld } from "@/lib/layoutGuidePick";
+import { startLayoutGuideMoveSession } from "@/lib/layoutGuideMove";
 import { useEditorStore } from "@/stores/useEditorStore";
 
-const EXTENT = 6000;
 const STROKE = CANVAS_VISUAL.layoutGuide;
 const SELECTED_STROKE = "#c084fc";
+const HIT_PX = 8;
+const LINE_PX = 1;
+const SELECTED_LINE_PX = 2;
 
-/** Persistent layout guides + in-progress ruler drag preview (Figma violet lines). */
-export function LayoutGuidesOverlay({ zoom }: { zoom: number }) {
+type GuideLine = { id: string; axis: "v" | "h"; pos: number; isDraft?: boolean };
+
+/** Layout guides in viewport space — constant 1px screen width while panning/zooming. */
+export function LayoutGuidesOverlay({
+  zoom,
+  pan,
+  viewportRef,
+}: {
+  zoom: number;
+  pan: { x: number; y: number };
+  viewportRef: RefObject<HTMLElement | null>;
+}) {
   const layoutGuides = useEditorStore((s) => s.layoutGuides);
   const draft = useEditorStore((s) => s.layoutGuideDraft);
   const selectedLayoutGuideId = useEditorStore((s) => s.selectedLayoutGuideId);
@@ -19,86 +33,89 @@ export function LayoutGuidesOverlay({ zoom }: { zoom: number }) {
   if (editorMode !== "design") return null;
   if (layoutGuides.length === 0 && !draft) return null;
 
-  const hitW = Math.max(layoutGuideHitThresholdWorld(zoom), 1);
-  const lines = draft ? [...layoutGuides, { id: "__draft__", axis: draft.axis, pos: draft.pos }] : layoutGuides;
+  const lines: GuideLine[] = draft
+    ? [...layoutGuides, { id: "__draft__", axis: draft.axis, pos: draft.pos, isDraft: true }]
+    : layoutGuides;
 
   const onGuidePointerDown = (guideId: string, e: React.PointerEvent) => {
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
     selectLayoutGuide(guideId);
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    startLayoutGuideMoveSession({
+      guideId,
+      pointerId: e.pointerId,
+      captureTarget: e.currentTarget as HTMLElement,
+      viewportEl: viewport,
+    });
   };
 
   return (
-    <div className="absolute inset-0 z-[34] overflow-visible" aria-hidden={false}>
-      <svg
-        className="absolute left-0 top-0 overflow-visible"
-        width={EXTENT}
-        height={EXTENT}
-        viewBox={`0 0 ${EXTENT} ${EXTENT}`}
-      >
-        {lines.map((g) => {
-          const isDraft = g.id === "__draft__";
-          const selected = !isDraft && g.id === selectedLayoutGuideId;
-          const stroke = selected ? SELECTED_STROKE : STROKE;
-          const visibleWidth = selected ? 2 : 1;
-          const common = {
-            stroke,
-            vectorEffect: "non-scaling-stroke" as const,
-            strokeDasharray: isDraft ? "4 4" : undefined,
-          };
+    <div className="pointer-events-none absolute inset-0 z-[34] overflow-hidden" aria-hidden={false}>
+      {lines.map((g) => {
+        const isDraft = Boolean(g.isDraft);
+        const selected = !isDraft && g.id === selectedLayoutGuideId;
+        const color = selected ? SELECTED_STROKE : STROKE;
+        const linePx = selected ? SELECTED_LINE_PX : LINE_PX;
+        const vp =
+          g.axis === "v"
+            ? worldToViewport(g.pos, 0, pan, zoom)
+            : worldToViewport(0, g.pos, pan, zoom);
 
-          if (g.axis === "v") {
-            return (
-              <g key={g.id}>
-                <line
-                  x1={g.pos}
-                  y1={0}
-                  x2={g.pos}
-                  y2={EXTENT}
-                  stroke="transparent"
-                  strokeWidth={hitW}
-                  className={isDraft ? "pointer-events-none" : "pointer-events-auto cursor-col-resize"}
-                  onPointerDown={isDraft ? undefined : (e) => onGuidePointerDown(g.id, e)}
-                />
-                <line
-                  x1={g.pos}
-                  y1={0}
-                  x2={g.pos}
-                  y2={EXTENT}
-                  pointerEvents="none"
-                  strokeWidth={visibleWidth}
-                  {...common}
-                />
-              </g>
-            );
-          }
-
+        if (g.axis === "v") {
+          const left = vp.x - HIT_PX / 2;
           return (
-            <g key={g.id}>
-              <line
-                x1={0}
-                y1={g.pos}
-                x2={EXTENT}
-                y2={g.pos}
-                stroke="transparent"
-                strokeWidth={hitW}
-                className={isDraft ? "pointer-events-none" : "pointer-events-auto cursor-row-resize"}
-                onPointerDown={isDraft ? undefined : (e) => onGuidePointerDown(g.id, e)}
+            <div key={g.id} className="absolute inset-y-0" style={{ left, width: HIT_PX }}>
+              {!isDraft ? (
+                <div
+                  role="presentation"
+                  className="absolute inset-0 cursor-col-resize pointer-events-auto"
+                  onPointerDown={(e) => onGuidePointerDown(g.id, e)}
+                />
+              ) : null}
+              <div
+                className="pointer-events-none absolute bottom-0 top-0"
+                style={{
+                  left: HIT_PX / 2 - linePx / 2,
+                  width: linePx,
+                  backgroundColor: color,
+                  opacity: isDraft ? 0.85 : 1,
+                  backgroundImage: isDraft
+                    ? `repeating-linear-gradient(to bottom, ${color} 0, ${color} 4px, transparent 4px, transparent 8px)`
+                    : undefined,
+                }}
               />
-              <line
-                x1={0}
-                y1={g.pos}
-                x2={EXTENT}
-                y2={g.pos}
-                pointerEvents="none"
-                strokeWidth={visibleWidth}
-                {...common}
-              />
-            </g>
+            </div>
           );
-        })}
-      </svg>
+        }
+
+        const top = vp.y - HIT_PX / 2;
+        return (
+          <div key={g.id} className="absolute inset-x-0" style={{ top, height: HIT_PX }}>
+            {!isDraft ? (
+              <div
+                role="presentation"
+                className="absolute inset-0 cursor-row-resize pointer-events-auto"
+                onPointerDown={(e) => onGuidePointerDown(g.id, e)}
+              />
+            ) : null}
+            <div
+              className="pointer-events-none absolute left-0 right-0"
+              style={{
+                top: HIT_PX / 2 - linePx / 2,
+                height: linePx,
+                backgroundColor: color,
+                opacity: isDraft ? 0.85 : 1,
+                backgroundImage: isDraft
+                  ? `repeating-linear-gradient(to right, ${color} 0, ${color} 4px, transparent 4px, transparent 8px)`
+                  : undefined,
+              }}
+            />
+          </div>
+        );
+      })}
     </div>
   );
 }

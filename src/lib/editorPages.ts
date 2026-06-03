@@ -1,5 +1,5 @@
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
-import { repairNodeHierarchy } from "@/lib/editorGraph";
+import { repairNodeHierarchyIfNeeded } from "@/lib/editorGraph";
 import { DEFAULT_CANVAS_BACKGROUND } from "@/lib/canvasVisual";
 import type { EditorNode, LayoutGuide } from "@/stores/useEditorStore";
 
@@ -151,7 +151,7 @@ export function pageToSnapshot(page: EditorPage): EditorPageSnapshot {
 }
 
 export function pageFromSnapshot(snap: EditorPageSnapshot): EditorPage {
-  const repaired = repairNodeHierarchy(snap.nodes, snap.childOrder);
+  const repaired = repairNodeHierarchyIfNeeded(snap.nodes, snap.childOrder);
   return {
     id: snap.id,
     name: snap.name,
