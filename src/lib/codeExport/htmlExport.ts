@@ -10,6 +10,7 @@ import {
   PC_TYPE_ATTR,
 } from "./pcMetadata";
 import type { CodeStyleOptions } from "@/lib/codeRoundTrip/reactStyle";
+import { ellipseArcPcAttrParts } from "@/lib/shapes/ellipseArcExport";
 
 export type HtmlExportOptions = {
   isFrameRoot?: boolean;
@@ -86,9 +87,15 @@ function attrsForNode(node: EditorNode, styleCss: string, opts?: HtmlExportOptio
     node.type === "rectangle" ||
     node.type === "ellipse" ||
     node.type === "line" ||
+    node.type === "arrow" ||
     node.type === "path"
   ) {
     parts.push(`${PC_SHAPE_ATTR}="${escapeHtmlAttr(node.type)}"`);
+  }
+  if (node.type === "ellipse") {
+    for (const arcAttr of ellipseArcPcAttrParts(node)) {
+      parts.push(arcAttr);
+    }
   }
   return parts.join(" ");
 }
@@ -122,6 +129,7 @@ export function nodeToHtml(
     node.type === "ellipse" ||
     node.type === "rectangle" ||
     node.type === "line" ||
+    node.type === "arrow" ||
     node.type === "path"
   ) {
     return `${pad}<div ${attrs}></div>\n`;

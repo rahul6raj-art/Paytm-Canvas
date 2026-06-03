@@ -4,6 +4,7 @@ import { ROOT } from "@/stores/useEditorStore";
 import { topLevelSelectedIds } from "@/lib/editorGraph";
 import { pathToSvgD } from "@/lib/pathGeometry";
 import { generatePolygonPoints } from "@/lib/shapes/pathGenerators";
+import { isPolygonNode, polygonVertices } from "@/lib/shapes/polygonGeometry";
 import {
   applyMatrixToPoint,
   getNodeTransformedWorldBounds,
@@ -42,8 +43,15 @@ export const BOOLEAN_OPERATION_LABELS: Record<BooleanOperation, string> = {
 /** Nodes eligible for boolean / mask (lines excluded in v1). */
 export function isBooleanEligibleNode(node: EditorNode | undefined): boolean {
   if (!node || !node.visible || node.locked) return false;
-  if (node.type === "line") return false;
-  if (node.type === "rectangle" || node.type === "ellipse" || node.type === "path") return true;
+  if (node.type === "line" || node.type === "arrow") return false;
+  if (
+    node.type === "rectangle" ||
+    node.type === "ellipse" ||
+    node.type === "polygon" ||
+    node.type === "path"
+  ) {
+    return true;
+  }
   if (node.type === "group" && node.isBooleanGroup && !node.maskId) return true;
   return false;
 }
@@ -126,6 +134,10 @@ export function shapeNodeToWorldPolygon(
   const localPts = (() => {
     const w = Math.max(1, node.width);
     const h = Math.max(1, node.height);
+    if (isPolygonNode(node)) {
+      const sides = node.polygonSides ?? 6;
+      return polygonVertices(sides, w, h);
+    }
     if (node.type === "path" && node.pathPoints?.length) {
       if (node.pathClosed ?? false) {
         return node.pathPoints.map((p) => ({ x: p.x, y: p.y }));

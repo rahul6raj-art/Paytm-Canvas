@@ -153,6 +153,11 @@ export function reactStyleToNodePatch(style: ReactStyleRecord): Partial<EditorNo
     if (Number.isFinite(o)) patch.opacity = o;
   }
 
+  const mix = style.mixBlendMode ?? style.mixBlend;
+  if (typeof mix === "string" && mix) {
+    patch.blendMode = mix.replace(/_/g, "-").toLowerCase() as import("@/lib/layerBlendMode").LayerBlendMode;
+  }
+
   const color = parseColor(String(style.color ?? ""));
   const bg = parseColor(String(style.background ?? style.backgroundColor ?? ""));
   if (color) {

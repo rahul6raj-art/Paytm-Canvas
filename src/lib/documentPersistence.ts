@@ -12,7 +12,7 @@ import {
   type EditorPageSnapshot,
 } from "@/lib/editorPages";
 import { DEFAULT_CANVAS_BACKGROUND } from "@/lib/canvasVisual";
-import { repairNodeHierarchyIfNeeded } from "@/lib/editorGraph";
+import { needsChildOrderReconcile, repairNodeHierarchyIfNeeded } from "@/lib/editorGraph";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import type { EditorNode, LayoutGuide } from "@/stores/useEditorStore";
 
@@ -26,12 +26,50 @@ export const MAX_LOCAL_DOCUMENT_BYTES = 4 * 1024 * 1024;
 /** Above this, hierarchy repair and canvas paint are too heavy for a smooth load. */
 export const MAX_LOCAL_DOCUMENT_NODES = 12_000;
 
+function lightRepairForImport(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): { nodes: Record<string, EditorNode>; childOrder: Record<string, string[]> } {
+  if (!needsChildOrderReconcile(nodes, childOrder)) {
+    return { nodes, childOrder };
+  }
+  return repairNodeHierarchyIfNeeded(nodes, childOrder, { maxNodesForFullRepair: 1 });
+}
+
 /** Light hierarchy reconcile only — avoids geometry repair that freezes the UI on import. */
 export function prepareDocumentForEditorImport(doc: PaytmCraftDocument): PaytmCraftDocument {
-  const repaired = repairNodeHierarchyIfNeeded(doc.nodes, doc.childOrder, {
-    maxNodesForFullRepair: 1,
-  });
+  if (doc.pages && doc.pages.length > 0) {
+    const pages = doc.pages.map((page) => {
+      const repaired = lightRepairForImport(page.nodes, page.childOrder);
+      return { ...page, nodes: repaired.nodes, childOrder: repaired.childOrder };
+    });
+    const activeId = doc.activePageId ?? pages[0]?.id;
+    const active = pages.find((p) => p.id === activeId) ?? pages[0]!;
+    return {
+      ...doc,
+      pages,
+      activePageId: active.id,
+      nodes: active.nodes,
+      childOrder: active.childOrder,
+    };
+  }
+
+  const repaired = lightRepairForImport(doc.nodes, doc.childOrder);
   return { ...doc, nodes: repaired.nodes, childOrder: repaired.childOrder };
+}
+
+/** Minimal editor patch for Figma import (supports multi-page .fig and flat REST docs). */
+export function editorPatchFromFigmaImport(
+  doc: PaytmCraftDocument,
+  revision: number,
+): EditorPersistSlice {
+  const patch = documentToEditorPatch(doc, { skipHierarchyRepair: true });
+  const roots = patch.childOrder[EDITOR_ROOT_KEY] ?? [];
+  return {
+    ...patch,
+    selectedIds: patch.selectedIds.length > 0 ? patch.selectedIds : roots.slice(0, 1),
+    documentHydrationRevision: revision + 1,
+  };
 }
 
 export interface EditorAsset {
@@ -198,6 +236,7 @@ export function documentToEditorPatch(
     const { pages, pageOrder, activePageId, activePage } = pagesFromDocumentSnapshots(
       doc.pages,
       doc.activePageId,
+      opts?.skipHierarchyRepair ? { skipHierarchyRepair: true } : undefined,
     );
     return {
       ...base,

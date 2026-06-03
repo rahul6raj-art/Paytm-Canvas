@@ -21,7 +21,7 @@ export function scheduleFigImportPostLayout(
     startTransition(() => {
       const doc = editorStateToDocument(getPersistSlice());
       const laid = applyFigDocumentPostImportLayout(doc);
-      set(() => documentToEditorPatch(laid));
+      set(() => documentToEditorPatch(laid, { skipHierarchyRepair: true }));
     });
   };
 

@@ -61,6 +61,8 @@ export function TextCanvasView({
         width: model.width,
         height: model.height,
         textAlign: model.textAlign,
+        verticalAlign: model.verticalAlign,
+        opacity: node.opacity ?? 1,
         wrapWidth,
         zoom,
         selection: isEditing ? selection : null,

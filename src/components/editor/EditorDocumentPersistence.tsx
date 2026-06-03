@@ -9,7 +9,11 @@ import {
   serializePersistStable,
 } from "@/lib/documentPersistence";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
-import { needsNodeHierarchyRepair, repairNodeHierarchyIfNeeded } from "@/lib/editorGraph";
+import {
+  needsNodeHierarchyRepair,
+  reconcileHierarchyLight,
+  repairNodeHierarchyIfNeeded,
+} from "@/lib/editorGraph";
 import { editorPatchFromPage } from "@/lib/editorPages";
 import { getSyncProvider } from "@/lib/syncProviderSingleton";
 import { toPersistSlice, useEditorStore } from "@/stores/useEditorStore";
@@ -117,12 +121,15 @@ export function EditorDocumentPersistence() {
         if (state.nodes === prev.nodes && state.childOrder === prev.childOrder) return;
         if (!needsNodeHierarchyRepair(state.nodes, state.childOrder)) return;
 
+        const wholesaleReplace = state.documentHydrationRevision !== prev.documentHydrationRevision;
         const pass = ++repairPassRef.current;
         scheduleIdle(() => {
           if (cancelled || pass !== repairPassRef.current) return;
           const live = useEditorStore.getState();
           if (!needsNodeHierarchyRepair(live.nodes, live.childOrder)) return;
-          const repaired = repairNodeHierarchyIfNeeded(live.nodes, live.childOrder);
+          const repaired = wholesaleReplace
+            ? reconcileHierarchyLight(live.nodes, live.childOrder)
+            : repairNodeHierarchyIfNeeded(live.nodes, live.childOrder);
           if (
             repaired.nodes === live.nodes &&
             repaired.childOrder === live.childOrder

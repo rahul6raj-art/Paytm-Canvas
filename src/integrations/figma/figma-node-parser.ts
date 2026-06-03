@@ -20,12 +20,12 @@ import {
   strokeFromFigmaNode,
 } from "@/integrations/figma/figma-style-parser";
 import { applyFigmaTextToNode } from "@/integrations/figma/figma-text-parser";
+import { blendModeFromFigmaApi } from "@/lib/figImport/figImportProperties";
 import { figmaBoundingBox, figmaRelativeBox } from "@/integrations/figma/figma-transform-parser";
 import type { FigmaApiImportResult, FigmaApiNode } from "@/integrations/figma/types";
 
 const SKIP_TYPES = new Set([
   "DOCUMENT",
-  "CANVAS",
   "SLICE",
   "CONNECTOR",
   "STICKY",
@@ -34,7 +34,7 @@ const SKIP_TYPES = new Set([
   "WIDGET",
 ]);
 
-const PASS_THROUGH = new Set(["SECTION"]);
+const PASS_THROUGH = new Set(["SECTION", "CANVAS"]);
 
 export type FigmaNodeImportCtx = {
   nodes: Record<string, EditorNode>;
@@ -182,6 +182,7 @@ function convertFigmaNode(
     ...constraintsFromFigma(node),
     ...cornerRadiusFromFigmaNode(node),
     opacity: node.opacity,
+    ...blendModeFromFigmaApi(node.blendMode),
     effects: effectsFromApi(node.effects as unknown[] | undefined),
     clipChildren: node.clipsContent !== false && (kind === "frame" || kind === "group"),
   };

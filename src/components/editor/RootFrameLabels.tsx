@@ -11,6 +11,7 @@ import {
 } from "@/lib/canvasInteractionGuards";
 import { CANVAS_VISUAL, screenPxToWorld } from "@/lib/canvasVisual";
 import { getRenderedWorldTopLeft } from "@/lib/editorGraph";
+import { applyMoveToolPointerSelection } from "@/lib/containerSelection";
 import { releaseFieldFocusForCanvas } from "@/lib/editorKeyboardFocus";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/useEditorStore";
@@ -101,6 +102,7 @@ function FrameLabel({
   const editorMode = useEditorStore((s) => s.editorMode);
   const tool = useEditorStore((s) => s.tool);
   const select = useEditorStore((s) => s.select);
+  const selectedIds = useEditorStore((s) => s.selectedIds);
   const createInstance = useEditorStore((s) => s.createInstance);
   const node = useEditorStore((s) => s.nodes[frameId]);
   const clientToWorld = useCanvasToWorld();
@@ -129,7 +131,7 @@ function FrameLabel({
         return;
       }
 
-      select(frameId, e.shiftKey);
+      applyMoveToolPointerSelection(frameId, selectedIds, e.shiftKey, select);
 
       if (!clientToWorld) return;
 
@@ -171,6 +173,7 @@ function FrameLabel({
     },
     [
       renaming,
+      selectedIds,
       node,
       editorMode,
       tool,

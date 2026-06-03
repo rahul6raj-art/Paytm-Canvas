@@ -30,6 +30,7 @@ import { TextEditPortal } from "./TextEditPortal";
 import { UiChromeHiddenHint } from "./UiChromeHiddenHint";
 import { FigImportOverlay } from "@/components/import/FigImportOverlay";
 import { FigImportFinishEffect } from "@/components/import/FigImportFinishEffect";
+import { FigImportToast } from "@/components/import/FigImportToast";
 import { ImportFigmaModal } from "@/components/import/ImportFigmaModal";
 import { DocumentHydrationOverlay } from "@/components/editor/DocumentHydrationOverlay";
 import { EditorBootGuard } from "@/components/editor/EditorBootGuard";
@@ -143,6 +144,7 @@ export function AppShell() {
       />
       <FigImportOverlay />
       <FigImportFinishEffect />
+      <FigImportToast />
       <PrototypePreviewModal />
       <EditorKeyboardShortcuts />
       <EditorContextMenu />

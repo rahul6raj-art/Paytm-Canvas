@@ -26,6 +26,7 @@ import {
   svgTextMarkup,
 } from "@/lib/svgMarkupCore";
 import { nodeToLocalSvgSubpath } from "@/lib/booleanGeometry";
+import { ellipseArcExportStyle } from "@/lib/shapes/ellipseArcExport";
 import {
   clampCornerRadii,
   cornerRadiiMax,
@@ -209,8 +210,16 @@ export function nodeToCss(node: EditorNode, designTokens?: Record<string, Design
     lines.push(`border: 1px solid #e5e5e5;`);
   }
 
-  if (node.type === "ellipse" && (node.cornerRadius ?? 0) > 0) {
-    lines.push(`border-radius: 9999px;`);
+  if (node.type === "ellipse") {
+    const arcCss = ellipseArcExportStyle(node);
+    if (arcCss.clipPath) {
+      lines.push(`clip-path: ${arcCss.clipPath};`);
+      lines.push(`overflow: hidden;`);
+    } else if (arcCss.borderRadius) {
+      lines.push(`border-radius: 50%;`);
+    } else if ((node.cornerRadius ?? 0) > 0) {
+      lines.push(`border-radius: 9999px;`);
+    }
   } else if (node.type === "rectangle" || node.type === "frame") {
     const radii = getNodeCornerRadii(node);
     if (cornerRadiiMax(radii) > 0) {
@@ -380,7 +389,7 @@ export function nodeToSvgGroupMarkup(
   let inner = "";
   if (node.type === "rectangle" || node.type === "ellipse") {
     inner = svgRectLike(resolved, shapeOpts);
-  } else if (node.type === "line") {
+  } else if (node.type === "line" || node.type === "arrow") {
     inner = svgLine(node);
   } else if (node.type === "path") {
     inner = svgPathMarkup(resolved, shapeOpts);
@@ -501,7 +510,7 @@ async function renderNodeToCanvas(
       ctx.lineWidth = sw;
       ctx.stroke();
     }
-  } else if (drawNode.type === "line") {
+  } else if (drawNode.type === "line" || drawNode.type === "arrow") {
     const lw = drawNode.strokeWidth ?? 2;
     ctx.strokeStyle = sc;
     ctx.lineWidth = lw;

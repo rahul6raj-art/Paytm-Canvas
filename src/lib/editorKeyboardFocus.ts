@@ -74,9 +74,18 @@ export function isToolShortcutEvent(e: KeyboardEvent): boolean {
   return toolFromShortcutKey(e.key) != null;
 }
 
+/** True when Delete/Backspace should edit field text, not delete canvas selection. */
+export function shouldBlockDeleteSelectionShortcut(
+  e: KeyboardEvent,
+  target: EventTarget | null,
+): boolean {
+  if (!isDeleteShortcutEvent(e)) return false;
+  const el = target ?? (typeof document !== "undefined" ? document.activeElement : null);
+  return isEditableFieldElement(el) && !isMultilineEditableElement(el);
+}
+
 /**
- * Block canvas shortcuts while typing in fields — except tool keys, Delete, and modifier
- * shortcuts, which should work from the properties panel like Figma.
+ * Block canvas shortcuts while typing in fields — except tool keys and modifier shortcuts.
  */
 export function shouldYieldShortcutsToTyping(e: KeyboardEvent, target: EventTarget | null): boolean {
   const st = useEditorStore.getState();
@@ -89,7 +98,7 @@ export function shouldYieldShortcutsToTyping(e: KeyboardEvent, target: EventTarg
   if (e.metaKey || e.ctrlKey) return false;
   if (e.key === "Escape") return false;
   if (isToolShortcutEvent(e)) return false;
-  if (isDeleteShortcutEvent(e) && !isMultilineEditableElement(target)) return false;
+  if (shouldBlockDeleteSelectionShortcut(e, target)) return true;
   return true;
 }
 

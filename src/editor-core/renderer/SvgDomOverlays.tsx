@@ -9,19 +9,22 @@ import {
   matrixToCssTransform,
 } from "@/lib/transformMath";
 import { pathHandleMirroring } from "@/lib/pathHandles";
-import { clampCornerRadii, getNodeCornerRadii, type CornerRadii } from "@/lib/cornerRadius";
+import { getNodeCornerRadii } from "@/lib/cornerRadius";
+import { beginCornerRadiusDrag } from "@/lib/cornerRadiusDrag";
 import {
   cornerRadiusHandlePosition,
-  cornerRadiiStylePatch,
   isRoundedRectPath,
   pathPointCornerIndex,
-  radiusFromCornerDrag,
 } from "@/lib/shapes/shapeToPath";
 import { screenPxToWorld } from "@/lib/canvasVisual";
 import { useCanvasToWorld } from "@/components/editor/CanvasToWorldContext";
 import { cn } from "@/lib/utils";
 import { pickDeepestFrameAtWorldPoint, worldRect } from "@/lib/tree";
 import { useEditorStore, type EditorNode } from "@/stores/useEditorStore";
+import {
+  createRafPointerScheduler,
+  forEachCoalescedPointerEvent,
+} from "@/lib/smoothPointer";
 
 function overlayWorldStyle(
   nodeId: string,
@@ -122,10 +125,11 @@ function PathEditOverlay({ nodeId }: { nodeId: string }) {
             : undefined,
     };
     captureEl.setPointerCapture(e.pointerId);
-    const onMove = (ev: PointerEvent) => {
+
+    const applyMove = (clientX: number, clientY: number) => {
       const d = pathPointDragRef.current;
-      if (!d || ev.pointerId !== d.pointerId) return;
-      const nw = clientToWorld(ev.clientX, ev.clientY);
+      if (!d) return;
+      const nw = clientToWorld(clientX, clientY);
       const startLocal = worldToNodeLocal(d.startWorld.x, d.startWorld.y);
       const nowLocal = worldToNodeLocal(nw.x, nw.y);
       const dx = nowLocal.x - startLocal.x;
@@ -145,9 +149,26 @@ function PathEditOverlay({ nodeId }: { nodeId: string }) {
         updatePathPoint(nodeId, pointId, patch, { skipHistory: true });
       }
     };
+
+    const pathScheduler = createRafPointerScheduler<{ clientX: number; clientY: number }>(
+      ({ clientX, clientY }) => applyMove(clientX, clientY),
+    );
+
+    const onMove = (ev: PointerEvent) => {
+      const d = pathPointDragRef.current;
+      if (!d || ev.pointerId !== d.pointerId) return;
+      forEachCoalescedPointerEvent(ev, (pe) => {
+        pathScheduler.schedule({ clientX: pe.clientX, clientY: pe.clientY });
+      });
+    };
     const onUp = (ev: PointerEvent) => {
       const d = pathPointDragRef.current;
       if (!d || ev.pointerId !== d.pointerId) return;
+      forEachCoalescedPointerEvent(ev, (pe) => {
+        pathScheduler.schedule({ clientX: pe.clientX, clientY: pe.clientY });
+      });
+      pathScheduler.flush();
+      pathScheduler.cancel();
       pathPointDragRef.current = null;
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
@@ -168,31 +189,15 @@ function PathEditOverlay({ nodeId }: { nodeId: string }) {
   const startCornerRadiusDrag = (cornerIndex: 0 | 1 | 2 | 3, e: React.PointerEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    pushHistory();
-    const captureEl = e.currentTarget as HTMLElement;
-    captureEl.setPointerCapture(e.pointerId);
-    const startRadii = getNodeCornerRadii(node);
-    const onMove = (ev: PointerEvent) => {
-      if (ev.pointerId !== e.pointerId) return;
-      const nw = clientToWorld(ev.clientX, ev.clientY);
-      const local = worldToNodeLocal(nw.x, nw.y);
-      const raw = radiusFromCornerDrag(cornerIndex, local.x, local.y, node.width, node.height);
-      const maxR = Math.min(node.width, node.height) / 2;
-      const next = [...startRadii] as CornerRadii;
-      next[cornerIndex] = Math.min(maxR, raw);
-      const clamped = clampCornerRadii(next, node.width, node.height);
-      updateNodeStyle(nodeId, cornerRadiiStylePatch(node, clamped), { skipHistory: true });
-    };
-    const onUp = (ev: PointerEvent) => {
-      if (ev.pointerId !== e.pointerId) return;
-      captureEl.releasePointerCapture(ev.pointerId);
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
+    beginCornerRadiusDrag({
+      nodeId,
+      cornerIndex,
+      pointerId: e.pointerId,
+      clientX: e.clientX,
+      clientY: e.clientY,
+      clientToWorld: (cx, cy) => clientToWorldFromDocument(cx, cy, zoom),
+      captureTarget: e.currentTarget as HTMLElement,
+    });
   };
 
   const onHandleDown = (

@@ -69,6 +69,10 @@ const MOVE: Row[] = [
   { keys: "⇧ (drag shape)", label: "Draw square / circle; line snaps to 45°" },
   { keys: "⌥ (drag shape)", label: "Draw from center (incl. lines)" },
   { keys: "⇧ (rotate handle)", label: "Snap rotation to 15°" },
+  {
+    keys: "Drag",
+    label: "Two shapes selected: drag one onto the other to swap positions",
+  },
 ];
 
 const VIEW: Row[] = [

@@ -38,6 +38,9 @@ export const CANVAS_VISUAL = {
   guide: "#f24822",
   /** Layout guides dragged from rulers (Figma-style). */
   layoutGuide: "#9747ff",
+  /** Smart selection / swap drag indicator (Figma pink). */
+  swapPink: "#ff24ff",
+  swapPinkRing: "rgba(255, 36, 255, 0.55)",
   frameLabel: "#333333",
   frameLabelMuted: "#8c8c8c",
   frameBorder: "#e6e6e6",

@@ -17,6 +17,7 @@ import {
 } from "./textMeasure";
 import type { TextAlign } from "./textNodeModel";
 import { textTypoFromModel } from "./textNodeModel";
+import { verticalContentOffsetY } from "./textVerticalAlign";
 
 /**
  * Convert a canvas-local point (inside the text box) to the nearest character index.
@@ -42,9 +43,11 @@ export function getCursorPositionFromPoint(
   const wrapWidth = wrapWidthForResizeMode(model.width, model.textResizeMode);
   const innerW = model.width - TEXT_BOX_PAD_X * 2;
   const layout = layoutText(model.text, wrapWidth, typo);
+  const innerH = model.height - TEXT_BOX_PAD_Y * 2;
+  const blockY = verticalContentOffsetY(layout.height, innerH, model.verticalAlign);
   return cursorIndexFromPoint(
     x - TEXT_BOX_PAD_X,
-    y - TEXT_BOX_PAD_Y,
+    y - TEXT_BOX_PAD_Y - blockY,
     layout,
     typo,
     innerW,

@@ -1,5 +1,9 @@
 import { useEditorStore } from "@/stores/useEditorStore";
 import { worldPosFromClientForGuide } from "@/lib/rulerGuideDrag";
+import {
+  createRafPointerScheduler,
+  forEachCoalescedPointerEvent,
+} from "@/lib/smoothPointer";
 
 /** Drag an existing layout guide to a new world position. */
 export function startLayoutGuideMoveSession(opts: {
@@ -25,15 +29,14 @@ export function startLayoutGuideMoveSession(opts: {
     window.removeEventListener("pointercancel", onCancel);
   };
 
-  const onMove = (e: PointerEvent) => {
-    if (e.pointerId !== pointerId) return;
+  const applyMove = (clientX: number, clientY: number) => {
     const st = useEditorStore.getState();
     const g = st.layoutGuides.find((x) => x.id === guideId);
     if (!g) return;
     const pos = worldPosFromClientForGuide(
       g.axis,
-      e.clientX,
-      e.clientY,
+      clientX,
+      clientY,
       viewportEl,
       st.pan,
       st.zoom,
@@ -41,8 +44,24 @@ export function startLayoutGuideMoveSession(opts: {
     st.updateLayoutGuidePosition(guideId, pos, { skipHistory: true });
   };
 
+  const moveScheduler = createRafPointerScheduler<{ clientX: number; clientY: number }>(
+    ({ clientX, clientY }) => applyMove(clientX, clientY),
+  );
+
+  const onMove = (e: PointerEvent) => {
+    if (e.pointerId !== pointerId) return;
+    forEachCoalescedPointerEvent(e, (pe) => {
+      moveScheduler.schedule({ clientX: pe.clientX, clientY: pe.clientY });
+    });
+  };
+
   const onUp = (e: PointerEvent) => {
     if (e.pointerId !== pointerId) return;
+    forEachCoalescedPointerEvent(e, (pe) => {
+      moveScheduler.schedule({ clientX: pe.clientX, clientY: pe.clientY });
+    });
+    moveScheduler.flush();
+    moveScheduler.cancel();
     cleanup();
   };
 

@@ -7,6 +7,7 @@ import {
 import type { InstanceOverridePatch } from "@/lib/componentModel";
 import { DEFAULT_GRADIENT_TRANSFORM, newGradientStopId, type FillGradient } from "@/lib/fillGradient";
 import { newNodeEffectId, type NodeEffect } from "@/lib/nodeEffects";
+import { figmaBlendModeToLayer } from "@/lib/layerBlendMode";
 import type { EditorNode, ImageFitMode, StrokePosition } from "@/stores/useEditorStore";
 import type { DesignToken } from "@/lib/designTokens";
 import {
@@ -344,6 +345,20 @@ export function instanceOverridesFromSymbol(
   }
 
   return out;
+}
+
+export function blendModeFromFigNode(
+  node: FigNode,
+): Pick<EditorNode, "blendMode"> | Record<string, never> {
+  const raw = (node as { blendMode?: string }).blendMode;
+  return blendModeFromFigmaApi(raw);
+}
+
+export function blendModeFromFigmaApi(
+  raw?: string | null,
+): Pick<EditorNode, "blendMode"> | Record<string, never> {
+  const blendMode = figmaBlendModeToLayer(raw);
+  return blendMode ? { blendMode } : {};
 }
 
 export function figFontWeight(style?: string): number {

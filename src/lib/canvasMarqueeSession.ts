@@ -8,6 +8,7 @@ import {
 } from "@/lib/canvasMarqueeSelection";
 import { useEditorStore } from "@/stores/useEditorStore";
 import type { ClientToWorldFn } from "@/lib/canvasNodeDrag";
+import { forEachCoalescedPointerEvent } from "@/lib/smoothPointer";
 
 export type MarqueeSessionOptions = {
   pointerId: number;
@@ -133,8 +134,10 @@ export function startCanvasMarqueeSession(opts: MarqueeSessionOptions): void {
 
   const onMove = (ev: PointerEvent) => {
     if (ev.pointerId !== capId) return;
-    const ww = opts.clientToWorld(ev.clientX, ev.clientY);
-    draft = { ...draft, x1: ww.x, y1: ww.y };
+    forEachCoalescedPointerEvent(ev, (pe) => {
+      const ww = opts.clientToWorld(pe.clientX, pe.clientY);
+      draft = { ...draft, x1: ww.x, y1: ww.y };
+    });
     if (!active) {
       const st = useEditorStore.getState();
       const slop = screenPxToWorld(CANVAS_CLICK_SLOP_SCREEN_PX, st.zoom);

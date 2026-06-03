@@ -92,3 +92,19 @@ export function drillTargetForDoubleClick(
 
   return null;
 }
+
+/** Preserve multi-selection when dragging an already-selected layer (Figma-style). */
+export function applyMoveToolPointerSelection(
+  targetId: string,
+  selectedIds: string[],
+  additive: boolean,
+  select: (id: string | null, additive?: boolean) => void,
+): void {
+  if (additive) {
+    select(targetId, true);
+    return;
+  }
+  if (!selectedIds.includes(targetId)) {
+    select(targetId, false);
+  }
+}

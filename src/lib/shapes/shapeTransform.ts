@@ -1,7 +1,8 @@
 import type { EditorNode } from "@/stores/useEditorStore";
 import { computeResizedBounds, type Bounds, type ResizeHandle, type ResizeModifiers } from "@/lib/resize";
-import { normalizeRotationDegrees } from "@/lib/transformMath";
-import { generatePolygonPoints, generateStarPoints } from "./pathGenerators";
+import { rotationDeltaDegrees, snapRotationDegrees } from "@/lib/rotation/rotateMath";
+import { isPolygonNode, polygonGeometryPatch } from "./polygonGeometry";
+import { starGeometryPatch } from "./starGeometry";
 
 export function resizeShape(
   shapeNode: EditorNode,
@@ -14,6 +15,7 @@ export function resizeShape(
     shapeNode.type === "rectangle" ||
     shapeNode.type === "ellipse" ||
     shapeNode.type === "line" ||
+    shapeNode.type === "arrow" ||
     shapeNode.type === "path"
       ? shapeNode.type
       : "rectangle";
@@ -21,31 +23,39 @@ export function resizeShape(
   const next = computeResizedBounds(handle, startBounds, pointerLocal, modifiers, kind);
   const patch: Partial<EditorNode> = { x: next.x, y: next.y, width: next.width, height: next.height };
 
-  if (shapeNode.type === "path" && shapeNode.polygonSides) {
-    patch.pathPoints = generatePolygonPoints(shapeNode.polygonSides, next.width, next.height);
+  if (isPolygonNode(shapeNode)) {
+    Object.assign(
+      patch,
+      polygonGeometryPatch(
+        { ...shapeNode, width: next.width, height: next.height },
+        { polygonSides: shapeNode.polygonSides, cornerRadius: shapeNode.cornerRadius },
+      ),
+    );
   }
   if (shapeNode.type === "path" && shapeNode.starPoints) {
-    patch.pathPoints = generateStarPoints(
-      shapeNode.starPoints,
-      shapeNode.starInnerRadius ?? 0.4,
-      next.width,
-      next.height,
+    Object.assign(
+      patch,
+      starGeometryPatch(
+        { ...shapeNode, width: next.width, height: next.height },
+        {
+          starPoints: shapeNode.starPoints,
+          starInnerRadius: shapeNode.starInnerRadius,
+          cornerRadius: shapeNode.cornerRadius,
+        },
+      ),
     );
   }
   return patch;
 }
 
 export function rotateShape(
-  shapeNode: EditorNode,
+  _shapeNode: EditorNode,
   pointerWorld: { x: number; y: number },
   modifiers: { shiftKey: boolean },
   centerWorld: { x: number; y: number },
   startRotation: number,
   startAngle: number,
 ): number {
-  const angle = Math.atan2(pointerWorld.y - centerWorld.y, pointerWorld.x - centerWorld.x);
-  const deltaDeg = ((angle - startAngle) * 180) / Math.PI;
-  let next = normalizeRotationDegrees(startRotation + deltaDeg);
-  if (modifiers.shiftKey) next = normalizeRotationDegrees(Math.round(next / 15) * 15);
-  return next;
+  const deltaDeg = rotationDeltaDegrees(pointerWorld, centerWorld, startAngle);
+  return snapRotationDegrees(startRotation + deltaDeg, modifiers.shiftKey);
 }

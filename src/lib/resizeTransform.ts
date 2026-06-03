@@ -1,6 +1,7 @@
 import type { EditorNode } from "@/stores/useEditorStore";
 import {
   applyMatrixToPoint,
+  finiteCoord,
   getNodeLocalMatrix,
   getNodeWorldMatrix,
   hasRotation,
@@ -109,5 +110,8 @@ export function solveNodeXYForAnchorWorld(
     }
   }
 
-  return { x, y };
+  return {
+    x: Number.isFinite(x) ? x : finiteCoord(seedXY.x, finiteCoord(node.x)),
+    y: Number.isFinite(y) ? y : finiteCoord(seedXY.y, finiteCoord(node.y)),
+  };
 }

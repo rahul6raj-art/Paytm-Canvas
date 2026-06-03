@@ -1,11 +1,20 @@
 import type { EditorNode } from "@/stores/useEditorStore";
 import { resolveTextTypo, type ResolvedTextTypo } from "@/lib/textTypography";
 
+import {
+  autoResizeToTextResizeMode,
+  textResizeModeToAutoResize,
+  type AutoResizeMode,
+} from "@/lib/text/autoResizeMode";
+import { normalizeVerticalAlign, type VerticalAlign } from "@/lib/text/textVerticalAlign";
+
 /** Horizontal alignment for text nodes. */
-export type TextAlign = "left" | "center" | "right";
+export type TextAlign = "left" | "center" | "right" | "justify";
 
 /** How the text box resizes relative to its content. */
 export type TextResizeMode = "auto-width" | "auto-height" | "fixed";
+
+export type { AutoResizeMode, VerticalAlign };
 
 /** Normalized text node view (maps store `content` → `text`). */
 export type TextNodeModel = {
@@ -23,7 +32,9 @@ export type TextNodeModel = {
   letterSpacing: number;
   color: string;
   textAlign: TextAlign;
+  verticalAlign: VerticalAlign;
   textResizeMode: TextResizeMode;
+  autoResize: AutoResizeMode;
   isEditing: boolean;
 };
 
@@ -56,13 +67,26 @@ export function wrapWidthForResizeMode(
 }
 
 export function normalizeTextAlign(value: unknown): TextAlign {
-  if (value === "center" || value === "right") return value;
+  if (value === "center" || value === "right" || value === "justify") return value;
   return "left";
 }
 
-export function normalizeTextResizeMode(value: unknown): TextResizeMode {
+export function normalizeTextResizeMode(
+  value: unknown,
+  autoResize?: unknown,
+): TextResizeMode {
+  if (autoResize != null) {
+    return autoResizeToTextResizeMode(autoResize);
+  }
   if (value === "auto-width" || value === "auto-height" || value === "fixed") return value;
   return DEFAULT_TEXT_RESIZE_MODE;
+}
+
+export function textResizePatch(mode: TextResizeMode): {
+  textResizeMode: TextResizeMode;
+  autoResize: AutoResizeMode;
+} {
+  return { textResizeMode: mode, autoResize: textResizeModeToAutoResize(mode) };
 }
 
 /** Build a normalized text model from an editor node + edit flag. */
@@ -87,7 +111,11 @@ export function toTextNodeModel(
     letterSpacing: typo.letterSpacing,
     color: typo.color,
     textAlign: normalizeTextAlign(node.textAlign),
-    textResizeMode: normalizeTextResizeMode(node.textResizeMode),
+    verticalAlign: normalizeVerticalAlign(node.verticalAlign),
+    textResizeMode: normalizeTextResizeMode(node.textResizeMode, node.autoResize),
+    autoResize: textResizeModeToAutoResize(
+      normalizeTextResizeMode(node.textResizeMode, node.autoResize),
+    ),
     isEditing,
   };
 }

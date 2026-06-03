@@ -14,14 +14,9 @@ import {
 } from "@/lib/tree";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import { clampCanvasZoom, viewportForRootNodes } from "@/lib/canvasZoom";
-import {
-  deferFigImportSave,
-  scheduleFigImportStateApply,
-  waitForNextPaint,
-} from "@/lib/figImport/figImportRuntime";
-import {
-  fitCanvasToImportedDocumentWithRetry,
-} from "@/lib/viewportZoom";
+import { finalizeFigmaImportToEditor } from "@/lib/figImport/finalizeFigmaImport";
+import { waitForNextPaint } from "@/lib/figImport/figImportRuntime";
+import { fitCanvasToImportedDocument } from "@/lib/viewportZoom";
 import { normalizeHex } from "@/lib/color";
 import { canvasChromeForeground } from "@/lib/canvasForeground";
 import {
@@ -71,10 +66,13 @@ import {
 } from "@/lib/alignSelection";
 import {
   clonedNodePosition,
+  parentUsesAutoLayout,
   collectSubtreeIds,
+  dedupeChildOrderLists,
   getRenderedWorldTopLeft,
   insertNodeInChildOrder,
   buildParentMapFromChildOrder,
+  syncParentIdsFromChildOrder,
   worldPointToParentLocalFromChildOrder,
   isAncestorOf,
   nextDuplicateName,
@@ -139,9 +137,16 @@ import {
   textLayoutPatchForNode,
   withTextLayoutPatch,
 } from "@/lib/text/textLayout";
-import { EMPTY_TEXT_PLACEHOLDER_WIDTH, MIN_TEXT_BOX } from "@/lib/text/textNodeModel";
+import { createPointTextAt, createTextBoxFromDrag } from "@/lib/text/textCreation";
+import { EMPTY_TEXT_PLACEHOLDER_WIDTH, MIN_TEXT_BOX, textResizePatch } from "@/lib/text/textNodeModel";
 import { resolveTextTypo } from "@/lib/textTypography";
 import { createShapeNode } from "@/lib/shapes/shapeCreation";
+import {
+  lineEndpointsPatchFromLayout,
+  linePatchFromEndpoints,
+  lineEndpointsFromNode,
+} from "@/lib/shapes/lineGeometry";
+import { polygonGeometryPatch } from "@/lib/shapes/polygonGeometry";
 import { DEFAULT_SHAPE_FILL, DEFAULT_SHAPE_STROKE, type ShapeType } from "@/lib/shapes/shapeModel";
 import {
   BOOLEAN_OPERATION_LABELS,
@@ -154,7 +159,12 @@ import {
   type BooleanOperation,
 } from "@/lib/booleanGeometry";
 import { getResizeAnchorLocal, solveNodeXYForAnchorWorld } from "@/lib/resizeTransform";
-import { hasRotation, getNodeWorldOrigin } from "@/lib/transformMath";
+import {
+  finiteCoord,
+  finiteDimension,
+  hasRotation,
+  getNodeWorldOrigin,
+} from "@/lib/transformMath";
 import { buildEditorAssetFromFile, validateImageImportFile } from "@/lib/editorAssets";
 import {
   clearLocalDocument,
@@ -200,7 +210,11 @@ import {
   type PathPoint,
 } from "@/lib/pathGeometry";
 import { mergePathPointHandles } from "@/lib/pathHandles";
-import { convertNodeToPath, ensureRoundedRectPathPoints } from "@/lib/shapes/shapeToPath";
+import {
+  convertNodeToPath,
+  ensureRoundedRectPathPoints,
+  shapeToPathPoints,
+} from "@/lib/shapes/shapeToPath";
 import { getPluginById, readInstalledPluginIds, writeInstalledPluginIds } from "@/lib/plugins";
 import { getEditorClipboardJson, setEditorClipboardJson } from "@/lib/editorClipboardBuffer";
 import { parseEditorClipboardPayload, type EditorClipboardPayloadV1 } from "@/lib/editorClipboardPayload";
@@ -269,7 +283,17 @@ export type CodePanelFormat = "html" | "react";
 
 export type AlignDirection = "left" | "center-h" | "right" | "top" | "center-v" | "bottom";
 
-export type NodeKind = "frame" | "group" | "rectangle" | "ellipse" | "line" | "path" | "text" | "image";
+export type NodeKind =
+  | "frame"
+  | "group"
+  | "rectangle"
+  | "ellipse"
+  | "line"
+  | "arrow"
+  | "polygon"
+  | "path"
+  | "text"
+  | "image";
 
 /** How image pixels map to the layer box (canvas uses CSS `object-fit`; export uses best-effort equivalents). */
 export type ImageFitMode = "fill" | "fit" | "crop";
@@ -348,6 +372,12 @@ export interface EditorNode {
   strokeWidthProfile?: "uniform";
   /** Flip width profile along path */
   strokeWidthProfileFlipped?: boolean;
+  /** Ellipse arc start angle in degrees (0° = 3 o'clock, clockwise). */
+  arcStartDeg?: number;
+  /** Ellipse arc sweep in degrees (360 = full ellipse). */
+  arcSweepDeg?: number;
+  /** Ellipse inner radius as ratio of outer (0 = pie, >0 = ring / donut). */
+  arcInnerRadiusRatio?: number;
   /** Regular polygon side count (path nodes) */
   polygonSides?: number;
   /** Star point count (path nodes) */
@@ -356,8 +386,24 @@ export interface EditorNode {
   starInnerRadius?: number;
   /** Line with arrowhead (line nodes) */
   arrowHead?: boolean;
+  /** Arrow layer start cap (arrow nodes). */
+  startArrow?: import("@/lib/shapes/arrowGeometry").ArrowHeadKind;
+  /** Arrow layer end cap (arrow nodes). */
+  endArrow?: import("@/lib/shapes/arrowGeometry").ArrowHeadKind;
+  /** Arrowhead size in px (arrow nodes). */
+  arrowHeadSize?: number;
+  /** Parent-local line start (Figma x1,y1). */
+  lineX1?: number;
+  lineY1?: number;
+  /** Parent-local line end (Figma x2,y2). */
+  lineX2?: number;
+  lineY2?: number;
   /** Horizontal alignment */
-  textAlign?: "left" | "center" | "right";
+  textAlign?: "left" | "center" | "right" | "justify";
+  /** Vertical alignment within the text box */
+  verticalAlign?: "top" | "middle" | "bottom";
+  /** Figma-style auto-resize label (kept in sync with textResizeMode) */
+  autoResize?: import("@/lib/text/autoResizeMode").AutoResizeMode;
   /** How the text box resizes with content */
   textResizeMode?: "auto-width" | "auto-height" | "fixed";
 
@@ -429,6 +475,8 @@ export interface EditorNode {
 
   /** Layer opacity 0–1 (default 1). Separate from fill opacity. */
   opacity?: number;
+  /** Layer blend mode (Figma Appearance → Blend). */
+  blendMode?: import("@/lib/layerBlendMode").LayerBlendMode;
   /** Ordered layer effects (shadows, blurs). */
   effects?: import("@/lib/nodeEffects").NodeEffect[];
 
@@ -474,6 +522,9 @@ export type NodeStylePatch = Partial<
     | "strokeStartPoint"
     | "strokeEndPoint"
     | "arrowHead"
+    | "startArrow"
+    | "endArrow"
+    | "arrowHeadSize"
     | "strokeStyle"
     | "strokeDashLength"
     | "strokeDashGap"
@@ -484,6 +535,9 @@ export type NodeStylePatch = Partial<
     | "strokeWidthProfileFlipped"
     | "cornerRadius"
     | "cornerRadii"
+    | "arcStartDeg"
+    | "arcSweepDeg"
+    | "arcInnerRadiusRatio"
     | "polygonSides"
     | "starPoints"
     | "starInnerRadius"
@@ -495,10 +549,13 @@ export type NodeStylePatch = Partial<
     | "lineHeight"
     | "letterSpacing"
     | "textAlign"
+    | "verticalAlign"
+    | "autoResize"
     | "textResizeMode"
     | "content"
     | "imageFitMode"
     | "opacity"
+    | "blendMode"
   >
 >;
 
@@ -543,6 +600,13 @@ export interface EditorState {
   designTokens: Record<string, DesignToken>;
   guides: GuideLine[];
   dragMeasurements: DragMeasurementLine[];
+  /** Pink-dot swap indicator while dragging one layer over another. */
+  swapDragIndicator: {
+    sourceId: string;
+    targetId: string;
+    sourceOrigin: { x: number; y: number };
+    targetOrigin: { x: number; y: number };
+  } | null;
   layoutGuides: LayoutGuide[];
   layoutGuideDraft: Pick<LayoutGuide, "axis" | "pos"> | null;
   /** Selected violet ruler guide (layout guide line on canvas). */
@@ -644,6 +708,7 @@ export interface EditorState {
   setPan: (p: { x: number; y: number }) => void;
   patchPan: (d: { x: number; y: number }) => void;
   updateNode: (id: string, patch: Partial<EditorNode>, opts?: { skipHistory?: boolean }) => void;
+  updateNodes: (patches: Record<string, Partial<EditorNode>>, opts?: { skipHistory?: boolean }) => void;
   updateNodeStyle: (id: string, patch: NodeStylePatch, opts?: { skipHistory?: boolean }) => void;
   toggleVisible: (id: string) => void;
   toggleLock: (id: string) => void;
@@ -674,6 +739,11 @@ export interface EditorState {
   releaseMask: (maskGroupId: string) => void;
   setNodeAsMask: (nodeId: string, isMask: boolean) => void;
   addTextAt: (worldX: number, worldY: number) => void;
+  createTextBoxFromDrag: (
+    start: { x: number; y: number },
+    end: { x: number; y: number },
+    modifiers: { shiftKey: boolean; altKey: boolean },
+  ) => void;
   /** Reads file into `assets`, returns new asset id or null on validation/read error (alerts user). */
   importImageAsset: (file: File) => Promise<string | null>;
   /** Places an image node for `assetId`. Uses frame center when `worldX` / `worldY` omitted. */
@@ -737,6 +807,14 @@ export interface EditorState {
   setSelection: (ids: string[]) => void;
   setGuides: (g: GuideLine[]) => void;
   setSnapOverlay: (guides: GuideLine[], measurements: DragMeasurementLine[]) => void;
+  setSwapDragIndicator: (
+    indicator: {
+      sourceId: string;
+      targetId: string;
+      sourceOrigin: { x: number; y: number };
+      targetOrigin: { x: number; y: number };
+    } | null,
+  ) => void;
   setLayoutGuideDraft: (draft: Pick<LayoutGuide, "axis" | "pos"> | null) => void;
   cancelLayoutGuideDraft: () => void;
   commitLayoutGuide: () => void;
@@ -767,6 +845,8 @@ export interface EditorState {
   cancelPath: () => void;
   startPencilStroke: (point: { x: number; y: number }) => void;
   extendPencilStroke: (point: { x: number; y: number }) => void;
+  /** Append multiple freehand samples in one store update (smooth pencil drag). */
+  extendPencilStrokeCoalesced: (points: { x: number; y: number }[]) => void;
   finishPencilStroke: () => void;
   cancelPencilStroke: () => void;
   updatePathPoint: (
@@ -918,6 +998,9 @@ export interface EditorState {
   figImportInProgress: boolean;
   /** Human-readable stage for the import overlay. */
   figImportStatus: string | null;
+  /** Brief success/warning message after import completes (cleared automatically). */
+  figImportToast: string | null;
+  setFigImportToast: (message: string | null) => void;
   codeRoundTripOpen: boolean;
   codeRoundTripTab: "export" | "import";
   /** Import lines preserved from uploaded React for 1:1 export */
@@ -1573,7 +1656,7 @@ function cloneTopLevelSelectionState(
   const nodes: Record<string, EditorNode> = { ...s.nodes };
   const childOrder: Record<string, string[]> = { ...s.childOrder };
   const newRoots: string[] = [];
-  const parentOf = buildParentMapFromChildOrder(s.childOrder);
+    const parentOf = buildParentMapFromChildOrder(s.childOrder);
 
   for (const rootId of tops) {
     const rootOld = s.nodes[rootId];
@@ -1581,6 +1664,8 @@ function cloneTopLevelSelectionState(
     const nameForRoot = nextDuplicateName(nodes);
     const idMap = new Map<string, string>();
     const renderParent = parentOf.get(rootId) ?? null;
+    const inAutoLayout = parentUsesAutoLayout(renderParent, s.nodes);
+    const rootOffset = inAutoLayout ? 0 : offset;
 
     const cloneRecursive = (oldId: string, newParent: string | null): string => {
       const old = s.nodes[oldId];
@@ -1590,7 +1675,7 @@ function cloneTopLevelSelectionState(
       const pos = clonedNodePosition(
         oldId,
         oldId === rootId,
-        offset,
+        rootOffset,
         s.nodes,
         s.childOrder,
         newParent,
@@ -1647,11 +1732,18 @@ function cloneTopLevelSelectionState(
   let nodesOut = nodes;
   const relayoutKeys = new Set<string>();
   for (const rootId of tops) {
-    relayoutKeys.add(parentListKey(parentOf.get(rootId) ?? null));
+    const pid = parentOf.get(rootId) ?? null;
+    if (parentUsesAutoLayout(pid, nodesOut)) {
+      relayoutKeys.add(parentListKey(pid));
+    }
   }
-  nodesOut = relayoutParentsWithAutoLayout(nodesOut, childOrder, relayoutKeys);
+  if (relayoutKeys.size > 0) {
+    nodesOut = relayoutParentsWithAutoLayout(nodesOut, childOrder, relayoutKeys);
+  }
 
-  const repaired = repairNodeHierarchy(nodesOut, childOrder);
+  const co = dedupeChildOrderLists(nodesOut, childOrder);
+  const nodesSynced = syncParentIdsFromChildOrder(nodesOut, co);
+  const repaired = repairNodeHierarchyIfNeeded(nodesSynced, co);
 
   return {
     nodes: repaired.nodes,
@@ -1698,7 +1790,7 @@ const LAYOUT_FIELD_KEYS = new Set<string>([
   "maxWidth",
   "maxHeight",
 ]);
-const GEOM_KEYS = new Set<string>(["x", "y", "width", "height"]);
+const GEOM_KEYS = new Set<string>(["x", "y", "width", "height", "lineX1", "lineY1", "lineX2", "lineY2"]);
 const INSTANCE_STYLE_KEYS = new Set<string>([
   "fill",
   "fillType",
@@ -1718,6 +1810,10 @@ const INSTANCE_STYLE_KEYS = new Set<string>([
   "letterSpacing",
   "content",
   "opacity",
+  "blendMode",
+  "arcStartDeg",
+  "arcSweepDeg",
+  "arcInnerRadiusRatio",
   "effects",
   "fillTokenId",
   "textStyleTokenId",
@@ -2111,6 +2207,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   designTokens: initialDoc.designTokens,
   guides: [],
   dragMeasurements: [],
+  swapDragIndicator: null,
   layoutGuides: initialDoc.pages[initialDoc.activePageId]?.layoutGuides ?? [],
   layoutGuideDraft: null,
   selectedLayoutGuideId: null,
@@ -2238,6 +2335,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
   importFigmaModalOpen: false,
   figImportInProgress: false,
   figImportStatus: null,
+  figImportToast: null,
+  setFigImportToast: (message) => set({ figImportToast: message }),
   codeRoundTripOpen: false,
   codeRoundTripTab: "export",
   codeRoundTripSourceHeader: null,
@@ -2925,18 +3024,22 @@ export const useEditorStore = create<EditorState>((set, get) => {
     }),
 
   clearSelection: () =>
-    set({
-      selectedIds: [],
-      selectedLayoutGuideId: null,
-      editingTextId: null,
-      hoveredCanvasId: null,
-      contextMenu: null,
-      layerRenameId: null,
-      placingComponentMasterId: null,
-      selectedPrototypeLinkId: null,
-      pathEditModeNodeId: null,
-  objectEditModeNodeId: null,
-      selectedPathPointId: null,
+    set((s) => {
+      const next = {
+        selectedIds: [] as string[],
+        selectedLayoutGuideId: null,
+        editingTextId: null,
+        hoveredCanvasId: null,
+        contextMenu: null,
+        layerRenameId: null,
+        placingComponentMasterId: null,
+        selectedPrototypeLinkId: null,
+        pathEditModeNodeId: null,
+        objectEditModeNodeId: null,
+        selectedPathPointId: null,
+        prototypeWireDrag: null,
+      };
+      return { ...next, ...syncActivePageRecord({ ...s, ...next }) };
     }),
 
   selectLayoutGuide: (id) =>
@@ -3030,7 +3133,46 @@ export const useEditorStore = create<EditorState>((set, get) => {
         nodes[id] = { ...n, ...directPart };
       }
 
-      const merged = nodes[id]!;
+      let merged = nodes[id]!;
+      if (merged.type === "line" || merged.type === "arrow") {
+        const endpointTouched =
+          layoutAwarePatch.lineX1 != null ||
+          layoutAwarePatch.lineY1 != null ||
+          layoutAwarePatch.lineX2 != null ||
+          layoutAwarePatch.lineY2 != null;
+        const boxTouched =
+          layoutAwarePatch.x != null ||
+          layoutAwarePatch.y != null ||
+          layoutAwarePatch.width != null ||
+          layoutAwarePatch.height != null ||
+          layoutAwarePatch.rotation != null;
+        if (endpointTouched) {
+          const ep = lineEndpointsFromNode(merged);
+          nodes[id] = { ...merged, ...linePatchFromEndpoints(ep.x1, ep.y1, ep.x2, ep.y2, merged) };
+        } else if (boxTouched) {
+          nodes[id] = { ...merged, ...lineEndpointsPatchFromLayout(merged) };
+        }
+        merged = nodes[id]!;
+      }
+      if (merged.type === "polygon") {
+        const touchesSides =
+          layoutAwarePatch.polygonSides != null || layoutAwarePatch.cornerRadius != null;
+        const touchesBox =
+          layoutAwarePatch.width != null ||
+          layoutAwarePatch.height != null ||
+          layoutAwarePatch.x != null ||
+          layoutAwarePatch.y != null;
+        if (touchesSides || touchesBox) {
+          nodes[id] = {
+            ...merged,
+            ...polygonGeometryPatch(merged, {
+              polygonSides: layoutAwarePatch.polygonSides ?? merged.polygonSides,
+              cornerRadius: layoutAwarePatch.cornerRadius ?? merged.cornerRadius,
+            }),
+          };
+          merged = nodes[id]!;
+        }
+      }
       const keys = Object.keys(layoutAwarePatch);
       const layoutSelf =
         (merged.type === "frame" || merged.type === "group") &&
@@ -3055,6 +3197,60 @@ export const useEditorStore = create<EditorState>((set, get) => {
       nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
       if (geom) {
         warnInvalidNodeGeometry("updateNode", id, merged, nodes);
+      }
+      return { nodes };
+    });
+  },
+
+  updateNodes: (patches, opts) => {
+    const ids = Object.keys(patches);
+    if (ids.length === 0) return;
+    if (!opts?.skipHistory && !get().isApplyingHistory) {
+      const pre = get();
+      if (ids.some((id) => pre.nodes[id] && !pre.nodes[id]!.locked)) get().pushHistory();
+    }
+    set((s) => {
+      let nodes = { ...s.nodes };
+      const refresh = new Set<string>();
+      let changed = false;
+      for (const id of ids) {
+        const n = nodes[id];
+        const patch = patches[id];
+        if (!n || !patch || n.locked) continue;
+        const layoutAwarePatch = n.type === "text" ? withTextLayoutPatch(n, patch) : patch;
+        nodes[id] = { ...n, ...layoutAwarePatch };
+        changed = true;
+        const keys = Object.keys(layoutAwarePatch);
+        const layoutSelf =
+          (n.type === "frame" || n.type === "group") &&
+          keys.some((k) => LAYOUT_FIELD_KEYS.has(k));
+        const geom = keys.some((k) => GEOM_KEYS.has(k) || k === "rotation");
+        if (layoutSelf) refresh.add(id);
+        if (geom) {
+          if (n.parentId) refresh.add(n.parentId);
+          if ((n.type === "frame" || n.type === "group") && (n.layoutMode ?? "none") !== "none") {
+            refresh.add(id);
+          }
+        }
+        if (
+          n.type === "text" &&
+          patchAffectsTextLayout(patch) &&
+          (layoutAwarePatch.width != null || layoutAwarePatch.height != null) &&
+          n.parentId
+        ) {
+          refresh.add(n.parentId);
+        }
+      }
+      if (!changed) return s;
+      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
+      for (const id of ids) {
+        const merged = nodes[id];
+        if (merged && patches[id]) {
+          const geom = Object.keys(patches[id]!).some(
+            (k) => GEOM_KEYS.has(k) || k === "rotation",
+          );
+          if (geom) warnInvalidNodeGeometry("updateNodes", id, merged, nodes);
+        }
       }
       return { nodes };
     });
@@ -3313,29 +3509,50 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const boxW = Math.max(tw, EMPTY_TEXT_PLACEHOLDER_WIDTH);
       const { x, y } = worldCenteredRootPoint(worldX, worldY, boxW, th);
       const id = `text-${Date.now()}`;
+      const { node: base } = createPointTextAt(x, y, boxW, th, ts);
       const node: EditorNode = {
+        ...base,
         id,
         parentId: null,
-        type: "text",
-        name: "Text",
-        x,
-        y,
-        width: boxW,
-        height: th,
-        rotation: 0,
-        visible: true,
-        locked: false,
-        expanded: true,
-        content: "",
-        textResizeMode: "auto-width",
-        textAlign: "left",
-        ...ts,
-        fillEnabled: true,
-        fillOpacity: 1,
+        ...textResizePatch("auto-width"),
       };
       const inserted = insertNodeWithFrameParenting(
         node,
-        { x, y, width: boxW, height: th },
+        { x, y, width: node.width, height: node.height },
+        s.nodes,
+        s.childOrder,
+        s.selectedIds,
+      );
+      return {
+        nodes: inserted.nodes,
+        childOrder: inserted.childOrder,
+        selectedIds: [id],
+        tool: "move",
+        editingTextId: id,
+        textEditSelection: { anchor: 0, focus: 0 },
+      };
+    });
+    requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLTextAreaElement>(`[data-text-editor="${get().editingTextId}"]`);
+      el?.focus();
+    });
+  },
+
+  createTextBoxFromDrag: (start, end, modifiers) => {
+    get().pushHistory();
+    set((s) => {
+      const ts = textStyleFromSelection(s);
+      const { x, y, width, height, node: base } = createTextBoxFromDrag(start, end, modifiers, ts);
+      const id = `text-${Date.now()}`;
+      const node: EditorNode = {
+        ...base,
+        id,
+        parentId: null,
+        ...textResizePatch(base.textResizeMode ?? "auto-height"),
+      };
+      const inserted = insertNodeWithFrameParenting(
+        node,
+        { x, y, width, height },
         s.nodes,
         s.childOrder,
         s.selectedIds,
@@ -3925,6 +4142,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         editingTextId: null,
       };
     });
+    get().setTool("move");
   },
 
   addEllipseAt: (worldX, worldY) => {
@@ -4086,8 +4304,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
         nodes: nodesOut,
         childOrder: inserted.childOrder,
         selectedIds: [id],
+        tool: "move",
       };
     });
+    get().setTool("move");
   },
 
   booleanUnionSelection: () => {
@@ -4405,7 +4625,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
   duplicateSelection: () => {
     if (editableTopLevelSelection(get()).length === 0) return;
     get().pushHistory();
-    set((s) => cloneTopLevelSelectionState(s, 24) ?? s);
+    const zoom = get().zoom;
+    const offset = 10 / Math.max(zoom, 0.01);
+    set((s) => cloneTopLevelSelectionState(s, offset) ?? s);
   },
 
   cloneSelectionInPlace: () => {
@@ -5060,6 +5282,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   setGuides: (guides) => set({ guides, dragMeasurements: [] }),
   setSnapOverlay: (guides, dragMeasurements) => set({ guides, dragMeasurements }),
+  setSwapDragIndicator: (swapDragIndicator) => set({ swapDragIndicator }),
   setLayoutGuideDraft: (layoutGuideDraft) => set({ layoutGuideDraft }),
   cancelLayoutGuideDraft: () => set({ layoutGuideDraft: null }),
   commitLayoutGuide: () => {
@@ -5420,7 +5643,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     if (!s0.nodes[tops0[0]!]) return;
     get().pushHistory();
     set((s) => {
-      const cloned = cloneTopLevelSelectionState({ ...s, selectedIds: [id] }, 24);
+      const offset = 10 / Math.max(s.zoom, 0.01);
+      const cloned = cloneTopLevelSelectionState({ ...s, selectedIds: [id] }, offset);
       if (!cloned) return s;
       return {
         ...cloned,
@@ -5489,16 +5713,18 @@ export const useEditorStore = create<EditorState>((set, get) => {
         n.type === "frame" ||
         n.type === "text" ||
         n.type === "line" ||
+        n.type === "arrow" ||
+        n.type === "polygon" ||
         n.type === "path" ||
         n.type === "group" ||
         n.type === "image"
           ? n.type
           : "rectangle";
       const next = computeResizedBounds(handle, startBounds, currentPoint, modifiers, kind);
-      let x = next.x;
-      let y = next.y;
-      const width = next.width;
-      const height = next.height;
+      let x = finiteCoord(next.x, n.x);
+      let y = finiteCoord(next.y, n.y);
+      const width = finiteDimension(next.width, RESIZE_MIN_DIMENSION);
+      const height = finiteDimension(next.height, RESIZE_MIN_DIMENSION);
 
       if (opts?.fixedWorld && hasRotation(n.rotation)) {
         const anchorLocal = getResizeAnchorLocal(handle, width, height);
@@ -5518,7 +5744,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const content = buildResizeContentPatches(n, startBounds, { x, y, width, height }, handle, modifiers);
       let nodePatch: Partial<EditorNode> = { x, y, width, height, ...content };
       if (n.type === "text") {
-        const layoutPatch = textLayoutPatchForNode({ ...n, ...nodePatch }, n.content ?? "");
+        const mode = n.textResizeMode ?? "auto-width";
+        const widthChanged = width !== startBounds.width;
+        if (mode === "auto-width" && widthChanged && (handle === "e" || handle === "w" || handle === "se" || handle === "sw" || handle === "ne" || handle === "nw")) {
+          nodePatch = { ...nodePatch, ...textResizePatch("auto-height") };
+        }
+        const layoutPatch = textLayoutPatchForNode(
+          { ...n, ...nodePatch },
+          n.content ?? "",
+        );
         if (layoutPatch) nodePatch = { ...nodePatch, ...layoutPatch };
       }
       let nodes: Record<string, EditorNode> = {
@@ -6230,23 +6464,33 @@ export const useEditorStore = create<EditorState>((set, get) => {
   },
 
   extendPencilStroke: (worldPoint) => {
+    get().extendPencilStrokeCoalesced([worldPoint]);
+  },
+
+  extendPencilStrokeCoalesced: (worldPoints) => {
+    if (worldPoints.length === 0) return;
     const s0 = get();
     const drawId = s0.pencilDrawingNodeId;
     if (!drawId || s0.tool !== "pencil") return;
     const path = s0.nodes[drawId];
     if (!path || path.type !== "path" || !path.pathPoints?.length) return;
-    const origin = getRenderedWorldTopLeft(drawId, s0.nodes, s0.childOrder);
-    const plx = worldPoint.x - origin.x;
-    const ply = worldPoint.y - origin.y;
-    const last = path.pathPoints[path.pathPoints.length - 1]!;
-    if (!shouldSampleFreehandPoint(last.x, last.y, plx, ply, s0.zoom)) return;
     set((s) => {
       const n = s.nodes[drawId];
-      if (!n || n.type !== "path" || !n.pathPoints) return s;
+      if (!n || n.type !== "path" || !n.pathPoints?.length) return s;
       const nOrigin = getRenderedWorldTopLeft(drawId, s.nodes, s.childOrder);
-      const lx = worldPoint.x - nOrigin.x;
-      const ly = worldPoint.y - nOrigin.y;
-      const pts = [...n.pathPoints, { id: newPathPointId(), x: lx, y: ly }];
+      let pts = n.pathPoints;
+      let last = pts[pts.length - 1]!;
+      let changed = false;
+      for (const worldPoint of worldPoints) {
+        const lx = worldPoint.x - nOrigin.x;
+        const ly = worldPoint.y - nOrigin.y;
+        if (!shouldSampleFreehandPoint(last.x, last.y, lx, ly, s.zoom)) continue;
+        const id = newPathPointId();
+        pts = [...pts, { id, x: lx, y: ly }];
+        last = pts[pts.length - 1]!;
+        changed = true;
+      }
+      if (!changed) return s;
       let next: EditorNode = { ...n, pathPoints: pts };
       next = normalizePathNode(next);
       let nodes = { ...s.nodes, [drawId]: next };
@@ -6416,19 +6660,31 @@ export const useEditorStore = create<EditorState>((set, get) => {
       raw.type !== "rectangle" &&
       raw.type !== "ellipse" &&
       raw.type !== "line" &&
+      raw.type !== "polygon" &&
       raw.type !== "path"
     ) {
       return;
     }
     if (s.editingTextId || s.penDrawingNodeId || s.pencilDrawingNodeId) return;
-    const needsConvert = raw.type !== "path";
+    const needsConvert = raw.type !== "path" && raw.type !== "polygon";
     if (needsConvert) get().pushHistory();
     set((st) => {
       const current = st.nodes[id];
       if (!current) return st;
-      let converted = convertNodeToPath(current);
-      if (!converted) return st;
-      converted = ensureRoundedRectPathPoints(converted);
+      let converted: EditorNode;
+      if (current.type === "polygon") {
+        const built = shapeToPathPoints(current);
+        if (!built) return st;
+        converted = {
+          ...current,
+          pathPoints: built.pathPoints,
+          pathClosed: built.pathClosed,
+        };
+      } else {
+        const c = convertNodeToPath(current);
+        if (!c) return st;
+        converted = ensureRoundedRectPathPoints(c);
+      }
       const nodes =
         needsConvert || converted !== current
           ? { ...st.nodes, [id]: converted }
@@ -6928,6 +7184,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       figImportInProgress: true,
       figImportStatus: "Reading file…",
       documentHydrating: false,
+      figImportToast: null,
     });
     try {
       await waitForNextPaint();
@@ -6937,33 +7194,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
       };
       const result = await convertFigFileAsync(bytes, file.name, onProgress);
       if (!result.ok) {
-        window.alert(result.error);
-        return;
+        throw new Error(result.error);
       }
-      set({ figImportStatus: "Applying layers to canvas…" });
-      const preparedFig = prepareDocumentForEditorImport(result.document);
-      await waitForNextPaint();
-      await scheduleFigImportStateApply(() => {
-        set((s) => ({
-          ...editorStateAfterDocumentImport(preparedFig, s, { skipHierarchyRepair: true }),
-          documentSaveStatus: "unsaved",
-          documentHydrating: false,
-        }));
+      const prepared = prepareDocumentForEditorImport(result.document);
+      await finalizeFigmaImportToEditor({
+        prepared,
+        fileName: result.document.name || file.name.replace(/\.fig$/i, ""),
+        runPostLayout: true,
       });
-      set({ figImportStatus: "Framing your design…" });
-      const rootsAfterFig = get().childOrder[EDITOR_ROOT_KEY] ?? [];
-      if (rootsAfterFig.length === 0) {
-        throw new Error("This .fig file had no importable frames on the canvas.");
-      }
-      await fitCanvasToImportedDocumentWithRetry();
-      set({ figImportStatus: "Saving…" });
-      deferFigImportSave(async () => {
-        get().saveToLocal();
-      });
-      get().resetEditorBlockingState();
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : "Could not import Figma file.");
       get().resetEditorBlockingState();
+      throw e;
     }
   },
 
@@ -7007,6 +7248,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         figImportInProgress: true,
         figImportStatus: "Connecting to Figma…",
         documentHydrating: false,
+        figImportToast: null,
       });
     } else {
       set({ figImportStatus: "Fetching file from Figma…", documentHydrating: false });
@@ -7020,37 +7262,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
         nodeId,
       });
       const prepared = prepareDocumentForEditorImport(doc);
-      const layerCount = Object.keys(prepared.nodes).length;
-      const rootCount = (prepared.childOrder[EDITOR_ROOT_KEY] ?? []).length;
-      set({ figImportStatus: `Applying ${layerCount} layers (${rootCount} on canvas)…` });
-      await waitForNextPaint();
-      await scheduleFigImportStateApply(() => {
-        set((s) => ({
-          ...editorStateAfterDocumentImport(prepared, s, { skipHierarchyRepair: true }),
-          documentSaveStatus: "unsaved",
-          documentHydrating: false,
-          figImportInProgress: true,
-          fileName: doc.name || s.fileName,
-        }));
+      await finalizeFigmaImportToEditor({
+        prepared,
+        fileName: doc.name,
+        runPostLayout: false,
       });
-      const rootsAfter = get().childOrder[EDITOR_ROOT_KEY] ?? [];
-      if (rootsAfter.length === 0) {
-        throw new Error(
-          "Figma returned no layers on the canvas. Select your frame in Figma, press ⌘L (Copy link), and paste that URL.",
-        );
-      }
-      set({ figImportStatus: "Framing your design…" });
-      const fitted = await fitCanvasToImportedDocumentWithRetry();
-      if (!fitted) {
-        throw new Error(
-          "Import finished but the canvas could not zoom to your design. Try the Layers panel on the left — if frames appear there, use View → Zoom to selection.",
-        );
-      }
-      set({ figImportStatus: "Saving…" });
-      deferFigImportSave(async () => {
-        get().saveToLocal();
-      });
-      get().resetEditorBlockingState();
     } catch (e) {
       const message = e instanceof Error ? e.message : "Could not import from Figma.";
       set({ figImportStatus: message });

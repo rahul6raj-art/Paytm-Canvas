@@ -38,14 +38,15 @@ export const DEFAULT_STROKE_WIDTH = 0;
 export function inferShapeType(node: EditorNode): ShapeType | null {
   if (node.type === "rectangle") return "rectangle";
   if (node.type === "ellipse") return "ellipse";
+  if (node.type === "arrow") return "arrow";
   if (node.type === "line") {
     return node.arrowHead ? "arrow" : "line";
   }
+  if (node.type === "polygon") return "polygon";
   if (node.type === "path") {
     if (node.starPoints != null) return "star";
     if (node.polygonSides != null) return "polygon";
-    if (node.name === "Triangle") return "polygon";
-    return "polygon";
+    return null;
   }
   return null;
 }
@@ -98,6 +99,9 @@ export function shapeTypeLabel(shapeType: ShapeType): string {
 export function editorNodeKindForShapeType(shapeType: ShapeType): EditorNode["type"] {
   if (shapeType === "rectangle") return "rectangle";
   if (shapeType === "ellipse") return "ellipse";
-  if (shapeType === "line" || shapeType === "arrow") return shapeType === "arrow" ? "path" : "line";
+  if (shapeType === "line") return "line";
+  if (shapeType === "arrow") return "arrow";
+  if (shapeType === "polygon") return "polygon";
+  if (shapeType === "star") return "path";
   return "path";
 }

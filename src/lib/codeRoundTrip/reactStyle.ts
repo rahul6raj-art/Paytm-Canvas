@@ -8,6 +8,8 @@ import {
 import { buildNodeEffectRenderStyle } from "@/lib/nodeEffects";
 import { shouldClipChildren } from "@/lib/clipChildren";
 import { cornerRadiiMax, cornerRadiiToCss, getNodeCornerRadii } from "@/lib/cornerRadius";
+import { layerBlendCanvasStyle } from "@/lib/layerBlendMode";
+import { ellipseArcExportStyle } from "@/lib/shapes/ellipseArcExport";
 import { buildLayerCssTransform } from "@/lib/transformMath";
 import type { EditorNode } from "@/stores/useEditorStore";
 
@@ -42,6 +44,10 @@ export function nodeToReactStyle(
   const op = resolved.opacity ?? 1;
   if (op < 0.999) style.opacity = Math.round(op * 1000) / 1000;
 
+  const blend = layerBlendCanvasStyle(node);
+  if (blend.mixBlendMode) style.mixBlendMode = blend.mixBlendMode;
+  if (blend.isolation) style.isolation = blend.isolation;
+
   if (node.type === "text") {
     style.color = resolved.textColor ?? resolved.fill ?? "#111111";
     style.fontFamily = resolved.fontFamily ?? "Inter, system-ui, sans-serif";
@@ -73,8 +79,8 @@ export function nodeToReactStyle(
     style.border = "1px solid #e5e5e5";
   }
 
-  if (node.type === "ellipse" && (node.cornerRadius ?? 0) > 0) {
-    style.borderRadius = 9999;
+  if (node.type === "ellipse") {
+    Object.assign(style, ellipseArcExportStyle(node));
   } else if (node.type === "rectangle" || node.type === "frame") {
     const radii = getNodeCornerRadii(node);
     if (cornerRadiiMax(radii) > 0) {

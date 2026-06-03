@@ -55,7 +55,25 @@ import {
   type FillGradient,
 } from "@/lib/fillGradient";
 import { inferAutoLayoutGap, type LayoutNode } from "@/lib/autoLayout";
-import { generatePolygonPoints, generateStarPoints } from "@/lib/shapes/pathGenerators";
+import { maxStarCornerRadius, starGeometryPatch } from "@/lib/shapes/starGeometry";
+import {
+  lineAngleDegrees,
+  lineEndpointsFromNode,
+  lineLength,
+} from "@/lib/shapes/lineGeometry";
+import { textResizePatch, type TextResizeMode } from "@/lib/text/textNodeModel";
+import {
+  arrowEndpointStylePatch,
+  arrowHeadToStrokeEndpoint,
+  resolveArrowEndKind,
+  resolveArrowStartKind,
+  strokeEndpointToArrowHead,
+} from "@/lib/shapes/arrowGeometry";
+import {
+  isPolygonNode,
+  maxPolygonCornerRadius,
+  polygonGeometryPatch,
+} from "@/lib/shapes/polygonGeometry";
 import {
   BOOLEAN_OPERATION_LABELS,
   isMaskGroup,
@@ -147,8 +165,13 @@ export function DesignInspector({ node }: { node: EditorNode }) {
   const key = id;
 
   const canFillStroke =
-    node.type === "rectangle" || node.type === "frame" || node.type === "ellipse" || node.type === "path";
+    node.type === "rectangle" ||
+    node.type === "frame" ||
+    node.type === "ellipse" ||
+    node.type === "polygon" ||
+    node.type === "path";
   const isLine = node.type === "line";
+  const isArrow = node.type === "arrow";
   const isPath = node.type === "path";
   const isImage = node.type === "image";
   const canRadius = node.type === "rectangle" || node.type === "frame";
@@ -849,17 +872,17 @@ export function DesignInspector({ node }: { node: EditorNode }) {
         </PropertiesSection>
       )}
 
-      {(canFillStroke || isLine || canRadius || isImage) && (
-        <AppearanceSection
-          node={node}
-          instanceKey={key}
-          locked={locked}
-          layerOpacity={display.opacity ?? 1}
-          canCornerRadius={canRadius}
-          onOpacityCommit={(opacity) => style({ opacity })}
-          onCornerStyle={style}
-        />
-      )}
+      <AppearanceSection
+        node={node}
+        instanceKey={key}
+        locked={locked}
+        layerOpacity={display.opacity ?? 1}
+        canCornerRadius={canRadius}
+        showArc={node.type === "ellipse"}
+        onOpacityCommit={(opacity) => style({ opacity })}
+        onBlendModeChange={(blendMode) => style({ blendMode })}
+        onCornerStyle={style}
+      />
 
       {canFillStroke && (
         <FillSection
@@ -884,7 +907,71 @@ export function DesignInspector({ node }: { node: EditorNode }) {
         />
       )}
 
-      {(canFillStroke || isLine) && (
+      {isLine ? (
+        <PropertiesSection title="Line" defaultOpen>
+          <PropertyNumberInput
+            commitOnInput={false}
+            label="Length"
+            value={Math.round(lineLength(lineEndpointsFromNode(node)))}
+            instanceKey={`${key}-line-len`}
+            disabled
+            min={0}
+            onCommit={() => {}}
+          />
+          <div className="mt-1.5">
+            <PropertyNumberInput
+              commitOnInput={false}
+              label="Angle °"
+              value={Math.round(lineAngleDegrees(lineEndpointsFromNode(node)))}
+              instanceKey={`${key}-line-ang`}
+              disabled
+              min={0}
+              max={359}
+              onCommit={() => {}}
+            />
+          </div>
+        </PropertiesSection>
+      ) : null}
+
+      {isArrow ? (
+        <PropertiesSection title="Arrow" defaultOpen>
+          <PropertyNumberInput
+            commitOnInput={false}
+            label="Length"
+            value={Math.round(lineLength(lineEndpointsFromNode(node)))}
+            instanceKey={`${key}-arrow-len`}
+            disabled
+            min={0}
+            onCommit={() => {}}
+          />
+          <div className="mt-1.5">
+            <PropertyNumberInput
+              commitOnInput={false}
+              label="Angle °"
+              value={Math.round(lineAngleDegrees(lineEndpointsFromNode(node)))}
+              instanceKey={`${key}-arrow-ang`}
+              disabled
+              min={0}
+              max={359}
+              onCommit={() => {}}
+            />
+          </div>
+          <div className="mt-1.5">
+            <PropertyNumberInput
+              commitOnInput={false}
+              label="Arrowhead size"
+              value={Math.round(node.arrowHeadSize ?? Math.max(10, (node.strokeWidth ?? 3) * 3))}
+              instanceKey={`${key}-arrow-head-size`}
+              disabled={locked}
+              min={1}
+              max={200}
+              onCommit={(v) => style({ arrowHeadSize: Math.max(1, v) })}
+            />
+          </div>
+        </PropertiesSection>
+      ) : null}
+
+      {(canFillStroke || isLine || isArrow) && (
         <StrokeSection
           instanceKey={key}
           locked={locked}
@@ -900,12 +987,38 @@ export function DesignInspector({ node }: { node: EditorNode }) {
           strokeLinejoin={node.strokeLinejoin}
           strokeMiterAngle={node.strokeMiterAngle}
           strokeWidthProfileFlipped={node.strokeWidthProfileFlipped}
-          strokeStartPoint={node.strokeStartPoint}
-          strokeEndPoint={resolveStrokeEndPoint(node)}
-          showEndpoints={
-            node.type === "line" || (node.type === "path" && !node.pathClosed)
+          strokeStartPoint={
+            isArrow
+              ? arrowHeadToStrokeEndpoint(resolveArrowStartKind(node))
+              : node.strokeStartPoint
           }
-          onStyle={style}
+          strokeEndPoint={
+            isArrow
+              ? arrowHeadToStrokeEndpoint(resolveArrowEndKind(node))
+              : resolveStrokeEndPoint(node)
+          }
+          showEndpoints={
+            node.type === "line" ||
+            node.type === "arrow" ||
+            (node.type === "path" && !node.pathClosed)
+          }
+          onStyle={(patch) => {
+            if (isArrow && (patch.strokeStartPoint != null || patch.strokeEndPoint != null)) {
+              style({
+                ...patch,
+                ...arrowEndpointStylePatch({
+                  ...(patch.strokeStartPoint != null
+                    ? { startArrow: strokeEndpointToArrowHead(patch.strokeStartPoint) }
+                    : {}),
+                  ...(patch.strokeEndPoint != null
+                    ? { endArrow: strokeEndpointToArrowHead(patch.strokeEndPoint) }
+                    : {}),
+                }),
+              });
+              return;
+            }
+            style(patch);
+          }}
         />
       )}
 
@@ -928,23 +1041,40 @@ export function DesignInspector({ node }: { node: EditorNode }) {
         onChangeEffectType={(effectId, type) => updateEffect(id, effectId, { type })}
       />
 
-      {node.type === "path" && node.polygonSides != null && node.starPoints == null ? (
+      {isPolygonNode(node) ? (
         <PropertiesSection title="Polygon" defaultOpen>
           <PropertyNumberInput
             commitOnInput={false}
             label="Sides"
-            value={node.polygonSides}
+            value={node.polygonSides ?? 6}
             instanceKey={`${key}-sides`}
             disabled={locked}
             min={3}
-            max={64}
+            max={100}
             onCommit={(v) => {
-              style({
-                polygonSides: v,
-                pathPoints: generatePolygonPoints(v, node.width, node.height),
-              });
+              patch(polygonGeometryPatch(node, { polygonSides: v }));
             }}
           />
+          <div className="mt-1.5">
+            <PropertyNumberInput
+              commitOnInput={false}
+              label="Corner radius"
+              value={Math.round(node.cornerRadius ?? 0)}
+              instanceKey={`${key}-poly-corner`}
+              disabled={locked}
+              min={0}
+              max={Math.round(
+                maxPolygonCornerRadius(
+                  node.polygonSides ?? 6,
+                  node.width,
+                  node.height,
+                ),
+              )}
+              onCommit={(v) => {
+                patch(polygonGeometryPatch(node, { cornerRadius: v }));
+              }}
+            />
+          </div>
         </PropertiesSection>
       ) : null}
 
@@ -957,30 +1087,43 @@ export function DesignInspector({ node }: { node: EditorNode }) {
             instanceKey={`${key}-star-pts`}
             disabled={locked}
             min={3}
-            max={32}
+            max={100}
             onCommit={(v) => {
-              const inner = node.starInnerRadius ?? 0.4;
-              style({
-                starPoints: v,
-                pathPoints: generateStarPoints(v, inner, node.width, node.height),
-              });
+              style(starGeometryPatch(node, { starPoints: v }));
             }}
           />
           <div className="mt-1.5">
             <PropertyNumberInput
               commitOnInput={false}
-              label="Inner radius"
+              label="Ratio"
               value={Math.round((node.starInnerRadius ?? 0.4) * 100)}
               instanceKey={`${key}-star-inner`}
               disabled={locked}
-              min={10}
-              max={90}
+              min={0}
+              max={100}
               onCommit={(v) => {
-                const inner = v / 100;
-                style({
-                  starInnerRadius: inner,
-                  pathPoints: generateStarPoints(node.starPoints ?? 5, inner, node.width, node.height),
-                });
+                style(starGeometryPatch(node, { starInnerRadius: v / 100 }));
+              }}
+            />
+          </div>
+          <div className="mt-1.5">
+            <PropertyNumberInput
+              commitOnInput={false}
+              label="Corner radius"
+              value={Math.round(node.cornerRadius ?? 0)}
+              instanceKey={`${key}-star-corner`}
+              disabled={locked}
+              min={0}
+              max={Math.round(
+                maxStarCornerRadius(
+                  node.starPoints ?? 5,
+                  node.starInnerRadius ?? 0.4,
+                  node.width,
+                  node.height,
+                ),
+              )}
+              onCommit={(v) => {
+                style(starGeometryPatch(node, { cornerRadius: v }));
               }}
             />
           </div>
@@ -1052,6 +1195,58 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               if (textContentDraft !== cur) style({ content: textContentDraft });
             }}
           />
+          <div className="mt-1.5">
+            <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">Resize</div>
+            <select
+              disabled={locked}
+              className={cn(field, "w-full cursor-pointer")}
+              value={node.textResizeMode ?? "auto-width"}
+              onChange={(e) => {
+                style(textResizePatch(e.target.value as TextResizeMode));
+              }}
+            >
+              <option value="auto-width">Auto width</option>
+              <option value="auto-height">Auto height</option>
+              <option value="fixed">Fixed size</option>
+            </select>
+          </div>
+          <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+            <div>
+              <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">Align</div>
+              <select
+                disabled={locked}
+                className={cn(field, "w-full cursor-pointer")}
+                value={node.textAlign ?? "left"}
+                onChange={(e) =>
+                  style({
+                    textAlign: e.target.value as "left" | "center" | "right" | "justify",
+                  })
+                }
+              >
+                <option value="left">Left</option>
+                <option value="center">Center</option>
+                <option value="right">Right</option>
+                <option value="justify">Justify</option>
+              </select>
+            </div>
+            <div>
+              <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">Vertical</div>
+              <select
+                disabled={locked}
+                className={cn(field, "w-full cursor-pointer")}
+                value={node.verticalAlign ?? "top"}
+                onChange={(e) =>
+                  style({
+                    verticalAlign: e.target.value as "top" | "middle" | "bottom",
+                  })
+                }
+              >
+                <option value="top">Top</option>
+                <option value="middle">Middle</option>
+                <option value="bottom">Bottom</option>
+              </select>
+            </div>
+          </div>
           <div className="mt-1.5">
             <ColorInput
               label="Text color"

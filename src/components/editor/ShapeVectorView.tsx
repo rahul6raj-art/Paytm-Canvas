@@ -1,6 +1,7 @@
 "use client";
 
-import { pathOutlineD } from "@/lib/shapes/shapeToPath";
+import { useSyncExternalStore } from "react";
+import { vectorShapeOutlineD } from "@/lib/shapes/shapeToPath";
 import { effectiveFillType, fillPaintCss } from "@/lib/fillGradient";
 import { ShapeGradientFill } from "./ShapeGradientFill";
 import {
@@ -10,6 +11,12 @@ import {
   roundedRectPathD,
   uniformCornerRadiusForRect,
 } from "@/lib/cornerRadius";
+import {
+  arrowHeadToStrokeEndpoint,
+  arrowMarkerScale,
+  resolveArrowEndKind,
+  resolveArrowStartKind,
+} from "@/lib/shapes/arrowGeometry";
 import {
   resolveStrokeEndPoint,
   resolveStrokeStartPoint,
@@ -22,6 +29,18 @@ import {
   strokeIsVisible,
   svgStrokePropsFromNode,
 } from "@/lib/stroke";
+import {
+  effectiveEllipseArc,
+  ellipseArcPathD,
+  hasEllipseArcInnerHole,
+  isFullEllipseArc,
+} from "@/lib/shapes/ellipseArc";
+import {
+  getEllipseArcPreview,
+  subscribeEllipseArcPreview,
+} from "@/lib/shapes/ellipseArcDrag";
+import { getLinePreview, subscribeLinePreview } from "@/lib/shapes/lineDrag";
+import { lineLocalRenderPoints } from "@/lib/shapes/lineGeometry";
 import type { EditorNode } from "@/stores/useEditorStore";
 
 /** SVG vector body for shapes — sharper than CSS borders under canvas zoom transforms. */
@@ -35,6 +54,12 @@ export function ShapeVectorView({
   /** Draw stroke only (frame fill stays on the HTML shell). */
   strokeOnly?: boolean;
 }) {
+  const arcPreview = useSyncExternalStore(
+    subscribeEllipseArcPreview,
+    getEllipseArcPreview,
+    () => null,
+  );
+  const linePreview = useSyncExternalStore(subscribeLinePreview, getLinePreview, () => null);
   const sw = node.strokeWidth ?? 0;
   const sc = resolveStrokeColor(node);
   const showStroke = strokeIsVisible(node);
@@ -86,32 +111,81 @@ export function ShapeVectorView({
   if (node.type === "ellipse") {
     const cx = node.width / 2;
     const cy = node.height / 2;
+    const arc =
+      arcPreview?.nodeId === nodeId
+        ? {
+            startDeg: arcPreview.startDeg,
+            sweepDeg: arcPreview.sweepDeg,
+            innerRadiusRatio: arcPreview.innerRadiusRatio,
+          }
+        : effectiveEllipseArc(node);
+    const useArcPath =
+      !isFullEllipseArc(arc.sweepDeg) || hasEllipseArcInnerHole(arc.innerRadiusRatio);
+    const arcPath = useArcPath
+      ? ellipseArcPathD(
+          node.width,
+          node.height,
+          arc.startDeg,
+          arc.sweepDeg,
+          arc.innerRadiusRatio,
+        )
+      : null;
     return (
       <>
-        {showShapeFill ? <ShapeGradientFill node={node} nodeId={nodeId} shape="ellipse" /> : null}
+        {showShapeFill ? (
+          <ShapeGradientFill
+            node={node}
+            nodeId={nodeId}
+            shape="ellipse"
+            pathD={arcPath ?? undefined}
+          />
+        ) : null}
         <svg
           className="pointer-events-none absolute inset-0 block overflow-visible"
           width={node.width}
           height={node.height}
           aria-hidden
         >
-          <ellipse cx={cx} cy={cy} rx={cx} ry={cy} fill={solidFill} {...strokeProps} />
+          {arcPath ? (
+            <path
+              d={arcPath}
+              fill={solidFill}
+              fillRule={
+                hasEllipseArcInnerHole(arc.innerRadiusRatio) &&
+                isFullEllipseArc(arc.sweepDeg)
+                  ? "evenodd"
+                  : undefined
+              }
+              {...strokeProps}
+            />
+          ) : (
+            <ellipse cx={cx} cy={cy} rx={cx} ry={cy} fill={solidFill} {...strokeProps} />
+          )}
         </svg>
       </>
     );
   }
 
-  if (node.type === "line") {
-    const mid = node.height / 2;
+  if (node.type === "line" || node.type === "arrow") {
+    const previewEp =
+      linePreview?.nodeId === nodeId
+        ? {
+            lineX1: linePreview.x1,
+            lineY1: linePreview.y1,
+            lineX2: linePreview.x2,
+            lineY2: linePreview.y2,
+          }
+        : {};
+    const pts = lineLocalRenderPoints({ ...node, ...previewEp });
     return (
       <StrokedLineSvg
         nodeId={nodeId}
         width={node.width}
         height={node.height}
-        x1={0}
-        y1={mid}
-        x2={node.width}
-        y2={mid}
+        x1={pts.x1}
+        y1={pts.y1}
+        x2={pts.x2}
+        y2={pts.y2}
         strokeColor={sc}
         strokeWidth={sw}
         showStroke={showStroke}
@@ -121,9 +195,9 @@ export function ShapeVectorView({
     );
   }
 
-  if (node.type === "path") {
-    const closed = node.pathClosed ?? false;
-    const d = node.flattenedPathData ?? pathOutlineD(node);
+  if (node.type === "path" || node.type === "polygon") {
+    const closed = node.type === "polygon" ? true : (node.pathClosed ?? false);
+    const d = node.flattenedPathData ?? vectorShapeOutlineD(node, nodeId);
     const start = resolveStrokeStartPoint(node);
     const end = resolveStrokeEndPoint(node);
     const markerPrefix = `pc-stroke-${nodeId}`;
@@ -185,12 +259,30 @@ function StrokedLineSvg({
   node: EditorNode;
   strokeProps: Record<string, unknown>;
 }) {
-  const start = resolveStrokeStartPoint(node);
-  const end = resolveStrokeEndPoint(node);
+  const start =
+    node.type === "arrow"
+      ? arrowHeadToStrokeEndpoint(resolveArrowStartKind(node))
+      : resolveStrokeStartPoint(node);
+  const end =
+    node.type === "arrow"
+      ? arrowHeadToStrokeEndpoint(resolveArrowEndKind(node))
+      : resolveStrokeEndPoint(node);
   const prefix = `pc-stroke-${nodeId}`;
-  const markers = strokeEndpointMarkerDefs(prefix, start, end, strokeColor, strokeWidth);
+  const markerOpts =
+    node.type === "arrow" ? { markerScale: arrowMarkerScale(node) } : undefined;
+  const markers = strokeEndpointMarkerDefs(
+    prefix,
+    start,
+    end,
+    strokeColor,
+    strokeWidth,
+    markerOpts,
+  );
   const markerRefs = strokeMarkerRefs(start, end, prefix);
-  const lineCap = unifiedLineCap(start, end);
+  const lineCap =
+    node.type === "arrow"
+      ? node.strokeLinecap ?? "butt"
+      : unifiedLineCap(start, end);
 
   return (
     <svg

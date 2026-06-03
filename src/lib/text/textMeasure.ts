@@ -159,8 +159,35 @@ export function layoutText(
   };
 }
 
+/** Extra space distributed between words for justified lines. */
+export function justifyWordSpacing(
+  line: string,
+  lineWidth: number,
+  boxWidth: number,
+  letterSpacing: number,
+): number {
+  const words = line.trim().split(/\s+/).filter(Boolean);
+  if (words.length < 2) return 0;
+  const ctx = getTextMeasureContext();
+  let wordsWidth = 0;
+  for (let i = 0; i < words.length; i++) {
+    wordsWidth += measureStringWidth(ctx, words[i]!, letterSpacing);
+    if (i < words.length - 1) wordsWidth += letterSpacing;
+  }
+  const gaps = words.length - 1;
+  return Math.max(0, (boxWidth - wordsWidth) / gaps);
+}
+
 /** X offset for a line inside a box with horizontal alignment. */
-export function lineOffsetX(lineWidth: number, boxWidth: number, align: TextAlign): number {
+export function lineOffsetX(
+  lineWidth: number,
+  boxWidth: number,
+  align: TextAlign,
+  opts?: { isLastLine?: boolean; fullLineText?: string; letterSpacing?: number },
+): number {
+  if (align === "justify" && opts?.fullLineText && !opts.isLastLine) {
+    return 0;
+  }
   if (align === "center") return Math.max(0, (boxWidth - lineWidth) / 2);
   if (align === "right") return Math.max(0, boxWidth - lineWidth);
   return 0;

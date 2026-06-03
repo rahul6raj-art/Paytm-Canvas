@@ -52,6 +52,7 @@ export interface FigmaApiNode {
   visible?: boolean;
   locked?: boolean;
   opacity?: number;
+  blendMode?: string;
   absoluteBoundingBox?: FigmaRect;
   fills?: FigmaPaint[];
   strokes?: FigmaPaint[];

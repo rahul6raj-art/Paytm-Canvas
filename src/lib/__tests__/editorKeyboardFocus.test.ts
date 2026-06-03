@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   isToolShortcutEvent,
+  shouldBlockDeleteSelectionShortcut,
   shouldYieldShortcutsToTyping,
   toolFromShortcutKey,
 } from "@/lib/editorKeyboardFocus";
@@ -30,7 +31,7 @@ describe("editorKeyboardFocus shortcuts", () => {
     assert.equal(shouldYieldShortcutsToTyping(e, null), false);
   });
 
-  it("does not yield Delete in single-line inspector inputs", () => {
+  it("blocks delete-selection in single-line inspector inputs", () => {
     const e = {
       key: "Delete",
       code: "Delete",
@@ -38,7 +39,19 @@ describe("editorKeyboardFocus shortcuts", () => {
       ctrlKey: false,
       altKey: false,
     } as KeyboardEvent;
-    assert.equal(shouldYieldShortcutsToTyping(e, fakeInput()), false);
+    assert.equal(shouldBlockDeleteSelectionShortcut(e, fakeInput()), true);
+    assert.equal(shouldYieldShortcutsToTyping(e, fakeInput()), true);
+  });
+
+  it("blocks backspace-selection in single-line inspector inputs", () => {
+    const e = {
+      key: "Backspace",
+      code: "Backspace",
+      metaKey: false,
+      ctrlKey: false,
+      altKey: false,
+    } as KeyboardEvent;
+    assert.equal(shouldBlockDeleteSelectionShortcut(e, fakeInput()), true);
   });
 
   it("yields Delete in multiline code import textarea", () => {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { pathOutlineD } from "@/lib/shapes/shapeToPath";
+import { vectorShapeOutlineD } from "@/lib/shapes/shapeToPath";
 import { screenPxToWorld } from "@/lib/canvasVisual";
 import { beginCanvasNodeDrag, type ClientToWorldFn } from "@/lib/canvasNodeDrag";
 import { prepareAltDragDuplicate } from "@/lib/canvasAltDrag";
@@ -21,10 +21,18 @@ import { useCanvasToWorld } from "@/components/editor/CanvasToWorldContext";
 import { useCanvasInteraction } from "@/components/editor/CanvasInteractionContext";
 import { maskGroupChildHitOrder } from "@/lib/booleanGeometry";
 import {
+  applyMoveToolPointerSelection,
   drillTargetForDoubleClick,
   selectionTargetForClick,
   shouldCollapseContainerHits,
 } from "@/lib/containerSelection";
+import {
+  effectiveEllipseArc,
+  ellipseArcPathD,
+  hasEllipseArcInnerHole,
+  isFullEllipseArc,
+} from "@/lib/shapes/ellipseArc";
+import { lineLocalRenderPoints } from "@/lib/shapes/lineGeometry";
 import { pickDeepestNodeAtWorldPoint } from "@/lib/tree";
 import type { SceneRendererProps } from "./RendererTypes";
 
@@ -66,6 +74,15 @@ function HitShape({
   };
 
   if (node.type === "ellipse") {
+    const arc = effectiveEllipseArc(node);
+    if (!isFullEllipseArc(arc.sweepDeg) || hasEllipseArcInnerHole(arc.innerRadiusRatio)) {
+      return (
+        <path
+          d={ellipseArcPathD(w, h, arc.startDeg, arc.sweepDeg, arc.innerRadiusRatio)}
+          {...common}
+        />
+      );
+    }
     return (
       <ellipse
         cx={w / 2}
@@ -77,15 +94,18 @@ function HitShape({
     );
   }
 
-  if (node.type === "line") {
-    const hitW = screenPxToWorld(LINE_HIT_SCREEN_PX, zoom);
-    const y = h / 2;
+  if (node.type === "line" || node.type === "arrow") {
+    const hitW = Math.max(
+      screenPxToWorld(LINE_HIT_SCREEN_PX, zoom),
+      (node.strokeWidth ?? 2) + screenPxToWorld(4, zoom),
+    );
+    const pts = lineLocalRenderPoints(node);
     return (
       <line
-        x1={0}
-        y1={y}
-        x2={w}
-        y2={y}
+        x1={pts.x1}
+        y1={pts.y1}
+        x2={pts.x2}
+        y2={pts.y2}
         stroke="transparent"
         strokeWidth={hitW}
         fill="none"
@@ -101,14 +121,14 @@ function HitShape({
     );
   }
 
-  if (node.type === "path") {
-    const d = pathOutlineD(node);
+  if (node.type === "path" || node.type === "polygon") {
+    const d = vectorShapeOutlineD(node, node.id);
     const hitW = Math.max(
       screenPxToWorld(LINE_HIT_SCREEN_PX, zoom),
       (node.strokeWidth ?? 2) + screenPxToWorld(4, zoom),
     );
     if (d) {
-      const closed = node.pathClosed ?? false;
+      const closed = node.type === "polygon" ? true : (node.pathClosed ?? false);
       return (
         <path
           d={d}
@@ -354,7 +374,7 @@ export function SvgHitLayer({
         return;
       }
 
-      select(targetId, e.shiftKey);
+      applyMoveToolPointerSelection(targetId, st.selectedIds, e.shiftKey, select);
 
       if (e.button !== 0) return;
       if (!canCanvasObjectDrag()) return;

@@ -2,6 +2,7 @@ import type { EditorNode, NodeKind } from "@/stores/useEditorStore";
 import { maskGroupChildHitOrder } from "@/lib/booleanGeometry";
 import {
   buildParentMapFromChildOrder,
+  getNodeWorldInverseMatrixFromChildOrder,
   getRenderedWorldBounds,
   insertNodeInChildOrder,
   isAncestorOf,
@@ -211,14 +212,24 @@ export function clampInsertLocalPoint(
   };
 }
 
-/** World-space point → immediate parent's local coordinates for a child node. */
+/** World-space point → node's own local coordinates (0…width, 0…height). */
 export function worldToLocalForNode(
   worldX: number,
   worldY: number,
   nodeId: string,
   nodes: Record<string, EditorNode>,
+  childOrder?: Record<string, string[]>,
 ): { x: number; y: number } {
-  return worldToParentLocal(worldX, worldY, nodeId, nodes);
+  if (childOrder) {
+    const inv = getNodeWorldInverseMatrixFromChildOrder(nodeId, nodes, childOrder);
+    if (inv) return applyMatrixToPoint(inv, { x: worldX, y: worldY });
+    const b = getRenderedWorldBounds(nodeId, nodes, childOrder);
+    return { x: worldX - b.x, y: worldY - b.y };
+  }
+  const inv = getNodeWorldInverseMatrix(nodeId, nodes);
+  if (inv) return applyMatrixToPoint(inv, { x: worldX, y: worldY });
+  const wr = worldRect(nodeId, nodes);
+  return { x: worldX - wr.x, y: worldY - wr.y };
 }
 
 /** Convert a world-space point into coordinates relative to `parentId`'s top-left (null = canvas / root). */
@@ -298,13 +309,15 @@ export function pickDeepestNodeAtWorldPoint(
   worldY: number,
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
-  opts?: { types?: NodeKind[] },
+  opts?: { types?: NodeKind[]; zoom?: number },
 ): string | null {
   const types = opts?.types;
   function dfs(nid: string): string | null {
     const n = nodes[nid];
     if (!n?.visible) return null;
-    if (!pointInNodeRenderedWorldBounds(worldX, worldY, nid, nodes, childOrder)) return null;
+    if (!pointInNodeRenderedWorldBounds(worldX, worldY, nid, nodes, childOrder, opts?.zoom ?? 1)) {
+      return null;
+    }
     const kids = maskGroupChildHitOrder(n, childOrder[nid] ?? []);
     for (const k of [...kids].reverse()) {
       const h = dfs(k);
@@ -356,6 +369,7 @@ export function pickDeepestVisibleNodeAtWorldPoint(
   worldY: number,
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
+  zoom = 1,
 ): string | null {
-  return pickDeepestNodeAtWorldPoint(worldX, worldY, nodes, childOrder);
+  return pickDeepestNodeAtWorldPoint(worldX, worldY, nodes, childOrder, { zoom });
 }

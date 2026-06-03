@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  applyMoveToolPointerSelection,
   drillTargetForDoubleClick,
   selectionTargetForClick,
   shouldCollapseContainerHits,
@@ -62,5 +63,26 @@ describe("containerSelection", () => {
     const childOrder = { f: ["r"] };
     const drill = drillTargetForDoubleClick("r", 0, 0, nodes, childOrder, null, () => "r");
     assert.deepEqual(drill, { containerId: "f", selectId: "r" });
+  });
+
+  it("applyMoveToolPointerSelection keeps multi-select when dragging selected layer", () => {
+    let selected: string[] = ["a", "b"];
+    const select = (id: string | null, additive?: boolean) => {
+      if (!id) {
+        selected = [];
+        return;
+      }
+      if (additive) {
+        selected = selected.includes(id)
+          ? selected.filter((x) => x !== id)
+          : [...selected, id];
+        return;
+      }
+      selected = [id];
+    };
+    applyMoveToolPointerSelection("a", ["a", "b"], false, select);
+    assert.deepEqual(selected, ["a", "b"]);
+    applyMoveToolPointerSelection("c", ["a", "b"], false, select);
+    assert.deepEqual(selected, ["c"]);
   });
 });

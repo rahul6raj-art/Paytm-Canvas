@@ -150,8 +150,18 @@ export function pageToSnapshot(page: EditorPage): EditorPageSnapshot {
   };
 }
 
-export function pageFromSnapshot(snap: EditorPageSnapshot): EditorPage {
-  const repaired = repairNodeHierarchyIfNeeded(snap.nodes, snap.childOrder);
+export type PageFromSnapshotOptions = {
+  /** Skip expensive geometry repair (Figma import already ran light reconcile). */
+  skipHierarchyRepair?: boolean;
+};
+
+export function pageFromSnapshot(
+  snap: EditorPageSnapshot,
+  opts?: PageFromSnapshotOptions,
+): EditorPage {
+  const repaired = opts?.skipHierarchyRepair
+    ? { nodes: snap.nodes, childOrder: snap.childOrder }
+    : repairNodeHierarchyIfNeeded(snap.nodes, snap.childOrder);
   return {
     id: snap.id,
     name: snap.name,
@@ -202,6 +212,7 @@ export function initialPagesFromCanvas(
 export function pagesFromDocumentSnapshots(
   snapshots: EditorPageSnapshot[],
   activePageId?: string,
+  opts?: PageFromSnapshotOptions,
 ): {
   pages: Record<string, EditorPage>;
   pageOrder: string[];
@@ -210,7 +221,7 @@ export function pagesFromDocumentSnapshots(
 } {
   const pages: Record<string, EditorPage> = {};
   for (const snap of snapshots) {
-    pages[snap.id] = pageFromSnapshot(snap);
+    pages[snap.id] = pageFromSnapshot(snap, opts);
   }
   const pageOrder = snapshots.map((s) => s.id);
   const activeId =

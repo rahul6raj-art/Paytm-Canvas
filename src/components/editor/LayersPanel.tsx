@@ -11,11 +11,13 @@ import {
   Eye,
   EyeOff,
   Frame,
+  Hexagon,
   Group,
   ImageIcon,
   Layers,
   Lock,
   Minus,
+  MoveUpRight,
   PenLine,
   Square,
   Type,
@@ -39,6 +41,8 @@ function KindIcon({ node }: { node: EditorNode }) {
   if (node.type === "image") return <ImageIcon className={c} strokeWidth={1.75} />;
   if (node.type === "ellipse") return <Circle className={c} strokeWidth={1.75} />;
   if (node.type === "line") return <Minus className={c} strokeWidth={1.75} />;
+  if (node.type === "arrow") return <MoveUpRight className={c} strokeWidth={1.75} />;
+  if (node.type === "polygon") return <Hexagon className={c} strokeWidth={1.75} />;
   if (node.type === "path") return <PenLine className={c} strokeWidth={1.75} />;
   return <Square className={c} strokeWidth={1.75} />;
 }
@@ -391,6 +395,8 @@ export function LayersPanel() {
   const [dragId, setDragId] = useState<string | null>(null);
   const [indicator, setIndicator] = useState<DropInd>(null);
   const [lineTop, setLineTop] = useState<number | null>(null);
+  const figImportBusy = useEditorStore((s) => s.figImportInProgress);
+  const figImportStatus = useEditorStore((s) => s.figImportStatus);
   const childOrder = useEditorStore((s) => s.childOrder);
   const nodes = useEditorStore((s) => s.nodes);
   const selectedIds = useEditorStore((s) => s.selectedIds);
@@ -513,15 +519,24 @@ export function LayersPanel() {
             style={{ top: lineTop }}
           />
         ) : null}
-        <Tree
-          parentId={ROOT}
-          depth={0}
-          dragId={dragId}
-          indicator={indicator}
-          setIndicator={setIndicator}
-          onDragStartRow={onDragStartRow}
-        />
-        {(childOrder[ROOT] ?? []).length === 0 ? (
+        {figImportBusy ? (
+          <div className="mx-2 mt-6 px-3 py-4 text-center">
+            <p className="text-[12px] font-medium text-app-muted">Importing layers…</p>
+            {figImportStatus ? (
+              <p className="mt-1 text-[11px] leading-relaxed text-app-subtle">{figImportStatus}</p>
+            ) : null}
+          </div>
+        ) : (
+          <Tree
+            parentId={ROOT}
+            depth={0}
+            dragId={dragId}
+            indicator={indicator}
+            setIndicator={setIndicator}
+            onDragStartRow={onDragStartRow}
+          />
+        )}
+        {!figImportBusy && (childOrder[ROOT] ?? []).length === 0 ? (
           <div className="mx-2 mt-4 rounded-lg border border-dashed border-app-border bg-white/[0.02] px-3 py-6 text-center">
             <Layers className="mx-auto mb-2 h-8 w-8 text-[#4a4a4a]" strokeWidth={1.25} />
             <p className="text-[12px] font-medium text-app-muted">No layers yet</p>

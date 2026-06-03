@@ -4,11 +4,17 @@ import { useCallback, useMemo, useRef, useEffect, useState } from "react";
 import { Grid3X3, Ruler } from "lucide-react";
 import { CanvasRulers } from "./CanvasRulers";
 import { SelectionBox } from "./SelectionBox";
+import { EllipseArcHandles } from "./EllipseArcHandles";
+import { CornerRadiusHandles } from "./CornerRadiusHandles";
+import { StarHandles } from "./StarHandles";
+import { LineHandles } from "./LineHandles";
+import { PolygonHandles } from "./PolygonHandles";
 import { SceneRenderer } from "@/editor-core/renderer/SceneRenderer";
 import { RootFrameLabels } from "./RootFrameLabels";
 import { PrototypeWireLayer } from "./PrototypeWireLayer";
 import { AltMeasureLayer } from "./AltMeasureLayer";
 import { DragSnapOverlay } from "./DragSnapOverlay";
+import { SwapDragOverlay } from "./SwapDragOverlay";
 import { pickLayoutGuideAt } from "@/lib/layoutGuidePick";
 import { LayoutGuidesOverlay } from "./LayoutGuidesOverlay";
 import { InspectMeasurementsLayer } from "./InspectMeasurementsLayer";
@@ -40,6 +46,10 @@ import { getRenderedWorldTopLeft } from "@/lib/editorGraph";
 
 const PEN_CURVE_DRAG_THRESHOLD = 4;
 import { wheelZoomFactor, zoomAtScreenPoint } from "@/lib/canvasZoom";
+import {
+  createRafPointerScheduler,
+  forEachCoalescedPointerEvent,
+} from "@/lib/smoothPointer";
 import {
   activateCanvasForShortcuts,
   focusCanvasViewport,
@@ -154,6 +164,26 @@ function PenStrokePreview({
   );
 }
 
+function TextDraftPreview({
+  draft,
+}: {
+  draft: { x0: number; y0: number; x1: number; y1: number; shiftKey: boolean; altKey: boolean };
+}) {
+  const box = boundsFromDrag(
+    { x: draft.x0, y: draft.y0 },
+    { x: draft.x1, y: draft.y1 },
+    { shiftKey: draft.shiftKey, altKey: draft.altKey },
+    { minSize: 8 },
+  );
+  return (
+    <div
+      className="pointer-events-none absolute z-[19] overflow-hidden rounded-sm border border-dashed border-[#18a0fb] bg-[rgba(13,153,255,0.08)]"
+      style={{ left: box.x, top: box.y, width: box.width, height: box.height }}
+      aria-hidden
+    />
+  );
+}
+
 function ShapeDraftPreview({
   draft,
 }: {
@@ -199,8 +229,28 @@ function ShapeDraftPreview({
             y2={midY}
             stroke="#18a0fb"
             strokeWidth={2}
-            strokeLinecap="round"
+            strokeLinecap="butt"
+            markerEnd={
+              draft.shapeType === "arrow"
+                ? "url(#craft-arrow-preview-end)"
+                : undefined
+            }
           />
+          {draft.shapeType === "arrow" ? (
+            <defs>
+              <marker
+                id="craft-arrow-preview-end"
+                markerWidth="10"
+                markerHeight="10"
+                refX="9"
+                refY="5"
+                orient="auto"
+                markerUnits="strokeWidth"
+              >
+                <polygon points="0,0 10,5 0,10" fill="#18a0fb" />
+              </marker>
+            </defs>
+          ) : null}
         </svg>
       </div>
     );
@@ -270,6 +320,7 @@ export function Canvas() {
   const addTriangleAt = useEditorStore((s) => s.addTriangleAt);
   const createShapeFromDrag = useEditorStore((s) => s.createShapeFromDrag);
   const addTextAt = useEditorStore((s) => s.addTextAt);
+  const createTextBoxFromDrag = useEditorStore((s) => s.createTextBoxFromDrag);
   const createFrameAt = useEditorStore((s) => s.createFrameAt);
   const createFrameWithBounds = useEditorStore((s) => s.createFrameWithBounds);
   const createInstance = useEditorStore((s) => s.createInstance);
@@ -277,6 +328,7 @@ export function Canvas() {
   const importImageAsset = useEditorStore((s) => s.importImageAsset);
   const placingComponentMasterId = useEditorStore((s) => s.placingComponentMasterId);
   const setPlacingComponentMasterId = useEditorStore((s) => s.setPlacingComponentMasterId);
+  const figImportBusy = useEditorStore((s) => s.figImportInProgress);
   const rootIds = useEditorStore((s) => s.childOrder[ROOT] ?? EMPTY_CHILD_IDS);
   const childOrder = useEditorStore((s) => s.childOrder);
   const assets = useEditorStore((s) => s.assets);
@@ -303,6 +355,17 @@ export function Canvas() {
   const [frameDraft, setFrameDraft] = useState<null | { x0: number; y0: number; x1: number; y1: number }>(
     null,
   );
+  const [textDraft, setTextDraft] = useState<null | {
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+    shiftKey: boolean;
+    altKey: boolean;
+  }>(null);
+  const textDraftRef = useRef<typeof textDraft>(null);
+  const textSessionCleanupRef = useRef<(() => void) | null>(null);
+
   const [shapeDraft, setShapeDraft] = useState<null | {
     shapeType: ShapeType;
     x0: number;
@@ -332,10 +395,24 @@ export function Canvas() {
 
   useEffect(() => {
     registerMarqueeAbortHandler(() => {
-      frameSessionCleanupRef.current?.();
-      shapeSessionCleanupRef.current?.();
-      pencilSessionCleanupRef.current?.();
-      penSessionCleanupRef.current?.();
+      let cancelled = false;
+      if (frameSessionCleanupRef.current) {
+        frameSessionCleanupRef.current();
+        cancelled = true;
+      }
+      if (shapeSessionCleanupRef.current) {
+        shapeSessionCleanupRef.current();
+        cancelled = true;
+      }
+      if (pencilSessionCleanupRef.current) {
+        pencilSessionCleanupRef.current();
+        cancelled = true;
+      }
+      if (penSessionCleanupRef.current) {
+        penSessionCleanupRef.current();
+        cancelled = true;
+      }
+      return cancelled;
     });
     return () => {
       registerMarqueeAbortHandler(null);
@@ -503,16 +580,30 @@ export function Canvas() {
         py: pan.y,
       };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-      const onMove = (ev: PointerEvent) => {
-        const d = panDrag.current;
-        if (!d || ev.pointerId !== d.pointerId) return;
-        setPan({ x: d.px + (ev.clientX - d.sx), y: d.py + (ev.clientY - d.sy) });
-      };
-      const onUp = (ev: PointerEvent) => {
-        const d = panDrag.current;
-        if (!d || ev.pointerId !== d.pointerId) return;
-        panDrag.current = null;
-        setIsPanning(false);
+        const panMoveScheduler = createRafPointerScheduler<{ clientX: number; clientY: number }>(
+          ({ clientX, clientY }) => {
+            const d = panDrag.current;
+            if (!d) return;
+            setPan({ x: d.px + (clientX - d.sx), y: d.py + (clientY - d.sy) });
+          },
+        );
+        const onMove = (ev: PointerEvent) => {
+          const d = panDrag.current;
+          if (!d || ev.pointerId !== d.pointerId) return;
+          forEachCoalescedPointerEvent(ev, (pe) => {
+            panMoveScheduler.schedule({ clientX: pe.clientX, clientY: pe.clientY });
+          });
+        };
+        const onUp = (ev: PointerEvent) => {
+          const d = panDrag.current;
+          if (!d || ev.pointerId !== d.pointerId) return;
+          forEachCoalescedPointerEvent(ev, (pe) => {
+            panMoveScheduler.schedule({ clientX: pe.clientX, clientY: pe.clientY });
+          });
+          panMoveScheduler.flush();
+          panMoveScheduler.cancel();
+          panDrag.current = null;
+          setIsPanning(false);
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
       };
@@ -748,13 +839,28 @@ export function Canvas() {
 
         pencilSessionCleanupRef.current = () => finish(false);
 
+        const pencilBatch: { x: number; y: number }[] = [];
+        const pencilScheduler = createRafPointerScheduler<null>(() => {
+          if (pencilBatch.length === 0) return;
+          const pts = pencilBatch.splice(0, pencilBatch.length);
+          st.extendPencilStrokeCoalesced(pts);
+        });
         const onMove = (ev: PointerEvent) => {
           if (ev.pointerId !== capId) return;
-          st.extendPencilStroke(toWorld(ev.clientX, ev.clientY));
+          forEachCoalescedPointerEvent(ev, (pe) => {
+            pencilBatch.push(toWorld(pe.clientX, pe.clientY));
+            pencilScheduler.schedule(null);
+          });
         };
 
         const onPointerEnd = (ev: PointerEvent) => {
           if (ev.pointerId !== capId) return;
+          forEachCoalescedPointerEvent(ev, (pe) => {
+            pencilBatch.push(toWorld(pe.clientX, pe.clientY));
+            pencilScheduler.schedule(null);
+          });
+          pencilScheduler.flush();
+          pencilScheduler.cancel();
           finish(ev.type === "pointerup");
         };
 
@@ -774,7 +880,90 @@ export function Canvas() {
           st.setEditingTextId(existingText);
           return;
         }
-        addTextAt(w.x, w.y);
+
+        const anchor = w;
+        const draft0 = {
+          x0: anchor.x,
+          y0: anchor.y,
+          x1: anchor.x,
+          y1: anchor.y,
+          shiftKey: e.shiftKey,
+          altKey: e.altKey,
+        };
+        textDraftRef.current = draft0;
+        setTextDraft(draft0);
+
+        const target = pointerCaptureTarget();
+        const capId = e.pointerId;
+        try {
+          target.setPointerCapture(capId);
+        } catch {
+          /* ignore */
+        }
+        let shiftHeld = e.shiftKey;
+        let altHeld = e.altKey;
+        let ended = false;
+
+        const removeListeners = () => {
+          window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("pointerup", onPointerEnd);
+          window.removeEventListener("pointercancel", onPointerEnd);
+        };
+
+        const finish = (commit: boolean) => {
+          if (ended) return;
+          ended = true;
+          textSessionCleanupRef.current = null;
+          removeListeners();
+          try {
+            target.releasePointerCapture(capId);
+          } catch {
+            /* ignore */
+          }
+          const m = textDraftRef.current;
+          textDraftRef.current = null;
+          setTextDraft(null);
+          if (!commit || !m) return;
+          const start = { x: m.x0, y: m.y0 };
+          const end = { x: m.x1, y: m.y1 };
+          const dist = Math.hypot(end.x - start.x, end.y - start.y);
+          if (dist < 4) {
+            addTextAt(start.x, start.y);
+          } else {
+            createTextBoxFromDrag(start, end, {
+              shiftKey: shiftHeld,
+              altKey: altHeld,
+            });
+          }
+          suppressPostCreationPointer();
+        };
+
+        textSessionCleanupRef.current = () => finish(false);
+
+        const onMove = (ev: PointerEvent) => {
+          if (ev.pointerId !== capId) return;
+          shiftHeld = ev.shiftKey;
+          altHeld = ev.altKey;
+          const ww = toWorld(ev.clientX, ev.clientY);
+          const next = textDraftRef.current
+            ? { ...textDraftRef.current, x1: ww.x, y1: ww.y, shiftKey: shiftHeld, altKey: altHeld }
+            : { ...draft0, x1: ww.x, y1: ww.y, shiftKey: shiftHeld, altKey: altHeld };
+          textDraftRef.current = next;
+          setTextDraft(next);
+        };
+
+        const onPointerEnd = (ev: PointerEvent) => {
+          if (ev.pointerId !== capId) return;
+          const ww = toWorld(ev.clientX, ev.clientY);
+          if (textDraftRef.current) {
+            textDraftRef.current = { ...textDraftRef.current, x1: ww.x, y1: ww.y };
+          }
+          finish(ev.type === "pointerup");
+        };
+
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onPointerEnd);
+        window.addEventListener("pointercancel", onPointerEnd);
         return;
       }
       if (activeTool === "pen") {
@@ -832,16 +1021,28 @@ export function Canvas() {
 
         penSessionCleanupRef.current = () => finish(false);
 
+        const penPreviewScheduler = createRafPointerScheduler<null>(() => {
+          const placement = penPlacementRef.current;
+          if (placement) setPenPlacement(placement);
+        });
         const onMove = (ev: PointerEvent) => {
           if (ev.pointerId !== capId) return;
-          const ww = toWorld(ev.clientX, ev.clientY);
-          const next = { anchor, drag: ww };
-          penPlacementRef.current = next;
-          setPenPlacement(next);
+          forEachCoalescedPointerEvent(ev, (pe) => {
+            const ww = toWorld(pe.clientX, pe.clientY);
+            penPlacementRef.current = { anchor, drag: ww };
+            penPreviewScheduler.schedule(null);
+          });
         };
 
         const onPointerEnd = (ev: PointerEvent) => {
           if (ev.pointerId !== capId) return;
+          forEachCoalescedPointerEvent(ev, (pe) => {
+            const ww = toWorld(pe.clientX, pe.clientY);
+            penPlacementRef.current = { anchor, drag: ww };
+            penPreviewScheduler.schedule(null);
+          });
+          penPreviewScheduler.flush();
+          penPreviewScheduler.cancel();
           finish(ev.type === "pointerup");
         };
 
@@ -887,7 +1088,7 @@ export function Canvas() {
       !isCanvasChromeTarget(e.target)
     ) {
       const w = toWorld(e.clientX, e.clientY);
-      const nodeHit = pickDeepestVisibleNodeAtWorldPoint(w.x, w.y, st.nodes, st.childOrder);
+      const nodeHit = pickDeepestVisibleNodeAtWorldPoint(w.x, w.y, st.nodes, st.childOrder, st.zoom);
       if (!nodeHit) {
         const guideId = pickLayoutGuideAt(w.x, w.y, st.layoutGuides, st.zoom);
         if (guideId) {
@@ -915,7 +1116,7 @@ export function Canvas() {
 
     if (canMarquee) {
       const w = toWorld(e.clientX, e.clientY);
-      const hitId = pickDeepestVisibleNodeAtWorldPoint(w.x, w.y, st.nodes, st.childOrder);
+      const hitId = pickDeepestVisibleNodeAtWorldPoint(w.x, w.y, st.nodes, st.childOrder, st.zoom);
       const tgt = e.target as HTMLElement | null;
       const domHitId =
         tgt?.closest?.("[data-node-id]")?.getAttribute("data-node-id") ??
@@ -1124,18 +1325,20 @@ export function Canvas() {
             className="pointer-events-none absolute inset-0 z-[1]"
             data-canvas-scene
           >
-            <SceneRenderer
-              rootIds={rootIds}
-              nodes={nodes}
-              childOrder={childOrder}
-              assets={assets}
-              designTokens={designTokens}
-              selectedIds={selectedIds}
-              zoom={zoom}
-            />
+            {figImportBusy ? null : (
+              <SceneRenderer
+                rootIds={rootIds}
+                nodes={nodes}
+                childOrder={childOrder}
+                assets={assets}
+                designTokens={designTokens}
+                selectedIds={selectedIds}
+                zoom={zoom}
+              />
+            )}
           </div>
           <div className="pointer-events-none absolute inset-0 z-[20]">
-            <RootFrameLabels rootIds={rootIds} />
+            {figImportBusy ? null : <RootFrameLabels rootIds={rootIds} />}
           </div>
           {editorMode === "design" && tool === "pen" && penDrawingNodeId && (penHoverWorld || penPlacement) ? (
             <PenStrokePreview
@@ -1158,6 +1361,7 @@ export function Canvas() {
               }}
             />
           ) : null}
+          {textDraft ? <TextDraftPreview draft={textDraft} /> : null}
           {shapeDraft ? (
             <ShapeDraftPreview draft={shapeDraft} />
           ) : null}
@@ -1174,7 +1378,13 @@ export function Canvas() {
             />
           ) : null}
           <SelectionBox />
+          <EllipseArcHandles />
+          <CornerRadiusHandles />
+          <StarHandles />
+          <LineHandles />
+          <PolygonHandles />
           <DragSnapOverlay />
+          <SwapDragOverlay />
           <AltMeasureLayer />
           <ComponentPlacementPreview />
           <GradientEditorLayer />

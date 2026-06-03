@@ -8,7 +8,9 @@ import {
   shapeTypeLabel,
   type ShapeType,
 } from "./shapeModel";
-import { generateArrowPoints, generatePolygonPoints, generateStarPoints } from "./pathGenerators";
+import { generatePolygonPoints, generateStarPoints } from "./pathGenerators";
+import { layoutFromLineEndpoints } from "./lineGeometry";
+import { arrowEndpointStylePatch, DEFAULT_ARROW_END } from "./arrowGeometry";
 
 export type Point = { x: number; y: number };
 
@@ -179,40 +181,37 @@ export function createShapeNode(
   if (shapeType === "line" || shapeType === "arrow") {
     const raw = lineGeometryFromDrag(startPoint, endPoint, modifiers);
     const geom = { ...roundBounds(raw), rotation: raw.rotation };
+    const { start: ls, end: le } = resolveLineEndpoints(startPoint, endPoint, modifiers);
+    const sw = style?.strokeWidth ?? 3;
     if (shapeType === "arrow") {
-      const pts = generateArrowPoints(geom.width, geom.height);
-      let node: EditorNode = {
+      return {
         ...base,
-        type: "path",
+        type: "arrow",
         name: shapeTypeLabel("arrow"),
-        x: geom.x,
-        y: geom.y,
-        width: geom.width,
-        height: geom.height,
-        rotation: geom.rotation,
-        pathPoints: pts,
-        pathClosed: false,
+        ...layoutFromLineEndpoints(ls.x, ls.y, le.x, le.y, sw),
+        ...arrowEndpointStylePatch({
+          startArrow: "none",
+          endArrow: DEFAULT_ARROW_END,
+        }),
         fillEnabled: false,
         fill: "transparent",
-        strokeWidth: style?.strokeWidth ?? 3,
+        fillOpacity: 0,
+        strokeColor: style?.strokeColor ?? DEFAULT_SHAPE_STROKE,
+        strokeWidth: sw,
+        strokeLinecap: "butt",
       };
-      node = normalizePathNode(node);
-      return node;
     }
     return {
       ...base,
       type: "line",
       name: shapeTypeLabel("line"),
-      x: geom.x,
-      y: geom.y,
-      width: geom.width,
-      height: geom.height,
-      rotation: geom.rotation,
+      ...layoutFromLineEndpoints(ls.x, ls.y, le.x, le.y, sw),
       fillEnabled: false,
       fill: "transparent",
       fillOpacity: 0,
       strokeColor: style?.strokeColor ?? DEFAULT_SHAPE_STROKE,
-      strokeWidth: style?.strokeWidth ?? 3,
+      strokeWidth: sw,
+      strokeLinecap: "round",
     };
   }
 
@@ -244,22 +243,34 @@ export function createShapeNode(
 
   const sides = style?.polygonSides ?? 6;
   const inner = style?.starInnerRadius ?? 0.4;
-  const pts =
-    shapeType === "star"
-      ? generateStarPoints(style?.starPoints ?? 5, inner, bounds.width, bounds.height)
-      : generatePolygonPoints(sides, bounds.width, bounds.height);
 
+  if (shapeType === "polygon") {
+    const kind = editorNodeKindForShapeType("polygon");
+    return {
+      ...base,
+      type: kind,
+      name: shapeTypeLabel("polygon"),
+      ...bounds,
+      polygonSides: sides,
+      cornerRadius: style?.cornerRadius ?? 0,
+      pathPoints: generatePolygonPoints(sides, bounds.width, bounds.height),
+      pathClosed: true,
+      strokeWidth: 0,
+    };
+  }
+
+  const pts = generateStarPoints(style?.starPoints ?? 5, inner, bounds.width, bounds.height);
   let node: EditorNode = {
     ...base,
     type: "path",
-    name: shapeTypeLabel(shapeType),
+    name: shapeTypeLabel("star"),
     ...bounds,
     pathPoints: pts,
     pathClosed: true,
-    polygonSides: shapeType === "polygon" ? sides : undefined,
-    starPoints: shapeType === "star" ? (style?.starPoints ?? 5) : undefined,
-    starInnerRadius: shapeType === "star" ? inner : undefined,
-    strokeWidth: shapeType === "polygon" || shapeType === "star" ? 0 : base.strokeWidth,
+    starPoints: style?.starPoints ?? 5,
+    starInnerRadius: inner,
+    cornerRadius: style?.cornerRadius ?? 0,
+    strokeWidth: 0,
   };
   node = normalizePathNode(node);
   return node;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useEditorStore, type EditorNode } from "@/stores/useEditorStore";
 import { findInstanceRoot } from "@/lib/componentModel";
 import {
@@ -15,6 +15,7 @@ import {
   getNodeWorldInverseMatrix,
   getWorldHandlesFromMatrix,
   matrixHasRotation,
+  matrixIsFinite,
   matrixToCssTransform,
   resizeCursorForRotatedHandle,
   normalizeRotationDegrees,
@@ -30,11 +31,24 @@ import {
   rotateZonesForCornerHandles,
   topRotateHandleWorld,
 } from "@/lib/selectionRotateZones";
-import { rotateShape } from "@/lib/shapes/shapeTransform";
+import {
+  applyMultiRotatePatches,
+  applySingleRotate,
+  createMultiRotateSession,
+  createSingleRotateSession,
+  formatRotationLabel,
+  multiRotateLabelDegrees,
+  singleRotateLabelDegrees,
+  type RotateDragSession,
+} from "@/lib/rotation";
 import { anchorWorldAtBounds } from "@/lib/resizeTransform";
 import type { ResizeHandle } from "@/lib/resize";
 import { useCanvasToWorld } from "./CanvasToWorldContext";
 import { clientToWorldFromDocument } from "@/lib/canvasCoordinates";
+import {
+  createRafPointerScheduler,
+  forEachCoalescedPointerEvent,
+} from "@/lib/smoothPointer";
 
 const CURSOR: Record<ResizeHandle, string> = {
   nw: "nwse-resize",
@@ -54,6 +68,7 @@ export function SelectionBox() {
   const zoom = useEditorStore((s) => s.zoom);
   const resizeNode = useEditorStore((s) => s.resizeNode);
   const updateNode = useEditorStore((s) => s.updateNode);
+  const updateNodes = useEditorStore((s) => s.updateNodes);
   const tool = useEditorStore((s) => s.tool);
   const editorMode = useEditorStore((s) => s.editorMode);
   const penDrawingNodeId = useEditorStore((s) => s.penDrawingNodeId);
@@ -105,13 +120,19 @@ export function SelectionBox() {
     id &&
       node &&
       visibleSelected.length === 1 &&
-      (worldMatrix ? matrixHasRotation(worldMatrix) : false),
+      worldMatrix &&
+      matrixIsFinite(worldMatrix) &&
+      matrixHasRotation(worldMatrix),
   );
 
   const orientedHandles = useMemo(() => {
     if (!oriented || !id || !node || !worldMatrix) return null;
-    return getWorldHandlesFromMatrix(worldMatrix, node.width, node.height);
+    const handles = getWorldHandlesFromMatrix(worldMatrix, node.width, node.height);
+    if (!handles.every((h) => Number.isFinite(h.x) && Number.isFinite(h.y))) return null;
+    return handles;
   }, [oriented, id, node, worldMatrix]);
+
+  const useOrientedOverlay = oriented && orientedHandles != null;
 
   const worldRotation = worldMatrix ? getMatrixRotationDegrees(worldMatrix) : 0;
 
@@ -130,11 +151,11 @@ export function SelectionBox() {
     } | null;
   } | null>(null);
 
-  const rotateDragRef = useRef<{
-    pointerId: number;
-    startRotation: number;
-    startAngle: number;
-    centerWorld: { x: number; y: number };
+  const rotateDragRef = useRef<{ pointerId: number; session: RotateDragSession } | null>(null);
+  const [rotateLabel, setRotateLabel] = useState<{
+    x: number;
+    y: number;
+    text: string;
   } | null>(null);
 
   const clientToWorld = useCallback(
@@ -208,12 +229,17 @@ export function SelectionBox() {
       const onMove = (ev: PointerEvent) => {
         const d = dragRef.current;
         if (!d || ev.pointerId !== d.pointerId) return;
-        scheduleResize(clientToWorld(ev.clientX, ev.clientY), ev.shiftKey, ev.altKey);
+        forEachCoalescedPointerEvent(ev, (pe) => {
+          scheduleResize(clientToWorld(pe.clientX, pe.clientY), pe.shiftKey, pe.altKey);
+        });
       };
 
       const onUp = (ev: PointerEvent) => {
         const d = dragRef.current;
         if (!d || ev.pointerId !== d.pointerId) return;
+        forEachCoalescedPointerEvent(ev, (pe) => {
+          scheduleResize(clientToWorld(pe.clientX, pe.clientY), pe.shiftKey, pe.altKey);
+        });
         if (d.pending) flushResize();
         if (d.rafId != null) cancelAnimationFrame(d.rafId);
         dragRef.current = null;
@@ -231,37 +257,88 @@ export function SelectionBox() {
     [id, node, canTransformSelection, resizeNode, clientToWorld, editorMode, oriented, worldRotation],
   );
 
+  const multi = visibleSelected.length > 1;
+  const locked = multi ? visibleSelected.some((sid) => nodes[sid]?.locked) : Boolean(node?.locked);
+  const canTransform = Boolean(union && !locked && !multi && canTransformSelection);
+  const canRotate = Boolean(union && !locked && canTransformSelection);
+  const showResizeHandles = canTransform && node?.type !== "line" && node?.type !== "arrow";
+  const showRotateHandles = canRotate;
+
   const beginRotateDrag = useCallback(
     (e: React.PointerEvent) => {
-      if (!id || !node || node.locked || !canTransformSelection) return;
+      if (!union || locked || !canTransformSelection) return;
+      if (multi && visibleSelected.every((sid) => nodes[sid]?.locked)) return;
+      if (!multi && (!id || !node || node.locked)) return;
       e.stopPropagation();
       e.preventDefault();
       document.body.style.userSelect = "none";
       document.body.style.cursor = CANVAS_ROTATE_CURSOR;
       useEditorStore.getState().pushHistory();
       const st = useEditorStore.getState();
-      const tb = getRenderedWorldBounds(id, st.nodes, st.childOrder);
-      const centerWorld = { x: tb.x + tb.width / 2, y: tb.y + tb.height / 2 };
       const w0 = clientToWorld(e.clientX, e.clientY);
-      rotateDragRef.current = {
-        pointerId: e.pointerId,
-        startRotation: node.rotation ?? 0,
-        startAngle: Math.atan2(w0.y - centerWorld.y, w0.x - centerWorld.x),
-        centerWorld,
-      };
+      const session: RotateDragSession = multi
+        ? createMultiRotateSession(visibleSelected, st.nodes, st.childOrder, union, w0)
+        : createSingleRotateSession(id!, node!, st.nodes, st.childOrder, w0);
+      rotateDragRef.current = { pointerId: e.pointerId, session };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+
+      const labelOffset = screenPxToWorld(12, zoom);
+
+      const rotateScheduler = createRafPointerScheduler<{
+        world: { x: number; y: number };
+        shiftKey: boolean;
+      }>(({ world, shiftKey }) => {
+        const d = rotateDragRef.current;
+        if (!d) return;
+        const cur = useEditorStore.getState();
+        if (d.session.kind === "single") {
+          const { rotation } = applySingleRotate(d.session, world, shiftKey);
+          updateNode(d.session.id, { rotation }, { skipHistory: true });
+          setRotateLabel({
+            x: world.x,
+            y: world.y - labelOffset,
+            text: formatRotationLabel(singleRotateLabelDegrees(d.session, world, shiftKey)),
+          });
+        } else {
+          const patches = applyMultiRotatePatches(
+            d.session,
+            world,
+            shiftKey,
+            cur.nodes,
+            cur.childOrder,
+          );
+          updateNodes(patches, { skipHistory: true });
+          setRotateLabel({
+            x: world.x,
+            y: world.y - labelOffset,
+            text: formatRotationLabel(multiRotateLabelDegrees(d.session, world, shiftKey)),
+          });
+        }
+      });
 
       const onMove = (ev: PointerEvent) => {
         const d = rotateDragRef.current;
         if (!d || ev.pointerId !== d.pointerId) return;
-        const w = clientToWorld(ev.clientX, ev.clientY);
-        const next = rotateShape(node, w, { shiftKey: ev.shiftKey }, d.centerWorld, d.startRotation, d.startAngle);
-        updateNode(id, { rotation: next }, { skipHistory: true });
+        forEachCoalescedPointerEvent(ev, (pe) => {
+          rotateScheduler.schedule({
+            world: clientToWorld(pe.clientX, pe.clientY),
+            shiftKey: pe.shiftKey,
+          });
+        });
       };
       const onUp = (ev: PointerEvent) => {
         const d = rotateDragRef.current;
         if (!d || ev.pointerId !== d.pointerId) return;
+        forEachCoalescedPointerEvent(ev, (pe) => {
+          rotateScheduler.schedule({
+            world: clientToWorld(pe.clientX, pe.clientY),
+            shiftKey: pe.shiftKey,
+          });
+        });
+        rotateScheduler.flush();
+        rotateScheduler.cancel();
         rotateDragRef.current = null;
+        setRotateLabel(null);
         document.body.style.userSelect = "";
         document.body.style.cursor = "";
         window.removeEventListener("pointermove", onMove);
@@ -272,22 +349,29 @@ export function SelectionBox() {
       window.addEventListener("pointerup", onUp);
       window.addEventListener("pointercancel", onUp);
     },
-    [id, node, canTransformSelection, clientToWorld, updateNode],
+    [
+      union,
+      locked,
+      multi,
+      visibleSelected,
+      nodes,
+      canTransformSelection,
+      clientToWorld,
+      updateNode,
+      updateNodes,
+      id,
+      node,
+      zoom,
+    ],
   );
-
-  const multi = visibleSelected.length > 1;
-  const locked = multi ? visibleSelected.some((sid) => nodes[sid]?.locked) : Boolean(node?.locked);
-  const canTransform = Boolean(union && !locked && !multi && canTransformSelection);
-  const showResizeHandles = canTransform && node?.type !== "line";
-  const showRotateHandles = canTransform;
 
   const rotateZones = useMemo(() => {
     if (!showRotateHandles || !union) return [];
-    if (oriented && orientedHandles) {
+    if (useOrientedOverlay && orientedHandles) {
       return rotateZonesForCornerHandles(orientedHandles, union, zoom);
     }
     return rotateZonesForAxisBounds(union, zoom);
-  }, [showRotateHandles, union, oriented, orientedHandles, zoom]);
+  }, [showRotateHandles, union, useOrientedOverlay, orientedHandles, zoom]);
 
   const topRotatePos = useMemo(() => {
     if (!showRotateHandles || !union) return null;
@@ -342,7 +426,7 @@ export function SelectionBox() {
 
   return (
     <div className="pointer-events-none absolute inset-0 z-30">
-      {oriented && node && worldMatrix ? (
+      {useOrientedOverlay && node && worldMatrix ? (
         <div
           className="pointer-events-none absolute box-border"
           style={{
@@ -367,7 +451,7 @@ export function SelectionBox() {
           }}
         />
       )}
-      {showResizeHandles && oriented && orientedHandles
+      {showResizeHandles && useOrientedOverlay && orientedHandles
         ? orientedHandles.map(({ handle, x, y }) => (
             <button
               key={handle}
@@ -386,7 +470,7 @@ export function SelectionBox() {
             />
           ))
         : null}
-      {showResizeHandles && !oriented
+      {showResizeHandles && !useOrientedOverlay
         ? axisHandles.map(({ h, style, cursor }) => (
             <button
               key={h}
@@ -423,7 +507,7 @@ export function SelectionBox() {
             />
           ))
         : null}
-      {showRotateHandles && id && node && topRotatePos ? (
+      {showRotateHandles && topRotatePos ? (
         <button
           type="button"
           data-rotate-handle
@@ -438,6 +522,19 @@ export function SelectionBox() {
           }}
           onPointerDown={beginRotateDrag}
         />
+      ) : null}
+      {rotateLabel ? (
+        <div
+          className="pointer-events-none absolute z-[32] whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-white"
+          style={{
+            left: rotateLabel.x,
+            top: rotateLabel.y,
+            transform: "translate(-50%, -100%)",
+            background: CANVAS_VISUAL.selection,
+          }}
+        >
+          {rotateLabel.text}
+        </div>
       ) : null}
     </div>
   );

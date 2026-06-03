@@ -35,6 +35,14 @@ export function cornerRadiiMax(radii: CornerRadii): number {
   return Math.max(...radii);
 }
 
+/** Rectangle / frame layers that show on-canvas corner radius handles. */
+export function supportsCornerRadiusHandles(
+  node: Pick<EditorNode, "type" | "visible" | "locked">,
+): boolean {
+  if (!node.visible || node.locked) return false;
+  return node.type === "rectangle" || node.type === "frame";
+}
+
 /** CSS `border-radius` for canvas / export. */
 export function cornerRadiiToCss(radii: CornerRadii): string | number {
   if (isUniformCornerRadii(radii)) return radii[0];

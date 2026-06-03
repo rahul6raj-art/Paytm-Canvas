@@ -18,6 +18,10 @@ export function isCanvasChromeTarget(target: EventTarget | null): boolean {
       el.closest("[data-resize-handle]") ||
       el.closest("[data-rotate-handle]") ||
       el.closest("[data-rotate-zone]") ||
+      el.closest("[data-star-ratio-handle]") ||
+      el.closest("[data-star-corner-handle]") ||
+      el.closest("[data-line-handle]") ||
+      el.closest("[data-polygon-corner-handle]") ||
       el.closest('[role="menu"]') ||
       el.closest("[data-text-editor]") ||
       el.closest("[data-svg-hit]"),

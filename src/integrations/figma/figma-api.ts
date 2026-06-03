@@ -185,12 +185,8 @@ function pickDefaultRoot(doc: FigmaApiNode): FigmaApiNode | null {
   }
   const pages = doc.children ?? [];
   for (const page of pages) {
-    if (page.type === "CANVAS" && page.children?.length) {
-      const frame = page.children.find((c) =>
-        ["FRAME", "COMPONENT", "INSTANCE", "GROUP", "SECTION"].includes(c.type),
-      );
-      if (frame) return frame;
-      return page.children[0]!;
+    if (page.type === "CANVAS" && (page.children?.length ?? 0) > 0) {
+      return page;
     }
     if (page.type === "FRAME" || page.type === "COMPONENT" || page.type === "INSTANCE") {
       return page;

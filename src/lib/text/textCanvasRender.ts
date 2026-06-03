@@ -1,5 +1,7 @@
 import type { ResolvedTextTypo } from "@/lib/textTypography";
+import type { EditorNode } from "@/stores/useEditorStore";
 import { TEXT_BOX_PAD_X, TEXT_BOX_PAD_Y, type TextAlign } from "./textNodeModel";
+import { verticalContentOffsetY } from "./textVerticalAlign";
 import {
   buildFontString,
   getTextMeasureContext,
@@ -17,6 +19,8 @@ export type TextCanvasRenderOptions = {
   width: number;
   height: number;
   textAlign: TextAlign;
+  verticalAlign?: EditorNode["verticalAlign"];
+  opacity?: number;
   wrapWidth: number;
   selection?: { anchor: number; focus: number } | null;
   caretIndex?: number | null;
@@ -63,16 +67,19 @@ export function renderTextToCanvas(
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
+  ctx.globalAlpha = Math.max(0, Math.min(1, opts.opacity ?? 1));
   ctx.font = buildFontString(opts.typo);
   ctx.textBaseline = "top";
   ctx.fillStyle = opts.typo.color;
 
   const innerW = Math.max(1, w - TEXT_BOX_PAD_X * 2);
+  const innerH = Math.max(1, h - TEXT_BOX_PAD_Y * 2);
   const wrapWidth =
     opts.wrapWidth === Number.POSITIVE_INFINITY
       ? Number.POSITIVE_INFINITY
       : Math.max(1, Math.min(opts.wrapWidth, innerW));
   const layout = layoutText(opts.text, wrapWidth, opts.typo);
+  const blockOffsetY = verticalContentOffsetY(layout.height, innerH, opts.verticalAlign);
 
   if (opts.selection && opts.selection.anchor !== opts.selection.focus) {
     const { start, end } = normalizedRange(opts.selection.anchor, opts.selection.focus);
@@ -83,7 +90,7 @@ export function renderTextToCanvas(
       opts.textAlign,
       innerW,
       TEXT_BOX_PAD_X,
-      TEXT_BOX_PAD_Y,
+      TEXT_BOX_PAD_Y + blockOffsetY,
       start,
       end,
     );
@@ -91,18 +98,65 @@ export function renderTextToCanvas(
 
   for (let i = 0; i < layout.lines.length; i++) {
     const line = layout.lines[i]!;
-    const x = lineOffsetX(line.width, innerW, opts.textAlign) + TEXT_BOX_PAD_X;
-    const y = i * layout.lineHeightPx + TEXT_BOX_PAD_Y;
-    drawLineWithSpacing(ctx, line.text, x, y, opts.typo);
+    const isLast = i === layout.lines.length - 1;
+    const x =
+      lineOffsetX(line.width, innerW, opts.textAlign, {
+        isLastLine: isLast,
+        fullLineText: line.text,
+        letterSpacing: opts.typo.letterSpacing,
+      }) + TEXT_BOX_PAD_X;
+    const y = i * layout.lineHeightPx + TEXT_BOX_PAD_Y + blockOffsetY;
+    if (opts.textAlign === "justify" && !isLast) {
+      drawJustifiedLine(ctx, line.text, x, y, innerW, opts.typo);
+    } else {
+      drawLineWithSpacing(ctx, line.text, x, y, opts.typo);
+    }
   }
 
   if (opts.caretVisible && opts.caretIndex != null) {
     const caret = getCaretRect(opts.caretIndex, layout, opts.typo, innerW, opts.textAlign);
     ctx.fillStyle = opts.typo.color;
-    ctx.fillRect(caret.x + TEXT_BOX_PAD_X, caret.y + TEXT_BOX_PAD_Y, 1, caret.height);
+    ctx.fillRect(
+      caret.x + TEXT_BOX_PAD_X,
+      caret.y + TEXT_BOX_PAD_Y + blockOffsetY,
+      1,
+      caret.height,
+    );
   }
 
   return layout;
+}
+
+function drawJustifiedLine(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  boxWidth: number,
+  typo: ResolvedTextTypo,
+): void {
+  const words = text.split(/(\s+)/);
+  const gaps = words.filter((w) => /^\s+$/.test(w)).length;
+  const wordCount = words.filter((w) => w && !/^\s+$/.test(w)).length;
+  if (wordCount < 2) {
+    drawLineWithSpacing(ctx, text, x, y, typo);
+    return;
+  }
+  let total = 0;
+  for (const w of words) {
+    if (!/^\s+$/.test(w)) total += measureStringWidth(getTextMeasureContext(), w, typo.letterSpacing);
+  }
+  const spaceCount = Math.max(1, wordCount - 1);
+  const extra = Math.max(0, boxWidth - total) / spaceCount;
+  let cx = x;
+  for (const token of words) {
+    if (/^\s+$/.test(token)) {
+      cx += extra;
+      continue;
+    }
+    drawLineWithSpacing(ctx, token, cx, y, typo);
+    cx += measureStringWidth(getTextMeasureContext(), token, typo.letterSpacing);
+  }
 }
 
 function drawLineWithSpacing(

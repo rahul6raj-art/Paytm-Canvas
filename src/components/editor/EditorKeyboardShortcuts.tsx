@@ -12,6 +12,7 @@ import {
   activateCanvasForShortcuts,
   isMultilineEditableElement,
   isShortcutOverlayOpen,
+  shouldBlockDeleteSelectionShortcut,
   shouldYieldShortcutsToTyping,
   toolFromShortcutKey,
 } from "@/lib/editorKeyboardFocus";
@@ -41,17 +42,87 @@ export function EditorKeyboardShortcuts() {
         return;
       }
 
-      const stUi = useEditorStore.getState();
       if (e.key === "Escape") {
         if (cancelActiveMarqueeFromKeyboard()) {
           e.preventDefault();
           return;
         }
-        if (stUi.closeTopmostOverlay()) {
+
+        const st0 = useEditorStore.getState();
+        if (st0.closeTopmostOverlay()) {
           e.preventDefault();
+        }
+
+        if (isShortcutOverlayOpen(useEditorStore.getState())) {
           return;
         }
+
+        const st = useEditorStore.getState();
+        const hasSelection =
+          st.selectedIds.length > 0 ||
+          st.selectedLayoutGuideId != null ||
+          st.selectedPrototypeLinkId != null;
+        const inTextOrStroke =
+          Boolean(st.editingTextId) ||
+          Boolean(st.penDrawingNodeId) ||
+          Boolean(st.pencilDrawingNodeId) ||
+          Boolean(st.layerRenameId);
+
+        if (hasSelection && !inTextOrStroke) {
+          e.preventDefault();
+          e.stopPropagation();
+          activateCanvasForShortcuts();
+          st.clearSelection();
+          return;
+        }
+
+        if (st.penDrawingNodeId) {
+          e.preventDefault();
+          st.cancelPath();
+          return;
+        }
+        if (st.pencilDrawingNodeId) {
+          e.preventDefault();
+          st.cancelPencilStroke();
+          return;
+        }
+        if (st.objectEditModeNodeId) {
+          e.preventDefault();
+          st.exitObjectEditMode();
+          return;
+        }
+        if (st.pathEditModeNodeId) {
+          e.preventDefault();
+          st.setPathEditMode(null);
+          return;
+        }
+        if (st.editorMode === "design" && st.isPlacingComment) {
+          e.preventDefault();
+          st.cancelPlacingComment();
+          return;
+        }
+        if (st.prototypePreview) {
+          e.preventDefault();
+          st.closePrototypePreview();
+          return;
+        }
+        if (st.prototypeWireDrag) {
+          e.preventDefault();
+          st.cancelPrototypeConnection();
+          return;
+        }
+        if (st.editingTextId) {
+          e.preventDefault();
+          st.setEditingTextId(null);
+          return;
+        }
+
+        e.preventDefault();
+        st.clearSelection();
+        return;
       }
+
+      const stUi = useEditorStore.getState();
       if (isShortcutOverlayOpen(stUi)) {
         return;
       }
@@ -74,35 +145,6 @@ export function EditorKeyboardShortcuts() {
               return;
             }
           }
-        }
-      }
-
-      if (e.key === "Escape") {
-        const stEsc = useEditorStore.getState();
-        if (stEsc.objectEditModeNodeId) {
-          e.preventDefault();
-          stEsc.exitObjectEditMode();
-          return;
-        }
-        if (stEsc.penDrawingNodeId) {
-          e.preventDefault();
-          stEsc.cancelPath();
-          return;
-        }
-        if (stEsc.pencilDrawingNodeId) {
-          e.preventDefault();
-          stEsc.cancelPencilStroke();
-          return;
-        }
-        if (stEsc.pathEditModeNodeId) {
-          e.preventDefault();
-          stEsc.setPathEditMode(null);
-          return;
-        }
-        if (stEsc.editorMode === "design" && stEsc.isPlacingComment) {
-          e.preventDefault();
-          stEsc.cancelPlacingComment();
-          return;
         }
       }
 
@@ -141,7 +183,12 @@ export function EditorKeyboardShortcuts() {
 
       if (e.code === "Backspace" || e.code === "Delete") {
         const stDel = useEditorStore.getState();
-        if (!isShortcutOverlayOpen(stDel) && stDel.editorMode === "design") {
+        const blockDeleteSelection = shouldBlockDeleteSelectionShortcut(e, e.target);
+        if (
+          !blockDeleteSelection &&
+          !isShortcutOverlayOpen(stDel) &&
+          stDel.editorMode === "design"
+        ) {
           if (
             e.code === "Backspace" &&
             stDel.pathEditModeNodeId &&
@@ -392,25 +439,6 @@ export function EditorKeyboardShortcuts() {
           stAl.addAutoLayoutToSelection();
           return;
         }
-      }
-
-      if (e.key === "Escape") {
-        e.preventDefault();
-        const st = useEditorStore.getState();
-        if (st.prototypePreview) {
-          st.closePrototypePreview();
-          return;
-        }
-        if (st.prototypeWireDrag) {
-          st.cancelPrototypeConnection();
-          return;
-        }
-        if (st.editingTextId) {
-          st.setEditingTextId(null);
-          return;
-        }
-        st.clearSelection();
-        return;
       }
 
     };

@@ -18,6 +18,13 @@ import { classNameToNodePatch, mergeStylePatches } from "@/lib/codeRoundTrip/rea
 import { placeholderSizeForComponent } from "@/lib/codeRoundTrip/reactComponentPlaceholders";
 import { sanitizeComponentName } from "@/lib/codeRoundTrip/reactStyle";
 import { reactStyleToNodePatch } from "@/lib/codeRoundTrip/reactStyleImport";
+import {
+  ellipseHasCustomArc,
+  parseEllipseArcPcAttrs,
+  PC_ARC_RATIO_ATTR,
+  PC_ARC_START_ATTR,
+  PC_ARC_SWEEP_ATTR,
+} from "@/lib/shapes/ellipseArcExport";
 import type { HtmlImportElement } from "./htmlParseTree";
 import { parseHtmlImportTree } from "./htmlParseTree";
 import { parseInlineCss } from "./parseInlineCss";
@@ -107,6 +114,7 @@ function applyCornerRadiusForKind(node: EditorNode): EditorNode {
   const w = node.width;
   const h = node.height;
   if (node.type === "ellipse") {
+    if (ellipseHasCustomArc(node)) return node;
     return { ...node, cornerRadius: 9999 };
   }
   if (node.type === "rectangle" && node.cornerRadius !== undefined) {
@@ -127,6 +135,9 @@ function readElementAttrs(el: HtmlImportElement): {
   componentTag?: string;
   style: ReturnType<typeof parseInlineCss>;
   src?: string;
+  arcStart?: string;
+  arcSweep?: string;
+  arcRatio?: string;
 } {
   const rawId = el.getAttr(PC_ID_ATTR);
   const id = rawId && /^[\w-]+$/.test(rawId) ? rawId : nextId();
@@ -139,6 +150,9 @@ function readElementAttrs(el: HtmlImportElement): {
     componentTag: el.getAttr(PC_COMPONENT_ATTR),
     style: parseInlineCss(el.getAttr("style")),
     src: el.getAttr("src"),
+    arcStart: el.getAttr(PC_ARC_START_ATTR),
+    arcSweep: el.getAttr(PC_ARC_SWEEP_ATTR),
+    arcRatio: el.getAttr(PC_ARC_RATIO_ATTR),
   };
 }
 
@@ -213,6 +227,15 @@ function buildFromElement(
     ...mergedPatch,
     type: kind,
   };
+
+  const arcPatch = parseEllipseArcPcAttrs({
+    arcStart: attrs.arcStart,
+    arcSweep: attrs.arcSweep,
+    arcRatio: attrs.arcRatio,
+  });
+  if (arcPatch) {
+    node = { ...node, ...arcPatch };
+  }
 
   node = applyCornerRadiusForKind(node);
 

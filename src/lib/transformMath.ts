@@ -19,6 +19,16 @@ export type SvgNodeTransform = {
 
 const ROT_EPS = 1e-9;
 
+/** Finite canvas coordinate (falls back when NaN/Infinity). */
+export function finiteCoord(value: number, fallback = 0): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+/** Positive finite size for layout/transform (Math.max(1, NaN) is still NaN). */
+export function finiteDimension(value: number, min = 1): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= min ? value : min;
+}
+
 export function normalizeRotationDegrees(rotation?: number): number {
   if (rotation == null || !Number.isFinite(rotation)) return 0;
   return ((rotation % 360) + 360) % 360;
@@ -32,10 +42,10 @@ export function hasRotation(rotation?: number): boolean {
 /** Local placement + size + rotation for a node (matches DOM box model). */
 export function nodeTransform(node: EditorNode): SvgNodeTransform {
   return {
-    x: node.x,
-    y: node.y,
-    width: Math.max(1, node.width),
-    height: Math.max(1, node.height),
+    x: finiteCoord(node.x),
+    y: finiteCoord(node.y),
+    width: finiteDimension(node.width),
+    height: finiteDimension(node.height),
     rotation: normalizeRotationDegrees(node.rotation),
   };
 }
@@ -270,6 +280,17 @@ export function cssRotationStyle(node: EditorNode): {
 
 export type Matrix2D = { a: number; b: number; c: number; d: number; e: number; f: number };
 
+export function matrixIsFinite(m: Matrix2D): boolean {
+  return (
+    Number.isFinite(m.a) &&
+    Number.isFinite(m.b) &&
+    Number.isFinite(m.c) &&
+    Number.isFinite(m.d) &&
+    Number.isFinite(m.e) &&
+    Number.isFinite(m.f)
+  );
+}
+
 function fromDomMatrix(dm: DOMMatrix): Matrix2D {
   return { a: dm.a, b: dm.b, c: dm.c, d: dm.d, e: dm.e, f: dm.f };
 }
@@ -423,11 +444,11 @@ export function worldRectSum(
 
 /** Local matrix: translate(x,y), flip/scale, then rotate around node center. */
 export function getNodeLocalMatrix(node: EditorNode): Matrix2D {
-  const w = Math.max(1, node.width);
-  const h = Math.max(1, node.height);
+  const w = finiteDimension(node.width);
+  const h = finiteDimension(node.height);
   const cx = w / 2;
   const cy = h / 2;
-  let m = translateMatrix(node.x, node.y);
+  let m = translateMatrix(finiteCoord(node.x), finiteCoord(node.y));
   const { sx, sy } = layerFlipScale(node);
   if (sx !== 1 || sy !== 1) {
     m = multiplyMatrix(m, scaleMatrix(sx, sy, cx, cy));
@@ -526,8 +547,8 @@ export function getWorldHandlesFromMatrix(
   width: number,
   height: number,
 ): { handle: ResizeHandle; x: number; y: number }[] {
-  const w = Math.max(1, width);
-  const h = Math.max(1, height);
+  const w = finiteDimension(width);
+  const h = finiteDimension(height);
   const box: RectBounds = { x: 0, y: 0, width: w, height: h };
   return HANDLE_ORDER.map((handle) => {
     const p = LOCAL_HANDLE_POINTS[handle](box);

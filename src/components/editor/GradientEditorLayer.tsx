@@ -19,6 +19,10 @@ import { useEditorStore } from "@/stores/useEditorStore";
 import { useCanvasToWorld } from "./CanvasToWorldContext";
 import { worldRect } from "@/lib/tree";
 import { screenPxToWorld } from "@/lib/canvasVisual";
+import {
+  createRafPointerScheduler,
+  forEachCoalescedPointerEvent,
+} from "@/lib/smoothPointer";
 
 type DragKind =
   | null
@@ -136,12 +140,12 @@ export function GradientEditorLayer() {
   };
 
   const bindDrag = (captureTarget: Element) => {
-    const onMove = (ev: PointerEvent) => {
+    const applyMove = (clientX: number, clientY: number) => {
       const d = dragRef.current;
-      if (!d || ev.pointerId !== d.pointerId) return;
+      if (!d) return;
       const st = readGradientState();
       if (!st || !toWorldFn) return;
-      const wpt = toWorldFn(ev.clientX, ev.clientY);
+      const wpt = toWorldFn(clientX, clientY);
       const lx = wpt.x - st.rect.x;
       const ly = wpt.y - st.rect.y;
 
@@ -185,9 +189,26 @@ export function GradientEditorLayer() {
         });
       }
     };
+
+    const gradientScheduler = createRafPointerScheduler<{ clientX: number; clientY: number }>(
+      ({ clientX, clientY }) => applyMove(clientX, clientY),
+    );
+
+    const onMove = (ev: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d || ev.pointerId !== d.pointerId) return;
+      forEachCoalescedPointerEvent(ev, (pe) => {
+        gradientScheduler.schedule({ clientX: pe.clientX, clientY: pe.clientY });
+      });
+    };
     const onUp = (ev: PointerEvent) => {
       const d = dragRef.current;
       if (!d || ev.pointerId !== d.pointerId) return;
+      forEachCoalescedPointerEvent(ev, (pe) => {
+        gradientScheduler.schedule({ clientX: pe.clientX, clientY: pe.clientY });
+      });
+      gradientScheduler.flush();
+      gradientScheduler.cancel();
       dragRef.current = null;
       try {
         captureTarget.releasePointerCapture(ev.pointerId);

@@ -3,6 +3,7 @@ import type { EditorAsset } from "@/lib/documentPersistence";
 import type { DesignToken } from "@/lib/designTokens";
 import type { EditorNode } from "@/stores/useEditorStore";
 import { collectSubtreeForExport } from "./collectSubtree";
+import { ellipseArcJsxAttrs } from "@/lib/shapes/ellipseArcExport";
 import { nodeToReactStyle, sanitizeComponentName, styleToLiteral } from "./reactStyle";
 import {
   CODE_PAYLOAD_END,
@@ -129,8 +130,14 @@ export function nodeToJsx(
     return `${pad}<img${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr}${src} style={${style}} alt="" />\n`;
   }
 
-  if (node.type === "ellipse" || node.type === "rectangle" || node.type === "line" || node.type === "path") {
-    return `${pad}<div${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr} data-pc-shape=${JSON.stringify(node.type)} style={${style}} />\n`;
+  if (
+    node.type === "ellipse" ||
+    node.type === "rectangle" ||
+    node.type === "line" ||
+    node.type === "arrow" ||
+    node.type === "path"
+  ) {
+    return `${pad}<div${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr}${ellipseArcJsxAttrs(node)} data-pc-shape=${JSON.stringify(node.type)} style={${style}} />\n`;
   }
 
   const shapeAttr =

@@ -325,7 +325,7 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
         </button>
 
         <div className="shrink-0 border-b border-app-border-subtle px-6 pb-3 pt-6 text-center">
-          <FigmaLogoMark className="mx-auto h-11 w-11 object-contain" />
+          <FigmaLogoMark className="mx-auto h-16 w-16 object-contain" />
           <h2 className="mt-2 text-lg font-semibold tracking-tight text-app-fg">
             Import from Figma
           </h2>
@@ -377,32 +377,6 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
                   autoComplete="off"
                   className={cn(fieldClass, "font-mono text-[11px]")}
                 />
-                <span className="mt-0.5 block text-[10px] leading-snug text-app-muted">
-                {serverTokenConfigured && !serverTokenValid ? (
-                  <span className="text-amber-950 dark:text-amber-100">
-                    Server token in <code className="rounded bg-app-raised px-1">.env.local</code> is
-                    invalid — paste a new token below and Verify & connect.
-                  </span>
-                ) : serverTokenReady ? (
-                  <>
-                    Server token is active. Paste a different token below only if you need another
-                    Figma account.
-                  </>
-                ) : (
-                    <>
-                      Create one at{" "}
-                      <a
-                        href="https://www.figma.com/developers/api#access-tokens"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-accent underline"
-                      >
-                        figma.com/developers
-                      </a>
-                      . Stored only in this browser.
-                    </>
-                  )}
-                </span>
               </label>
 
               <button

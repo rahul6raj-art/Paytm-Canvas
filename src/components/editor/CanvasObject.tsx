@@ -26,11 +26,17 @@ import { useCanvasInteraction } from "./CanvasInteractionContext";
 import { clientToWorldFromDocument } from "@/lib/canvasCoordinates";
 import { beginCanvasNodeDrag } from "@/lib/canvasNodeDrag";
 import {
+  createRafPointerScheduler,
+  forEachCoalescedPointerEvent,
+} from "@/lib/smoothPointer";
+import {
+  applyMoveToolPointerSelection,
   drillTargetForDoubleClick,
   selectionTargetForClick,
   shouldCollapseContainerHits,
 } from "@/lib/containerSelection";
 import { clampCornerRadii, cornerRadiiToCss, getNodeCornerRadii } from "@/lib/cornerRadius";
+import { layerBlendCanvasStyle } from "@/lib/layerBlendMode";
 import { prepareAltDragDuplicate } from "@/lib/canvasAltDrag";
 import { EMPTY_CHILD_IDS } from "@/lib/editorConstants";
 import {
@@ -251,17 +257,40 @@ export function CanvasObject({ id }: { id: string }) {
         startPt: { x: pt.x, y: pt.y },
       };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+
+      const applyMove = (clientX: number, clientY: number) => {
+        const d = pathPointDragRef.current;
+        if (!d) return;
+        const nw = clientToWorld(clientX, clientY);
+        const ddx = nw.x - d.startWorld.x;
+        const ddy = nw.y - d.startWorld.y;
+        updatePathPoint(
+          id,
+          pointId,
+          { x: d.startPt.x + ddx, y: d.startPt.y + ddy },
+          { skipHistory: true },
+        );
+      };
+
+      const pathScheduler = createRafPointerScheduler<{ clientX: number; clientY: number }>(
+        ({ clientX, clientY }) => applyMove(clientX, clientY),
+      );
+
       const onMove = (ev: PointerEvent) => {
         const d = pathPointDragRef.current;
         if (!d || ev.pointerId !== d.pointerId) return;
-        const nw = clientToWorld(ev.clientX, ev.clientY);
-        const ddx = nw.x - d.startWorld.x;
-        const ddy = nw.y - d.startWorld.y;
-        updatePathPoint(id, pointId, { x: d.startPt.x + ddx, y: d.startPt.y + ddy }, { skipHistory: true });
+        forEachCoalescedPointerEvent(ev, (pe) => {
+          pathScheduler.schedule({ clientX: pe.clientX, clientY: pe.clientY });
+        });
       };
       const onUp = (ev: PointerEvent) => {
         const d = pathPointDragRef.current;
         if (!d || ev.pointerId !== d.pointerId) return;
+        forEachCoalescedPointerEvent(ev, (pe) => {
+          pathScheduler.schedule({ clientX: pe.clientX, clientY: pe.clientY });
+        });
+        pathScheduler.flush();
+        pathScheduler.cancel();
         pathPointDragRef.current = null;
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
@@ -327,7 +356,7 @@ export function CanvasObject({ id }: { id: string }) {
         return;
       }
 
-      select(targetId, e.shiftKey);
+      applyMoveToolPointerSelection(targetId, st.selectedIds, e.shiftKey, select);
 
       const dragNode = st.nodes[targetId];
       if (
@@ -480,7 +509,13 @@ export function CanvasObject({ id }: { id: string }) {
       </div>
     );
     body = isRootFrame ? <Artboard>{shell}</Artboard> : shell;
-  } else if (node.type === "ellipse" || node.type === "rectangle" || node.type === "line") {
+  } else if (
+    node.type === "ellipse" ||
+    node.type === "rectangle" ||
+    node.type === "line" ||
+    node.type === "arrow" ||
+    node.type === "polygon"
+  ) {
     body = <ShapeVectorView node={node} nodeId={id} />;
   } else if (node.type === "path") {
     const pts = node.pathPoints ?? [];
@@ -558,6 +593,8 @@ export function CanvasObject({ id }: { id: string }) {
   const effectOverlays = er.overlayLayers;
   const layerOpacity = node.opacity ?? 1;
   const imageAlpha = node.type === "image" ? layerOpacity * (node.fillOpacity ?? 1) : layerOpacity;
+  const blendStyle = layerBlendCanvasStyle(node);
+  const clipOverflow = shouldClipChildren(node) ? "hidden" : "visible";
 
   return (
     <div
@@ -570,7 +607,6 @@ export function CanvasObject({ id }: { id: string }) {
         height: node.height,
         pointerEvents: objectPointerEvents,
         borderRadius: radiusStyle,
-        overflow: shouldClipChildren(node) ? "hidden" : "visible",
         outline:
           node.type === "group" &&
           !node.isBooleanGroup &&
@@ -585,8 +621,6 @@ export function CanvasObject({ id }: { id: string }) {
         boxShadow: combinedShadow,
         filter: combinedFilter,
         backdropFilter: er.backdropFilter,
-        ...(glassBg ? { backgroundColor: glassBg } : {}),
-        ...(glassBorder ? { border: glassBorder, boxSizing: "border-box" as const } : {}),
         cursor:
           editorMode === "inspect"
             ? "default"
@@ -662,8 +696,20 @@ export function CanvasObject({ id }: { id: string }) {
         openContextMenu(id, e.clientX, e.clientY);
       }}
     >
-      {body}
-      {effectOverlays?.length ? <EffectOverlays layers={effectOverlays} /> : null}
+      <div
+        data-canvas-node-blend
+        className="relative h-full w-full"
+        style={{
+          borderRadius: radiusStyle,
+          overflow: clipOverflow,
+          ...(glassBg ? { backgroundColor: glassBg } : {}),
+          ...(glassBorder ? { border: glassBorder, boxSizing: "border-box" as const } : {}),
+          ...blendStyle,
+        }}
+      >
+        {body}
+        {effectOverlays?.length ? <EffectOverlays layers={effectOverlays} /> : null}
+      </div>
       {editorMode === "prototype" &&
       tool === "move" &&
       selectedIds.length === 1 &&

@@ -4,6 +4,7 @@ import {
   MIN_TEXT_BOX,
   TEXT_BOX_PAD_X,
   TEXT_BOX_PAD_Y,
+  textResizePatch,
   wrapWidthForResizeMode,
 } from "./textNodeModel";
 import { layoutText } from "./textMeasure";
@@ -79,8 +80,13 @@ export function withTextLayoutPatch(
   node: EditorNode,
   patch: Partial<EditorNode>,
 ): Partial<EditorNode> {
-  if (node.type !== "text" || !patchAffectsTextLayout(patch)) return patch;
-  const merged = { ...node, ...patch };
+  if (node.type !== "text") return patch;
+  let next = patch;
+  if (patch.textResizeMode != null) {
+    next = { ...next, ...textResizePatch(patch.textResizeMode) };
+  }
+  if (!patchAffectsTextLayout(next)) return next;
+  const merged = { ...node, ...next };
   const layoutPatch = textLayoutPatchForNode(merged, merged.content ?? "");
-  return layoutPatch ? { ...patch, ...layoutPatch } : patch;
+  return layoutPatch ? { ...next, ...layoutPatch } : next;
 }

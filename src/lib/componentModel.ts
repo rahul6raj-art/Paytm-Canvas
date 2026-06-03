@@ -31,6 +31,10 @@ export type InstanceOverridePatch = Partial<
     | "textStyleTokenId"
     | "effectTokenId"
     | "opacity"
+    | "blendMode"
+    | "arcStartDeg"
+    | "arcSweepDeg"
+    | "arcInnerRadiusRatio"
     | "effects"
   >
 >;

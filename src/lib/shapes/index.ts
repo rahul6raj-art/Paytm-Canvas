@@ -15,3 +15,15 @@ export { resizeShape, rotateShape } from "./shapeTransform";
 export { applyBooleanOperation, type BooleanOperation as BooleanOp } from "./shapeBoolean";
 export { snapBoundsMovement } from "./shapeSnap";
 export { generatePolygonPoints, generateStarPoints, generateArrowPoints } from "./pathGenerators";
+export {
+  type ArrowHeadKind,
+  arrowEndpointStylePatch,
+  arrowHeadSizeForNode,
+  arrowHeadToStrokeEndpoint,
+  getArrowAngle,
+  getArrowLength,
+  hitTestArrowWorld,
+  isArrowNode,
+  resolveArrowEndKind,
+  resolveArrowStartKind,
+} from "./arrowGeometry";

@@ -1,6 +1,10 @@
 import { clientToViewport, viewportToWorld } from "@/lib/canvasCoordinates";
 import { CANVAS_RULER_SIZE } from "@/lib/canvasRulers";
 import { useEditorStore } from "@/stores/useEditorStore";
+import {
+  createRafPointerScheduler,
+  forEachCoalescedPointerEvent,
+} from "@/lib/smoothPointer";
 
 export function worldPosFromClientForGuide(
   axis: "v" | "h",
@@ -68,13 +72,24 @@ export function startRulerGuideDragSession(opts: {
     window.removeEventListener("pointercancel", onCancel);
   };
 
+  const draftScheduler = createRafPointerScheduler<{ clientX: number; clientY: number }>(
+    ({ clientX, clientY }) => updatePos(clientX, clientY),
+  );
+
   const onMove = (e: PointerEvent) => {
     if (e.pointerId !== pointerId) return;
-    updatePos(e.clientX, e.clientY);
+    forEachCoalescedPointerEvent(e, (pe) => {
+      draftScheduler.schedule({ clientX: pe.clientX, clientY: pe.clientY });
+    });
   };
 
   const onUp = (e: PointerEvent) => {
     if (e.pointerId !== pointerId) return;
+    forEachCoalescedPointerEvent(e, (pe) => {
+      draftScheduler.schedule({ clientX: pe.clientX, clientY: pe.clientY });
+    });
+    draftScheduler.flush();
+    draftScheduler.cancel();
     cleanup();
     const st = useEditorStore.getState();
     if (!st.layoutGuideDraft) return;

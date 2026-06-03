@@ -24,7 +24,9 @@ import {
 } from "@/lib/documentPersistence";
 import { isFigmaFigFile } from "@/lib/figImport";
 import { waitForNextPaint } from "@/lib/figImport/figImportRuntime";
+import { FigImportFinishEffect } from "@/components/import/FigImportFinishEffect";
 import { FigImportOverlay } from "@/components/import/FigImportOverlay";
+import { FigImportToast } from "@/components/import/FigImportToast";
 import { AIGenerateModal } from "@/components/ai/AIGenerateModal";
 import { ImportHub } from "@/components/import/ImportHub";
 import { CodeRoundTripModal } from "@/components/code/CodeRoundTripModal";
@@ -524,6 +526,8 @@ export function DashboardShell() {
       <CodeRoundTripModal />
       <ImportFigmaModal onImportFigFile={onImportFile} />
       <FigImportOverlay />
+      <FigImportFinishEffect />
+      <FigImportToast />
       <ImportWebModal />
       <DashboardSidebar
         active={nav}

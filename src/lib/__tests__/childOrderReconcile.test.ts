@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import {
   clonedNodePosition,
+  parentUsesAutoLayout,
   getRenderedWorldTopLeft,
   insertNodeInChildOrder,
   needsChildOrderReconcile,
@@ -134,6 +135,16 @@ describe("childOrderReconcile", () => {
     });
     assert.equal(fixed.nodes.r1!.x, 246);
     assert.equal(fixed.nodes.r1!.y, 299);
+  });
+
+  it("parentUsesAutoLayout detects horizontal and vertical frames", () => {
+    const nodes = {
+      al: { ...frame("al", 0, 0), layoutMode: "horizontal" as const },
+      manual: frame("manual", 0, 0),
+    };
+    assert.equal(parentUsesAutoLayout("al", nodes), true);
+    assert.equal(parentUsesAutoLayout("manual", nodes), false);
+    assert.equal(parentUsesAutoLayout(null, nodes), false);
   });
 
   it("clonedNodePosition offsets only the tree root in world space", () => {

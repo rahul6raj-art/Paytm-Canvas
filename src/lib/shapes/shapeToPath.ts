@@ -6,7 +6,17 @@ import {
 } from "@/lib/cornerRadius";
 import { newPathPointId, normalizePathNode, pathToSvgD, type PathPoint } from "@/lib/pathGeometry";
 import type { EditorNode } from "@/stores/useEditorStore";
+import {
+  effectiveEllipseArc,
+  ellipsePointAtDeg,
+  hasEllipseArcInnerHole,
+  isFullEllipseArc,
+} from "@/lib/shapes/ellipseArc";
 import { generatePolygonPoints } from "./pathGenerators";
+import { isPolygonNode, polygonPathDForNode } from "./polygonGeometry";
+import { getPolygonPreview } from "./polygonDrag";
+import { isStarNode, starPathDForNode } from "./starGeometry";
+import { getStarPreview } from "./starDrag";
 
 const CORNER_EPS = 0.75;
 
@@ -29,7 +39,7 @@ export function rectCornerPathPoints(w: number, h: number, existing?: PathPoint[
   }));
 }
 
-export type VectorEditableShapeType = "rectangle" | "ellipse" | "line" | "path";
+export type VectorEditableShapeType = "rectangle" | "ellipse" | "line" | "polygon" | "path";
 
 export function isVectorEditableShape(
   node: Pick<EditorNode, "type" | "locked" | "visible"> | null | undefined,
@@ -39,15 +49,37 @@ export function isVectorEditableShape(
     node.type === "rectangle" ||
     node.type === "ellipse" ||
     node.type === "line" ||
+    node.type === "arrow" ||
+    node.type === "polygon" ||
     node.type === "path"
   );
 }
 
 export function shapeToPathPoints(
-  node: Pick<EditorNode, "type" | "width" | "height" | "pathPoints" | "pathClosed" | "cornerRadius" | "cornerRadii">,
+  node: Pick<
+    EditorNode,
+    | "type"
+    | "width"
+    | "height"
+    | "pathPoints"
+    | "pathClosed"
+    | "cornerRadius"
+    | "cornerRadii"
+    | "arcStartDeg"
+    | "arcSweepDeg"
+    | "arcInnerRadiusRatio"
+  >,
 ): { pathPoints: PathPoint[]; pathClosed: boolean } | null {
   const w = Math.max(1, node.width);
   const h = Math.max(1, node.height);
+
+  if (node.type === "polygon") {
+    const sides = node.polygonSides ?? 6;
+    return {
+      pathPoints: generatePolygonPoints(sides, w, h),
+      pathClosed: true,
+    };
+  }
 
   if (node.type === "path" && node.pathPoints?.length) {
     return {
@@ -64,13 +96,42 @@ export function shapeToPathPoints(
   }
 
   if (node.type === "ellipse") {
-    return {
-      pathPoints: generatePolygonPoints(64, w, h),
-      pathClosed: true,
-    };
+    const arc = effectiveEllipseArc(node);
+    if (isFullEllipseArc(arc.sweepDeg) && !hasEllipseArcInnerHole(arc.innerRadiusRatio)) {
+      return {
+        pathPoints: generatePolygonPoints(64, w, h),
+        pathClosed: true,
+      };
+    }
+    const cx = w / 2;
+    const cy = h / 2;
+    const outerRx = w / 2;
+    const outerRy = h / 2;
+    const innerRx = outerRx * arc.innerRadiusRatio;
+    const innerRy = outerRy * arc.innerRadiusRatio;
+    const pts: PathPoint[] = [];
+    if (!hasEllipseArcInnerHole(arc.innerRadiusRatio)) {
+      pts.push({ id: newPathPointId(), x: cx, y: cy });
+    }
+    const steps = Math.max(8, Math.ceil((arc.sweepDeg / 360) * 64));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const deg = arc.startDeg + arc.sweepDeg * t;
+      const p = ellipsePointAtDeg(cx, cy, outerRx, outerRy, deg);
+      pts.push({ id: newPathPointId(), x: p.x, y: p.y });
+    }
+    if (hasEllipseArcInnerHole(arc.innerRadiusRatio)) {
+      for (let i = steps; i >= 0; i--) {
+        const t = i / steps;
+        const deg = arc.startDeg + arc.sweepDeg * t;
+        const p = ellipsePointAtDeg(cx, cy, innerRx, innerRy, deg);
+        pts.push({ id: newPathPointId(), x: p.x, y: p.y });
+      }
+    }
+    return { pathPoints: pts, pathClosed: true };
   }
 
-  if (node.type === "line") {
+  if (node.type === "line" || node.type === "arrow") {
     const y = h / 2;
     return {
       pathPoints: [
@@ -150,14 +211,45 @@ export function cornerRadiusHandlePosition(
   }
 }
 
-/** SVG path `d` for display/hit-testing (uses corner radii when applicable). */
-export function pathOutlineD(
+/** SVG path `d` for vector shapes (polygon, star, path). */
+export function vectorShapeOutlineD(
   node: Pick<
     EditorNode,
-    "type" | "width" | "height" | "pathPoints" | "pathClosed" | "cornerRadius" | "cornerRadii"
+    | "type"
+    | "width"
+    | "height"
+    | "pathPoints"
+    | "pathClosed"
+    | "cornerRadius"
+    | "cornerRadii"
+    | "polygonSides"
+    | "starPoints"
+    | "starInnerRadius"
   >,
+  nodeId?: string,
 ): string {
+  if (isPolygonNode(node)) {
+    const preview = nodeId ? getPolygonPreview() : null;
+    if (preview?.nodeId === nodeId) {
+      return polygonPathDForNode(node, {
+        sides: preview.sides,
+        cornerRadius: preview.cornerRadius,
+      });
+    }
+    return polygonPathDForNode(node);
+  }
   if (node.type !== "path") return "";
+  if (isStarNode(node)) {
+    const preview = nodeId ? getStarPreview() : null;
+    if (preview?.nodeId === nodeId) {
+      return starPathDForNode(node, {
+        pointCount: preview.pointCount,
+        ratio: preview.ratio,
+        cornerRadius: preview.cornerRadius,
+      });
+    }
+    return starPathDForNode(node);
+  }
   const pts = node.pathPoints ?? [];
   if (isRoundedRectPath(node)) {
     return roundedRectPathD(
@@ -167,6 +259,14 @@ export function pathOutlineD(
     );
   }
   return pathToSvgD(pts, node.pathClosed ?? false);
+}
+
+/** @deprecated Prefer vectorShapeOutlineD */
+export function pathOutlineD(
+  node: Parameters<typeof vectorShapeOutlineD>[0],
+  nodeId?: string,
+): string {
+  return vectorShapeOutlineD(node, nodeId);
 }
 
 /** Keep four rectangle anchors; corner radii are stored on the node. */
@@ -196,7 +296,8 @@ export function cornerRadiiStylePatch(
   };
 }
 
-export function radiusFromCornerDrag(
+/** Distance along the corner bisector used for radius (Figma-style). */
+export function cornerRadiusMetricAtPoint(
   cornerIndex: 0 | 1 | 2 | 3,
   localX: number,
   localY: number,
@@ -207,16 +308,44 @@ export function radiusFromCornerDrag(
   const h = Math.max(1, height);
   switch (cornerIndex) {
     case 0:
-      return Math.max(0, localX);
+      return Math.min(localX, localY);
     case 1:
-      return Math.max(0, w - localX);
+      return Math.min(w - localX, localY);
     case 2:
-      return Math.max(0, h - localY);
+      return Math.min(w - localX, h - localY);
     case 3:
-      return Math.max(0, h - localY);
+      return Math.min(localX, h - localY);
     default:
       return 0;
   }
+}
+
+export function radiusFromCornerDrag(
+  cornerIndex: 0 | 1 | 2 | 3,
+  localX: number,
+  localY: number,
+  width: number,
+  height: number,
+): number {
+  return Math.max(0, cornerRadiusMetricAtPoint(cornerIndex, localX, localY, width, height));
+}
+
+/** Continuous radius drag from grab point (avoids jump on pointer down). */
+export function radiusFromRelativeCornerDrag(
+  cornerIndex: 0 | 1 | 2 | 3,
+  grabRadius: number,
+  grabX: number,
+  grabY: number,
+  moveX: number,
+  moveY: number,
+  width: number,
+  height: number,
+  maxRadius: number,
+): number {
+  const grabMetric = cornerRadiusMetricAtPoint(cornerIndex, grabX, grabY, width, height);
+  const moveMetric = cornerRadiusMetricAtPoint(cornerIndex, moveX, moveY, width, height);
+  const next = grabRadius + (moveMetric - grabMetric);
+  return Math.min(maxRadius, Math.max(0, next));
 }
 
 export function ensureRoundedRectPathPoints(node: EditorNode): EditorNode {
@@ -249,6 +378,9 @@ export function convertNodeToPath(node: EditorNode): EditorNode | null {
     starPoints: undefined,
     starInnerRadius: undefined,
     arrowHead: undefined,
+    arcStartDeg: undefined,
+    arcSweepDeg: undefined,
+    arcInnerRadiusRatio: undefined,
   };
   return normalizePathNode(next);
 }

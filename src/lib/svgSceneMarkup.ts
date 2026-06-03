@@ -105,7 +105,7 @@ function renderNode(nodeId: string, ctx: BuildCtx): string {
     return wrapOpacity(svgRectLike(resolved, shapeOpts));
   }
 
-  if (node.type === "line") {
+  if (node.type === "line" || node.type === "arrow") {
     return wrapOpacity(svgLine(node));
   }
 

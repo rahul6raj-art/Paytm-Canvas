@@ -138,6 +138,40 @@ describe("code import", () => {
     assert.notEqual(rectNode?.type, "ellipse");
   });
 
+  it("exports ellipse arc pie with clip-path and round-trips arc attrs", () => {
+    const f = frame("f1", "Screen", 0, 0, 200, 200);
+    const e: EditorNode = {
+      ...ellipse("e1", "f1", 10, 10, 75, 75),
+      arcStartDeg: 0,
+      arcSweepDeg: 270,
+      arcInnerRadiusRatio: 0.32,
+    };
+    const nodes = { f1: f, e1: e };
+    const childOrder = { [EDITOR_ROOT_KEY]: ["f1"], f1: ["e1"] };
+
+    const exported = exportSelectionCode({
+      nodes,
+      childOrder,
+      selectedIds: ["e1"],
+      designTokens: {},
+      assets: {},
+      format: "html",
+    });
+
+    assert.match(exported.code, /clip-path:\s*path\(/);
+    assert.match(exported.code, /data-pc-arc-sweep="270"/);
+    assert.match(exported.code, /data-pc-arc-ratio="0.32"/);
+
+    const imported = importCodeSource(exported.code, "html");
+    assert.equal(imported.ok, true);
+    if (!imported.ok) return;
+
+    const back = imported.slice.nodes.e1;
+    assert.equal(back?.type, "ellipse");
+    assert.ok(Math.abs((back?.arcSweepDeg ?? 0) - 270) < 0.01);
+    assert.ok(Math.abs((back?.arcInnerRadiusRatio ?? 0) - 0.32) < 0.01);
+  });
+
   it("round-trips HTML export to canvas layers", () => {
     const f = frame("f1", "Card", 0, 0, 200, 100);
     const t = text("t1", "f1", "Hello");

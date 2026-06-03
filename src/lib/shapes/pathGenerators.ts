@@ -1,52 +1,20 @@
-import { newPathPointId, type PathPoint } from "@/lib/pathGeometry";
+import type { PathPoint } from "@/lib/pathGeometry";
+import { polygonPathPoints } from "@/lib/shapes/polygonGeometry";
+import { starPathPoints } from "@/lib/shapes/starGeometry";
 
 /** Regular polygon centered in a w×h box. */
 export function generatePolygonPoints(sides: number, width: number, height: number): PathPoint[] {
-  const n = Math.max(3, Math.min(64, Math.round(sides)));
-  const cx = width / 2;
-  const cy = height / 2;
-  const rx = width / 2;
-  const ry = height / 2;
-  const pts: PathPoint[] = [];
-  for (let i = 0; i < n; i++) {
-    const angle = (-Math.PI / 2) + (i * 2 * Math.PI) / n;
-    pts.push({
-      id: newPathPointId(),
-      x: cx + rx * Math.cos(angle),
-      y: cy + ry * Math.sin(angle),
-    });
-  }
-  return pts;
+  return polygonPathPoints(sides, width, height);
 }
 
-/** Star with outer/inner radii as fractions of the box. */
+/** Star with outer/inner radii as fractions of the box (Figma-style). */
 export function generateStarPoints(
   numPoints: number,
   innerRadius: number,
   width: number,
   height: number,
 ): PathPoint[] {
-  const spikes = Math.max(3, Math.min(32, Math.round(numPoints)));
-  const cx = width / 2;
-  const cy = height / 2;
-  const outerRx = width / 2;
-  const outerRy = height / 2;
-  const innerRx = outerRx * innerRadius;
-  const innerRy = outerRy * innerRadius;
-  const total = spikes * 2;
-  const pts: PathPoint[] = [];
-  for (let i = 0; i < total; i++) {
-    const angle = (-Math.PI / 2) + (i * Math.PI) / spikes;
-    const outer = i % 2 === 0;
-    const rx = outer ? outerRx : innerRx;
-    const ry = outer ? outerRy : innerRy;
-    pts.push({
-      id: newPathPointId(),
-      x: cx + rx * Math.cos(angle),
-      y: cy + ry * Math.sin(angle),
-    });
-  }
-  return pts;
+  return starPathPoints(numPoints, innerRadius, width, height);
 }
 
 /** Arrow as open path: shaft + arrowhead. */

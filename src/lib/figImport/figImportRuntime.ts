@@ -1,5 +1,3 @@
-import { startTransition } from "react";
-
 export type FigImportProgress = (message: string) => void;
 
 let importYieldTick = 0;
@@ -17,13 +15,25 @@ export async function yieldImportTick(every = 16): Promise<void> {
 }
 
 /** Yield so the import overlay can paint before heavy work. */
-export async function waitForNextPaint(): Promise<void> {
+export async function waitForNextPaint(maxWaitMs = 250): Promise<void> {
   if (typeof requestAnimationFrame !== "function") {
     await new Promise<void>((resolve) => setTimeout(resolve, 16));
     return;
   }
   await new Promise<void>((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      resolve();
+    };
+    const fallback = window.setTimeout(finish, maxWaitMs);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.clearTimeout(fallback);
+        finish();
+      });
+    });
   });
 }
 
@@ -31,10 +41,12 @@ export async function waitForNextPaint(): Promise<void> {
 export function scheduleFigImportStateApply(apply: () => void): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(() => {
-      startTransition(() => {
-        apply();
-        resolve();
-      });
+      apply();
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      } else {
+        setTimeout(() => resolve(), 16);
+      }
     }, 0);
   });
 }

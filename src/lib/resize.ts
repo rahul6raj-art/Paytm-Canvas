@@ -21,6 +21,8 @@ export type ResizeKind =
   | "frame"
   | "text"
   | "line"
+  | "arrow"
+  | "polygon"
   | "path"
   | "group"
   | "image";
@@ -292,7 +294,7 @@ export function computeResizedBounds(
     out = anchoredResize(handle, startBounds, px, py);
   }
 
-  if (kind === "line") {
+  if (kind === "line" || kind === "arrow") {
     out = normalizeLineBounds(handle, startBounds, out);
   }
 

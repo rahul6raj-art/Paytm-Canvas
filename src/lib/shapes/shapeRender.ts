@@ -1,5 +1,6 @@
 import type { EditorNode } from "@/stores/useEditorStore";
 import { pathToSvgD } from "@/lib/pathGeometry";
+import { isPolygonNode, polygonPathDForNode } from "@/lib/shapes/polygonGeometry";
 import { applyCanvasStrokeStyle } from "@/lib/stroke";
 import { editorNodeToShape, type ShapeModel } from "./shapeModel";
 
@@ -30,8 +31,11 @@ export function renderShape(ctx: CanvasRenderingContext2D, shapeNode: EditorNode
     case "line":
       renderLine(ctx, shape);
       break;
+    case "polygon":
+      renderPath(ctx, shape, editorNode ?? undefined);
+      break;
     default:
-      renderPath(ctx, shape);
+      renderPath(ctx, shape, editorNode ?? undefined);
       break;
   }
   ctx.restore();
@@ -76,12 +80,19 @@ function renderLine(ctx: CanvasRenderingContext2D, shape: ShapeModel): void {
   ctx.stroke();
 }
 
-function renderPath(ctx: CanvasRenderingContext2D, shape: ShapeModel): void {
-  const pts = shape.pathPoints ?? [];
-  const d = pathToSvgD(pts, shape.pathClosed ?? false);
+function renderPath(ctx: CanvasRenderingContext2D, shape: ShapeModel, node?: EditorNode): void {
+  let d = "";
+  if (node && isPolygonNode(node)) {
+    d = polygonPathDForNode(node);
+  } else {
+    const pts = shape.pathPoints ?? [];
+    d = pathToSvgD(pts, shape.pathClosed ?? false);
+  }
   if (!d) return;
   const path = new Path2D(d);
-  if (shape.fill !== "transparent" && shape.pathClosed) {
+  const closed =
+    shape.shapeType === "polygon" || shape.pathClosed || (node && isPolygonNode(node));
+  if (shape.fill !== "transparent" && closed) {
     ctx.fillStyle = shape.fill;
     ctx.fill(path);
   }

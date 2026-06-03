@@ -51,6 +51,7 @@ import {
   sortedFigChildren,
 } from "@/lib/figImport/figNodeGeometry";
 import {
+  blendModeFromFigNode,
   buildTokensByVariableKey,
   effectiveNodeFillPaints,
   effectsFromFigNode,
@@ -943,6 +944,7 @@ function convertFigNode(
     ...constraintsFromFigNode(source),
     ...cornerRadiusFromFigNode(source),
     opacity: source.opacity,
+    ...blendModeFromFigNode(source),
     effects: effectsFromFigNode(source, ctx.variableColors),
   };
 

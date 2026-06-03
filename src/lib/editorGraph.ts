@@ -1,12 +1,18 @@
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import {
   applyMatrixToPoint,
+  finiteCoord,
+  finiteDimension,
   getNodeLocalMatrix,
   invertMatrix,
   multiplyMatrix,
   type Matrix2D,
 } from "@/lib/transformMath";
 import type { EditorNode } from "@/stores/useEditorStore";
+import { hitTestLineWorld, lineRenderedWorldBounds } from "@/lib/shapes/lineGeometry";
+import { arrowRenderedWorldBounds, hitTestArrowWorld } from "@/lib/shapes/arrowGeometry";
+import { hitTestTextWorld } from "@/lib/text/textHitTest";
+import { hitTestPolygonLocal, isPolygonNode } from "@/lib/shapes/polygonGeometry";
 
 export type NodeMin = { parentId: string | null; name: string };
 
@@ -102,9 +108,33 @@ export function pointInNodeRenderedWorldBounds(
   nodeId: string,
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
+  zoom = 1,
 ): boolean {
   const n = nodes[nodeId];
   if (!n) return false;
+  if (n.type === "line") {
+    return hitTestLineWorld(worldX, worldY, nodeId, nodes, childOrder, zoom);
+  }
+  if (n.type === "arrow") {
+    return hitTestArrowWorld(worldX, worldY, nodeId, nodes, childOrder, zoom);
+  }
+  if (n.type === "text") {
+    return hitTestTextWorld(worldX, worldY, nodeId, nodes, childOrder);
+  }
+  if (isPolygonNode(n)) {
+    const inv = getNodeWorldInverseMatrixFromChildOrder(nodeId, nodes, childOrder);
+    if (!inv) {
+      const b = getRenderedWorldBounds(nodeId, nodes, childOrder);
+      return (
+        worldX >= b.x &&
+        worldX <= b.x + b.width &&
+        worldY >= b.y &&
+        worldY <= b.y + b.height
+      );
+    }
+    const local = applyMatrixToPoint(inv, { x: worldX, y: worldY });
+    return hitTestPolygonLocal(local.x, local.y, n, zoom);
+  }
   const inv = getNodeWorldInverseMatrixFromChildOrder(nodeId, nodes, childOrder);
   if (!inv) {
     const b = getRenderedWorldBounds(nodeId, nodes, childOrder);
@@ -178,12 +208,23 @@ export function getRenderedWorldBounds(
 ): { x: number; y: number; width: number; height: number } {
   const n = nodes[nodeId];
   if (!n) return { x: 0, y: 0, width: 0, height: 0 };
+  if (n.type === "line") {
+    return lineRenderedWorldBounds(nodeId, nodes, childOrder);
+  }
+  if (n.type === "arrow") {
+    return arrowRenderedWorldBounds(nodeId, nodes, childOrder);
+  }
   const wm = getNodeWorldMatrixFromChildOrder(nodeId, nodes, childOrder);
   if (!wm) {
-    return { x: n.x, y: n.y, width: n.width, height: n.height };
+    return {
+      x: finiteCoord(n.x),
+      y: finiteCoord(n.y),
+      width: finiteDimension(n.width),
+      height: finiteDimension(n.height),
+    };
   }
-  const w = Math.max(1, n.width);
-  const h = Math.max(1, n.height);
+  const w = finiteDimension(n.width);
+  const h = finiteDimension(n.height);
   const corners = [
     { x: 0, y: 0 },
     { x: w, y: 0 },
@@ -195,10 +236,20 @@ export function getRenderedWorldBounds(
   let maxX = -Infinity;
   let maxY = -Infinity;
   for (const p of corners) {
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
     minX = Math.min(minX, p.x);
     minY = Math.min(minY, p.y);
     maxX = Math.max(maxX, p.x);
     maxY = Math.max(maxY, p.y);
+  }
+  if (!Number.isFinite(minX)) {
+    const origin = applyMatrixToPoint(wm, { x: 0, y: 0 });
+    return {
+      x: finiteCoord(origin.x),
+      y: finiteCoord(origin.y),
+      width: w,
+      height: h,
+    };
   }
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
@@ -404,6 +455,18 @@ export function getRenderedWorldOrigin(
   return getRenderedWorldTopLeft(nodeId, nodes, childOrder);
 }
 
+/** True when the parent frame uses horizontal or vertical auto-layout. */
+export function parentUsesAutoLayout(
+  parentId: string | null,
+  nodes: Record<string, { layoutMode?: string }>,
+): boolean {
+  if (!parentId) return false;
+  const p = nodes[parentId];
+  if (!p) return false;
+  const mode = p.layoutMode ?? "none";
+  return mode === "horizontal" || mode === "vertical";
+}
+
 /** Clone positioning: only offset the duplicated tree root in world space; keep child locals. */
 export function clonedNodePosition(
   oldId: string,
@@ -465,6 +528,44 @@ export function worldOriginToNodeXYFromChildOrder(
     nodes,
     childOrder,
   );
+}
+
+/** Set node x/y so its world center matches a point at the given rotation (iterative). */
+export function worldCenterToNodeXYFromChildOrder(
+  nodeId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  desiredWorldCenter: { x: number; y: number },
+  rotation: number,
+  initialGuess?: { x: number; y: number },
+): { x: number; y: number } {
+  const n = nodes[nodeId];
+  if (!n) return { x: 0, y: 0 };
+  const w = Math.max(1, n.width);
+  const h = Math.max(1, n.height);
+  let x = initialGuess?.x ?? n.x;
+  let y = initialGuess?.y ?? n.y;
+
+  for (let i = 0; i < 16; i++) {
+    const trial = { ...nodes, [nodeId]: { ...n, x, y, rotation } };
+    const wm = getNodeWorldMatrixFromChildOrder(nodeId, trial, childOrder);
+    if (!wm) return { x, y };
+    const got = applyMatrixToPoint(wm, { x: w / 2, y: h / 2 });
+    const errX = desiredWorldCenter.x - got.x;
+    const errY = desiredWorldCenter.y - got.y;
+    if (Math.abs(errX) < 0.01 && Math.abs(errY) < 0.01) break;
+    const curOrigin = applyMatrixToPoint(wm, { x: 0, y: 0 });
+    const desiredOrigin = { x: curOrigin.x + errX, y: curOrigin.y + errY };
+    const xy = worldOriginToNodeXYFromChildOrder(
+      nodeId,
+      trial,
+      childOrder,
+      desiredOrigin,
+    );
+    x = xy.x;
+    y = xy.y;
+  }
+  return { x, y };
 }
 
 function rectOverlapArea(

@@ -4,10 +4,16 @@ import type {
   Expression,
   File,
   FunctionExpression,
+  JSXAttribute,
   JSXElement,
   JSXExpressionContainer,
+  JSXFragment,
+  JSXSpreadAttribute,
+  JSXSpreadChild,
+  JSXText,
   ObjectExpression,
   ObjectProperty,
+  PrivateName,
 } from "@babel/types";
 import type { ReactStyleRecord } from "./reactStyle";
 
@@ -18,12 +24,19 @@ export type ModuleArrays = Map<string, ModuleArrayItem[]>;
 /** `const statusColors = { confirmed: { bg: '…' }, … }` */
 export type ModuleNestedMaps = Map<string, Record<string, ModuleArrayItem>>;
 
+type JSXChild = JSXElement | JSXFragment | JSXExpressionContainer | JSXText | JSXSpreadChild;
+
 function unwrapExpression(expr: Expression): Expression {
   if (expr.type === "ParenthesizedExpression") return unwrapExpression(expr.expression);
   if (expr.type === "TSAsExpression" || expr.type === "TSSatisfiesExpression") {
     return unwrapExpression(expr.expression);
   }
   return expr;
+}
+
+function unwrapOperand(operand: Expression | PrivateName): Expression | null {
+  if (operand.type === "PrivateName") return null;
+  return unwrapExpression(operand);
 }
 
 function literalFromExpression(
@@ -120,7 +133,8 @@ export function collectModuleNestedMaps(
 export function isStateEqualityGuard(expr: Expression): boolean {
   const e = unwrapExpression(expr);
   if (e.type !== "BinaryExpression" || e.operator !== "===") return false;
-  const left = unwrapExpression(e.left);
+  const left = unwrapOperand(e.left);
+  if (!left) return false;
   return left.type === "Identifier" || left.type === "MemberExpression";
 }
 
@@ -165,8 +179,12 @@ function evalCondition(
 ): boolean {
   const e = unwrapExpression(expr);
   if (e.type === "BinaryExpression" && e.operator === "===") {
-    const left = memberValue(e.left, binding, item) ?? literalFromExpression(e.left, constants);
-    const right = memberValue(e.right, binding, item) ?? literalFromExpression(e.right, constants);
+    const leftExpr = unwrapOperand(e.left);
+    const rightExpr = unwrapOperand(e.right);
+    if (!leftExpr || !rightExpr) return false;
+    const left = memberValue(leftExpr, binding, item) ?? literalFromExpression(leftExpr, constants);
+    const right =
+      memberValue(rightExpr, binding, item) ?? literalFromExpression(rightExpr, constants);
     return left === right;
   }
   if (e.type === "MemberExpression") {
@@ -246,8 +264,11 @@ function resolveStyleValue(
     if (v !== undefined && typeof v !== "boolean") return v;
   }
   if (e.type === "BinaryExpression" && e.operator === "+") {
-    const left = resolveStyleValue(e.left, binding, item, extras, constants);
-    const right = literalFromExpression(e.right, constants);
+    const leftOp = unwrapOperand(e.left);
+    const rightOp = unwrapOperand(e.right);
+    if (!leftOp || !rightOp) return undefined;
+    const left = resolveStyleValue(leftOp, binding, item, extras, constants);
+    const right = literalFromExpression(rightOp, constants);
     if (left !== undefined && typeof right === "string") return String(left) + right;
   }
   return undefined;
@@ -316,9 +337,10 @@ function substituteJsxElement(
     if (!attr.value || attr.value.type !== "JSXExpressionContainer") return attr;
 
     if (attr.name.name === "className") {
+      if (attr.value.expression.type === "JSXEmptyExpression") return attr;
       const cn = resolveClassNameFromExpression(attr.value.expression, constants, { binding, item });
       if (!cn) return attr;
-      return { ...attr, value: { type: "StringLiteral", value: cn } as const };
+      return { ...attr, value: { type: "StringLiteral" as const, value: cn } } satisfies JSXAttribute;
     }
 
     if (attr.name.name === "style" && attr.value.expression.type === "ObjectExpression") {
@@ -333,21 +355,20 @@ function substituteJsxElement(
       return {
         ...attr,
         value: {
-          type: "JSXExpressionContainer",
+          type: "JSXExpressionContainer" as const,
           expression: styleRecordToObjectExpression(style),
         },
-      };
+      } satisfies JSXAttribute;
     }
 
     return attr;
   });
 
-  const children = el.children.flatMap((ch) => {
+  const children: JSXChild[] = el.children.flatMap((ch): JSXChild[] => {
     if (ch.type === "JSXElement") return [substituteJsxElement(ch, binding, item, constants, extras)];
     if (ch.type === "JSXExpressionContainer") {
       const sub = substituteExpressionChild(ch, binding, item, constants, extras);
       if (sub === null) return [];
-      if (sub.type === "JSXElement") return [sub];
       return [sub];
     }
     return [ch];
@@ -355,7 +376,10 @@ function substituteJsxElement(
 
   return {
     ...el,
-    openingElement: { ...el.openingElement, attributes: attrs },
+    openingElement: {
+      ...el.openingElement,
+      attributes: attrs as (JSXAttribute | JSXSpreadAttribute)[],
+    },
     closingElement: el.closingElement,
     children,
   };

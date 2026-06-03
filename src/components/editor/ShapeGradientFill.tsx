@@ -8,6 +8,11 @@ import {
   roundedRectPathD,
   uniformCornerRadiusForRect,
 } from "@/lib/cornerRadius";
+import {
+  effectiveEllipseArc,
+  hasEllipseArcInnerHole,
+  isFullEllipseArc,
+} from "@/lib/shapes/ellipseArc";
 import type { EditorNode } from "@/stores/useEditorStore";
 
 type ShapeKind = "rect" | "ellipse" | "path";
@@ -41,6 +46,11 @@ export function ShapeGradientFill({
   const r = uniformCornerRadiusForRect(node, node.width, node.height);
   const rectPathD = uniform ? null : roundedRectPathD(node.width, node.height, radii);
   const closed = node.pathClosed ?? false;
+  const ellipseArc = node.type === "ellipse" ? effectiveEllipseArc(node) : null;
+  const ellipseFillEvenOdd =
+    ellipseArc != null &&
+    hasEllipseArcInnerHole(ellipseArc.innerRadiusRatio) &&
+    isFullEllipseArc(ellipseArc.sweepDeg);
 
   return (
     <svg
@@ -50,7 +60,9 @@ export function ShapeGradientFill({
       aria-hidden
     >
       {defs.length > 0 ? <defs dangerouslySetInnerHTML={{ __html: defs.join("") }} /> : null}
-      {shape === "ellipse" ? (
+      {shape === "ellipse" && pathD ? (
+        <path d={pathD} fill={fillRef} fillRule={ellipseFillEvenOdd ? "evenodd" : undefined} />
+      ) : shape === "ellipse" ? (
         <ellipse
           cx={node.width / 2}
           cy={node.height / 2}

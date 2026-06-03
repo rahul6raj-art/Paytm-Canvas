@@ -92,8 +92,10 @@ export function strokeEndpointMarkerDefs(
   end: StrokeEndpoint,
   color: string,
   strokeWidth: number,
+  opts?: { markerScale?: number },
 ): string {
   const sw = Math.max(1, strokeWidth);
+  const scale = Math.max(0.25, opts?.markerScale ?? 1);
   const parts: string[] = [];
 
   const capMarker = (id: string, cap: "round" | "square") => {
@@ -111,7 +113,7 @@ export function strokeEndpointMarkerDefs(
   }
 
   const arrowMarker = (id: string, type: StrokeEndpoint) => {
-    const s = sw * 1.8;
+    const s = sw * 1.8 * scale;
     switch (type) {
       case "line-arrow":
         return `<marker id="${id}" markerWidth="${s}" markerHeight="${s}" refX="${s * 0.85}" refY="${s / 2}" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L${s},${s / 2} L0,${s} Z" fill="none" stroke="${color}" stroke-width="${Math.max(1, sw * 0.15)}"/></marker>`;
