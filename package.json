@@ -1,0 +1,39 @@
+{
+  "name": "paytm-craft",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "dev:clean": "rm -rf .next && next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "lint": "next lint",
+    "test": "tsx --test 'src/lib/**/__tests__/*.test.ts'",
+    "setup:browsers": "playwright install chromium"
+  },
+  "dependencies": {
+    "@babel/parser": "^7.29.7",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.511.0",
+    "next": "^15.3.2",
+    "node-html-parser": "^7.1.0",
+    "openfig-core": "^0.3.7",
+    "playwright": "^1.52.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwind-merge": "^2.6.0",
+    "zustand": "^5.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.1",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^9.25.1",
+    "eslint-config-next": "^15.3.2",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

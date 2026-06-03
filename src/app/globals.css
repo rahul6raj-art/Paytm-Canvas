@@ -1,0 +1,149 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --app-bg: 0 0% 96%;
+  --app-fg: 0 0% 9%;
+  --app-muted: 0 0% 40%;
+  --app-subtle: 0 0% 52%;
+  --app-panel: 0 0% 100%;
+  --app-surface: 0 0% 98%;
+  --app-raised: 0 0% 94%;
+  --app-card: 0 0% 100%;
+  --app-inset: 0 0% 91%;
+  --app-border: 0 0% 0%;
+  --app-border-opacity: 0.1;
+  --app-border-subtle-opacity: 0.06;
+  --app-hover: 0 0% 0%;
+  --app-hover-opacity: 0.05;
+  --app-overlay: 0 0% 0%;
+  --app-overlay-opacity: 0.04;
+  --app-toolbar-well: 0 0% 0%;
+  --app-toolbar-well-opacity: 0.06;
+  --app-inset-highlight: 0 0% 100%;
+  --app-inset-highlight-opacity: 0.65;
+  --app-scrollbar: 0 0% 0%;
+  --app-scrollbar-opacity: 0.18;
+  --app-field-bg: 0 0% 100%;
+  --app-field-fg: 0 0% 9%;
+  /* Canvas selection / hover (Figma-like, restrained on dark UI) */
+  --pc-canvas-selection: #18a0fb;
+  --pc-canvas-selection-fill: rgba(24, 160, 251, 0.08);
+  --pc-canvas-selection-muted: rgba(24, 160, 251, 0.12);
+  --pc-canvas-hover-outline: rgba(24, 160, 251, 0.38);
+  --pc-canvas-inspect-hover: rgba(244, 114, 182, 0.5);
+  --pc-canvas-locked-outline: rgba(214, 158, 46, 0.5);
+  --pc-canvas-instance-outline: rgba(151, 71, 255, 0.45);
+  --pc-canvas-group-outline: rgba(15, 23, 42, 0.1);
+  --pc-canvas-boolean-outline: rgba(24, 160, 251, 0.35);
+  --pc-canvas-mask-outline: rgba(168, 85, 247, 0.35);
+  color-scheme: light;
+}
+
+.dark {
+  --app-bg: 0 0% 17%;
+  --app-fg: 0 0% 90%;
+  --app-muted: 0 0% 62%;
+  --app-subtle: 0 0% 48%;
+  --app-panel: 0 0% 20%;
+  --app-surface: 0 0% 12%;
+  --app-raised: 0 0% 22%;
+  --app-card: 0 0% 20%;
+  --app-inset: 0 0% 14%;
+  --app-border: 0 0% 100%;
+  --app-border-opacity: 0.08;
+  --app-border-subtle-opacity: 0.045;
+  --app-hover: 0 0% 100%;
+  --app-hover-opacity: 0.05;
+  --app-overlay: 0 0% 100%;
+  --app-overlay-opacity: 0.035;
+  --app-toolbar-well: 0 0% 0%;
+  --app-toolbar-well-opacity: 0.28;
+  --app-inset-highlight: 0 0% 100%;
+  --app-inset-highlight-opacity: 0.025;
+  --app-scrollbar: 0 0% 100%;
+  --app-scrollbar-opacity: 0.16;
+  --app-field-bg: 0 0% 14%;
+  --app-field-fg: 0 0% 96%;
+  --pc-canvas-selection: rgba(138, 188, 255, 0.68);
+  --pc-canvas-selection-fill: rgba(138, 188, 255, 0.05);
+  --pc-canvas-selection-muted: rgba(138, 188, 255, 0.1);
+  --pc-canvas-hover-outline: rgba(138, 188, 255, 0.22);
+  --pc-canvas-inspect-hover: rgba(244, 114, 182, 0.38);
+  --pc-canvas-locked-outline: rgba(214, 158, 46, 0.38);
+  --pc-canvas-instance-outline: rgba(180, 140, 255, 0.38);
+  --pc-canvas-group-outline: rgba(255, 255, 255, 0.09);
+  --pc-canvas-boolean-outline: rgba(138, 188, 255, 0.28);
+  --pc-canvas-mask-outline: rgba(196, 150, 255, 0.32);
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: hsl(var(--app-bg));
+  color: hsl(var(--app-fg));
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer utilities {
+  .thin-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--app-scrollbar) / var(--app-scrollbar-opacity)) transparent;
+  }
+  .thin-scroll::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .thin-scroll::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--app-scrollbar) / var(--app-scrollbar-opacity));
+    border-radius: 999px;
+  }
+  .thin-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .shadow-app-panel {
+    box-shadow: inset 0 1px 0 hsl(var(--app-inset-highlight) / var(--app-inset-highlight-opacity));
+  }
+
+  .shadow-app-raised {
+    box-shadow: inset 0 1px 0 hsl(var(--app-inset-highlight) / var(--app-inset-highlight-opacity));
+  }
+}
+
+@keyframes pcProtoDissolve {
+  from {
+    opacity: 0.2;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pcProtoSlideLeft {
+  from {
+    opacity: 0.85;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pcProtoSlideRight {
+  from {
+    opacity: 0.85;
+    transform: translateX(-28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
