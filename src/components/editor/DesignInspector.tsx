@@ -13,15 +13,11 @@ import {
   Boxes,
   Component,
   Copy,
-  Eye,
-  EyeOff,
   LayoutTemplate,
   Link2,
-  Lock,
   Monitor,
   StretchHorizontal,
   StretchVertical,
-  Unlock,
   Unlink,
 } from "lucide-react";
 import { PropertiesSection } from "./PropertiesSection";
@@ -120,8 +116,6 @@ export function DesignInspector({ node }: { node: EditorNode }) {
   const addAutoLayoutToSelection = useEditorStore((s) => s.addAutoLayoutToSelection);
   const updateConstraints = useEditorStore((s) => s.updateConstraints);
   const renameNode = useEditorStore((s) => s.renameNode);
-  const setNodeVisible = useEditorStore((s) => s.setNodeVisible);
-  const setNodeLocked = useEditorStore((s) => s.setNodeLocked);
   const parent = useEditorStore((s) => (node.parentId ? s.nodes[node.parentId!] : null));
   const nodesAll = useEditorStore((s) => s.nodes);
   const childOrder = useEditorStore((s) => s.childOrder);
@@ -169,7 +163,9 @@ export function DesignInspector({ node }: { node: EditorNode }) {
     node.type === "frame" ||
     node.type === "ellipse" ||
     node.type === "polygon" ||
-    node.type === "path";
+    node.type === "path" ||
+    Boolean(node.isBooleanGroup);
+  const showStrokeSides = node.type === "rectangle" || node.type === "frame";
   const isLine = node.type === "line";
   const isArrow = node.type === "arrow";
   const isPath = node.type === "path";
@@ -353,45 +349,6 @@ export function DesignInspector({ node }: { node: EditorNode }) {
           </p>
         </PropertiesSection>
       ) : null}
-
-      <PropertiesSection title="Layer" defaultOpen>
-        <div className="flex gap-1.5">
-          <button
-            type="button"
-            onClick={() => setNodeVisible(id, !node.visible)}
-            className={cn(
-              "flex h-6 flex-1 items-center justify-center gap-1 rounded border text-[11px] font-medium transition-colors",
-              node.visible
-                ? "border-app-border bg-app-panel text-app-fg hover:bg-app-hover"
-                : "border-app-border-subtle bg-app-toolbar-well text-[#737373] hover:text-app-muted",
-            )}
-          >
-            {node.visible ? (
-              <Eye className="h-3.5 w-3.5" strokeWidth={1.75} />
-            ) : (
-              <EyeOff className="h-3.5 w-3.5" strokeWidth={1.75} />
-            )}
-            {node.visible ? "Visible" : "Hidden"}
-          </button>
-          <button
-            type="button"
-            onClick={() => setNodeLocked(id, !node.locked)}
-            className={cn(
-              "flex h-6 flex-1 items-center justify-center gap-1 rounded border text-[11px] font-medium transition-colors",
-              node.locked
-                ? "border-amber-500/35 bg-amber-500/10 text-amber-100 hover:bg-amber-500/15"
-                : "border-app-border bg-app-panel text-app-fg hover:bg-app-hover",
-            )}
-          >
-            {node.locked ? (
-              <Lock className="h-3.5 w-3.5" strokeWidth={1.75} />
-            ) : (
-              <Unlock className="h-3.5 w-3.5" strokeWidth={1.75} />
-            )}
-            {node.locked ? "Locked" : "Unlocked"}
-          </button>
-        </div>
-      </PropertiesSection>
 
       <PositionSection
         node={node}
@@ -800,6 +757,59 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                   );
                 })}
               </div>
+              <div className="mt-2 border-t border-app-border-subtle pt-2">
+                <div className="mb-1 text-[11px] font-medium text-app-subtle">Min / max size</div>
+                <div className="grid grid-cols-2 gap-1">
+                  <PropertyNumberInput
+                    commitOnInput={false}
+                    label="Min W"
+                    value={node.minWidth ?? 0}
+                    instanceKey={`${key}-minw`}
+                    disabled={locked}
+                    min={0}
+                    max={99999}
+                    onCommit={(v) =>
+                      updateLayout(id, { minWidth: v > 0 ? v : undefined })
+                    }
+                  />
+                  <PropertyNumberInput
+                    commitOnInput={false}
+                    label="Max W"
+                    value={node.maxWidth ?? 0}
+                    instanceKey={`${key}-maxw`}
+                    disabled={locked}
+                    min={0}
+                    max={99999}
+                    onCommit={(v) =>
+                      updateLayout(id, { maxWidth: v > 0 ? v : undefined })
+                    }
+                  />
+                  <PropertyNumberInput
+                    commitOnInput={false}
+                    label="Min H"
+                    value={node.minHeight ?? 0}
+                    instanceKey={`${key}-minh`}
+                    disabled={locked}
+                    min={0}
+                    max={99999}
+                    onCommit={(v) =>
+                      updateLayout(id, { minHeight: v > 0 ? v : undefined })
+                    }
+                  />
+                  <PropertyNumberInput
+                    commitOnInput={false}
+                    label="Max H"
+                    value={node.maxHeight ?? 0}
+                    instanceKey={`${key}-maxh`}
+                    disabled={locked}
+                    min={0}
+                    max={99999}
+                    onCommit={(v) =>
+                      updateLayout(id, { maxHeight: v > 0 ? v : undefined })
+                    }
+                  />
+                </div>
+              </div>
             </>
           )}
         </PropertiesSection>
@@ -981,6 +991,9 @@ export function DesignInspector({ node }: { node: EditorNode }) {
           strokeEnabled={node.strokeEnabled !== false}
           strokeStyle={node.strokeStyle ?? "solid"}
           strokePosition={strokePos}
+          strokeSides={node.strokeSides ?? "all"}
+          strokeSidesCustom={node.strokeSidesCustom}
+          showSides={showStrokeSides}
           strokeDashLength={node.strokeDashLength}
           strokeDashGap={node.strokeDashGap}
           strokeLinecap={node.strokeLinecap}

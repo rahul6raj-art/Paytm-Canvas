@@ -42,7 +42,7 @@ const shapeItems: {
   { id: "ellipse", label: "Ellipse / Circle", icon: Circle, shortcut: "O" },
   { id: "line", label: "Line", icon: Minus, shortcut: "L" },
   { id: "arrow", label: "Arrow", icon: ArrowRight, shortcut: "⇧L" },
-  { id: "pencil", label: "Freehand", icon: PencilLine },
+  { id: "pencil", label: "Freehand", icon: PencilLine, shortcut: "⇧P" },
   { id: "polygon", label: "Polygon", icon: Hexagon },
   { id: "star", label: "Star", icon: Sparkles },
   { id: "triangle", label: "Triangle", icon: Triangle },

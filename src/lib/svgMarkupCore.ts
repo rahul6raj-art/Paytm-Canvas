@@ -260,6 +260,7 @@ export function svgPathMarkup(
     filterRef?: string;
     nodeId?: string;
     registerGradient?: (id: string, markup: string) => void;
+    fillRule?: "nonzero" | "evenodd";
   },
 ): string {
   const d = resolved.flattenedPathData ?? pathOutlineD(resolved);
@@ -283,5 +284,7 @@ export function svgPathMarkup(
   const fillAttr = f === "transparent" || f === "none" ? "none" : f.startsWith("url(") ? f : escXml(f);
   const filter = opts?.filterRef ? ` filter="url(#${opts.filterRef})"` : "";
   const strokeExtra = sw > 0 ? ` ${strokeAttrsForSvgMarkup(resolved)}` : "";
-  return `<path d="${escXml(d)}" fill="${fillAttr}" stroke="${sc}" stroke-width="${sw}"${strokeExtra}${filter} />`;
+  const fillRuleAttr =
+    opts?.fillRule && opts.fillRule !== "nonzero" ? ` fill-rule="${opts.fillRule}"` : "";
+  return `<path d="${escXml(d)}" fill="${fillAttr}" stroke="${sc}" stroke-width="${sw}"${strokeExtra}${fillRuleAttr}${filter} />`;
 }

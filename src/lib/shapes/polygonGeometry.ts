@@ -233,6 +233,34 @@ export function hitTestPolygonLocal(
   return false;
 }
 
+/** Side-count handle on the first edge midpoint (local). */
+export function polygonSidesHandleLocal(
+  sides: number,
+  width: number,
+  height: number,
+): Point2 {
+  const verts = polygonVertices(sides, width, height);
+  const a = verts[1]!;
+  const b = verts[2] ?? verts[1]!;
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
+
+/** Map pointer distance from center to polygon side count. */
+export function polygonSidesFromLocalPoint(
+  localX: number,
+  localY: number,
+  width: number,
+  height: number,
+): number {
+  const cx = width / 2;
+  const cy = height / 2;
+  const dist = Math.hypot(localX - cx, localY - cy);
+  const maxDist = Math.max(1, Math.hypot(width, height) / 2);
+  const t = Math.max(0, Math.min(1, dist / maxDist));
+  const sides = 3 + Math.round(t * (100 - 3));
+  return clampPolygonSides(sides);
+}
+
 /** Corner-radius handle at top vertex (local). */
 export function polygonCornerRadiusHandleLocal(
   sides: number,

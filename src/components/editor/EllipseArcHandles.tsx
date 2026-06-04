@@ -32,6 +32,7 @@ import {
 import { applyMatrixToPoint } from "@/lib/transformMath";
 import { useCanvasToWorld } from "./CanvasToWorldContext";
 import { clientToWorldFromDocument } from "@/lib/canvasCoordinates";
+import { useShapeEditHandlesGate } from "./useShapeEditHandles";
 
 function localToWorld(
   nodeId: string,
@@ -49,16 +50,11 @@ type ArcHandleKind = "sweep" | "start" | "ratio";
 
 /** Figma-style arc handles: sweep, start, and inner ratio on ellipses. */
 export function EllipseArcHandles() {
-  const selectedIds = useEditorStore((s) => s.selectedIds);
   const nodes = useEditorStore((s) => s.nodes);
   const childOrder = useEditorStore((s) => s.childOrder);
   const zoom = useEditorStore((s) => s.zoom);
-  const tool = useEditorStore((s) => s.tool);
-  const editorMode = useEditorStore((s) => s.editorMode);
-  const penDrawingNodeId = useEditorStore((s) => s.penDrawingNodeId);
-  const pencilDrawingNodeId = useEditorStore((s) => s.pencilDrawingNodeId);
-  const isPlacingComment = useEditorStore((s) => s.isPlacingComment);
   const clientToWorld = useCanvasToWorld();
+  const { show: editActive, id } = useShapeEditHandlesGate();
 
   const preview = useSyncExternalStore(
     subscribeEllipseArcPreview,
@@ -68,19 +64,9 @@ export function EllipseArcHandles() {
 
   const [arcDragUi, setArcDragUi] = useState<"ratio" | "sweep" | "start" | null>(null);
 
-  const id = selectedIds.length === 1 ? selectedIds[0]! : null;
   const node = id ? nodes[id] : null;
 
-  const show =
-    editorMode === "design" &&
-    tool === "move" &&
-    !penDrawingNodeId &&
-    !pencilDrawingNodeId &&
-    !isPlacingComment &&
-    id &&
-    node?.type === "ellipse" &&
-    node.visible &&
-    !node.locked;
+  const show = editActive && node?.type === "ellipse" && node.visible && !node.locked;
 
   const handleWorld = screenPxToWorld(CANVAS_HANDLE_SCREEN_PX, zoom);
   const borderWorld = screenPxToWorld(CANVAS_OUTLINE_SCREEN_PX, zoom);

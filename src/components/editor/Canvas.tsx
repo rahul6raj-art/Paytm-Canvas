@@ -4,17 +4,14 @@ import { useCallback, useMemo, useRef, useEffect, useState } from "react";
 import { Grid3X3, Ruler } from "lucide-react";
 import { CanvasRulers } from "./CanvasRulers";
 import { SelectionBox } from "./SelectionBox";
-import { EllipseArcHandles } from "./EllipseArcHandles";
-import { CornerRadiusHandles } from "./CornerRadiusHandles";
-import { StarHandles } from "./StarHandles";
-import { LineHandles } from "./LineHandles";
-import { PolygonHandles } from "./PolygonHandles";
+import { ShapeEditHandlesOverlay } from "./ShapeEditHandlesOverlay";
 import { SceneRenderer } from "@/editor-core/renderer/SceneRenderer";
 import { RootFrameLabels } from "./RootFrameLabels";
 import { PrototypeWireLayer } from "./PrototypeWireLayer";
 import { AltMeasureLayer } from "./AltMeasureLayer";
 import { DragSnapOverlay } from "./DragSnapOverlay";
 import { SwapDragOverlay } from "./SwapDragOverlay";
+import { AutoLayoutReorderOverlay } from "./AutoLayoutReorderOverlay";
 import { pickLayoutGuideAt } from "@/lib/layoutGuidePick";
 import { LayoutGuidesOverlay } from "./LayoutGuidesOverlay";
 import { InspectMeasurementsLayer } from "./InspectMeasurementsLayer";
@@ -29,6 +26,10 @@ import { CanvasInteractionContext } from "./CanvasInteractionContext";
 import { clientToWorld } from "@/lib/canvasCoordinates";
 import { useTheme } from "@/components/ThemeProvider";
 import { CANVAS_VISUAL, displayCanvasBackground } from "@/lib/canvasVisual";
+import {
+  canvasViewportRotateCursorCss,
+  isRotateCursorActive,
+} from "@/lib/canvasRotateCursor";
 import { useOptionPointerTracking } from "@/hooks/useOptionPointerTracking";
 import { pickDeepestNodeAtWorldPoint, pickDeepestVisibleNodeAtWorldPoint, worldRect } from "@/lib/tree";
 import { startCanvasMarqueeSession } from "@/lib/canvasMarqueeSession";
@@ -298,6 +299,8 @@ export function Canvas() {
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasBgRef = useRef<HTMLDivElement>(null);
   const zoom = useEditorStore((s) => s.zoom);
+  const transformInteractionMode = useEditorStore((s) => s.transformInteractionMode);
+  const rotateHandleHoverCount = useEditorStore((s) => s.rotateHandleHoverCount);
   const pan = useEditorStore((s) => s.pan);
   const setPan = useEditorStore((s) => s.setPan);
   const showGrid = useEditorStore((s) => s.showGrid);
@@ -1175,6 +1178,18 @@ export function Canvas() {
     selectedIds.length > 0 &&
     !optionOverSelection;
 
+  const rotateCursorActive = isRotateCursorActive({
+    transformInteractionMode,
+    rotateHandleHoverCount,
+  });
+
+  useEffect(() => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    if (rotateCursorActive) vp.setAttribute("data-rotate-active", "true");
+    else vp.removeAttribute("data-rotate-active");
+  }, [rotateCursorActive]);
+
   const cursor =
     isPanning
       ? "grabbing"
@@ -1198,7 +1213,9 @@ export function Canvas() {
                   ? "text"
                   : crosshairTool
                     ? "crosshair"
-                    : "default";
+                    : rotateCursorActive
+                      ? canvasViewportRotateCursorCss()
+                      : "default";
 
   return (
     <div
@@ -1258,7 +1275,7 @@ export function Canvas() {
             data-canvas-bg
             className={cn(
               "pointer-events-auto absolute inset-0",
-              creationCaptureActive ? "z-[14]" : "z-0",
+              creationCaptureActive ? "z-[40]" : "z-0",
             )}
             onPointerDown={onBgPointerDown}
             onDoubleClick={(e) => {
@@ -1352,7 +1369,7 @@ export function Canvas() {
           {editorMode === "design" ? <CommentPinLayer /> : null}
           {frameDraft ? (
             <div
-              className="pointer-events-none absolute z-[19] border border-accent/60 bg-app-panel/90 shadow-sm"
+              className="pointer-events-none absolute z-[45] border border-accent/60 bg-app-panel/90 shadow-sm"
               style={{
                 left: Math.min(frameDraft.x0, frameDraft.x1),
                 top: Math.min(frameDraft.y0, frameDraft.y1),
@@ -1363,7 +1380,9 @@ export function Canvas() {
           ) : null}
           {textDraft ? <TextDraftPreview draft={textDraft} /> : null}
           {shapeDraft ? (
-            <ShapeDraftPreview draft={shapeDraft} />
+            <div className="pointer-events-none absolute z-[45]">
+              <ShapeDraftPreview draft={shapeDraft} />
+            </div>
           ) : null}
           {marquee ? (
             <div
@@ -1378,13 +1397,10 @@ export function Canvas() {
             />
           ) : null}
           <SelectionBox />
-          <EllipseArcHandles />
-          <CornerRadiusHandles />
-          <StarHandles />
-          <LineHandles />
-          <PolygonHandles />
+          <ShapeEditHandlesOverlay />
           <DragSnapOverlay />
           <SwapDragOverlay />
+          <AutoLayoutReorderOverlay />
           <AltMeasureLayer />
           <ComponentPlacementPreview />
           <GradientEditorLayer />

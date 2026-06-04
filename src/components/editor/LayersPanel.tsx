@@ -29,6 +29,7 @@ import { ROOT, useEditorStore, type EditorNode } from "@/stores/useEditorStore";
 import { findInstanceRoot } from "@/lib/componentModel";
 import { isAncestorOf } from "@/lib/editorGraph";
 import { BOOLEAN_OPERATION_LABELS, isMaskGroup } from "@/lib/booleanGeometry";
+import { didPointerExitElement } from "@/lib/domPointer";
 
 function KindIcon({ node }: { node: EditorNode }) {
   const c = "h-3.5 w-3.5 shrink-0 text-app-subtle";
@@ -193,8 +194,7 @@ function LayerRow({
   };
 
   const onRowDragLeave = (e: React.DragEvent) => {
-    const rt = e.relatedTarget as Node | null;
-    if (!rt || !(e.currentTarget as HTMLElement).contains(rt)) {
+    if (didPointerExitElement(e.currentTarget, e.relatedTarget)) {
       setIndicator(null);
     }
   };

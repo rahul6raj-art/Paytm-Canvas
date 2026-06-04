@@ -12,6 +12,7 @@ import {
   effectivePolygonParams,
   isPolygonNode,
   polygonCornerRadiusHandleLocal,
+  polygonSidesHandleLocal,
 } from "@/lib/shapes/polygonGeometry";
 import {
   beginPolygonCornerRadiusDrag,
@@ -19,12 +20,18 @@ import {
   subscribePolygonPreview,
 } from "@/lib/shapes/polygonDrag";
 import {
+  beginPolygonSidesDrag,
+  getPolygonSidesPreview,
+  subscribePolygonSidesPreview,
+} from "@/lib/shapes/polygonSidesDrag";
+import {
   getNodeWorldMatrixFromChildOrder,
   getRenderedWorldBounds,
 } from "@/lib/editorGraph";
 import { applyMatrixToPoint } from "@/lib/transformMath";
 import { useCanvasToWorld } from "./CanvasToWorldContext";
 import { clientToWorldFromDocument } from "@/lib/canvasCoordinates";
+import { useShapeEditHandlesGate } from "./useShapeEditHandles";
 
 function localToWorld(
   nodeId: string,
@@ -38,21 +45,13 @@ function localToWorld(
   return { x: b.x + local.x, y: b.y + local.y };
 }
 
-/** Corner-radius handle on polygon top vertex (single selection). */
+/** Polygon side count + corner-radius handles (shape edit mode). */
 export function PolygonHandles() {
-  const selectedIds = useEditorStore((s) => s.selectedIds);
   const nodes = useEditorStore((s) => s.nodes);
   const childOrder = useEditorStore((s) => s.childOrder);
   const zoom = useEditorStore((s) => s.zoom);
-  const tool = useEditorStore((s) => s.tool);
-  const editorMode = useEditorStore((s) => s.editorMode);
-  const penDrawingNodeId = useEditorStore((s) => s.penDrawingNodeId);
-  const pencilDrawingNodeId = useEditorStore((s) => s.pencilDrawingNodeId);
-  const isPlacingComment = useEditorStore((s) => s.isPlacingComment);
-  const pathEditModeNodeId = useEditorStore((s) => s.pathEditModeNodeId);
   const toWorld = useCanvasToWorld();
-
-  const id = selectedIds.length === 1 ? selectedIds[0]! : null;
+  const { show: editActive, id } = useShapeEditHandlesGate();
   const node = id ? nodes[id] : null;
 
   const polygonPreview = useSyncExternalStore(
@@ -60,23 +59,24 @@ export function PolygonHandles() {
     getPolygonPreview,
     () => null,
   );
+  const sidesPreview = useSyncExternalStore(
+    subscribePolygonSidesPreview,
+    getPolygonSidesPreview,
+    () => null,
+  );
 
-  const [dragging, setDragging] = useState(false);
+  const [dragging, setDragging] = useState<"corner" | "sides" | null>(null);
 
-  const show =
-    editorMode === "design" &&
-    tool === "move" &&
-    !penDrawingNodeId &&
-    !pencilDrawingNodeId &&
-    !isPlacingComment &&
-    !pathEditModeNodeId &&
-    id &&
-    node &&
-    isPolygonNode(node) &&
-    !node.locked;
+  const show = editActive && node && isPolygonNode(node) && !node.locked;
 
   const params = useMemo(() => {
     if (!node) return null;
+    if (sidesPreview?.nodeId === id) {
+      return {
+        sides: sidesPreview.sides,
+        cornerRadius: sidesPreview.cornerRadius,
+      };
+    }
     if (polygonPreview?.nodeId === id) {
       return {
         sides: polygonPreview.sides,
@@ -84,9 +84,9 @@ export function PolygonHandles() {
       };
     }
     return effectivePolygonParams(node);
-  }, [node, polygonPreview, id]);
+  }, [node, polygonPreview, sidesPreview, id]);
 
-  const handleWorld = useMemo(() => {
+  const cornerWorld = useMemo(() => {
     if (!show || !id || !node || !params) return null;
     const local = polygonCornerRadiusHandleLocal(
       params.sides,
@@ -94,6 +94,12 @@ export function PolygonHandles() {
       node.height,
       params.cornerRadius,
     );
+    return localToWorld(id, local, nodes, childOrder);
+  }, [show, id, node, params, nodes, childOrder]);
+
+  const sidesWorld = useMemo(() => {
+    if (!show || !id || !node || !params) return null;
+    const local = polygonSidesHandleLocal(params.sides, node.width, node.height);
     return localToWorld(id, local, nodes, childOrder);
   }, [show, id, node, params, nodes, childOrder]);
 
@@ -106,53 +112,84 @@ export function PolygonHandles() {
     [toWorld],
   );
 
-  const onPointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      if (!id) return;
-      e.stopPropagation();
-      e.preventDefault();
-      setDragging(true);
-      beginPolygonCornerRadiusDrag({
-        nodeId: id,
-        pointerId: e.pointerId,
-        clientX: e.clientX,
-        clientY: e.clientY,
-        clientToWorld,
-        captureTarget: e.currentTarget,
-      });
-      const onEnd = () => {
-        setDragging(false);
-        window.removeEventListener("pointerup", onEnd);
-        window.removeEventListener("pointercancel", onEnd);
-      };
-      window.addEventListener("pointerup", onEnd);
-      window.addEventListener("pointercancel", onEnd);
-    },
-    [id, clientToWorld],
-  );
-
-  if (!show || !handleWorld) return null;
+  if (!show || !cornerWorld || !sidesWorld) return null;
 
   const size = screenPxToWorld(CANVAS_HANDLE_SCREEN_PX, zoom);
   const borderWorld = screenPxToWorld(CANVAS_OUTLINE_SCREEN_PX, zoom);
 
   return (
-    <button
-      type="button"
-      data-polygon-corner-handle
-      aria-label="Adjust polygon corner radius"
-      title="Drag to round polygon corners"
-      className="pointer-events-auto absolute z-[31] touch-none rounded-full border-2 border-[#18a0fb] bg-white/90 will-change-transform"
-      style={{
-        left: handleWorld.x - size / 2,
-        top: handleWorld.y - size / 2,
-        width: size,
-        height: size,
-        boxShadow: `0 0 0 ${borderWorld}px ${CANVAS_VISUAL.selection}`,
-        opacity: (params?.cornerRadius ?? 0) > 0 || dragging ? 1 : 0.65,
-        transition: dragging ? "none" : undefined,
-      }}
-      onPointerDown={onPointerDown}
-    />
+    <>
+      <button
+        type="button"
+        data-polygon-sides-handle
+        aria-label="Adjust polygon sides"
+        title={`Sides: ${params?.sides ?? 6} — drag to change`}
+        className="pointer-events-auto absolute z-[34] touch-none rounded-sm border-2 border-[#18a0fb] bg-white will-change-transform"
+        style={{
+          left: sidesWorld.x - size / 2,
+          top: sidesWorld.y - size / 2,
+          width: size,
+          height: size,
+          boxShadow: `0 0 0 ${borderWorld}px ${CANVAS_VISUAL.selection}`,
+          transition: dragging === "sides" ? "none" : undefined,
+        }}
+        onPointerDown={(e) => {
+          if (!id) return;
+          e.stopPropagation();
+          e.preventDefault();
+          setDragging("sides");
+          beginPolygonSidesDrag({
+            nodeId: id,
+            pointerId: e.pointerId,
+            clientToWorld,
+            captureTarget: e.currentTarget,
+          });
+          const onEnd = () => {
+            setDragging(null);
+            window.removeEventListener("pointerup", onEnd);
+            window.removeEventListener("pointercancel", onEnd);
+          };
+          window.addEventListener("pointerup", onEnd);
+          window.addEventListener("pointercancel", onEnd);
+        }}
+      />
+      <button
+        type="button"
+        data-polygon-corner-handle
+        aria-label="Adjust polygon corner radius"
+        title="Drag to round polygon corners"
+        className="pointer-events-auto absolute z-[34] touch-none rounded-full border-2 border-[#18a0fb] bg-white/90 will-change-transform"
+        style={{
+          left: cornerWorld.x - size / 2,
+          top: cornerWorld.y - size / 2,
+          width: size,
+          height: size,
+          boxShadow: `0 0 0 ${borderWorld}px ${CANVAS_VISUAL.selection}`,
+          opacity: (params?.cornerRadius ?? 0) > 0 || dragging === "corner" ? 1 : 0.65,
+          transition: dragging === "corner" ? "none" : undefined,
+        }}
+        onPointerDown={(e) => {
+          if (!id) return;
+          e.stopPropagation();
+          e.preventDefault();
+          setDragging("corner");
+          beginPolygonCornerRadiusDrag({
+            nodeId: id,
+            pointerId: e.pointerId,
+            clientX: e.clientX,
+            clientY: e.clientY,
+            clientToWorld,
+            captureTarget: e.currentTarget,
+          });
+          const onEnd = () => {
+            setDragging(null);
+            window.removeEventListener("pointerup", onEnd);
+            window.removeEventListener("pointercancel", onEnd);
+          };
+          window.addEventListener("pointerup", onEnd);
+          window.removeEventListener("pointercancel", onEnd);
+        }}
+      />
+    </>
   );
 }

@@ -14,7 +14,7 @@ import {
   worldRect,
   worldToLocalForNode,
 } from "@/lib/tree";
-import { insertIndexInAutoLayout, type LayoutNode } from "@/lib/autoLayout";
+import type { LayoutNode } from "@/lib/autoLayout";
 import { buildParentMapFromChildOrder, isAncestorOf } from "@/lib/editorGraph";
 import { mergeInstanceOverrides } from "@/lib/componentModel";
 import { legacyEffectShadowAppend, resolveEffectBoxShadow, resolveNodeWithDesignTokens } from "@/lib/designTokens";
@@ -35,6 +35,10 @@ import {
   selectionTargetForClick,
   shouldCollapseContainerHits,
 } from "@/lib/containerSelection";
+import {
+  canEnterParametricShapeEdit,
+  shouldEnterPathEditOnEdit,
+} from "@/lib/editMode/shapeEditGate";
 import { clampCornerRadii, cornerRadiiToCss, getNodeCornerRadii } from "@/lib/cornerRadius";
 import { layerBlendCanvasStyle } from "@/lib/layerBlendMode";
 import { prepareAltDragDuplicate } from "@/lib/canvasAltDrag";
@@ -49,8 +53,10 @@ import { TextCanvasView } from "./TextCanvasView";
 import { ShapeVectorView } from "./ShapeVectorView";
 import { BooleanGroupView, MaskGroupView } from "./BooleanGroupView";
 import { shouldClipChildren } from "@/lib/clipChildren";
+import { DEFAULT_FRAME_FILL } from "@/lib/shapes/shapeModel";
 import { cssRotationStyle } from "@/lib/transformMath";
 import { shouldSuppressCanvasPointer } from "@/lib/canvasCreationGuard";
+import { didPointerExitElement } from "@/lib/domPointer";
 
 function isUnder(nodes: Record<string, EditorNode>, nodeId: string, ancestorId: string): boolean {
   let cur: string | null = nodes[nodeId]?.parentId ?? null;
@@ -149,8 +155,6 @@ export function CanvasObject({ id }: { id: string }) {
   const editingTextId = useEditorStore((s) => s.editingTextId);
   const textEditSelection = useEditorStore((s) => s.textEditSelection);
   const setEditingTextId = useEditorStore((s) => s.setEditingTextId);
-  const reorderNode = useEditorStore((s) => s.reorderNode);
-  const moveNodeToParent = useEditorStore((s) => s.moveNodeToParent);
   const editorMode = useEditorStore((s) => s.editorMode);
   const startPrototypeConnection = useEditorStore((s) => s.startPrototypeConnection);
   const finishPrototypeConnection = useEditorStore((s) => s.finishPrototypeConnection);
@@ -176,17 +180,6 @@ export function CanvasObject({ id }: { id: string }) {
     nodeId: id,
   });
 
-
-  const dragRef = useRef<{
-    pointerId: number;
-    sx: number;
-    sy: number;
-    primaryId: string;
-    startWorld: Record<string, { x: number; y: number }>;
-    mode: "free" | "al-reorder";
-    alParentId?: string;
-    lastAlInsert?: number;
-  } | null>(null);
 
   const pathPointDragRef = useRef<{
     pointerId: number;
@@ -496,7 +489,7 @@ export function CanvasObject({ id }: { id: string }) {
             ? undefined
             : node.fillEnabled === false
               ? "transparent"
-              : (fill ?? "#ffffff"),
+              : (fill ?? DEFAULT_FRAME_FILL),
           borderRadius: cornerRadiusCss,
           overflow: shouldClipChildren(node) ? "hidden" : "visible",
         }}
@@ -613,11 +606,7 @@ export function CanvasObject({ id }: { id: string }) {
           !node.maskId &&
           (node.layoutMode ?? "none") === "none"
             ? `1px dashed ${CANVAS_VISUAL.groupOutline}`
-            : node.isBooleanGroup
-              ? `1px dashed ${CANVAS_VISUAL.booleanOutline}`
-              : node.maskId
-                ? `1px dashed ${CANVAS_VISUAL.maskOutline}`
-                : undefined,
+            : undefined,
         boxShadow: combinedShadow,
         filter: combinedFilter,
         backdropFilter: er.backdropFilter,
@@ -670,10 +659,16 @@ export function CanvasObject({ id }: { id: string }) {
           return;
         }
 
-        if (node.type !== "path") return;
         e.stopPropagation();
-        if (st.pathEditModeNodeId === id) st.setPathEditMode(null);
-        else st.setPathEditMode(id);
+        if (shouldEnterPathEditOnEdit(node)) {
+          if (st.pathEditModeNodeId === id) st.setPathEditMode(null);
+          else st.setPathEditMode(id);
+          return;
+        }
+        if (canEnterParametricShapeEdit(node)) {
+          if (st.shapeEditModeNodeId === id) st.exitShapeEditMode();
+          else st.enterShapeEditMode(id);
+        }
       }}
       onPointerEnter={() => {
         if (!node.visible) return;
@@ -684,8 +679,7 @@ export function CanvasObject({ id }: { id: string }) {
         if (!node.locked) setHoveredCanvasId(id);
       }}
       onPointerLeave={(e) => {
-        const rt = e.relatedTarget as Node | null;
-        if (!rt || !(e.currentTarget as HTMLElement).contains(rt)) {
+        if (didPointerExitElement(e.currentTarget, e.relatedTarget)) {
           if (useEditorStore.getState().hoveredCanvasId === id) setHoveredCanvasId(null);
         }
       }}

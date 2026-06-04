@@ -6,6 +6,8 @@ export const PC_ID_ATTR = "data-pc-id";
 export const PC_NAME_ATTR = "data-pc-name";
 export const PC_COMPONENT_ATTR = "data-pc-component";
 export const PC_ROOT_ATTR = "data-pc-root";
+export const PC_BOOLEAN_OP_ATTR = "data-pc-boolean-op";
+export const PC_MASK_GROUP_ATTR = "data-pc-mask-group";
 
 const VALID_NODE_KINDS = new Set<NodeKind>([
   "frame",

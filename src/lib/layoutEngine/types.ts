@@ -37,6 +37,8 @@ export interface LayoutEngineNode {
   layoutSizingHorizontal?: LayoutSizingMode;
   layoutSizingVertical?: LayoutSizingMode;
   layoutPositioning?: LayoutPositioning;
+  /** Flex grow weight when main-axis sizing is fill (0 = equal split with other fill children). */
+  layoutGrow?: number;
 
   minWidth?: number;
   minHeight?: number;

@@ -4,6 +4,13 @@ import type { DesignToken } from "@/lib/designTokens";
 import type { EditorNode } from "@/stores/useEditorStore";
 import { collectSubtreeForExport } from "./collectSubtree";
 import { ellipseArcJsxAttrs } from "@/lib/shapes/ellipseArcExport";
+import {
+  booleanGroupExportSvgMarkup,
+  codeExportChildIds,
+  compositeGroupHtmlAttrParts,
+  maskGroupClipDefsMarkup,
+} from "@/lib/codeExport/compositeShapeExport";
+import { isBooleanGroup, isMaskGroup } from "@/lib/booleanGeometry";
 import { nodeToReactStyle, sanitizeComponentName, styleToLiteral } from "./reactStyle";
 import {
   CODE_PAYLOAD_END,
@@ -107,9 +114,13 @@ export function nodeToJsx(
   opts?: JsxExportOptions,
 ): string {
   const pad = "  ".repeat(depth);
-  const kids = childOrder[node.id] ?? [];
+  const kids = codeExportChildIds(node, childOrder);
   const style = styleToLiteral(
-    nodeToReactStyle(node, designTokens, { isFrameRoot: opts?.isFrameRoot }),
+    nodeToReactStyle(node, designTokens, {
+      isFrameRoot: opts?.isFrameRoot,
+      nodes,
+      childOrder,
+    }),
   );
   const rootAttr =
     opts?.isPcRoot && opts.pcRootId ? ` data-pc-root=${JSON.stringify(opts.pcRootId)}` : "";
@@ -118,6 +129,15 @@ export function nodeToJsx(
   const typeAttr = ` data-pc-type=${JSON.stringify(node.type)}`;
   const classAttr = node.codeClassName ? ` className=${JSON.stringify(node.codeClassName)}` : "";
   const componentAttr = portableComponentAttr(node, opts);
+  const compositeAttrs = compositeGroupHtmlAttrParts(node)
+    .map((part) => {
+      const eq = part.indexOf("=");
+      if (eq < 0) return "";
+      const key = part.slice(0, eq);
+      const raw = part.slice(eq + 2, -1);
+      return ` ${key}=${JSON.stringify(raw)}`;
+    })
+    .join("");
   const tag = jsxTagForNode(node, opts);
 
   if (node.type === "text" && tag === "p") {
@@ -137,7 +157,47 @@ export function nodeToJsx(
     node.type === "arrow" ||
     node.type === "path"
   ) {
-    return `${pad}<div${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr}${ellipseArcJsxAttrs(node)} data-pc-shape=${JSON.stringify(node.type)} style={${style}} />\n`;
+    return `${pad}<div${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr}${compositeAttrs}${ellipseArcJsxAttrs(node)} data-pc-shape=${JSON.stringify(node.type)} style={${style}} />\n`;
+  }
+
+  if (isBooleanGroup(node)) {
+    const svgInner = booleanGroupExportSvgMarkup(node, nodes, childOrder)
+      .replace(/^<svg[^>]*>/, "")
+      .replace(/<\/svg>\s*$/, "");
+    const w = Math.max(1, node.width);
+    const h = Math.max(1, node.height);
+    return `${pad}<div${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr}${compositeAttrs} style={${style}}>
+${pad}  <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style={{ display: 'block', position: 'absolute', inset: 0 }} aria-hidden>
+${pad}    ${svgInner}
+${pad}  </svg>
+${pad}</div>\n`;
+  }
+
+  if (isMaskGroup(node)) {
+    const clip = maskGroupClipDefsMarkup(node, nodes, childOrder);
+    const inner = kids
+      .map((cid) => {
+        const c = nodes[cid];
+        const childOpts = opts?.isPcRoot ? (opts.portable ? { portable: true } : undefined) : opts;
+        return c ? nodeToJsx(c, nodes, childOrder, designTokens, depth + 2, childOpts) : "";
+      })
+      .join("");
+    const clipStyle = clip
+      ? `{ position: 'relative', width: '100%', height: '100%', clipPath: ${JSON.stringify(clip.clipRef)} }`
+      : `{ position: 'relative', width: '100%', height: '100%' }`;
+    const defsJsx = clip
+      ? `${pad}  <svg xmlns="http://www.w3.org/2000/svg" width={0} height={0} style={{ position: 'absolute', overflow: 'hidden' }} aria-hidden>
+${pad}    <defs>
+${pad}      <clipPath id=${JSON.stringify(clip.clipId)} clipPathUnits="userSpaceOnUse">
+${pad}        <path d={${JSON.stringify(clip.clipD)}} />
+${pad}      </clipPath>
+${pad}    </defs>
+${pad}  </svg>\n`
+      : "";
+    return `${pad}<div${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr}${compositeAttrs} style={${style}}>
+${defsJsx}${pad}  <div style={${clipStyle}}>
+${inner}${pad}  </div>
+${pad}</div>\n`;
   }
 
   const shapeAttr =
@@ -155,7 +215,7 @@ export function nodeToJsx(
       return c ? nodeToJsx(c, nodes, childOrder, designTokens, depth + 1, childOpts) : "";
     })
     .join("");
-  return `${pad}<${tag}${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr}${shapeAttr} style={${style}}>\n${inner}${pad}</${tag}>\n`;
+  return `${pad}<${tag}${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr}${compositeAttrs}${shapeAttr} style={${style}}>\n${inner}${pad}</${tag}>\n`;
 }
 
 export function buildCodeRoundTripPayload(input: ReactExportInput): CodeRoundTripPayloadV1 {

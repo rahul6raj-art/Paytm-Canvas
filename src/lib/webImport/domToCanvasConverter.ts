@@ -5,6 +5,7 @@ import type {
   ImportWebPageMeta,
 } from "@/lib/webImport/types";
 import { sanitizeImportText } from "@/lib/webImport/urlValidation";
+import { DEFAULT_FRAME_FILL, DEFAULT_SHAPE_FILL } from "@/lib/shapes/shapeModel";
 
 let idSeq = 0;
 function nextId(prefix: string): string {
@@ -171,7 +172,9 @@ function convertNode(
     locked: false,
     expanded: true,
     ...codeFieldsFromDom(node),
-    fill: fill ?? (type === "frame" ? "#ffffff" : type === "rectangle" ? fill : undefined),
+    fill:
+      fill ??
+      (type === "frame" ? DEFAULT_FRAME_FILL : type === "text" ? undefined : DEFAULT_SHAPE_FILL),
     fillEnabled: type !== "text" ? Boolean(fill) || type === "frame" : false,
     fillOpacity: parseFloat(node.styles.opacity ?? "1") || 1,
     cornerRadius: parsePx(node.styles.borderRadius),

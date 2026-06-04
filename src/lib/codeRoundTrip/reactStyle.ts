@@ -10,6 +10,12 @@ import { shouldClipChildren } from "@/lib/clipChildren";
 import { cornerRadiiMax, cornerRadiiToCss, getNodeCornerRadii } from "@/lib/cornerRadius";
 import { layerBlendCanvasStyle } from "@/lib/layerBlendMode";
 import { ellipseArcExportStyle } from "@/lib/shapes/ellipseArcExport";
+import {
+  booleanGroupExportStyle,
+  maskGroupExportStyle,
+} from "@/lib/codeExport/compositeShapeExport";
+import { isBooleanGroup, isMaskGroup } from "@/lib/booleanGeometry";
+import { strokeSidesToReactStyle } from "@/lib/strokeAlign";
 import { buildLayerCssTransform } from "@/lib/transformMath";
 import type { EditorNode } from "@/stores/useEditorStore";
 
@@ -18,6 +24,8 @@ export type ReactStyleRecord = Record<string, string | number>;
 export type CodeStyleOptions = {
   /** Screen frame root in code: (0,0) origin, no canvas x/y on the frame */
   isFrameRoot?: boolean;
+  nodes?: Record<string, EditorNode>;
+  childOrder?: Record<string, string[]>;
 };
 
 export function nodeToReactStyle(
@@ -68,13 +76,17 @@ export function nodeToReactStyle(
     return style;
   }
 
-  const bg = fillCss(resolved.fill, resolved.fillOpacity, resolved.fillEnabled);
-  if (bg !== "transparent") style.background = bg;
+  const compositeGroup = isBooleanGroup(node) || isMaskGroup(node);
+
+  if (!compositeGroup) {
+    const bg = fillCss(resolved.fill, resolved.fillOpacity, resolved.fillEnabled);
+    if (bg !== "transparent") style.background = bg;
+  }
 
   const sw = node.strokeWidth ?? 0;
   const sc = node.strokeColor;
-  if (sw > 0 && sc) {
-    style.border = `${sw}px solid ${sc}`;
+  if (!compositeGroup && sw > 0 && sc && node.strokeEnabled !== false) {
+    Object.assign(style, strokeSidesToReactStyle(node));
   } else if (node.type === "frame") {
     style.border = "1px solid #e5e5e5";
   }
@@ -123,6 +135,12 @@ export function nodeToReactStyle(
       style.top = Math.round(node.y * 100) / 100;
     }
     style.overflow = shouldClipChildren(node) ? "hidden" : "visible";
+    const nodes = codeOpts?.nodes;
+    const childOrder = codeOpts?.childOrder;
+    if (nodes && childOrder) {
+      Object.assign(style, booleanGroupExportStyle(node, nodes, childOrder));
+      Object.assign(style, maskGroupExportStyle(node, nodes, childOrder));
+    }
   }
 
   const tokens = designTokens ?? {};

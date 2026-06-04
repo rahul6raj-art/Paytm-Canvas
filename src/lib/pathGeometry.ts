@@ -15,6 +15,73 @@ export function newPathPointId(): string {
   return `pt-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+/** Parse SVG path `d` (M/L/C/H/V/Z) into path points for import / boolean round-trip. */
+export function svgPathDToPathPoints(svgPath: string): PathPoint[] {
+  const tokens = svgPath.match(/[a-zA-Z]|-?\d*\.?\d+(?:e[-+]?\d+)?/g);
+  if (!tokens?.length) return [];
+  const points: PathPoint[] = [];
+  let i = 0;
+  let cx = 0;
+  let cy = 0;
+  let startX = 0;
+  let startY = 0;
+
+  const readNum = () => parseFloat(tokens[i++] ?? "0");
+
+  while (i < tokens.length) {
+    const cmd = tokens[i++]!;
+    const rel = cmd === cmd.toLowerCase();
+    const c = cmd.toUpperCase();
+
+    if (c === "M") {
+      const x = readNum() + (rel ? cx : 0);
+      const y = readNum() + (rel ? cy : 0);
+      cx = x;
+      cy = y;
+      startX = x;
+      startY = y;
+      points.push({ id: newPathPointId(), x, y });
+    } else if (c === "L") {
+      const x = readNum() + (rel ? cx : 0);
+      const y = readNum() + (rel ? cy : 0);
+      cx = x;
+      cy = y;
+      points.push({ id: newPathPointId(), x, y });
+    } else if (c === "H") {
+      const x = readNum() + (rel ? cx : 0);
+      cx = x;
+      points.push({ id: newPathPointId(), x, y: cy });
+    } else if (c === "V") {
+      const y = readNum() + (rel ? cy : 0);
+      cy = y;
+      points.push({ id: newPathPointId(), x: cx, y });
+    } else if (c === "C") {
+      const c1x = readNum() + (rel ? cx : 0);
+      const c1y = readNum() + (rel ? cy : 0);
+      const c2x = readNum() + (rel ? cx : 0);
+      const c2y = readNum() + (rel ? cy : 0);
+      const x = readNum() + (rel ? cx : 0);
+      const y = readNum() + (rel ? cy : 0);
+      const prev = points[points.length - 1];
+      if (prev) {
+        prev.handleOut = { x: c1x - prev.x, y: c1y - prev.y };
+      }
+      points.push({
+        id: newPathPointId(),
+        x,
+        y,
+        handleIn: prev ? { x: c2x - x, y: c2y - y } : undefined,
+      });
+      cx = x;
+      cy = y;
+    } else if (c === "Z") {
+      cx = startX;
+      cy = startY;
+    }
+  }
+  return points;
+}
+
 export function pathBounds(points: PathPoint[]): { x: number; y: number; width: number; height: number } {
   if (points.length === 0) return { x: 0, y: 0, width: 1, height: 1 };
   let minX = Infinity;

@@ -136,6 +136,37 @@ describe("layoutEngine — auto gap", () => {
   });
 });
 
+describe("layoutEngine — layoutGrow fill distribution", () => {
+  it("splits extra main-axis space by layoutGrow weights", () => {
+    const nodes: Record<string, LayoutEngineNode> = {
+      parent: rootFrame("parent", {
+        layoutMode: "horizontal",
+        layoutGap: 0,
+        width: 300,
+        height: 60,
+        paddingLeft: 0,
+        paddingRight: 0,
+        layoutSizingHorizontal: "fixed",
+        layoutSizingVertical: "fixed",
+      }),
+      a: frame("a", 0, 0, 50, 40, {
+        parentId: "parent",
+        layoutSizingHorizontal: "fill",
+        layoutGrow: 1,
+      }),
+      b: frame("b", 0, 0, 50, 40, {
+        parentId: "parent",
+        layoutSizingHorizontal: "fill",
+        layoutGrow: 3,
+      }),
+    };
+    const childOrder = { parent: ["a", "b"] };
+    const out = layoutAutoNode("parent", nodes, childOrder);
+    assert.equal(out.children.a?.width, 75);
+    assert.equal(out.children.b?.width, 225);
+  });
+});
+
 describe("layoutEngine — padding on fixed frame", () => {
   it("keeps frame width/height and shrinks the inner content area when padding grows", () => {
     const base: Record<string, LayoutEngineNode> = {

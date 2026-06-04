@@ -234,6 +234,99 @@ function wrapInAutoLayoutFrame(
   return { nodes: laidOut, childOrder: nextOrder, frameId: fid };
 }
 
+/** Figma ⌘⌥G — wrap selection in a frame without enabling auto layout. */
+function wrapInPlainFrame(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  topIds: string[],
+): { nodes: Record<string, EditorNode>; childOrder: Record<string, string[]>; frameId: string } | null {
+  if (topIds.length === 0) return null;
+  const parentId = nodes[topIds[0]!]!.parentId;
+  if (!topIds.every((id) => nodes[id]!.parentId === parentId)) return null;
+
+  const P = parentListKey(parentId);
+  const pw = parentId ? worldRect(parentId, nodes) : { x: 0, y: 0, width: 0, height: 0 };
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const id of topIds) {
+    const w = worldRect(id, nodes);
+    minX = Math.min(minX, w.x);
+    minY = Math.min(minY, w.y);
+    maxX = Math.max(maxX, w.x + w.width);
+    maxY = Math.max(maxY, w.y + w.height);
+  }
+
+  const fw = Math.max(1, maxX - minX);
+  const fh = Math.max(1, maxY - minY);
+  const fx = minX - pw.x;
+  const fy = minY - pw.y;
+  const fid = `frame-wrap-${Date.now()}`;
+  const nextNodes = { ...nodes };
+  const nextOrder = { ...childOrder };
+
+  for (const id of topIds) {
+    const w = worldRect(id, nodes);
+    const cn = nextNodes[id]!;
+    nextNodes[id] = {
+      ...cn,
+      parentId: fid,
+      x: w.x - minX,
+      y: w.y - minY,
+    };
+  }
+
+  nextNodes[fid] = {
+    id: fid,
+    parentId,
+    type: "frame",
+    name: topIds.length === 1 ? nextNodes[topIds[0]!]!.name || "Frame" : "Frame",
+    x: fx,
+    y: fy,
+    width: fw,
+    height: fh,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    fillEnabled: false,
+    fill: "#ffffff",
+    clipChildren: true,
+    layoutMode: "none",
+  };
+
+  const list = [...(nextOrder[P] ?? [])];
+  const ixs = topIds.map((id) => list.indexOf(id)).sort((a, b) => a - b);
+  const insertAt = ixs[0] ?? list.length;
+  const newList = list.filter((id) => !topIds.includes(id));
+  newList.splice(insertAt, 0, fid);
+  nextOrder[P] = newList;
+  nextOrder[fid] = [...topIds];
+
+  return { nodes: nextNodes, childOrder: nextOrder, frameId: fid };
+}
+
+export function applyWrapSelectionInFrame(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  selectedIds: string[],
+): ApplyAutoLayoutSelectionResult | null {
+  const tops = topLevelSelectedIds(selectedIds, nodes).filter((id) => {
+    const n = nodes[id];
+    return n && n.visible && !n.locked;
+  });
+  if (tops.length < 1) return null;
+  const wrapped = wrapInPlainFrame(nodes, childOrder, tops);
+  if (!wrapped) return null;
+  return {
+    nodes: wrapped.nodes,
+    childOrder: wrapped.childOrder,
+    selectedIds: [wrapped.frameId],
+  };
+}
+
 export type ApplyAutoLayoutSelectionResult = {
   nodes: Record<string, EditorNode>;
   childOrder: Record<string, string[]>;

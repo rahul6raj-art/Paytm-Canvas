@@ -2,8 +2,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   isToolShortcutEvent,
+  shouldAllowNativeFieldClipboard,
   shouldBlockDeleteSelectionShortcut,
   shouldYieldShortcutsToTyping,
+  resolveToolFromKeyboardEvent,
   toolFromShortcutKey,
 } from "@/lib/editorKeyboardFocus";
 
@@ -24,6 +26,29 @@ describe("editorKeyboardFocus shortcuts", () => {
   it("detects tool shortcut keys", () => {
     const e = { key: "v", metaKey: false, ctrlKey: false, altKey: false } as KeyboardEvent;
     assert.equal(isToolShortcutEvent(e), true);
+  });
+
+  it("resolves shift+pencil and comment tools", () => {
+    assert.equal(
+      resolveToolFromKeyboardEvent({
+        key: "P",
+        shiftKey: true,
+        metaKey: false,
+        ctrlKey: false,
+        altKey: false,
+      } as KeyboardEvent),
+      "pencil",
+    );
+    assert.equal(
+      resolveToolFromKeyboardEvent({
+        key: "c",
+        shiftKey: false,
+        metaKey: false,
+        ctrlKey: false,
+        altKey: false,
+      } as KeyboardEvent),
+      "comment",
+    );
   });
 
   it("does not yield modifier shortcuts", () => {
@@ -63,5 +88,18 @@ describe("editorKeyboardFocus shortcuts", () => {
       altKey: false,
     } as KeyboardEvent;
     assert.equal(shouldYieldShortcutsToTyping(e, fakeTextarea()), true);
+  });
+
+  it("allows native paste in code import textarea", () => {
+    const e = {
+      key: "v",
+      code: "KeyV",
+      metaKey: true,
+      ctrlKey: false,
+      altKey: false,
+      shiftKey: false,
+    } as KeyboardEvent;
+    assert.equal(shouldAllowNativeFieldClipboard(e, fakeTextarea()), true);
+    assert.equal(shouldAllowNativeFieldClipboard(e, null), false);
   });
 });

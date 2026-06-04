@@ -27,8 +27,11 @@ import {
 import {
   resolveStrokeColor,
   strokeIsVisible,
+  svgStrokePresentationFromNode,
   svgStrokePropsFromNode,
 } from "@/lib/stroke";
+import { fullEllipsePathD, shouldUseAlignedPathStroke } from "@/lib/strokeAlign";
+import { renderShapeStrokeLayers } from "./StrokedShapeLayers";
 import {
   effectiveEllipseArc,
   ellipseArcPathD,
@@ -68,18 +71,25 @@ export function ShapeVectorView({
   const showShapeFill = !strokeOnly && node.fillEnabled !== false && isGradientFill;
   const fillVisible = !strokeOnly && node.fillEnabled !== false;
   const solidFill = fillVisible && !showShapeFill ? fill : "none";
-  const strokePresentation = svgStrokePropsFromNode(node);
+  const strokePresentation = svgStrokePresentationFromNode(node);
   const strokeProps = {
     stroke: showStroke ? sc : "none",
     strokeWidth: showStroke ? sw : 0,
-    ...strokePresentation,
+    ...svgStrokePropsFromNode(node),
   };
 
   if (node.type === "rectangle" || node.type === "frame") {
     const radii = clampCornerRadii(getNodeCornerRadii(node), node.width, node.height);
     const uniform = isUniformCornerRadii(radii);
     const r = uniformCornerRadiusForRect(node, node.width, node.height);
-    const pathD = uniform ? null : roundedRectPathD(node.width, node.height, radii);
+    const pathD = uniform
+      ? roundedRectPathD(node.width, node.height, [
+          r,
+          r,
+          r,
+          r,
+        ])
+      : roundedRectPathD(node.width, node.height, radii);
     return (
       <>
         {showShapeFill ? <ShapeGradientFill node={node} nodeId={nodeId} shape="rect" /> : null}
@@ -89,19 +99,18 @@ export function ShapeVectorView({
           height={node.height}
           aria-hidden
         >
-          {pathD ? (
-            <path d={pathD} fill={solidFill} {...strokeProps} />
-          ) : (
-            <rect
-              x={0}
-              y={0}
-              width={node.width}
-              height={node.height}
-              rx={r}
-              ry={r}
-              fill={solidFill}
-              {...strokeProps}
-            />
+          {renderShapeStrokeLayers(
+            { ...node, id: nodeId },
+            {
+              pathD,
+              fill: solidFill,
+              showStroke,
+              strokeColor: sc,
+              strokeWidth: sw,
+              strokePresentation,
+              uniformRect: uniform ? { width: node.width, height: node.height, rx: r } : undefined,
+              closed: true,
+            },
           )}
         </svg>
       </>
@@ -146,21 +155,37 @@ export function ShapeVectorView({
           height={node.height}
           aria-hidden
         >
-          {arcPath ? (
-            <path
-              d={arcPath}
-              fill={solidFill}
-              fillRule={
-                hasEllipseArcInnerHole(arc.innerRadiusRatio) &&
-                isFullEllipseArc(arc.sweepDeg)
-                  ? "evenodd"
-                  : undefined
-              }
-              {...strokeProps}
-            />
-          ) : (
-            <ellipse cx={cx} cy={cy} rx={cx} ry={cy} fill={solidFill} {...strokeProps} />
-          )}
+          {(() => {
+            const shapeD = arcPath ?? fullEllipsePathD(node.width, node.height);
+            const fillRule =
+              arcPath &&
+              hasEllipseArcInnerHole(arc.innerRadiusRatio) &&
+              isFullEllipseArc(arc.sweepDeg)
+                ? "evenodd"
+                : undefined;
+            if (shouldUseAlignedPathStroke(node, true)) {
+              return renderShapeStrokeLayers(
+                { ...node, id: nodeId },
+                {
+                  pathD: shapeD,
+                  fill: solidFill,
+                  showStroke,
+                  strokeColor: sc,
+                  strokeWidth: sw,
+                  strokePresentation,
+                  closed: true,
+                },
+              );
+            }
+            return (
+              <path
+                d={shapeD}
+                fill={solidFill}
+                fillRule={fillRule}
+                {...strokeProps}
+              />
+            );
+          })()}
         </svg>
       </>
     );
@@ -216,14 +241,29 @@ export function ShapeVectorView({
           aria-hidden
         >
           {markers ? <defs dangerouslySetInnerHTML={{ __html: markers }} /> : null}
-          <path
-            d={d || "M0 0"}
-            fill={closed && fillVisible && !showShapeFill ? solidFill : "none"}
-            {...strokeProps}
-            {...(lineCap ? { strokeLinecap: lineCap } : {})}
-            markerStart={markerRefs.markerStart}
-            markerEnd={markerRefs.markerEnd}
-          />
+          {closed && shouldUseAlignedPathStroke(node, true) ? (
+            renderShapeStrokeLayers(
+              { ...node, id: nodeId },
+              {
+                pathD: d || "M0 0",
+                fill: fillVisible && !showShapeFill ? solidFill : "none",
+                showStroke,
+                strokeColor: sc,
+                strokeWidth: sw,
+                strokePresentation,
+                closed: true,
+              },
+            )
+          ) : (
+            <path
+              d={d || "M0 0"}
+              fill={closed && fillVisible && !showShapeFill ? solidFill : "none"}
+              {...strokeProps}
+              {...(lineCap ? { strokeLinecap: lineCap } : {})}
+              markerStart={markerRefs.markerStart}
+              markerEnd={markerRefs.markerEnd}
+            />
+          )}
         </svg>
       </>
     );

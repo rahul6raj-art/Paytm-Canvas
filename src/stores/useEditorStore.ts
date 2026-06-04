@@ -44,6 +44,7 @@ import {
 } from "@/lib/autoLayout";
 import {
   applyAutoLayoutToSelection,
+  applyWrapSelectionInFrame,
   canAddAutoLayoutToSelection,
 } from "@/lib/autoLayoutSelection";
 import {
@@ -56,8 +57,13 @@ import {
   type ResizeModifiers,
 } from "@/lib/resize";
 import { clearPostCreationPointerSuppress } from "@/lib/canvasCreationGuard";
+import { isCanvasBgCreationTool } from "@/lib/canvasInteractionGuards";
 import { warnInvalidNodeGeometry } from "@/lib/canvasGeometryDev";
 import type { CornerRadii } from "@/lib/cornerRadius";
+import {
+  canEnterParametricShapeEdit,
+  shouldEnterPathEditOnEdit,
+} from "@/lib/editMode/shapeEditGate";
 import {
   alignNodesInDocument,
   alignableSelectionIds,
@@ -79,6 +85,8 @@ import {
   nextFrameName,
   repairNodeHierarchy,
   repairNodeHierarchyIfNeeded,
+  syncGroupFrameToVisible,
+  boundsForMaskAndContent,
   topLevelSelectedIds,
 } from "@/lib/editorGraph";
 import {
@@ -147,17 +155,25 @@ import {
   lineEndpointsFromNode,
 } from "@/lib/shapes/lineGeometry";
 import { polygonGeometryPatch } from "@/lib/shapes/polygonGeometry";
-import { DEFAULT_SHAPE_FILL, DEFAULT_SHAPE_STROKE, type ShapeType } from "@/lib/shapes/shapeModel";
+import {
+  DEFAULT_FRAME_FILL,
+  DEFAULT_SHAPE_FILL,
+  DEFAULT_SHAPE_STROKE,
+  type ShapeType,
+} from "@/lib/shapes/shapeModel";
 import {
   BOOLEAN_OPERATION_LABELS,
   booleanResultToPathNode,
+  boundsForBooleanChildren,
   flattenBooleanGroup,
   getBooleanEligibleSelection,
   isBooleanEligibleNode,
+  isBooleanGroup,
   isMaskGroup,
   topmostAmongSiblings,
   type BooleanOperation,
 } from "@/lib/booleanGeometry";
+import { expandBooleanFillStylePatches } from "@/lib/booleanGroupFill";
 import { getResizeAnchorLocal, solveNodeXYForAnchorWorld } from "@/lib/resizeTransform";
 import {
   finiteCoord,
@@ -340,6 +356,9 @@ export interface EditorNode {
   /** When false, stroke is hidden but settings are kept */
   strokeEnabled?: boolean;
   strokePosition?: StrokePosition;
+  /** Which edges receive stroke (rectangles / frames). */
+  strokeSides?: import("@/lib/strokeAlign").StrokeSidesMode;
+  strokeSidesCustom?: import("@/lib/strokeAlign").StrokeSidesCustom;
   /** Line / open path start cap or arrow */
   strokeStartPoint?: import("@/lib/strokeEndpoints").StrokeEndpoint;
   /** Line / open path end cap or arrow */
@@ -439,6 +458,8 @@ export interface EditorNode {
   layoutWrap?: boolean;
   /** In auto-layout parent: `auto` flows with siblings; `absolute` uses manual x/y. */
   layoutPositioning?: LayoutPositioning;
+  /** Main-axis flex grow when sizing is fill (default 1). */
+  layoutGrow?: number;
   minWidth?: number;
   minHeight?: number;
   maxWidth?: number;
@@ -519,6 +540,8 @@ export type NodeStylePatch = Partial<
     | "strokeOpacity"
     | "strokeEnabled"
     | "strokePosition"
+    | "strokeSides"
+    | "strokeSidesCustom"
     | "strokeStartPoint"
     | "strokeEndPoint"
     | "arrowHead"
@@ -607,6 +630,15 @@ export interface EditorState {
     sourceOrigin: { x: number; y: number };
     targetOrigin: { x: number; y: number };
   } | null;
+  /** Insertion line while reordering a child inside auto layout. */
+  autoLayoutReorderIndicator: {
+    parentId: string;
+    insertIndex: number;
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+  } | null;
   layoutGuides: LayoutGuide[];
   layoutGuideDraft: Pick<LayoutGuide, "axis" | "pos"> | null;
   /** Selected violet ruler guide (layout guide line on canvas). */
@@ -628,6 +660,14 @@ export interface EditorState {
   pencilDrawingNodeId: string | null;
   /** Point-edit mode for a finished path (Backspace deletes selected anchor). */
   pathEditModeNodeId: string | null;
+  /** Parametric shape edit (corner radius, arc, line endpoints, polygon sides, etc.). */
+  shapeEditModeNodeId: string | null;
+  /** Transient mode while resizing or rotating via selection handles. */
+  transformInteractionMode: "none" | "resize" | "rotate";
+  /** True while dragging selected object(s) on canvas. */
+  isMovingSelection: boolean;
+  /** Pointer over rotate-from-corner hit targets (nested enter/leave safe). */
+  rotateHandleHoverCount: number;
   /** Edit children inside a boolean group (Figma-style). */
   objectEditModeNodeId: string | null;
   selectedPathPointId: string | null;
@@ -803,6 +843,8 @@ export interface EditorState {
   ungroupSelection: () => void;
   /** Figma ⇧A — wrap selection in auto-layout frame or enable on container. */
   addAutoLayoutToSelection: () => void;
+  /** Figma ⌘⌥G — wrap selection in a plain frame. */
+  wrapSelectionInFrame: () => void;
   toggleSelectNode: (id: string) => void;
   setSelection: (ids: string[]) => void;
   setGuides: (g: GuideLine[]) => void;
@@ -813,6 +855,16 @@ export interface EditorState {
       targetId: string;
       sourceOrigin: { x: number; y: number };
       targetOrigin: { x: number; y: number };
+    } | null,
+  ) => void;
+  setAutoLayoutReorderIndicator: (
+    indicator: {
+      parentId: string;
+      insertIndex: number;
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
     } | null,
   ) => void;
   setLayoutGuideDraft: (draft: Pick<LayoutGuide, "axis" | "pos"> | null) => void;
@@ -858,6 +910,13 @@ export interface EditorState {
   deletePathPoint: (nodeId: string, pointId: string) => void;
   togglePathClosed: (nodeId: string) => void;
   setPathEditMode: (nodeId: string | null) => void;
+  enterShapeEditMode: (nodeId?: string) => void;
+  exitShapeEditMode: () => void;
+  exitAllEditModes: () => void;
+  toggleEditMode: (nodeId?: string) => void;
+  setTransformInteractionMode: (mode: "none" | "resize" | "rotate") => void;
+  setIsMovingSelection: (active: boolean) => void;
+  setRotateHandleHovered: (hovered: boolean) => void;
   enterVectorEditMode: (nodeId?: string) => void;
   setPathHandleMirroring: (mode: import("@/lib/pathHandles").PathHandleMirroring) => void;
   setSelectedPathPointId: (id: string | null) => void;
@@ -1785,6 +1844,7 @@ const LAYOUT_FIELD_KEYS = new Set<string>([
   "layoutSizingHorizontal",
   "layoutSizingVertical",
   "layoutPositioning",
+  "layoutGrow",
   "minWidth",
   "minHeight",
   "maxWidth",
@@ -1800,6 +1860,8 @@ const INSTANCE_STYLE_KEYS = new Set<string>([
   "strokeColor",
   "strokeWidth",
   "strokePosition",
+  "strokeSides",
+  "strokeSidesCustom",
   "cornerRadius",
   "cornerRadii",
   "textColor",
@@ -2020,6 +2082,10 @@ function editorStateAfterDocumentImport(
     penDrawingNodeId: null,
     pencilDrawingNodeId: null,
     pathEditModeNodeId: null,
+    shapeEditModeNodeId: null,
+    transformInteractionMode: "none",
+    isMovingSelection: false,
+    rotateHandleHoverCount: 0,
     objectEditModeNodeId: null,
     selectedPathPointId: null,
     presenceUsers: [],
@@ -2073,7 +2139,11 @@ function editorPartialFromPaytmCraftDocument(doc: PaytmCraftDocument, s: EditorS
     penDrawingNodeId: null,
     pencilDrawingNodeId: null,
     pathEditModeNodeId: null,
-  objectEditModeNodeId: null,
+    shapeEditModeNodeId: null,
+    transformInteractionMode: "none",
+    isMovingSelection: false,
+    rotateHandleHoverCount: 0,
+    objectEditModeNodeId: null,
     selectedPathPointId: null,
     presenceUsers: [],
     showPresence: false,
@@ -2208,6 +2278,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   guides: [],
   dragMeasurements: [],
   swapDragIndicator: null,
+  autoLayoutReorderIndicator: null,
   layoutGuides: initialDoc.pages[initialDoc.activePageId]?.layoutGuides ?? [],
   layoutGuideDraft: null,
   selectedLayoutGuideId: null,
@@ -2222,6 +2293,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
   penDrawingNodeId: null,
   pencilDrawingNodeId: null,
   pathEditModeNodeId: null,
+  shapeEditModeNodeId: null,
+  transformInteractionMode: "none",
+  isMovingSelection: false,
+  rotateHandleHoverCount: 0,
   objectEditModeNodeId: null,
   selectedPathPointId: null,
   editingTextId: null,
@@ -2790,6 +2865,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
     if (before.tool === "pencil" && tool !== "pencil" && before.pencilDrawingNodeId) {
       get().cancelPencilStroke();
     }
+    const enteringCreation =
+      before.editorMode === "design" &&
+      isCanvasBgCreationTool(tool, before.editorMode, {
+        isPlacingComment: tool === "comment",
+      });
     set((s) => {
       if (s.editorMode === "inspect" && tool !== "move" && tool !== "hand") return s;
       if (tool === "comment") {
@@ -2798,6 +2878,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
           placingComponentMasterId: null,
           isPlacingComment: true,
           activeCommentId: null,
+          rotateHandleHoverCount: 0,
+          ...(enteringCreation ? { shapeEditModeNodeId: null, pathEditModeNodeId: null } : {}),
         };
       }
       return {
@@ -2805,6 +2887,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
         placingComponentMasterId: tool === "move" ? s.placingComponentMasterId : null,
         isPlacingComment: false,
         activeCommentId: null,
+        rotateHandleHoverCount: 0,
+        ...(enteringCreation ? { shapeEditModeNodeId: null, pathEditModeNodeId: null } : {}),
       };
     });
   },
@@ -2993,7 +3077,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
           selectedLayoutGuideId: null,
           selectedPrototypeLinkId: null,
           pathEditModeNodeId: null,
-  objectEditModeNodeId: null,
+          shapeEditModeNodeId: null,
+          objectEditModeNodeId: null,
           selectedPathPointId: null,
         };
       if (additive) {
@@ -3003,7 +3088,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
           selectedLayoutGuideId: null,
           selectedPrototypeLinkId: null,
           pathEditModeNodeId: null,
-  objectEditModeNodeId: null,
+          shapeEditModeNodeId: null,
+          objectEditModeNodeId: null,
           selectedPathPointId: null,
         };
       }
@@ -3018,6 +3104,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         selectedLayoutGuideId: null,
         selectedPrototypeLinkId: null,
         pathEditModeNodeId: null,
+        shapeEditModeNodeId: null,
         objectEditModeNodeId: preserveObjectEdit ? s.objectEditModeNodeId : null,
         selectedPathPointId: null,
       };
@@ -3035,6 +3122,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         placingComponentMasterId: null,
         selectedPrototypeLinkId: null,
         pathEditModeNodeId: null,
+        shapeEditModeNodeId: null,
         objectEditModeNodeId: null,
         selectedPathPointId: null,
         prototypeWireDrag: null,
@@ -3194,9 +3282,20 @@ export const useEditorStore = create<EditorState>((set, get) => {
       ) {
         refresh.add(n.parentId);
       }
+      if (geom) {
+        const parent = merged.parentId ? nodes[merged.parentId] : undefined;
+        if (parent && (isMaskGroup(parent) || isBooleanGroup(parent))) {
+          nodes = syncGroupFrameToVisible(parent.id, nodes, s.childOrder);
+        } else if (
+          (isMaskGroup(merged) && merged.maskId) ||
+          isBooleanGroup(merged)
+        ) {
+          nodes = syncGroupFrameToVisible(id, nodes, s.childOrder);
+        }
+      }
       nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
       if (geom) {
-        warnInvalidNodeGeometry("updateNode", id, merged, nodes);
+        warnInvalidNodeGeometry("updateNode", id, nodes[id] ?? merged, nodes);
       }
       return { nodes };
     });
@@ -3284,7 +3383,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
         io[id] = { ...prev, ...finalPatch };
         nodes = { ...s.nodes, [instRoot]: { ...rn, instanceOverrides: io } };
       } else {
-        nodes = { ...s.nodes, [id]: { ...n, ...finalPatch } };
+        const expanded = expandBooleanFillStylePatches(id, finalPatch, s.nodes, s.childOrder);
+        if (expanded) {
+          nodes = { ...s.nodes };
+          for (const [nid, p] of Object.entries(expanded)) {
+            const cur = nodes[nid];
+            if (cur && !cur.locked) nodes[nid] = { ...cur, ...p };
+          }
+        } else {
+          nodes = { ...s.nodes, [id]: { ...n, ...finalPatch } };
+        }
       }
 
       const fp = finalPatch as Partial<EditorNode>;
@@ -4117,7 +4225,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         visible: true,
         locked: false,
         expanded: true,
-        fill: "#ffffff",
+        fill: DEFAULT_FRAME_FILL,
         fillEnabled: true,
         fillOpacity: 1,
         strokePosition: "center",
@@ -4340,24 +4448,19 @@ export const useEditorStore = create<EditorState>((set, get) => {
         ordered = ordered.filter((id) => id !== top).concat(top);
       }
       const pw = parentId ? worldRect(parentId, s.nodes) : { x: 0, y: 0, width: 0, height: 0 };
-      let minX = Infinity;
-      let minY = Infinity;
-      let maxX = -Infinity;
-      let maxY = -Infinity;
-      for (const id of ordered) {
-        const w = worldRect(id, s.nodes);
-        minX = Math.min(minX, w.x);
-        minY = Math.min(minY, w.y);
-        maxX = Math.max(maxX, w.x + w.width);
-        maxY = Math.max(maxY, w.y + w.height);
-      }
-      const gw = maxX - minX;
-      const gh = maxY - minY;
+      const visible = boundsForBooleanChildren(operation, ordered, s.nodes);
+      const minX = visible.x;
+      const minY = visible.y;
+      const maxX = visible.x + visible.width;
+      const maxY = visible.y + visible.height;
+      const gw = visible.width;
+      const gh = visible.height;
       const gx = minX - pw.x;
       const gy = minY - pw.y;
       const gid = `group-bool-${Date.now()}`;
       const nodes = { ...s.nodes };
       const childOrder = { ...s.childOrder };
+      const fillSource = nodes[ordered[0]!];
       nodes[gid] = {
         id: gid,
         parentId,
@@ -4373,6 +4476,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
         expanded: true,
         isBooleanGroup: true,
         booleanOperation: operation,
+        fill: fillSource?.fill,
+        fillEnabled: fillSource?.fillEnabled ?? true,
+        fillOpacity: fillSource?.fillOpacity ?? 1,
+        fillType: fillSource?.fillType,
+        fillGradient: fillSource?.fillGradient,
       };
       for (const id of ordered) {
         const o = getNodeWorldOrigin(id, nodes);
@@ -4410,17 +4518,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
     set((s) => {
       const node = s.nodes[groupId];
       if (!node?.isBooleanGroup) return s;
-      return {
-        nodes: {
-          ...s.nodes,
-          [groupId]: {
-            ...node,
-            booleanOperation: operation,
-            name: BOOLEAN_OPERATION_LABELS[operation],
-            flattenedPathData: undefined,
-          },
+      let nodes = {
+        ...s.nodes,
+        [groupId]: {
+          ...node,
+          booleanOperation: operation,
+          name: BOOLEAN_OPERATION_LABELS[operation],
+          flattenedPathData: undefined,
         },
       };
+      nodes = syncGroupFrameToVisible(groupId, nodes, s.childOrder);
+      return { nodes };
     });
   },
 
@@ -4478,7 +4586,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
       n.type === "group" ||
       (n.type === "frame" && kids.some((cid) => s.nodes[cid]?.visible));
     if (!canEdit) return;
-    set({ objectEditModeNodeId: nodeId, selectedIds: [nodeId], pathEditModeNodeId: null });
+    set({
+      objectEditModeNodeId: nodeId,
+      selectedIds: [nodeId],
+      pathEditModeNodeId: null,
+      shapeEditModeNodeId: null,
+    });
   },
 
   exitObjectEditMode: () => set({ objectEditModeNodeId: null }),
@@ -4505,17 +4618,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const contentIds = tops.filter((id) => id !== maskId);
       const allIds = [...contentIds, maskId];
       const pw = parentId ? worldRect(parentId, s.nodes) : { x: 0, y: 0, width: 0, height: 0 };
-      let minX = Infinity;
-      let minY = Infinity;
-      let maxX = -Infinity;
-      let maxY = -Infinity;
-      for (const id of allIds) {
-        const w = worldRect(id, s.nodes);
-        minX = Math.min(minX, w.x);
-        minY = Math.min(minY, w.y);
-        maxX = Math.max(maxX, w.x + w.width);
-        maxY = Math.max(maxY, w.y + w.height);
-      }
+      const visible = boundsForMaskAndContent(maskId, contentIds, s.nodes, s.childOrder);
+      const minX = visible.x;
+      const minY = visible.y;
+      const maxX = visible.x + visible.width;
+      const maxY = visible.y + visible.height;
       const gid = `group-mask-${Date.now()}`;
       const nodes = { ...s.nodes };
       const childOrder = { ...s.childOrder };
@@ -5211,6 +5318,22 @@ export const useEditorStore = create<EditorState>((set, get) => {
     });
   },
 
+  wrapSelectionInFrame: () => {
+    const s0 = get();
+    if (s0.editorMode !== "design") return;
+    if (!canAddAutoLayoutToSelection(s0.selectedIds, s0.nodes)) return;
+    const result = applyWrapSelectionInFrame(s0.nodes, s0.childOrder, s0.selectedIds);
+    if (!result) return;
+    get().pushHistory();
+    set({
+      nodes: result.nodes,
+      childOrder: result.childOrder,
+      selectedIds: result.selectedIds,
+      tool: "move",
+      editingTextId: null,
+    });
+  },
+
   ungroupSelection: () => {
     const s0 = get();
     if (s0.selectedIds.length !== 1) return;
@@ -5283,6 +5406,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
   setGuides: (guides) => set({ guides, dragMeasurements: [] }),
   setSnapOverlay: (guides, dragMeasurements) => set({ guides, dragMeasurements }),
   setSwapDragIndicator: (swapDragIndicator) => set({ swapDragIndicator }),
+  setAutoLayoutReorderIndicator: (autoLayoutReorderIndicator) =>
+    set({ autoLayoutReorderIndicator }),
   setLayoutGuideDraft: (layoutGuideDraft) => set({ layoutGuideDraft }),
   cancelLayoutGuideDraft: () => set({ layoutGuideDraft: null }),
   commitLayoutGuide: () => {
@@ -6648,7 +6773,80 @@ export const useEditorStore = create<EditorState>((set, get) => {
     });
   },
 
-  setPathEditMode: (nodeId) => set({ pathEditModeNodeId: nodeId, selectedPathPointId: null }),
+  setPathEditMode: (nodeId) =>
+    set({
+      pathEditModeNodeId: nodeId,
+      shapeEditModeNodeId: null,
+      selectedPathPointId: null,
+    }),
+
+  enterShapeEditMode: (nodeId) => {
+    const s = get();
+    const id = nodeId ?? s.selectedIds[0];
+    if (!id) return;
+    const n = s.nodes[id];
+    if (!n || n.locked || n.visible === false) return;
+    if (s.editingTextId || s.penDrawingNodeId || s.pencilDrawingNodeId) return;
+    if (n.type === "text") {
+      set({ editingTextId: id, shapeEditModeNodeId: null, pathEditModeNodeId: null });
+      return;
+    }
+    if (shouldEnterPathEditOnEdit(n)) {
+      set({
+        pathEditModeNodeId: id,
+        shapeEditModeNodeId: null,
+        selectedIds: [id],
+        selectedPathPointId: null,
+        objectEditModeNodeId: null,
+      });
+      return;
+    }
+    if (!canEnterParametricShapeEdit(n)) return;
+    set({
+      shapeEditModeNodeId: id,
+      pathEditModeNodeId: null,
+      selectedIds: [id],
+      selectedPathPointId: null,
+      objectEditModeNodeId: null,
+    });
+  },
+
+  exitShapeEditMode: () => set({ shapeEditModeNodeId: null }),
+
+  exitAllEditModes: () =>
+    set({
+      shapeEditModeNodeId: null,
+      pathEditModeNodeId: null,
+      editingTextId: null,
+      selectedPathPointId: null,
+    }),
+
+  toggleEditMode: (nodeId) => {
+    const s = get();
+    const id = nodeId ?? s.selectedIds[0];
+    if (!id) return;
+    if (s.editingTextId === id) {
+      set({ editingTextId: null });
+      return;
+    }
+    if (s.pathEditModeNodeId === id || s.shapeEditModeNodeId === id) {
+      get().exitAllEditModes();
+      return;
+    }
+    get().enterShapeEditMode(id);
+  },
+
+  setTransformInteractionMode: (mode) => set({ transformInteractionMode: mode }),
+
+  setIsMovingSelection: (active) => set({ isMovingSelection: active }),
+
+  setRotateHandleHovered: (hovered) =>
+    set((s) => ({
+      rotateHandleHoverCount: Math.max(
+        0,
+        s.rotateHandleHoverCount + (hovered ? 1 : -1),
+      ),
+    })),
 
   enterVectorEditMode: (nodeId) => {
     const s = get();
@@ -6692,6 +6890,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return {
         nodes,
         pathEditModeNodeId: id,
+        shapeEditModeNodeId: null,
         selectedIds: [id],
         selectedPathPointId: null,
         objectEditModeNodeId: null,

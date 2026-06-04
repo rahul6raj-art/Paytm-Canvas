@@ -1,6 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  rotateEdgeBandsForAxisBounds,
+  rotateEdgeBandsForCorners,
   rotateZonesForAxisBounds,
   rotateZonesForCornerHandles,
   topRotateHandleWorld,
@@ -37,5 +39,29 @@ describe("selectionRotateZones", () => {
     const top = topRotateHandleWorld(bounds, 1);
     assert.equal(top.x, 100);
     assert.ok(top.y < bounds.y);
+  });
+
+  it("places edge rotate bands outside corners on axis-aligned bounds", () => {
+    const bounds = { x: 100, y: 200, width: 80, height: 60 };
+    const bands = rotateEdgeBandsForAxisBounds(bounds, 1);
+    const nwTop = bands.find((b) => b.id === "nw-top");
+    const seRight = bands.find((b) => b.id === "se-right");
+    assert.ok(nwTop);
+    assert.ok(seRight);
+    assert.ok(nwTop!.y < bounds.y);
+    assert.ok(seRight!.x >= bounds.x + bounds.width);
+  });
+
+  it("places edge rotate bands along oriented corner edges", () => {
+    const bounds = { x: 50, y: 50, width: 100, height: 80 };
+    const handles = [
+      { handle: "nw" as const, x: 60, y: 40 },
+      { handle: "ne" as const, x: 140, y: 55 },
+      { handle: "se" as const, x: 125, y: 120 },
+      { handle: "sw" as const, x: 45, y: 105 },
+    ];
+    const bands = rotateEdgeBandsForCorners(handles, bounds, 1);
+    assert.equal(bands.length, 8);
+    assert.ok(bands.every((b) => b.transform?.includes("rotate")));
   });
 });

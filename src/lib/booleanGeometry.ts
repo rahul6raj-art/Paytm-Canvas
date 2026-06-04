@@ -1,8 +1,8 @@
 import { getNodeCornerRadii, roundedRectPathD, roundedRectPolygonPoints } from "@/lib/cornerRadius";
 import type { EditorNode } from "@/stores/useEditorStore";
 import { ROOT } from "@/stores/useEditorStore";
-import { topLevelSelectedIds } from "@/lib/editorGraph";
-import { pathToSvgD } from "@/lib/pathGeometry";
+import { getRenderedWorldTopLeft, topLevelSelectedIds } from "@/lib/editorGraph";
+import { pathToSvgD, svgPathDToPathPoints } from "@/lib/pathGeometry";
 import { generatePolygonPoints } from "@/lib/shapes/pathGenerators";
 import { isPolygonNode, polygonVertices } from "@/lib/shapes/polygonGeometry";
 import {
@@ -58,6 +58,110 @@ export function isBooleanEligibleNode(node: EditorNode | undefined): boolean {
 
 export function isMaskGroup(node: EditorNode | undefined): boolean {
   return Boolean(node?.type === "group" && node.maskId);
+}
+
+export function isBooleanGroup(node: EditorNode | undefined): boolean {
+  return Boolean(node?.type === "group" && node.isBooleanGroup && !node.maskId);
+}
+
+type WorldBounds = { x: number; y: number; width: number; height: number };
+
+function boundsOfPolygonPoints(points: { x: number; y: number }[]): WorldBounds | null {
+  if (points.length === 0) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of points) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  if (!Number.isFinite(minX)) return null;
+  return {
+    x: minX,
+    y: minY,
+    width: Math.max(1, maxX - minX),
+    height: Math.max(1, maxY - minY),
+  };
+}
+
+function intersectBoundsAabb(a: WorldBounds, b: WorldBounds): WorldBounds | null {
+  const minX = Math.max(a.x, b.x);
+  const minY = Math.max(a.y, b.y);
+  const maxX = Math.min(a.x + a.width, b.x + b.width);
+  const maxY = Math.min(a.y + a.height, b.y + b.height);
+  if (maxX <= minX || maxY <= minY) return null;
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+/**
+ * World bounds of the visible boolean result (not the union of all operand bounding boxes).
+ */
+export function boundsForBooleanChildren(
+  operation: BooleanOperation,
+  childIds: string[],
+  nodes: Record<string, EditorNode>,
+): WorldBounds {
+  const inputs = shapesToBooleanInput(childIds, nodes);
+  if (inputs.length === 0) {
+    return { x: 0, y: 0, width: 1, height: 1 };
+  }
+  if (inputs.length === 1) {
+    return boundsOfPolygonPoints(inputs[0]!.polygon) ?? boundsOfPolygons(inputs);
+  }
+
+  switch (operation) {
+    case "subtract": {
+      const topId = childIds[childIds.length - 1]!;
+      const base = inputs.filter((i) => i.id !== topId);
+      return boundsOfPolygons(base.length > 0 ? base : inputs);
+    }
+    case "intersect": {
+      const boxes = inputs
+        .map((i) => boundsOfPolygonPoints(i.polygon))
+        .filter((b): b is WorldBounds => b != null);
+      if (boxes.length === 0) return boundsOfPolygons(inputs);
+      let acc = boxes[0]!;
+      for (let i = 1; i < boxes.length; i++) {
+        const next = intersectBoundsAabb(acc, boxes[i]!);
+        if (!next) return boundsOfPolygons(inputs);
+        acc = next;
+      }
+      return acc;
+    }
+    case "union":
+    case "exclude":
+    default:
+      return boundsOfPolygons(inputs);
+  }
+}
+
+export function getBooleanGroupVisibleWorldBounds(
+  groupId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): WorldBounds {
+  const g = nodes[groupId];
+  if (!isBooleanGroup(g)) {
+    const wb = getNodeTransformedWorldBounds(groupId, nodes);
+    return { x: wb.x, y: wb.y, width: wb.width, height: wb.height };
+  }
+  const childIds = (childOrder[groupId] ?? []).filter((cid) => {
+    const c = nodes[cid];
+    return c && c.visible && !c.locked;
+  });
+  if (childIds.length === 0) {
+    const wb = getNodeTransformedWorldBounds(groupId, nodes);
+    return { x: wb.x, y: wb.y, width: Math.max(1, wb.width), height: Math.max(1, wb.height) };
+  }
+  return boundsForBooleanChildren(g.booleanOperation ?? "union", childIds, nodes);
+}
+
+/** Mask groups use visible-region AABB for selection, not a single child transform. */
+export function maskGroupFrameNodeId(_node: EditorNode | undefined): string | null {
+  return null;
 }
 
 /** Paint-order for hit tests: masked content above mask shape (Figma). */
@@ -138,17 +242,24 @@ export function shapeNodeToWorldPolygon(
       const sides = node.polygonSides ?? 6;
       return polygonVertices(sides, w, h);
     }
-    if (node.type === "path" && node.pathPoints?.length) {
-      if (node.pathClosed ?? false) {
-        return node.pathPoints.map((p) => ({ x: p.x, y: p.y }));
+    if (node.type === "path") {
+      let pts = node.pathPoints ?? [];
+      if (pts.length < 3 && node.flattenedPathData) {
+        const fromD = svgPathDToPathPoints(node.flattenedPathData);
+        if (fromD.length >= 3) pts = fromD;
       }
-      const wb = getNodeTransformedWorldBounds(nodeId, nodes);
-      return [
-        { x: 0, y: 0 },
-        { x: node.width, y: 0 },
-        { x: node.width, y: node.height },
-        { x: 0, y: node.height },
-      ];
+      if (pts.length >= 3 && (node.pathClosed ?? false)) {
+        return pts.map((p) => ({ x: p.x, y: p.y }));
+      }
+      if (node.pathPoints?.length) {
+        const wb = getNodeTransformedWorldBounds(nodeId, nodes);
+        return [
+          { x: 0, y: 0 },
+          { x: node.width, y: 0 },
+          { x: node.width, y: node.height },
+          { x: 0, y: node.height },
+        ];
+      }
     }
     if (node.type === "ellipse") {
       return generatePolygonPoints(segs, w, h).map((p) => ({ x: p.x, y: p.y }));
@@ -198,20 +309,38 @@ function polygonToPathD(points: { x: number; y: number }[], originX: number, ori
   return `${d} Z`;
 }
 
+/** Operand order for evenodd subtract: all bases first, topmost (subtracted) shape last. */
+export function orderedBooleanChildIds(
+  childIds: string[],
+  operation: BooleanOperation,
+): string[] {
+  if (operation !== "subtract" || childIds.length < 2) return childIds;
+  const topId = childIds[childIds.length - 1]!;
+  const rest = childIds.filter((id) => id !== topId);
+  return [...rest, topId];
+}
+
 /** World-space polygons → single SVG path `d` in group-local coordinates. */
 export function buildCompositePathDForGroup(
   groupId: string,
   childIds: string[],
   nodes: Record<string, EditorNode>,
   operation: BooleanOperation,
+  childOrder?: Record<string, string[]>,
 ): { d: string; fillRule: "nonzero" | "evenodd"; fill: string } | null {
-  const groupW = worldRect(groupId, nodes);
-  const originX = groupW.x;
-  const originY = groupW.y;
+  const origin = childOrder
+    ? getRenderedWorldTopLeft(groupId, nodes, childOrder)
+    : (() => {
+        const w = worldRect(groupId, nodes);
+        return { x: w.x, y: w.y };
+      })();
+  const originX = origin.x;
+  const originY = origin.y;
   const parts: string[] = [];
   let fill = DEFAULT_SHAPE_FILL;
 
-  for (const cid of childIds) {
+  const ordered = orderedBooleanChildIds(childIds, operation);
+  for (const cid of ordered) {
     const node = nodes[cid];
     if (!node) continue;
     const poly = shapeNodeToWorldPolygon(cid, nodes);
@@ -231,13 +360,124 @@ export function buildCompositePathDForGroup(
   return { d: parts.join(" "), fillRule, fill };
 }
 
+export type SubtractCompositePaths = {
+  baseD: string;
+  subtractD: string;
+  fill: string;
+};
+
+export type BooleanRenderModel =
+  | { op: "union"; pathDs: string[]; fill: string }
+  | { op: "subtract"; baseD: string; subtractD: string; fill: string }
+  | { op: "intersect"; pathDs: string[]; fill: string }
+  | { op: "exclude"; pathDs: string[]; fill: string };
+
+function booleanGroupLocalOrigin(
+  groupId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder?: Record<string, string[]>,
+): { x: number; y: number } {
+  if (childOrder) {
+    return getRenderedWorldTopLeft(groupId, nodes, childOrder);
+  }
+  const w = worldRect(groupId, nodes);
+  return { x: w.x, y: w.y };
+}
+
+function collectOperandPathDs(
+  groupId: string,
+  childIds: string[],
+  nodes: Record<string, EditorNode>,
+  childOrder?: Record<string, string[]>,
+): { pathDs: string[]; fill: string } | null {
+  const { x: originX, y: originY } = booleanGroupLocalOrigin(groupId, nodes, childOrder);
+  const pathDs: string[] = [];
+  let fill = DEFAULT_SHAPE_FILL;
+
+  for (const cid of childIds) {
+    const node = nodes[cid];
+    if (!node) continue;
+    const poly = shapeNodeToWorldPolygon(cid, nodes);
+    if (poly.length < 3) continue;
+    pathDs.push(polygonToPathD(poly, originX, originY));
+    if (pathDs.length === 1 && node.fillEnabled !== false) {
+      fill = node.fill ?? fill;
+    }
+  }
+
+  if (pathDs.length === 0) return null;
+  return { pathDs, fill };
+}
+
+/**
+ * Base + subtract paths in group-local space for SVG mask rendering.
+ * Mask: bases white, subtract black — correct set difference (unlike evenodd on overlaps).
+ */
+export function buildSubtractCompositeForGroup(
+  groupId: string,
+  childIds: string[],
+  nodes: Record<string, EditorNode>,
+  childOrder?: Record<string, string[]>,
+): SubtractCompositePaths | null {
+  const ordered = orderedBooleanChildIds(childIds, "subtract");
+  if (ordered.length < 2) return null;
+
+  const collected = collectOperandPathDs(groupId, ordered, nodes, childOrder);
+  if (!collected || collected.pathDs.length < 2) return null;
+
+  const subtractD = collected.pathDs[collected.pathDs.length - 1]!;
+  const baseD = collected.pathDs.slice(0, -1).join(" ");
+  if (!baseD || !subtractD) return null;
+
+  return { baseD, subtractD, fill: collected.fill };
+}
+
+/**
+ * Canvas/export boolean preview — mask/clip stacking per op (not combined evenodd paths).
+ */
+export function buildBooleanRenderForGroup(
+  groupId: string,
+  childIds: string[],
+  nodes: Record<string, EditorNode>,
+  operation: BooleanOperation,
+  childOrder?: Record<string, string[]>,
+): BooleanRenderModel | null {
+  if (operation === "subtract") {
+    const sub = buildSubtractCompositeForGroup(groupId, childIds, nodes, childOrder);
+    if (!sub) return null;
+    return { op: "subtract", baseD: sub.baseD, subtractD: sub.subtractD, fill: sub.fill };
+  }
+
+  const collected = collectOperandPathDs(groupId, childIds, nodes, childOrder);
+  if (!collected) return null;
+
+  const { pathDs, fill } = collected;
+
+  switch (operation) {
+    case "union":
+      return pathDs.length >= 1 ? { op: "union", pathDs, fill } : null;
+    case "intersect":
+      return pathDs.length >= 2 ? { op: "intersect", pathDs, fill } : null;
+    case "exclude":
+      return pathDs.length >= 2 ? { op: "exclude", pathDs, fill } : null;
+    default:
+      return null;
+  }
+}
+
 /** Mask clip path in group-local coordinates. */
 export function buildMaskClipPathDForGroup(
   groupId: string,
   maskChildId: string,
   nodes: Record<string, EditorNode>,
+  childOrder?: Record<string, string[]>,
 ): string | null {
-  const groupW = worldRect(groupId, nodes);
+  const origin = childOrder
+    ? getRenderedWorldTopLeft(groupId, nodes, childOrder)
+    : (() => {
+        const w = worldRect(groupId, nodes);
+        return { x: w.x, y: w.y };
+      })();
   const poly = shapeNodeToWorldPolygon(maskChildId, nodes);
   if (poly.length < 3) {
     const mask = nodes[maskChildId];
@@ -249,9 +489,9 @@ export function buildMaskClipPathDForGroup(
       { x: wb.x + wb.width, y: wb.y + wb.height },
       { x: wb.x, y: wb.y + wb.height },
     ];
-    return polygonToPathD(fallback, groupW.x, groupW.y);
+    return polygonToPathD(fallback, origin.x, origin.y);
   }
-  return polygonToPathD(poly, groupW.x, groupW.y);
+  return polygonToPathD(poly, origin.x, origin.y);
 }
 
 function boundsOfPolygons(inputs: BooleanInput[]): { x: number; y: number; width: number; height: number } {

@@ -20,6 +20,8 @@ import {
   type StrokeLinejoin,
   type StrokeStyleKind,
 } from "@/lib/stroke";
+import type { StrokeSidesCustom, StrokeSidesMode } from "@/lib/strokeAlign";
+import { StrokeSidesPicker } from "./StrokeSidesPicker";
 import type { StrokePosition } from "@/stores/useEditorStore";
 
 const field =
@@ -32,6 +34,8 @@ export type StrokeStylePatch = {
   strokeEnabled?: boolean;
   strokeStyle?: StrokeStyleKind;
   strokePosition?: StrokePosition;
+  strokeSides?: StrokeSidesMode;
+  strokeSidesCustom?: StrokeSidesCustom;
   strokeDashLength?: number;
   strokeDashGap?: number;
   strokeLinecap?: StrokeLinecap;
@@ -59,6 +63,9 @@ export function StrokeSection({
   strokeEnabled = true,
   strokeStyle,
   strokePosition,
+  strokeSides = "all",
+  strokeSidesCustom,
+  showSides = false,
   strokeDashLength,
   strokeDashGap,
   strokeLinecap,
@@ -78,6 +85,10 @@ export function StrokeSection({
   strokeEnabled?: boolean;
   strokeStyle: StrokeStyleKind;
   strokePosition: StrokePosition;
+  strokeSides?: StrokeSidesMode;
+  strokeSidesCustom?: StrokeSidesCustom;
+  /** Per-side stroke control (Figma-style) for rectangles and frames. */
+  showSides?: boolean;
   strokeDashLength?: number;
   strokeDashGap?: number;
   strokeLinecap?: StrokeLinecap;
@@ -229,7 +240,7 @@ export function StrokeSection({
             </button>
           </div>
 
-          {/* Position + weight + advanced */}
+          {/* Position + sides + weight + advanced */}
           <div className="flex items-end gap-1">
             <div className="min-w-0 flex-1">
               <div className="mb-0.5 text-[11px] font-medium text-app-subtle">Position</div>
@@ -246,6 +257,17 @@ export function StrokeSection({
                 ))}
               </select>
             </div>
+            {showSides ? (
+              <div className="shrink-0">
+                <div className="mb-0.5 text-[11px] font-medium text-app-subtle">Sides</div>
+                <StrokeSidesPicker
+                  disabled={disabled}
+                  strokeSides={strokeSides}
+                  strokeSidesCustom={strokeSidesCustom}
+                  onChange={onStyle}
+                />
+              </div>
+            ) : null}
             <div className="min-w-0 flex-1">
               <div className="mb-0.5 text-[11px] font-medium text-app-subtle">Weight</div>
               <div className="flex h-6 items-center overflow-hidden rounded border border-app-border bg-app-field focus-within:border-accent focus-within:ring-1 focus-within:ring-accent">

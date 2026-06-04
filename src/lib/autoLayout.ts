@@ -65,6 +65,7 @@ export interface LayoutNode extends LayoutFields, ConstraintFields {
   layoutSizingHorizontal?: LayoutSizingMode;
   layoutSizingVertical?: LayoutSizingMode;
   layoutPositioning?: LayoutPositioning;
+  layoutGrow?: number;
   minWidth?: number;
   minHeight?: number;
   maxWidth?: number;
@@ -300,41 +301,7 @@ export function applyDeepAutoLayoutAll(
   return next;
 }
 
-export function insertIndexInAutoLayout(
-  parentId: string,
-  nodes: Record<string, LayoutNode>,
-  childOrder: Record<string, string[]>,
-  localX: number,
-  localY: number,
-  draggedId: string,
-): number {
-  const parent = nodes[parentId];
-  if (!parent) return 0;
-  const mode = parent.layoutMode ?? "none";
-  const kids = layoutableChildIds(parentId, nodes, childOrder).filter((id) => id !== draggedId);
-
-  if (mode === "horizontal") {
-    let i = 0;
-    for (const cid of kids) {
-      const c = nodes[cid]!;
-      const mid = c.x + c.width / 2;
-      if (localX < mid) return i;
-      i++;
-    }
-    return kids.length;
-  }
-  if (mode === "vertical") {
-    let i = 0;
-    for (const cid of kids) {
-      const c = nodes[cid]!;
-      const mid = c.y + c.height / 2;
-      if (localY < mid) return i;
-      i++;
-    }
-    return kids.length;
-  }
-  return 0;
-}
+export { insertIndexInAutoLayout, reorderChildByPointer } from "@/lib/autoLayoutReorder";
 
 export { inferAutoLayoutGap } from "@/lib/layoutEngine/inferGap";
 
@@ -371,4 +338,30 @@ export function defaultHugSizingForContainer(
   _mode: Exclude<LayoutMode, "none">,
 ): Pick<LayoutNode, "layoutSizingHorizontal" | "layoutSizingVertical"> {
   return { layoutSizingHorizontal: "hug", layoutSizingVertical: "hug" };
+}
+
+// ——— Spec-aligned aliases (recursive layout engine public API) ———
+
+export {
+  measureNode as measureAutoLayoutNode,
+  measureNode as resolveChildSize,
+  layoutAutoNode as layoutAutoLayoutNode,
+  layoutAutoNodeDeep as layoutAutoLayoutNodeDeep,
+  resolveHugSize as calculateHugSize,
+} from "@/lib/layoutEngine";
+export {
+  layoutChildren as layoutHorizontal,
+  layoutChildren as layoutVertical,
+  buildFlowLines as layoutWrapped,
+} from "@/lib/layoutEngine/layoutChildren";
+export { resolveFillSizesByGrow as calculateFillSpace } from "@/lib/layoutEngine/sizing";
+export { editorNodesToLayoutMap } from "@/lib/autoLayoutReorder";
+
+/** Apply primary/counter alignment when positioning (delegates to full layout pass). */
+export function applyAlignment(
+  parentId: string,
+  nodes: Record<string, LayoutNode>,
+  childOrder: Record<string, string[]>,
+): AutoLayoutComputeResult {
+  return computeAutoLayout(parentId, nodes, childOrder);
 }

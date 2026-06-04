@@ -1,4 +1,4 @@
-import { resolveFillSize } from "./sizing";
+import { resolveFillSizesByGrow } from "./sizing";
 import {
   childCrossSizing,
   childMainSizing,
@@ -153,19 +153,21 @@ export function layoutChildren(input: LayoutChildrenInput): Record<string, Layou
 
   const lines = buildFlowLines(mode, childIds, measures, innerMain, gap, wrap);
 
-  const fillCount = childIds.filter((id) => childMainSizing(nodes[id]!, mode) === "fill").length;
+  const fillEntries = childIds
+    .filter((id) => childMainSizing(nodes[id]!, mode) === "fill")
+    .map((id) => ({ id, grow: nodes[id]!.layoutGrow ?? 1 }));
   const fixedMain = childIds.reduce((sum, id, i) => {
     return childMainSizing(nodes[id]!, mode) === "fill" ? sum : sum + measures[i]!.main;
   }, 0);
-  const fillMain =
-    fillCount > 0
-      ? resolveFillSize(
+  const fillSizesById =
+    fillEntries.length > 0
+      ? resolveFillSizesByGrow(
           innerMain,
           fixedMain,
           gap * Math.max(0, childIds.length - 1),
-          fillCount,
+          fillEntries,
         )
-      : 0;
+      : {};
 
   // Cross-axis: stack lines (wrap) with gap between lines
   const lineCrossSizes = lines.map((l) => l.crossMax);
@@ -192,7 +194,7 @@ export function layoutChildren(input: LayoutChildrenInput): Record<string, Layou
       const mainMode = childMainSizing(child, mode);
       const crossMode = childCrossSizing(child, mode);
 
-      const mainSize = mainMode === "fill" ? fillMain : m0.main;
+      const mainSize = mainMode === "fill" ? (fillSizesById[id] ?? m0.main) : m0.main;
       let crossSize = m0.cross;
       const effectiveStretch = crossMode === "fill" || cross === "stretch";
       const { pos: crossOff, size: crossSz } = crossPosition(

@@ -253,11 +253,13 @@ export function CodePanel() {
             </div>
 
             <textarea
+              data-code-import-field
               value={importSource}
               onChange={(e) => {
                 setImportSource(e.target.value);
                 setImportError(null);
               }}
+              onPaste={() => setImportError(null)}
               placeholder={
                 codePanelFormat === "html"
                   ? "Paste HTML document or snippet…"

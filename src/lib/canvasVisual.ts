@@ -59,6 +59,18 @@ export const CANVAS_HANDLE_SCREEN_PX = 8;
 /** Selection / hover outline width in screen pixels. */
 export const CANVAS_OUTLINE_SCREEN_PX = 1;
 
+/** Selection dimension badge (W × H below selection box). */
+export const CANVAS_SELECTION_DIMENSION_BADGE_FONT_SCREEN_PX = 14;
+export const CANVAS_SELECTION_DIMENSION_BADGE_PAD_X_SCREEN_PX = 12;
+export const CANVAS_SELECTION_DIMENSION_BADGE_PAD_Y_SCREEN_PX = 7;
+export const CANVAS_SELECTION_DIMENSION_BADGE_GAP_SCREEN_PX = 14;
+export const CANVAS_SELECTION_DIMENSION_BADGE_RADIUS_SCREEN_PX = 6;
+
 export function screenPxToWorld(px: number, zoom: number): number {
   return px / Math.max(zoom, 0.0001);
+}
+
+/** W × H label for canvas selection dimension badge. */
+export function formatSelectionDimensions(width: number, height: number): string {
+  return `${Math.round(width)} × ${Math.round(height)}`;
 }

@@ -20,6 +20,7 @@ import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import type { EditorPersistSlice } from "@/lib/documentPersistence";
 import { wrapPersistSliceWithPages } from "@/lib/documentPersistence";
 import { DEFAULT_CANVAS_BACKGROUND } from "@/lib/canvasVisual";
+import { DEFAULT_FRAME_FILL, DEFAULT_SHAPE_FILL } from "@/lib/shapes/shapeModel";
 import type { EditorNode, NodeKind } from "@/stores/useEditorStore";
 import { sanitizeComponentName } from "./reactStyle";
 import type { ReactStyleRecord } from "./reactStyle";
@@ -405,7 +406,13 @@ function buildNode(
     expanded: true,
     fill:
       mergedPatch.fill ??
-      (kind === "text" ? undefined : iconSize ? "#e8ecf0" : "#ffffff"),
+      (kind === "text"
+        ? undefined
+        : iconSize
+          ? "#e8ecf0"
+          : kind === "frame"
+            ? DEFAULT_FRAME_FILL
+            : DEFAULT_SHAPE_FILL),
     fillEnabled: kind !== "text",
     codeJsxTag: tag,
     codeJsxIntrinsic: intrinsic,

@@ -11,6 +11,13 @@ import {
 } from "./pcMetadata";
 import type { CodeStyleOptions } from "@/lib/codeRoundTrip/reactStyle";
 import { ellipseArcPcAttrParts } from "@/lib/shapes/ellipseArcExport";
+import {
+  booleanGroupExportSvgMarkup,
+  codeExportChildIds,
+  compositeGroupHtmlAttrParts,
+  maskGroupClipDefsMarkup,
+} from "@/lib/codeExport/compositeShapeExport";
+import { isBooleanGroup, isMaskGroup } from "@/lib/booleanGeometry";
 
 export type HtmlExportOptions = {
   isFrameRoot?: boolean;
@@ -97,6 +104,9 @@ function attrsForNode(node: EditorNode, styleCss: string, opts?: HtmlExportOptio
       parts.push(arcAttr);
     }
   }
+  for (const attr of compositeGroupHtmlAttrParts(node)) {
+    parts.push(attr);
+  }
   return parts.join(" ");
 }
 
@@ -109,8 +119,12 @@ export function nodeToHtml(
   opts?: HtmlExportOptions,
 ): string {
   const pad = "  ".repeat(depth);
-  const kids = childOrder[node.id] ?? [];
-  const codeStyle: CodeStyleOptions = { isFrameRoot: opts?.isFrameRoot };
+  const kids = codeExportChildIds(node, childOrder);
+  const codeStyle: CodeStyleOptions = {
+    isFrameRoot: opts?.isFrameRoot,
+    nodes,
+    childOrder,
+  };
   const styleCss = reactStyleToInlineCss(nodeToReactStyle(node, designTokens, codeStyle));
   const attrs = attrsForNode(node, styleCss, opts);
   const tag = htmlTagForNode(node);
@@ -133,6 +147,26 @@ export function nodeToHtml(
     node.type === "path"
   ) {
     return `${pad}<div ${attrs}></div>\n`;
+  }
+
+  if (isBooleanGroup(node)) {
+    const svg = booleanGroupExportSvgMarkup(node, nodes, childOrder);
+    return `${pad}<div ${attrs}>${svg}</div>\n`;
+  }
+
+  if (isMaskGroup(node)) {
+    const clip = maskGroupClipDefsMarkup(node, nodes, childOrder);
+    const inner = kids
+      .map((cid) => {
+        const c = nodes[cid];
+        const childOpts = opts?.isPcRoot ? undefined : opts;
+        return c ? nodeToHtml(c, nodes, childOrder, designTokens, depth + 2, childOpts) : "";
+      })
+      .join("");
+    const clipStyle = clip
+      ? `position: relative; width: 100%; height: 100%; clip-path: ${clip.clipRef}`
+      : "position: relative; width: 100%; height: 100%";
+    return `${pad}<div ${attrs}>\n${clip ? `${pad}  ${clip.defsMarkup}\n` : ""}${pad}  <div style="${escapeHtmlAttr(clipStyle)}">\n${inner}${pad}  </div>\n${pad}</div>\n`;
   }
 
   if (kids.length === 0) {

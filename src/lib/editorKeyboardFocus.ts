@@ -69,9 +69,21 @@ export function toolFromShortcutKey(key: string): Tool | null {
   return TOOL_SHORTCUT_MAP[key] ?? null;
 }
 
+/** Resolve canvas tool from a keydown (Figma-style, including ⇧L, ⇧P, ⇧S, C). */
+export function resolveToolFromKeyboardEvent(e: KeyboardEvent): Tool | null {
+  if (e.metaKey || e.ctrlKey || e.altKey) return null;
+  const key = e.key;
+  if (key === "l" || key === "L") return e.shiftKey ? "arrow" : "line";
+  if (e.shiftKey && (key === "p" || key === "P")) return "pencil";
+  if (e.shiftKey && (key === "s" || key === "S")) return "frame";
+  if (!e.shiftKey && (key === "c" || key === "C")) return "comment";
+  if (e.shiftKey) return null;
+  return toolFromShortcutKey(key);
+}
+
 export function isToolShortcutEvent(e: KeyboardEvent): boolean {
   if (e.metaKey || e.ctrlKey || e.altKey) return false;
-  return toolFromShortcutKey(e.key) != null;
+  return resolveToolFromKeyboardEvent(e) != null;
 }
 
 /** True when Delete/Backspace should edit field text, not delete canvas selection. */
@@ -82,6 +94,23 @@ export function shouldBlockDeleteSelectionShortcut(
   if (!isDeleteShortcutEvent(e)) return false;
   const el = target ?? (typeof document !== "undefined" ? document.activeElement : null);
   return isEditableFieldElement(el) && !isMultilineEditableElement(el);
+}
+
+/** Let inputs/textareas handle clipboard & undo/redo (code panel import, inspector fields). */
+export function shouldAllowNativeFieldClipboard(
+  e: KeyboardEvent,
+  target: EventTarget | null,
+): boolean {
+  if (!isEditableFieldElement(target)) return false;
+  if (!(e.metaKey || e.ctrlKey)) return false;
+  return (
+    e.code === "KeyV" ||
+    e.code === "KeyC" ||
+    e.code === "KeyX" ||
+    e.code === "KeyA" ||
+    e.code === "KeyZ" ||
+    e.code === "KeyY"
+  );
 }
 
 /**

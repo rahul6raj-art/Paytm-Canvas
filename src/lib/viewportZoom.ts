@@ -6,6 +6,7 @@ import {
   viewportForRootNodes,
   zoomAtScreenPoint,
 } from "@/lib/canvasZoom";
+import { topLevelSelectedIds } from "@/lib/editorGraph";
 import { worldRect } from "@/lib/tree";
 
 export const CANVAS_VIEWPORT_SELECTOR = "[data-canvas-viewport]";
@@ -171,6 +172,56 @@ export function fitCanvasToImportedDocument(): boolean {
   if (!vp) return false;
 
   applyCanvasViewport(vp, { selectedIds: fitRoots.slice(0, 1) });
+  return true;
+}
+
+/** Figma ⇧2 — zoom/pan so the current selection fits in the viewport. */
+export function zoomCanvasToSelection(options?: { recordHistory?: boolean }): boolean {
+  const s = useEditorStore.getState();
+  if (options?.recordHistory) {
+    s.pushHistory();
+  }
+
+  const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+    const n = s.nodes[id];
+    return n && n.visible && !n.locked;
+  });
+  if (tops.length === 0) return false;
+
+  const { width, height } = readCanvasViewportSize();
+  const measure = worldBoundsMeasure(s.nodes);
+  const vp = viewportForRootNodes(s.nodes, tops, width, height, {
+    fit: "all",
+    measureWorldBounds: measure,
+  });
+  if (!vp) return false;
+  applyCanvasViewport(vp);
+  return true;
+}
+
+/** Figma N / ⇧N — focus the next or previous top-level frame on the canvas. */
+export function cycleCanvasFrame(direction: 1 | -1): boolean {
+  const s = useEditorStore.getState();
+  const roots = (s.childOrder[ROOT] ?? []).filter((id) => {
+    const n = s.nodes[id];
+    return n?.type === "frame" && n.visible !== false;
+  });
+  if (roots.length === 0) return false;
+
+  const selectedFrame = s.selectedIds.find((id) => roots.includes(id));
+  const currentIdx = selectedFrame ? roots.indexOf(selectedFrame) : -1;
+  const nextIdx = (currentIdx + direction + roots.length) % roots.length;
+  const nextId = roots[nextIdx]!;
+
+  const { width, height } = readCanvasViewportSize();
+  const measure = worldBoundsMeasure(s.nodes);
+  const vp = viewportForRootNodes(s.nodes, [nextId], width, height, {
+    fit: "primary",
+    measureWorldBounds: measure,
+  });
+
+  s.select(nextId);
+  if (vp) applyCanvasViewport(vp);
   return true;
 }
 

@@ -27,6 +27,10 @@ import {
   shouldCollapseContainerHits,
 } from "@/lib/containerSelection";
 import {
+  canEnterParametricShapeEdit,
+  shouldEnterPathEditOnEdit,
+} from "@/lib/editMode/shapeEditGate";
+import {
   effectiveEllipseArc,
   ellipseArcPathD,
   hasEllipseArcInnerHole,
@@ -315,9 +319,14 @@ export function SvgHitLayer({
         return;
       }
 
-      if (node.type === "path" && st.tool === "move") {
+      if (shouldEnterPathEditOnEdit(node) && st.tool === "move") {
         if (st.pathEditModeNodeId === nodeId) st.setPathEditMode(null);
         else st.setPathEditMode(nodeId);
+        return;
+      }
+      if (canEnterParametricShapeEdit(node) && st.tool === "move") {
+        if (st.shapeEditModeNodeId === nodeId) st.exitShapeEditMode();
+        else st.enterShapeEditMode(nodeId);
       }
     },
     [clientToWorld],

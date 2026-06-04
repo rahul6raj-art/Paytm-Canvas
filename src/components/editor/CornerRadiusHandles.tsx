@@ -27,6 +27,7 @@ import {
 import { applyMatrixToPoint } from "@/lib/transformMath";
 import { useCanvasToWorld } from "./CanvasToWorldContext";
 import { clientToWorldFromDocument } from "@/lib/canvasCoordinates";
+import { useShapeEditHandlesGate } from "./useShapeEditHandles";
 
 const CORNERS: CornerIndex[] = [0, 1, 2, 3];
 
@@ -44,19 +45,12 @@ function localToWorld(
 
 /** Figma-style corner radius dots on rectangle / frame (single selection). */
 export function CornerRadiusHandles() {
-  const selectedIds = useEditorStore((s) => s.selectedIds);
   const nodes = useEditorStore((s) => s.nodes);
   const childOrder = useEditorStore((s) => s.childOrder);
   const zoom = useEditorStore((s) => s.zoom);
-  const tool = useEditorStore((s) => s.tool);
-  const editorMode = useEditorStore((s) => s.editorMode);
-  const penDrawingNodeId = useEditorStore((s) => s.penDrawingNodeId);
-  const pencilDrawingNodeId = useEditorStore((s) => s.pencilDrawingNodeId);
-  const isPlacingComment = useEditorStore((s) => s.isPlacingComment);
-  const pathEditModeNodeId = useEditorStore((s) => s.pathEditModeNodeId);
+  const pan = useEditorStore((s) => s.pan);
   const clientToWorld = useCanvasToWorld();
-
-  const id = selectedIds.length === 1 ? selectedIds[0]! : null;
+  const { show: editActive, id } = useShapeEditHandlesGate();
   const node = id ? nodes[id] : null;
 
   const cornerPreview = useSyncExternalStore(
@@ -71,15 +65,9 @@ export function CornerRadiusHandles() {
   } | null>(null);
 
   const show =
-    editorMode === "design" &&
-    tool === "move" &&
-    !penDrawingNodeId &&
-    !pencilDrawingNodeId &&
-    !isPlacingComment &&
-    id &&
+    editActive &&
     node &&
-    supportsCornerRadiusHandles(node) &&
-    pathEditModeNodeId !== id;
+    supportsCornerRadiusHandles(node);
 
   const handlePx = screenPxToWorld(CANVAS_HANDLE_SCREEN_PX, zoom);
   const borderWorld = screenPxToWorld(CANVAS_OUTLINE_SCREEN_PX, zoom);
@@ -115,7 +103,7 @@ export function CornerRadiusHandles() {
       e.stopPropagation();
       const toWorld =
         clientToWorld ??
-        ((cx: number, cy: number) => clientToWorldFromDocument(cx, cy, zoom));
+        ((cx: number, cy: number) => clientToWorldFromDocument(cx, cy, { pan, zoom }));
       const initialRadius = radii[cornerIndex] ?? 0;
       setDragUi({ cornerIndex, radius: initialRadius });
       beginCornerRadiusDrag({

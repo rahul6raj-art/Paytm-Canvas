@@ -9,7 +9,9 @@ export interface HtmlImportElement {
   getAttr(name: string): string | undefined;
   childElements(): HtmlImportElement[];
   directText(): string;
+  innerMarkup(): string;
   querySelector(selector: string): HtmlImportElement | null;
+  querySelectorAll(selector: string): HtmlImportElement[];
 }
 
 function adaptDomElement(el: Element): HtmlImportElement {
@@ -26,10 +28,13 @@ function adaptDomElement(el: Element): HtmlImportElement {
       }
       return text.replace(/\s+/g, " ").trim();
     },
+    innerMarkup: () => el.innerHTML ?? "",
     querySelector: (selector) => {
       const hit = el.querySelector(selector);
       return hit ? adaptDomElement(hit) : null;
     },
+    querySelectorAll: (selector) =>
+      Array.from(el.querySelectorAll(selector)).map(adaptDomElement),
   };
 }
 
@@ -50,10 +55,13 @@ function adaptNodeHtmlElement(el: NodeHtmlElement): HtmlImportElement {
       }
       return text.replace(/\s+/g, " ").trim();
     },
+    innerMarkup: () => el.innerHTML ?? "",
     querySelector: (selector) => {
       const hit = el.querySelector(selector);
       return hit ? adaptNodeHtmlElement(hit) : null;
     },
+    querySelectorAll: (selector) =>
+      Array.from(el.querySelectorAll(selector)).map(adaptNodeHtmlElement),
   };
 }
 

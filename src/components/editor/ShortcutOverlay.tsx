@@ -3,107 +3,45 @@
 import { useEffect } from "react";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { formatShortcutLabel } from "@/lib/commands";
+import {
+  SHORTCUT_ALIGN,
+  SHORTCUT_CANVAS,
+  SHORTCUT_EDITING,
+  SHORTCUT_OBJECT,
+  SHORTCUT_TOOLS,
+  SHORTCUT_VIEW,
+  SHORTCUT_ZOOM,
+  type ShortcutRow,
+} from "@/lib/keyboardShortcutReference";
 import { cn } from "@/lib/utils";
 
-type Row = { keys: string; label: string };
-
-function Section({ title, rows }: { title: string; rows: Row[] }) {
+function Section({ title, rows }: { title: string; rows: ShortcutRow[] }) {
   return (
     <section className="mb-4 last:mb-0">
-      <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-app-subtle">{title}</h3>
+      <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-app-subtle">
+        {title}
+      </h3>
       <ul className="space-y-0.5">
         {rows.map((r) => (
-          <li key={`${title}-${r.keys}-${r.label}`} className="flex items-baseline justify-between gap-4 text-[12px] leading-snug">
-            <span className="text-app-muted">{r.label}</span>
-            <span className="shrink-0 text-right text-[11px] tabular-nums text-app-subtle">{formatShortcutLabel(r.keys)}</span>
+          <li
+            key={`${title}-${r.keys}-${r.label}`}
+            className="flex items-baseline justify-between gap-4 text-[12px] leading-snug"
+          >
+            <span className="min-w-0 text-app-muted">
+              {r.label}
+              {r.note ? (
+                <span className="block text-[10px] text-app-subtle">{r.note}</span>
+              ) : null}
+            </span>
+            <span className="shrink-0 text-right text-[11px] tabular-nums text-app-subtle">
+              {r.keys ? formatShortcutLabel(r.keys) : "—"}
+            </span>
           </li>
         ))}
       </ul>
     </section>
   );
 }
-
-const TOOLS: Row[] = [
-  { keys: "V", label: "Move tool" },
-  { keys: "F", label: "Frame tool — device presets & draw custom" },
-  { keys: "R", label: "Rectangle tool" },
-  { keys: "O", label: "Ellipse tool" },
-  { keys: "L", label: "Line tool" },
-  { keys: "⇧L", label: "Arrow tool" },
-  { keys: "P", label: "Pen tool" },
-  { keys: "T", label: "Text tool" },
-  { keys: "", label: "Polygon / Star (shape menu)" },
-  { keys: "H", label: "Hand tool" },
-];
-
-const EDITING: Row[] = [
-  { keys: "⌘Z", label: "Undo" },
-  { keys: "⌘⇧Z", label: "Redo" },
-  { keys: "⌘Y", label: "Redo (alternate)" },
-  { keys: "⌘C", label: "Copy" },
-  { keys: "⌘X", label: "Cut" },
-  { keys: "⌘V", label: "Paste" },
-  { keys: "⌘⇧V", label: "Paste in place" },
-  { keys: "⌘A", label: "Select all (visible, unlocked)" },
-  { keys: "⌘L", label: "Lock / unlock selection" },
-  { keys: "⌘⇧H", label: "Hide / show selection" },
-  { keys: "⌘D", label: "Duplicate selection" },
-  { keys: "⌫", label: "Delete selection" },
-  { keys: "⌘G", label: "Group selection" },
-  { keys: "⌘⇧G", label: "Ungroup selection" },
-  { keys: "⇧A", label: "Add auto layout (wrap in frame)" },
-];
-
-const ARRANGE: Row[] = [
-  { keys: "⌘]", label: "Bring forward" },
-  { keys: "⌘[", label: "Send backward" },
-  { keys: "⌘⇧]", label: "Bring to front" },
-  { keys: "⌘⇧[", label: "Send to back" },
-  { keys: "", label: "Align & distribute (context menu or command palette)" },
-];
-
-const MOVE: Row[] = [
-  { keys: "↑ ↓ ← →", label: "Nudge selection 1px" },
-  { keys: "⇧↑ ↓ ← →", label: "Nudge selection 10px" },
-  { keys: "⇧ (drag handle)", label: "Resize with locked aspect ratio" },
-  { keys: "⇧ (drag shape)", label: "Draw square / circle; line snaps to 45°" },
-  { keys: "⌥ (drag shape)", label: "Draw from center (incl. lines)" },
-  { keys: "⇧ (rotate handle)", label: "Snap rotation to 15°" },
-  {
-    keys: "Drag",
-    label: "Two shapes selected: drag one onto the other to swap positions",
-  },
-];
-
-const VIEW: Row[] = [
-  { keys: "⌘+", label: "Zoom in" },
-  { keys: "⌘−", label: "Zoom out" },
-  { keys: "⇧1", label: "Zoom to fit (all frames)" },
-  { keys: "", label: "Toggle layout grid (command palette)" },
-  { keys: "", label: "Toggle mock presence (command palette)" },
-  { keys: "", label: "Toggle comments (command palette)" },
-  { keys: "", label: "Open styles panel (command palette)" },
-  { keys: "", label: "Open AI generator (command palette)" },
-  { keys: "", label: "Help → demo checklist (command palette or toolbar)" },
-  { keys: "⌘.", label: "Show / hide UI (panels & toolbar)" },
-  { keys: "⌘K", label: "Command menu" },
-  { keys: "⌘/", label: "Keyboard shortcuts overlay" },
-];
-
-const FILES: Row[] = [
-  { keys: "", label: "Save, import, export — File menu (toolbar)" },
-  { keys: "", label: "Open version history (command palette)" },
-  { keys: "", label: "Open plugins marketplace (command palette)" },
-];
-
-const PROTOTYPE: Row[] = [
-  { keys: "", label: "Prototype mode (toolbar tabs)" },
-  { keys: "", label: "Present prototype (toolbar)" },
-];
-
-const CANVAS: Row[] = [
-  { keys: "Esc", label: "Cancel marquee, path, comment placement, or clear selection" },
-];
 
 export function ShortcutOverlay() {
   const open = useEditorStore((s) => s.shortcutOverlayOpen);
@@ -134,13 +72,15 @@ export function ShortcutOverlay() {
       }}
     >
       <div
-        className="max-h-[min(80vh,640px)] w-full max-w-md overflow-y-auto rounded-lg border border-app-border bg-app-panel/95 p-4 shadow-2xl backdrop-blur-md"
+        className="max-h-[min(80vh,640px)] w-full max-w-lg overflow-y-auto rounded-lg border border-app-border bg-app-panel/95 p-4 shadow-2xl backdrop-blur-md"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-start justify-between gap-2">
           <div>
             <h2 className="text-[14px] font-semibold text-white">Keyboard shortcuts</h2>
-            <p className="mt-0.5 text-[11px] text-app-subtle">⌘ = Ctrl on Windows / Linux</p>
+            <p className="mt-0.5 text-[11px] text-app-subtle">
+              Figma-style bindings · ⌘ = Ctrl on Windows / Linux
+            </p>
           </div>
           <button
             type="button"
@@ -155,16 +95,15 @@ export function ShortcutOverlay() {
         </div>
         <div className="columns-1 sm:columns-2 sm:gap-6">
           <div className="break-inside-avoid">
-            <Section title="Tools" rows={TOOLS} />
-            <Section title="Editing" rows={EDITING} />
-            <Section title="Move & resize" rows={MOVE} />
-            <Section title="Arrange" rows={ARRANGE} />
+            <Section title="Tools" rows={SHORTCUT_TOOLS} />
+            <Section title="Object" rows={SHORTCUT_OBJECT} />
+            <Section title="Align" rows={SHORTCUT_ALIGN} />
           </div>
           <div className="break-inside-avoid">
-            <Section title="View" rows={VIEW} />
-            <Section title="Files" rows={FILES} />
-            <Section title="Prototype" rows={PROTOTYPE} />
-            <Section title="Canvas" rows={CANVAS} />
+            <Section title="Zoom & frames" rows={SHORTCUT_ZOOM} />
+            <Section title="View" rows={SHORTCUT_VIEW} />
+            <Section title="Editing" rows={SHORTCUT_EDITING} />
+            <Section title="Canvas" rows={SHORTCUT_CANVAS} />
           </div>
         </div>
       </div>

@@ -4,6 +4,7 @@ import {
   finiteCoord,
   finiteDimension,
   getNodeLocalMatrix,
+  getNodeWorldOrigin,
   invertMatrix,
   multiplyMatrix,
   type Matrix2D,
@@ -13,6 +14,11 @@ import { hitTestLineWorld, lineRenderedWorldBounds } from "@/lib/shapes/lineGeom
 import { arrowRenderedWorldBounds, hitTestArrowWorld } from "@/lib/shapes/arrowGeometry";
 import { hitTestTextWorld } from "@/lib/text/textHitTest";
 import { hitTestPolygonLocal, isPolygonNode } from "@/lib/shapes/polygonGeometry";
+import {
+  getBooleanGroupVisibleWorldBounds,
+  isBooleanGroup,
+  isMaskGroup,
+} from "@/lib/booleanGeometry";
 
 export type NodeMin = { parentId: string | null; name: string };
 
@@ -200,8 +206,8 @@ export function getRenderedWorldTopLeft(
   return { x: n?.x ?? 0, y: n?.y ?? 0 };
 }
 
-/** Axis-aligned world bounds using the childOrder render tree (matches what you see on canvas). */
-export function getRenderedWorldBounds(
+/** Bounds for one node (no mask-group expansion). */
+function renderNodeWorldBounds(
   nodeId: string,
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
@@ -253,6 +259,164 @@ export function getRenderedWorldBounds(
   }
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
+
+function intersectWorldBounds(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+): { x: number; y: number; width: number; height: number } | null {
+  const minX = Math.max(a.x, b.x);
+  const minY = Math.max(a.y, b.y);
+  const maxX = Math.min(a.x + a.width, b.x + b.width);
+  const maxY = Math.min(a.y + a.height, b.y + b.height);
+  if (maxX <= minX || maxY <= minY) return null;
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+function unionWorldBounds(
+  boxes: { x: number; y: number; width: number; height: number }[],
+): { x: number; y: number; width: number; height: number } | null {
+  if (boxes.length === 0) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const b of boxes) {
+    minX = Math.min(minX, b.x);
+    minY = Math.min(minY, b.y);
+    maxX = Math.max(maxX, b.x + b.width);
+    maxY = Math.max(maxY, b.y + b.height);
+  }
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+/** Visible region before a mask group node exists (mask ∩ content layers). */
+export function boundsForMaskAndContent(
+  maskId: string,
+  contentIds: string[],
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): { x: number; y: number; width: number; height: number } {
+  const maskBounds = renderNodeWorldBounds(maskId, nodes, childOrder);
+  if (contentIds.length === 0) return maskBounds;
+  const contentUnion = unionWorldBounds(
+    contentIds.map((cid) => renderNodeWorldBounds(cid, nodes, childOrder)),
+  );
+  if (!contentUnion) return maskBounds;
+  const visible = intersectWorldBounds(maskBounds, contentUnion);
+  return visible
+    ? {
+        x: visible.x,
+        y: visible.y,
+        width: Math.max(1, visible.width),
+        height: Math.max(1, visible.height),
+      }
+    : maskBounds;
+}
+
+/**
+ * World bounds of what is actually visible in a mask group (mask shape ∩ masked content).
+ */
+export function getMaskGroupVisibleWorldBounds(
+  groupId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): { x: number; y: number; width: number; height: number } {
+  const g = nodes[groupId];
+  if (!isMaskGroup(g) || !g.maskId || !nodes[g.maskId]) {
+    return renderNodeWorldBounds(groupId, nodes, childOrder);
+  }
+  const contentIds = (childOrder[groupId] ?? []).filter((cid) => {
+    if (cid === g.maskId) return false;
+    const c = nodes[cid];
+    return c && c.visible && !c.locked;
+  });
+  return boundsForMaskAndContent(g.maskId, contentIds, nodes, childOrder);
+}
+
+/** Axis-aligned world bounds using the childOrder render tree (matches what you see on canvas). */
+export function getRenderedWorldBounds(
+  nodeId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): { x: number; y: number; width: number; height: number } {
+  const n = nodes[nodeId];
+  if (!n) return { x: 0, y: 0, width: 0, height: 0 };
+  if (isMaskGroup(n) && n.maskId && nodes[n.maskId]) {
+    return getMaskGroupVisibleWorldBounds(nodeId, nodes, childOrder);
+  }
+  if (isBooleanGroup(n)) {
+    return getBooleanGroupVisibleWorldBounds(nodeId, nodes, childOrder);
+  }
+  return renderNodeWorldBounds(nodeId, nodes, childOrder);
+}
+
+function visibleBoundsForCompositeGroup(
+  groupId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): { x: number; y: number; width: number; height: number } | null {
+  const g = nodes[groupId];
+  if (!g || g.type !== "group") return null;
+  if (isMaskGroup(g) && g.maskId) {
+    return getMaskGroupVisibleWorldBounds(groupId, nodes, childOrder);
+  }
+  if (isBooleanGroup(g)) {
+    return getBooleanGroupVisibleWorldBounds(groupId, nodes, childOrder);
+  }
+  return null;
+}
+
+/**
+ * Resize a mask or boolean group to its visible result; keep children fixed in world space.
+ */
+export function syncGroupFrameToVisible(
+  groupId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): Record<string, EditorNode> {
+  const g = nodes[groupId];
+  const visibleBounds = visibleBoundsForCompositeGroup(groupId, nodes, childOrder);
+  if (!g || !visibleBounds) return nodes;
+  const parentId = g.parentId;
+  const groupXY = parentId
+    ? worldPointToParentLocalFromChildOrder(
+        visibleBounds.x,
+        visibleBounds.y,
+        parentId,
+        nodes,
+        childOrder,
+      )
+    : { x: visibleBounds.x, y: visibleBounds.y };
+
+  const kids = (childOrder[groupId] ?? []).filter((cid) => nodes[cid]);
+  const worldOrigins = new Map<string, { x: number; y: number }>();
+  for (const cid of kids) {
+    worldOrigins.set(cid, getNodeWorldOrigin(cid, nodes));
+  }
+
+  let out = { ...nodes };
+  out[groupId] = {
+    ...g,
+    x: groupXY.x,
+    y: groupXY.y,
+    width: Math.max(1, visibleBounds.width),
+    height: Math.max(1, visibleBounds.height),
+  };
+
+  for (const cid of kids) {
+    const wo = worldOrigins.get(cid)!;
+    const local = worldPointToParentLocalFromChildOrder(wo.x, wo.y, groupId, out, childOrder);
+    out[cid] = { ...out[cid]!, x: local.x, y: local.y };
+  }
+
+  return out;
+}
+
+/** @deprecated Use syncGroupFrameToVisible */
+export const syncMaskGroupFrameToMask = syncGroupFrameToVisible;
+
+/** @deprecated Use syncGroupFrameToVisible */
+export const syncBooleanGroupFrame = syncGroupFrameToVisible;
 
 /** Inverse world matrix using the childOrder render tree. */
 export function getNodeWorldInverseMatrixFromChildOrder(

@@ -195,6 +195,99 @@ describe("code import", () => {
     assert.ok(textNode);
   });
 
+  it("round-trips boolean exclude HTML export to editable boolean group", () => {
+    const f = frame("f1", "Screen", 0, 0, 400, 400);
+    const g: EditorNode = {
+      id: "g-bool",
+      parentId: "f1",
+      type: "group",
+      name: "Exclude",
+      x: 40,
+      y: 60,
+      width: 200,
+      height: 160,
+      rotation: 0,
+      visible: true,
+      locked: false,
+      expanded: true,
+      isBooleanGroup: true,
+      booleanOperation: "exclude",
+      fill: "#e5e5e5",
+      fillEnabled: true,
+    };
+    const outer: EditorNode = {
+      id: "p-outer",
+      parentId: "g-bool",
+      type: "path",
+      name: "Outer",
+      x: 0,
+      y: 0,
+      width: 200,
+      height: 160,
+      rotation: 0,
+      visible: true,
+      locked: false,
+      expanded: true,
+      pathPoints: [
+        { id: "a", x: 20, y: 10 },
+        { id: "b", x: 180, y: 10 },
+        { id: "c", x: 180, y: 150 },
+        { id: "d", x: 20, y: 150 },
+      ],
+      pathClosed: true,
+      fill: "#e5e5e5",
+      fillEnabled: true,
+    };
+    const inner: EditorNode = {
+      id: "p-inner",
+      parentId: "g-bool",
+      type: "path",
+      name: "Inner",
+      x: 0,
+      y: 0,
+      width: 200,
+      height: 160,
+      rotation: 0,
+      visible: true,
+      locked: false,
+      expanded: true,
+      pathPoints: [
+        { id: "e", x: 60, y: 40 },
+        { id: "f", x: 140, y: 40 },
+        { id: "g", x: 140, y: 120 },
+        { id: "h", x: 60, y: 120 },
+      ],
+      pathClosed: true,
+      fill: "#e5e5e5",
+      fillEnabled: true,
+    };
+    const nodes = { f1: f, "g-bool": g, "p-outer": outer, "p-inner": inner };
+    const childOrder = { [EDITOR_ROOT_KEY]: ["f1"], f1: ["g-bool"], "g-bool": ["p-outer", "p-inner"] };
+
+    const exported = exportSelectionCode({
+      nodes,
+      childOrder,
+      selectedIds: ["f1"],
+      designTokens: {},
+      assets: {},
+      format: "html",
+    });
+
+    assert.match(exported.code, /data-pc-boolean-op="exclude"/);
+    assert.match(exported.code, /<svg[^>]*>/);
+
+    const imported = importCodeSource(exported.code, "html");
+    assert.equal(imported.ok, true);
+    if (!imported.ok) return;
+
+    const group = Object.values(imported.slice.nodes).find((n) => n.isBooleanGroup);
+    assert.ok(group);
+    assert.equal(group?.booleanOperation, "exclude");
+    const kids = imported.slice.childOrder[group!.id] ?? [];
+    assert.ok(kids.length >= 2);
+    assert.ok(kids.every((id) => imported.slice.nodes[id]?.type === "path"));
+  });
+
   it("round-trips portable React export to canvas layers", () => {
     const f = frame("f1", "Card", 0, 0, 200, 100);
     f.codeJsxTag = "Header";

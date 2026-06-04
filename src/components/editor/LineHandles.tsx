@@ -22,22 +22,15 @@ import {
 } from "@/lib/shapes/lineDrag";
 import { useCanvasToWorld } from "./CanvasToWorldContext";
 import { clientToWorldFromDocument } from "@/lib/canvasCoordinates";
+import { useShapeEditHandlesGate } from "./useShapeEditHandles";
 
 /** Figma-style start / end / midpoint handles for line layers. */
 export function LineHandles() {
-  const selectedIds = useEditorStore((s) => s.selectedIds);
   const nodes = useEditorStore((s) => s.nodes);
   const childOrder = useEditorStore((s) => s.childOrder);
   const zoom = useEditorStore((s) => s.zoom);
-  const tool = useEditorStore((s) => s.tool);
-  const editorMode = useEditorStore((s) => s.editorMode);
-  const penDrawingNodeId = useEditorStore((s) => s.penDrawingNodeId);
-  const pencilDrawingNodeId = useEditorStore((s) => s.pencilDrawingNodeId);
-  const isPlacingComment = useEditorStore((s) => s.isPlacingComment);
-  const pathEditModeNodeId = useEditorStore((s) => s.pathEditModeNodeId);
   const toWorld = useCanvasToWorld();
-
-  const id = selectedIds.length === 1 ? selectedIds[0]! : null;
+  const { show: editActive, id } = useShapeEditHandlesGate();
   const node = id ? nodes[id] : null;
 
   const linePreview = useSyncExternalStore(subscribeLinePreview, getLinePreview, () => null);
@@ -45,14 +38,9 @@ export function LineHandles() {
   const [dragKind, setDragKind] = useState<"start" | "end" | "body" | null>(null);
 
   const show =
-    editorMode === "design" &&
-    tool === "move" &&
-    !penDrawingNodeId &&
-    !pencilDrawingNodeId &&
-    !isPlacingComment &&
-    !pathEditModeNodeId &&
-    id &&
+    editActive &&
     (node?.type === "line" || node?.type === "arrow") &&
+    node &&
     !node.locked;
 
   const endpoints = useMemo((): LineEndpoints | null => {

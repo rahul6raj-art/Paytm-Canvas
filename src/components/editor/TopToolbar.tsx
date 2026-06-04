@@ -57,7 +57,7 @@ const tools: { id: Tool; icon: typeof MousePointer2; label: string; shortcut?: s
   { id: "move", icon: MousePointer2, label: "Move", shortcut: "V" },
   { id: "pen", icon: Pen, label: "Pen", shortcut: "P" },
   { id: "text", icon: Type, label: "Text", shortcut: "T" },
-  { id: "comment", icon: MessageSquare, label: "Comment" },
+  { id: "comment", icon: MessageSquare, label: "Comment", shortcut: "C" },
   { id: "hand", icon: Hand, label: "Hand", shortcut: "H" },
 ];
 
@@ -596,6 +596,7 @@ export function TopToolbar() {
           </ToolButton>
           <input
             ref={imageImportInputRef}
+            data-place-image-input
             type="file"
             accept="image/png,image/jpeg,image/webp,image/svg+xml"
             className="sr-only"

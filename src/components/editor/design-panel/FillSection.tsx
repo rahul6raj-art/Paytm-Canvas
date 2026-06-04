@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { isColorValue, type ColorTokenValue, type DesignToken } from "@/lib/designTokens";
 import type { FillGradient } from "@/lib/fillGradient";
 import type { EditorNode, NodeStylePatch } from "@/stores/useEditorStore";
+import { DEFAULT_FRAME_FILL, DEFAULT_SHAPE_FILL } from "@/lib/shapes/shapeModel";
 
 export function FillSection({
   node,
@@ -124,7 +125,7 @@ export function FillSection({
       {fillType === "solid" && linkedFillTokenType !== "gradient" ? (
         <div className="mt-2 space-y-1.5">
           <ColorInput
-            hex={display.fill ?? "#ffffff"}
+            hex={display.fill ?? (node.type === "frame" ? DEFAULT_FRAME_FILL : DEFAULT_SHAPE_FILL)}
             libraryName={fillToken?.name}
             libraryTokenId={node.fillTokenId}
             instanceKey={instanceKey}

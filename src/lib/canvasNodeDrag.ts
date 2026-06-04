@@ -1,5 +1,13 @@
 import { ROOT, useEditorStore, type EditorNode } from "@/stores/useEditorStore";
 import { idsToDetachForAutoLayoutDrag } from "@/lib/autoLayoutDrag";
+import {
+  computeAutoLayoutInsertIndicator,
+  editorNodesToLayoutMap,
+  getAutoLayoutReorderContext,
+  pointerInsideAutoLayoutContent,
+  reorderChildByPointer,
+  type AutoLayoutReorderContext,
+} from "@/lib/autoLayoutReorder";
 import { screenDeltaToWorld } from "@/lib/canvasCoordinates";
 import {
   computeDragSmartGuides,
@@ -11,6 +19,7 @@ import {
   getRenderedWorldBounds,
   isAncestorOf,
   worldOriginToNodeXYFromChildOrder,
+  worldPointToParentLocalFromChildOrder,
 } from "@/lib/editorGraph";
 import {
   captureSwapWorldOrigins,
@@ -44,9 +53,11 @@ type DragSession = {
   movingIds: string[];
   startWorld: Record<string, { x: number; y: number }>;
   startBounds: Record<string, WorldRect>;
-  /** Other selected layer when dragging one of two (Figma swap). */
   swapPartnerId?: string;
   swapTargetId?: string | null;
+  mode: "free" | "al-reorder";
+  alContext?: AutoLayoutReorderContext;
+  lastAlInsert?: number;
 };
 
 let activeDrag: DragSession | null = null;
@@ -58,6 +69,24 @@ function detachAutoLayoutChildrenForDrag(movingIds: string[], nodes: Record<stri
   const { updateNode } = useEditorStore.getState();
   for (const id of toDetach) {
     updateNode(id, { layoutPositioning: "absolute", layoutDirty: true }, { skipHistory: true });
+  }
+}
+
+function convertAlReorderToFreeDrag(d: DragSession): void {
+  if (!d.alContext) return;
+  detachAutoLayoutChildrenForDrag(d.movingIds, useEditorStore.getState().nodes);
+  const st = useEditorStore.getState();
+  d.mode = "free";
+  d.alContext = undefined;
+  d.lastAlInsert = undefined;
+  st.setAutoLayoutReorderIndicator(null);
+  d.startWorld = captureSwapWorldOrigins(
+    d.swapPartnerId ? [d.primaryId, d.swapPartnerId] : d.movingIds,
+    st.nodes,
+    st.childOrder,
+  );
+  for (const sid of d.movingIds) {
+    d.startBounds[sid] = getRenderedWorldBounds(sid, st.nodes, st.childOrder);
   }
 }
 
@@ -85,7 +114,13 @@ export function beginCanvasNodeDrag(opts: {
   const movingIds =
     swapPartnerId && dragTargets.includes(opts.nodeId) ? [opts.nodeId] : dragTargets;
 
-  detachAutoLayoutChildrenForDrag(movingIds, s1.nodes);
+  const alContext = swapPartnerId
+    ? null
+    : getAutoLayoutReorderContext(movingIds, s1.nodes, s1.nodes);
+
+  if (!alContext) {
+    detachAutoLayoutChildrenForDrag(movingIds, s1.nodes);
+  }
 
   const st = useEditorStore.getState();
   const startWorld = captureSwapWorldOrigins(
@@ -111,8 +146,12 @@ export function beginCanvasNodeDrag(opts: {
     startBounds,
     swapPartnerId,
     swapTargetId: null,
+    mode: alContext ? "al-reorder" : "free",
+    alContext: alContext ?? undefined,
   };
+  useEditorStore.getState().setIsMovingSelection(true);
   useEditorStore.getState().setSwapDragIndicator(null);
+  useEditorStore.getState().setAutoLayoutReorderIndicator(null);
 
   try {
     opts.captureTarget.setPointerCapture(opts.pointerId);
@@ -124,13 +163,57 @@ export function beginCanvasNodeDrag(opts: {
     const d = activeDrag;
     if (!d) return;
     const state = useEditorStore.getState();
-    const { updateNode, setSnapOverlay } = state;
+    const { updateNode, setSnapOverlay, reorderNode } = state;
+
+    const world = opts.clientToWorld(clientX, clientY);
+
+    if (d.mode === "al-reorder" && d.alContext) {
+      const inside = pointerInsideAutoLayoutContent(
+        d.alContext.parentId,
+        world.x,
+        world.y,
+        state.nodes,
+        state.childOrder,
+      );
+      if (!inside) {
+        convertAlReorderToFreeDrag(d);
+      } else {
+        const local = worldPointToParentLocalFromChildOrder(
+          world.x,
+          world.y,
+          d.alContext.parentId,
+          state.nodes,
+          state.childOrder,
+        );
+        const layoutMap = editorNodesToLayoutMap(state.nodes);
+        const idx = reorderChildByPointer(
+          d.alContext,
+          layoutMap,
+          state.childOrder,
+          local.x,
+          local.y,
+        );
+        if (idx !== d.lastAlInsert) {
+          d.lastAlInsert = idx;
+          reorderNode(d.alContext.draggedId, d.alContext.parentId, idx);
+        }
+        const indicator = computeAutoLayoutInsertIndicator(
+          d.alContext.parentId,
+          idx,
+          d.alContext.draggedId,
+          state.nodes,
+          state.childOrder,
+        );
+        state.setAutoLayoutReorderIndicator(indicator);
+        state.setGuides([]);
+        return;
+      }
+    }
 
     const z = state.zoom;
     const fdx = screenDeltaToWorld(clientX - d.sx, z);
     const fdy = screenDeltaToWorld(clientY - d.sy, z);
 
-    const world = opts.clientToWorld(clientX, clientY);
     const swapTarget = findSwapTargetAtPoint(
       d.primaryId,
       world.x,
@@ -204,8 +287,10 @@ export function beginCanvasNodeDrag(opts: {
     activeDrag = null;
     document.body.style.cursor = "";
     const stEnd = useEditorStore.getState();
+    stEnd.setIsMovingSelection(false);
     stEnd.setGuides([]);
     stEnd.setSwapDragIndicator(null);
+    stEnd.setAutoLayoutReorderIndicator(null);
     window.removeEventListener("pointermove", onMove);
     window.removeEventListener("pointerup", onUp);
     window.removeEventListener("pointercancel", onUp);
@@ -284,6 +369,8 @@ export function cancelCanvasNodeDrag(): void {
   activeDrag = null;
   document.body.style.cursor = "";
   const st = useEditorStore.getState();
+  st.setIsMovingSelection(false);
   st.setGuides([]);
   st.setSwapDragIndicator(null);
+  st.setAutoLayoutReorderIndicator(null);
 }

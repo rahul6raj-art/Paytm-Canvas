@@ -30,7 +30,10 @@ export type ShapeModel = {
   visible: boolean;
 };
 
-export const DEFAULT_SHAPE_FILL = "#ffffff";
+/** Default fill for shapes (rect, ellipse, path, etc.) — not device frames. */
+export const DEFAULT_SHAPE_FILL = "#cfcfcf";
+/** Default fill for frame / device screen nodes. */
+export const DEFAULT_FRAME_FILL = "#ffffff";
 export const DEFAULT_SHAPE_STROKE = "#0f172a";
 /** Filled shapes start with no stroke; lines/arrows set width explicitly at creation. */
 export const DEFAULT_STROKE_WIDTH = 0;

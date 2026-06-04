@@ -25,7 +25,15 @@ import {
   svgSafeId,
   svgTextMarkup,
 } from "@/lib/svgMarkupCore";
-import { nodeToLocalSvgSubpath } from "@/lib/booleanGeometry";
+import {
+  buildBooleanRenderForGroup,
+  buildMaskClipPathDForGroup,
+  isBooleanGroup,
+} from "@/lib/booleanGeometry";
+import {
+  booleanRenderFillAttr,
+  svgInnerMarkupFromBooleanRender,
+} from "@/lib/codeExport/booleanRenderSvg";
 import { ellipseArcExportStyle } from "@/lib/shapes/ellipseArcExport";
 import {
   clampCornerRadii,
@@ -396,12 +404,25 @@ export function nodeToSvgGroupMarkup(
   } else if (node.type === "text") {
     inner = svgTextMarkup(resolved);
   } else if (node.type === "frame" || node.type === "group") {
-    if (node.isBooleanGroup && node.flattenedPathData) {
-      inner = svgPathMarkup({ ...resolved, pathPoints: [], pathClosed: true }, shapeOpts);
+    if (isBooleanGroup(node)) {
+      const flowKids = kids.filter((cid) => {
+        const c = nodes[cid];
+        return c && c.visible && !c.locked;
+      });
+      const op = node.booleanOperation ?? "union";
+      const render = buildBooleanRenderForGroup(node.id, flowKids, nodes, op, childOrder);
+      if (render) {
+        const fill = fillCss(node.fill, node.fillOpacity, node.fillEnabled);
+        inner = svgInnerMarkupFromBooleanRender(
+          render,
+          node.id,
+          booleanRenderFillAttr(fill),
+          "pc-bool-inspect",
+        );
+      }
     } else if (node.maskId) {
-      const maskNode = nodes[node.maskId];
       const clipId = `pc-mask-${svgSafeId(node.id)}`;
-      const md = maskNode ? nodeToLocalSvgSubpath(maskNode) : "";
+      const md = buildMaskClipPathDForGroup(node.id, node.maskId, nodes, childOrder);
       if (md) clipDefs.push(`<clipPath id="${clipId}"><path d="${escXml(md)}" /></clipPath>`);
       let clipped = "";
       for (const cid of kids) {

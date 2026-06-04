@@ -1,4 +1,11 @@
+import type { BooleanOperation } from "@/lib/booleanGeometry";
 import { DEFAULT_CANVAS_BACKGROUND } from "@/lib/canvasVisual";
+import {
+  parseBooleanOperandsFromExportSvg,
+  parseBooleanOperandsFromMarkup,
+  pathNodesFromSvgOperands,
+} from "@/lib/codeImport/booleanSvgImport";
+import { DEFAULT_FRAME_FILL, DEFAULT_SHAPE_FILL } from "@/lib/shapes/shapeModel";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import type { EditorPersistSlice } from "@/lib/documentPersistence";
 import { wrapPersistSliceWithPages } from "@/lib/documentPersistence";
@@ -7,8 +14,10 @@ import { placeScreenFrameOnCanvas } from "@/lib/codeExport/frameRelativeExport";
 import {
   isPaytmCraftRoundTripHtml,
   parseNodeKindFromPcAttrs,
+  PC_BOOLEAN_OP_ATTR,
   PC_COMPONENT_ATTR,
   PC_ID_ATTR,
+  PC_MASK_GROUP_ATTR,
   PC_NAME_ATTR,
   PC_SHAPE_ATTR,
   PC_TYPE_ATTR,
@@ -57,7 +66,20 @@ const INTRINSIC_HTML = new Set([
   "textarea",
 ]);
 
-const SKIP_TAGS = new Set(["script", "style", "meta", "link", "head", "title", "noscript", "html", "body"]);
+const SKIP_TAGS = new Set([
+  "script",
+  "style",
+  "meta",
+  "link",
+  "head",
+  "title",
+  "noscript",
+  "html",
+  "body",
+  "svg",
+]);
+
+const BOOLEAN_OPS = new Set<BooleanOperation>(["union", "subtract", "intersect", "exclude"]);
 
 let idSeq = 0;
 function nextId(): string {
@@ -184,9 +206,33 @@ function buildFromElement(
 ): string {
   const tag = el.tagLower;
   const attrs = readElementAttrs(el);
-  const elementKids = el
+  const booleanOpRaw = el.getAttr(PC_BOOLEAN_OP_ATTR);
+  const booleanOp = BOOLEAN_OPS.has(booleanOpRaw as BooleanOperation)
+    ? (booleanOpRaw as BooleanOperation)
+    : undefined;
+  const isMaskGroupAttr = el.getAttr(PC_MASK_GROUP_ATTR) === "true";
+
+  let elementKids = el
     .childElements()
     .filter((c) => !SKIP_TAGS.has(c.tagLower));
+  const svgExport =
+    el.querySelector("svg") ??
+    elementKids.find((c) => c.tagLower === "svg") ??
+    null;
+  if (booleanOp && svgExport) {
+    elementKids = elementKids.filter((c) => c.tagLower !== "svg");
+  }
+
+  if (isMaskGroupAttr) {
+    const clipWrapper = elementKids.find((c) => {
+      const style = parseInlineCss(c.getAttr("style"));
+      return typeof style.clipPath === "string" && style.clipPath.includes("url(");
+    });
+    if (clipWrapper) {
+      elementKids = clipWrapper.childElements().filter((c) => !SKIP_TAGS.has(c.tagLower));
+    }
+  }
+
   const textContent = el.directText();
   const hasElementChildren = elementKids.length > 0;
 
@@ -219,7 +265,9 @@ function buildFromElement(
     visible: true,
     locked: false,
     expanded: true,
-    fill: mergedPatch.fill ?? (kind === "text" ? undefined : "#ffffff"),
+    fill:
+      mergedPatch.fill ??
+      (kind === "text" ? undefined : kind === "frame" ? DEFAULT_FRAME_FILL : DEFAULT_SHAPE_FILL),
     fillEnabled: kind !== "text",
     codeJsxTag: effectiveTag,
     codeJsxIntrinsic: intrinsic,
@@ -251,6 +299,40 @@ function buildFromElement(
     node.imageName = effectiveTag;
   }
 
+  if (booleanOp) {
+    const parsed =
+      (svgExport
+        ? parseBooleanOperandsFromExportSvg(svgExport, booleanOp)
+        : null) ??
+      parseBooleanOperandsFromMarkup(el.innerMarkup(), booleanOp);
+    if (parsed && parsed.operandDs.length > 0) {
+      node = {
+        ...node,
+        type: "group",
+        isBooleanGroup: true,
+        booleanOperation: booleanOp,
+        fill: parsed.fill,
+        fillEnabled: true,
+      };
+      const operandNodes = pathNodesFromSvgOperands(
+        parsed.operandDs,
+        attrs.id,
+        node.width,
+        node.height,
+        parsed.fill,
+        nextId,
+      );
+      const childIds: string[] = [];
+      for (const opNode of operandNodes) {
+        ctx.nodes[opNode.id] = opNode;
+        childIds.push(opNode.id);
+      }
+      ctx.childOrder[attrs.id] = childIds;
+      ctx.nodes[attrs.id] = finalizeFrameAfterChildren(node, ctx.preserveExactLayout);
+      return attrs.id;
+    }
+  }
+
   const childIds: string[] = [];
   for (let i = 0; i < elementKids.length; i++) {
     const ch = elementKids[i]!;
@@ -259,6 +341,15 @@ function buildFromElement(
   }
   ctx.childOrder[attrs.id] = childIds;
   node = finalizeFrameAfterChildren(node, ctx.preserveExactLayout);
+
+  if (booleanOp) {
+    node = {
+      ...node,
+      isBooleanGroup: true,
+      booleanOperation: booleanOp,
+    };
+  }
+
   ctx.nodes[attrs.id] = node;
   return attrs.id;
 }
