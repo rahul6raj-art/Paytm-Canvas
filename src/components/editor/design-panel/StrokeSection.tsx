@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Eye, EyeOff, Minus, Plus, SlidersHorizontal } from "lucide-react";
 import { PropertiesSection } from "../PropertiesSection";
-import { normalizeHex } from "@/lib/color";
+import { OpacityPercentInput } from "../PropertyInput";
+import { normalizeHex, parseHexInputLive } from "@/lib/color";
+import { useEditorStore } from "@/stores/useEditorStore";
 import {
   anchoredMenuStyle,
   useAnchoredDropdownPosition,
@@ -23,6 +25,14 @@ import {
 import type { StrokeSidesCustom, StrokeSidesMode } from "@/lib/strokeAlign";
 import { StrokeSidesPicker } from "./StrokeSidesPicker";
 import type { StrokePosition } from "@/stores/useEditorStore";
+import { InspectorSegmented } from "./InspectorPrimitives";
+import { GradientFillControls } from "../GradientFillControls";
+import {
+  effectiveStrokeType,
+  normalizeStrokeGradient,
+  type FillGradient,
+} from "@/lib/fillGradient";
+import { strokePaintCss } from "@/lib/fillGradient";
 
 const field =
   "h-6 min-h-[24px] rounded border border-app-border bg-app-field px-1.5 text-[12px] text-app-field-fg focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40";
@@ -30,6 +40,8 @@ const field =
 export type StrokeStylePatch = {
   strokeWidth?: number;
   strokeColor?: string;
+  strokeType?: "solid" | "gradient";
+  strokeGradient?: FillGradient;
   strokeOpacity?: number;
   strokeEnabled?: boolean;
   strokeStyle?: StrokeStyleKind;
@@ -41,7 +53,7 @@ export type StrokeStylePatch = {
   strokeLinecap?: StrokeLinecap;
   strokeLinejoin?: StrokeLinejoin;
   strokeMiterAngle?: number;
-  strokeWidthProfile?: "uniform";
+  strokeWidthProfile?: "uniform" | "taper";
   strokeWidthProfileFlipped?: boolean;
   strokeStartPoint?: StrokeEndpoint;
   strokeEndPoint?: StrokeEndpoint;
@@ -59,6 +71,8 @@ export function StrokeSection({
   locked,
   strokeWidth,
   strokeColor,
+  strokeType = "solid",
+  strokeGradient,
   strokeOpacity = 1,
   strokeEnabled = true,
   strokeStyle,
@@ -71,16 +85,20 @@ export function StrokeSection({
   strokeLinecap,
   strokeLinejoin,
   strokeMiterAngle,
+  strokeWidthProfile,
   strokeWidthProfileFlipped,
   strokeStartPoint = "none",
   strokeEndPoint = "none",
   showEndpoints = false,
   onStyle,
+  onApplyStrokeGradient,
 }: {
   instanceKey: string;
   locked: boolean;
   strokeWidth: number;
   strokeColor: string;
+  strokeType?: "solid" | "gradient";
+  strokeGradient?: FillGradient;
   strokeOpacity?: number;
   strokeEnabled?: boolean;
   strokeStyle: StrokeStyleKind;
@@ -94,19 +112,29 @@ export function StrokeSection({
   strokeLinecap?: StrokeLinecap;
   strokeLinejoin?: StrokeLinejoin;
   strokeMiterAngle?: number;
+  strokeWidthProfile?: "uniform" | "taper";
   strokeWidthProfileFlipped?: boolean;
   strokeStartPoint?: StrokeEndpoint;
   strokeEndPoint?: StrokeEndpoint;
   showEndpoints?: boolean;
   onStyle: (patch: StrokeStylePatch) => void;
+  onApplyStrokeGradient?: (g: FillGradient, opts?: { skipHistory?: boolean }) => void;
 }) {
   const hasStroke = strokeWidth > 0;
   const safeHex = normalizeHex(strokeColor) ?? "#000000";
+  const resolvedStrokeType = effectiveStrokeType({
+    strokeType,
+    strokeGradient,
+    strokeColor,
+  });
+  const normalizedStrokeGradient = normalizeStrokeGradient(strokeGradient, strokeColor);
   const [hexDraft, setHexDraft] = useState(safeHex.replace("#", "").toUpperCase());
-  const [opDraft, setOpDraft] = useState(String(Math.round(strokeOpacity * 100)));
+  const [hexFocused, setHexFocused] = useState(false);
   const [weightDraft, setWeightDraft] = useState(String(strokeWidth || 1));
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const lastAppliedHexRef = useRef(safeHex);
+  const dirtyHexLiveRef = useRef(false);
   const advancedRef = useRef<HTMLButtonElement>(null);
   const advancedMenuRef = useRef<HTMLDivElement>(null);
   const advancedPos = useAnchoredDropdownPosition(advancedRef, advancedOpen, 4, {
@@ -120,13 +148,57 @@ export function StrokeSection({
   }, []);
 
   useEffect(() => {
-    setHexDraft(safeHex.replace("#", "").toUpperCase());
-    setOpDraft(String(Math.round(strokeOpacity * 100)));
+    if (!hexFocused) {
+      setHexDraft(safeHex.replace("#", "").toUpperCase());
+      lastAppliedHexRef.current = safeHex;
+      dirtyHexLiveRef.current = false;
+    }
     setWeightDraft(String(strokeWidth || 1));
-  }, [safeHex, strokeOpacity, strokeWidth, instanceKey]);
+  }, [safeHex, strokeWidth, instanceKey, hexFocused]);
+
+  const applyStrokeHex = (hex: string, opts?: { skipHistory?: boolean }) => {
+    if (hex === lastAppliedHexRef.current) return;
+    onStyle({ strokeColor: hex });
+    lastAppliedHexRef.current = hex;
+    if (opts?.skipHistory) dirtyHexLiveRef.current = true;
+  };
+
+  const handleHexChange = (raw: string) => {
+    const cleaned = raw.replace(/#/g, "").replace(/[^0-9a-fA-F]/g, "").slice(0, 6);
+    setHexDraft(cleaned.toUpperCase());
+    const n = parseHexInputLive(cleaned);
+    if (n) applyStrokeHex(n, { skipHistory: true });
+  };
+
+  const finishHexEdit = () => {
+    setHexFocused(false);
+    const n = parseHexInputLive(hexDraft) ?? normalizeHex(`#${hexDraft}`);
+    if (n) {
+      applyStrokeHex(n, { skipHistory: true });
+      setHexDraft(n.replace("#", "").toUpperCase());
+    } else {
+      setHexDraft(safeHex.replace("#", "").toUpperCase());
+      lastAppliedHexRef.current = safeHex;
+    }
+    if (dirtyHexLiveRef.current) {
+      useEditorStore.getState().pushHistory();
+      dirtyHexLiveRef.current = false;
+    }
+  };
 
   const disabled = locked || !strokeEnabled;
   const style = resolveStrokeStyle({ strokeStyle });
+
+  const parseWeightDraft = () => {
+    const n = parseFloat(weightDraft);
+    return Number.isFinite(n) ? n : strokeWidth || 1;
+  };
+
+  const commitWeight = (n: number) => {
+    const next = Math.min(256, Math.max(0, n));
+    onStyle({ strokeWidth: next });
+    setWeightDraft(String(next));
+  };
 
   const addStroke = () => {
     onStyle({
@@ -155,6 +227,7 @@ export function StrokeSection({
           strokeLinecap={strokeLinecap}
           strokeLinejoin={strokeLinejoin}
           strokeMiterAngle={strokeMiterAngle}
+          strokeWidthProfile={strokeWidthProfile}
           strokeWidthProfileFlipped={strokeWidthProfileFlipped}
           onStyle={onStyle}
         />
@@ -175,46 +248,91 @@ export function StrokeSection({
         </button>
       ) : (
         <div className="space-y-2">
-          {/* Color + opacity + visibility + remove */}
+          <InspectorSegmented
+            options={[
+              { value: "solid" as const, label: "Solid" },
+              { value: "gradient" as const, label: "Gradient" },
+            ]}
+            value={resolvedStrokeType}
+            disabled={disabled}
+            onChange={(t) => {
+              if (t === "gradient") {
+                onStyle({
+                  strokeType: "gradient",
+                  strokeGradient: normalizedStrokeGradient,
+                });
+              } else {
+                onStyle({ strokeType: "solid" });
+              }
+            }}
+          />
+
+          {resolvedStrokeType === "solid" ? (
           <div className="flex items-center gap-1">
             <input
               type="color"
-              value={safeHex}
+              value={(hexFocused ? parseHexInputLive(hexDraft) : null) ?? safeHex}
               disabled={disabled}
-              onChange={(e) => onStyle({ strokeColor: e.target.value.toLowerCase() })}
+              onChange={(e) => {
+                const v = e.target.value.toLowerCase();
+                applyStrokeHex(v);
+                setHexDraft(v.replace("#", "").toUpperCase());
+              }}
               className="h-6 w-6 shrink-0 cursor-pointer rounded border border-app-border bg-transparent p-0 disabled:opacity-40"
               aria-label="Stroke color"
             />
             <input
               type="text"
               disabled={disabled}
+              spellCheck={false}
+              autoComplete="off"
+              maxLength={6}
+              title="6-digit hex — stroke updates when complete"
               className={cn(field, "min-w-0 flex-1 font-mono uppercase")}
               value={hexDraft}
-              onChange={(e) => setHexDraft(e.target.value.replace(/#/g, ""))}
-              onBlur={() => {
-                const n = normalizeHex(`#${hexDraft}`);
-                if (n) onStyle({ strokeColor: n });
-                else setHexDraft(safeHex.replace("#", "").toUpperCase());
-              }}
+              onFocus={() => setHexFocused(true)}
+              onChange={(e) => handleHexChange(e.target.value)}
+              onBlur={finishHexEdit}
               onKeyDown={(e) => {
-                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  finishHexEdit();
+                  (e.target as HTMLInputElement).blur();
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  dirtyHexLiveRef.current = false;
+                  setHexDraft(safeHex.replace("#", "").toUpperCase());
+                  lastAppliedHexRef.current = safeHex;
+                  setHexFocused(false);
+                  (e.target as HTMLInputElement).blur();
+                }
               }}
             />
-            <input
-              type="text"
+          </div>
+          ) : (
+            <div
+              className="h-6 w-full shrink-0 rounded border border-app-border"
+              style={{
+                background: strokePaintCss({
+                  strokeType: "gradient",
+                  strokeGradient: normalizedStrokeGradient,
+                  strokeColor: safeHex,
+                  strokeEnabled,
+                  strokeOpacity,
+                }),
+              }}
+              aria-hidden
+            />
+          )}
+
+          <div className="flex items-center justify-end gap-1">
+            <OpacityPercentInput
+              value={strokeOpacity}
               disabled={disabled}
-              className={cn(field, "w-12 shrink-0 text-right tabular-nums")}
-              value={`${opDraft}%`}
-              onChange={(e) => setOpDraft(e.target.value.replace(/%/g, ""))}
-              onBlur={() => {
-                const n = parseInt(opDraft, 10);
-                if (Number.isFinite(n)) {
-                  onStyle({ strokeOpacity: Math.min(100, Math.max(0, n)) / 100 });
-                } else setOpDraft(String(Math.round(strokeOpacity * 100)));
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-              }}
+              instanceKey={`${instanceKey}-stroke-op`}
+              className={cn(field, "w-12 shrink-0 flex-none")}
+              onCommit={(op) => onStyle({ strokeOpacity: op })}
             />
             <button
               type="button"
@@ -240,6 +358,19 @@ export function StrokeSection({
             </button>
           </div>
 
+          {resolvedStrokeType === "gradient" && onApplyStrokeGradient ? (
+            <GradientFillControls
+              gradient={normalizedStrokeGradient}
+              fallbackFill={strokeColor}
+              fillEnabled={strokeEnabled}
+              fillOpacity={strokeOpacity}
+              paintMode="stroke"
+              locked={locked}
+              instanceKey={`${instanceKey}-stroke-grad`}
+              onChange={onApplyStrokeGradient}
+            />
+          ) : null}
+
           {/* Position + sides + weight + advanced */}
           <div className="flex items-end gap-1">
             <div className="min-w-0 flex-1">
@@ -264,6 +395,7 @@ export function StrokeSection({
                   disabled={disabled}
                   strokeSides={strokeSides}
                   strokeSidesCustom={strokeSidesCustom}
+                  strokeWidth={strokeWidth}
                   onChange={onStyle}
                 />
               </div>
@@ -285,12 +417,23 @@ export function StrokeSection({
                   onChange={(e) => setWeightDraft(e.target.value)}
                   onBlur={() => {
                     const n = parseFloat(weightDraft);
-                    if (Number.isFinite(n)) {
-                      onStyle({ strokeWidth: Math.min(256, Math.max(0, n)) });
-                    } else setWeightDraft(String(strokeWidth));
+                    if (Number.isFinite(n)) commitWeight(n);
+                    else setWeightDraft(String(strokeWidth));
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      (e.target as HTMLInputElement).blur();
+                      return;
+                    }
+                    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+                      e.preventDefault();
+                      let step = 1;
+                      if (e.shiftKey) step *= 10;
+                      if (e.altKey) step /= 10;
+                      const dir = e.key === "ArrowUp" ? 1 : -1;
+                      commitWeight(parseWeightDraft() + step * dir);
+                    }
                   }}
                 />
               </div>

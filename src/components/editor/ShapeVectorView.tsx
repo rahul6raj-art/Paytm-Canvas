@@ -26,11 +26,18 @@ import {
 } from "@/lib/strokeEndpoints";
 import {
   resolveStrokeColor,
+  resolveSvgStrokePaint,
   strokeIsVisible,
   svgStrokePresentationFromNode,
   svgStrokePropsFromNode,
 } from "@/lib/stroke";
-import { fullEllipsePathD, shouldUseAlignedPathStroke } from "@/lib/strokeAlign";
+import { svgSafeId } from "@/lib/svgMarkupCore";
+import {
+  fullEllipsePathD,
+  individualBorderStrokeStyle,
+  shouldUseAlignedPathStroke,
+  strokeUsesCssIndividualBorders,
+} from "@/lib/strokeAlign";
 import { renderShapeStrokeLayers } from "./StrokedShapeLayers";
 import {
   effectiveEllipseArc,
@@ -64,8 +71,16 @@ export function ShapeVectorView({
   );
   const linePreview = useSyncExternalStore(subscribeLinePreview, getLinePreview, () => null);
   const sw = node.strokeWidth ?? 0;
-  const sc = resolveStrokeColor(node);
   const showStroke = strokeIsVisible(node);
+  const strokeDefs: string[] = [];
+  const sc = showStroke
+    ? resolveSvgStrokePaint(node, {
+        gradientId: `pc-sg-${svgSafeId(nodeId)}`,
+        width: node.width,
+        height: node.height,
+        registerGradient: (id, markup) => strokeDefs.push(markup),
+      })
+    : resolveStrokeColor(node);
   const fill = fillPaintCss(node);
   const isGradientFill = effectiveFillType(node) === "gradient";
   const showShapeFill = !strokeOnly && node.fillEnabled !== false && isGradientFill;
@@ -90,9 +105,17 @@ export function ShapeVectorView({
           r,
         ])
       : roundedRectPathD(node.width, node.height, radii);
+    const cssBorderStroke = strokeUsesCssIndividualBorders(node) && showStroke;
     return (
       <>
         {showShapeFill ? <ShapeGradientFill node={node} nodeId={nodeId} shape="rect" /> : null}
+        {cssBorderStroke ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0"
+            style={individualBorderStrokeStyle(node, sc)}
+          />
+        ) : null}
         <svg
           className="pointer-events-none absolute inset-0 block overflow-visible"
           width={node.width}
@@ -104,7 +127,7 @@ export function ShapeVectorView({
             {
               pathD,
               fill: solidFill,
-              showStroke,
+              showStroke: cssBorderStroke ? false : showStroke,
               strokeColor: sc,
               strokeWidth: sw,
               strokePresentation,
@@ -155,6 +178,9 @@ export function ShapeVectorView({
           height={node.height}
           aria-hidden
         >
+          {strokeDefs.length > 0 ? (
+            <defs dangerouslySetInnerHTML={{ __html: strokeDefs.join("") }} />
+          ) : null}
           {(() => {
             const shapeD = arcPath ?? fullEllipsePathD(node.width, node.height);
             const fillRule =
@@ -240,7 +266,13 @@ export function ShapeVectorView({
           height={node.height}
           aria-hidden
         >
-          {markers ? <defs dangerouslySetInnerHTML={{ __html: markers }} /> : null}
+          {strokeDefs.length > 0 || markers ? (
+            <defs
+              dangerouslySetInnerHTML={{
+                __html: [...strokeDefs, markers].filter(Boolean).join(""),
+              }}
+            />
+          ) : null}
           {closed && shouldUseAlignedPathStroke(node, true) ? (
             renderShapeStrokeLayers(
               { ...node, id: nodeId },
@@ -324,6 +356,20 @@ function StrokedLineSvg({
       ? node.strokeLinecap ?? "butt"
       : unifiedLineCap(start, end);
 
+  const lineStrokeDefs: string[] = [];
+  const lineStrokePaint = showStroke
+    ? resolveSvgStrokePaint(node, {
+        gradientId: `pc-sg-${svgSafeId(nodeId)}`,
+        width,
+        height,
+        registerGradient: (id, markup) => lineStrokeDefs.push(markup),
+      })
+    : "none";
+  const lineStrokeProps = {
+    ...strokeProps,
+    stroke: showStroke ? lineStrokePaint : "none",
+  };
+
   return (
     <svg
       className="pointer-events-none absolute inset-0 block overflow-visible"
@@ -331,14 +377,20 @@ function StrokedLineSvg({
       height={height}
       aria-hidden
     >
-      {markers ? <defs dangerouslySetInnerHTML={{ __html: markers }} /> : null}
+      {lineStrokeDefs.length > 0 || markers ? (
+        <defs
+          dangerouslySetInnerHTML={{
+            __html: [...lineStrokeDefs, markers].filter(Boolean).join(""),
+          }}
+        />
+      ) : null}
       <line
         x1={x1}
         y1={y1}
         x2={x2}
         y2={y2}
         fill="none"
-        {...strokeProps}
+        {...lineStrokeProps}
         {...(lineCap ? { strokeLinecap: lineCap } : {})}
         markerStart={showStroke ? markerRefs.markerStart : undefined}
         markerEnd={showStroke ? markerRefs.markerEnd : undefined}

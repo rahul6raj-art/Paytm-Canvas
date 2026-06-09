@@ -243,19 +243,32 @@ export function EditorDocumentPersistence() {
       if (!prev?.figImportInProgress || state.figImportInProgress) return;
       if (!skippedHydrationDuringImportRef.current) return;
       skippedHydrationDuringImportRef.current = false;
+
+      const finishPostImportHydration = () => {
+        const live = useEditorStore.getState();
+        if (hasCanvasRootDesign(live)) {
+          lastSavedRef.current = persistFingerprint(live);
+          return;
+        }
+        try {
+          restoreFromLocalStorage();
+        } catch (e) {
+          console.warn("[Paytm Craft] Post-import hydration failed", e);
+          clearLocalDocument();
+          if (!hasCanvasRootDesign(useEditorStore.getState())) {
+            useEditorStore.getState().applySampleDocumentIfEmpty();
+          }
+        }
+      };
+
+      // Import applies synchronously in finalize; wait two frames before fallback restore.
       if (hasCanvasRootDesign(state)) {
-        lastSavedRef.current = persistFingerprint(state);
+        finishPostImportHydration();
         return;
       }
-      try {
-        restoreFromLocalStorage();
-      } catch (e) {
-        console.warn("[Paytm Craft] Post-import hydration failed", e);
-        clearLocalDocument();
-        if (!hasCanvasRootDesign(useEditorStore.getState())) {
-          useEditorStore.getState().applySampleDocumentIfEmpty();
-        }
-      }
+      requestAnimationFrame(() => {
+        requestAnimationFrame(finishPostImportHydration);
+      });
     });
 
     const runHydrationWork = () => {

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown } from "lucide-react";
-import { normalizeHex } from "@/lib/color";
+import { normalizeHex, parseHexInputLive } from "@/lib/color";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/useEditorStore";
 import {
@@ -13,6 +13,8 @@ import {
 } from "./useAnchoredDropdown";
 import { LibraryColorPickerMenu } from "./LibraryColorPickerMenu";
 
+export type ColorCommitOptions = { skipHistory?: boolean };
+
 type ColorInputProps = {
   label?: string;
   /** Design-system / library style name when this color is linked to a token */
@@ -20,7 +22,7 @@ type ColorInputProps = {
   /** Token id for the linked library color — enables picker on name click */
   libraryTokenId?: string;
   hex: string;
-  onCommitHex: (hex: string) => void;
+  onCommitHex: (hex: string, opts?: ColorCommitOptions) => void;
   disabled?: boolean;
   instanceKey?: string;
 };
@@ -36,8 +38,11 @@ export function ColorInput({
 }: ColorInputProps) {
   const safe = normalizeHex(hex) ?? "#888888";
   const [text, setText] = useState(safe);
+  const [focused, setFocused] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const lastAppliedRef = useRef(safe);
+  const dirtyLiveRef = useRef(false);
   const libraryAnchorRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const applyTokenToSelection = useEditorStore((s) => s.applyTokenToSelection);
@@ -56,20 +61,47 @@ export function ColorInput({
   }, []);
 
   useEffect(() => {
-    setText(normalizeHex(hex) ?? "#888888");
-  }, [hex, instanceKey]);
+    if (focused) return;
+    const n = normalizeHex(hex) ?? "#888888";
+    setText(n);
+    lastAppliedRef.current = n;
+    dirtyLiveRef.current = false;
+  }, [hex, instanceKey, focused]);
 
   useEffect(() => {
     if (!canPickLibrary) setPickerOpen(false);
   }, [canPickLibrary]);
 
-  const commitText = () => {
-    const n = normalizeHex(text.startsWith("#") ? text : `#${text}`);
+  const previewHex = (focused ? parseHexInputLive(text) : null) ?? safe;
+
+  const applyHex = (n: string, opts?: ColorCommitOptions) => {
+    if (n === lastAppliedRef.current) return;
+    onCommitHex(n, opts);
+    lastAppliedRef.current = n;
+    if (opts?.skipHistory) dirtyLiveRef.current = true;
+  };
+
+  const handleTextChange = (raw: string) => {
+    setText(raw);
+    const n = parseHexInputLive(raw);
+    if (n) applyHex(n, { skipHistory: true });
+  };
+
+  const finishEditing = () => {
+    setFocused(false);
+    const n =
+      parseHexInputLive(text) ??
+      normalizeHex(text.startsWith("#") ? text : `#${text}`);
     if (n) {
-      onCommitHex(n);
+      applyHex(n, { skipHistory: true });
       setText(n);
     } else {
       setText(safe);
+      lastAppliedRef.current = safe;
+    }
+    if (dirtyLiveRef.current) {
+      useEditorStore.getState().pushHistory();
+      dirtyLiveRef.current = false;
     }
   };
 
@@ -102,11 +134,11 @@ export function ColorInput({
       <div className="flex gap-1.5">
         <input
           type="color"
-          value={safe}
+          value={previewHex}
           disabled={disabled}
           onChange={(e) => {
             const v = e.target.value.toLowerCase();
-            onCommitHex(v);
+            applyHex(v);
             setText(v);
           }}
           className="h-6 w-9 shrink-0 cursor-pointer rounded border border-app-border bg-transparent p-px disabled:opacity-45"
@@ -154,17 +186,27 @@ export function ColorInput({
           <input
             type="text"
             disabled={disabled}
-            className={cn(
-              "h-full min-w-0 flex-1 border-0 bg-transparent px-1.5 py-0 font-mono text-[12px] leading-4 text-app-field-fg focus-visible:outline-none disabled:opacity-45",
-              libraryName && "max-w-[45%]",
-            )}
+            spellCheck={false}
+            autoComplete="off"
+            aria-label={label ? `${label} hex` : "Color hex"}
+            title={disabled ? "Enable fill to edit color" : "Type 6-digit hex — shape updates when complete"}
+            className="h-full min-w-0 flex-1 border-0 bg-transparent px-1.5 py-0 font-mono text-[12px] leading-4 text-app-field-fg focus-visible:outline-none disabled:opacity-45"
             value={text}
-            onChange={(e) => setText(e.target.value)}
-            onBlur={commitText}
+            onFocus={() => setFocused(true)}
+            onChange={(e) => handleTextChange(e.target.value)}
+            onBlur={finishEditing}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
-                commitText();
+                finishEditing();
+                (e.target as HTMLInputElement).blur();
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                dirtyLiveRef.current = false;
+                setText(safe);
+                lastAppliedRef.current = safe;
+                setFocused(false);
                 (e.target as HTMLInputElement).blur();
               }
             }}

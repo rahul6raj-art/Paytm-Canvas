@@ -52,6 +52,7 @@ type ArcHandleKind = "sweep" | "start" | "ratio";
 export function EllipseArcHandles() {
   const nodes = useEditorStore((s) => s.nodes);
   const childOrder = useEditorStore((s) => s.childOrder);
+  const pan = useEditorStore((s) => s.pan);
   const zoom = useEditorStore((s) => s.zoom);
   const clientToWorld = useCanvasToWorld();
   const { show: editActive, id } = useShapeEditHandlesGate();
@@ -169,7 +170,7 @@ export function EllipseArcHandles() {
       e.preventDefault();
       const toWorld =
         clientToWorld ??
-        ((cx: number, cy: number) => clientToWorldFromDocument(cx, cy, zoom));
+        ((cx: number, cy: number) => clientToWorldFromDocument(cx, cy, { pan, zoom }));
       const begin =
         kind === "ratio"
           ? beginEllipseRatioDrag

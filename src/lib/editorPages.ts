@@ -1,6 +1,7 @@
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import { repairNodeHierarchyIfNeeded } from "@/lib/editorGraph";
 import { DEFAULT_CANVAS_BACKGROUND } from "@/lib/canvasVisual";
+import { DEFAULT_CANVAS_ZOOM } from "@/lib/canvasZoom";
 import type { EditorNode, LayoutGuide } from "@/stores/useEditorStore";
 
 export const ROOT = EDITOR_ROOT_KEY;
@@ -110,7 +111,7 @@ export function createEmptyPage(id: string, name: string): EditorPage {
     name,
     nodes: {},
     childOrder: { [ROOT]: [] },
-    zoom: 0.55,
+    zoom: DEFAULT_CANVAS_ZOOM,
     pan: { x: 40, y: 24 },
     showGrid: false,
     showRulers: true,
@@ -168,7 +169,7 @@ export function pageFromSnapshot(
     nodes: repaired.nodes,
     childOrder: repaired.childOrder,
     selectedIds: snap.selectedIds ?? [],
-    zoom: snap.canvas?.zoom ?? 0.55,
+    zoom: snap.canvas?.zoom ?? DEFAULT_CANVAS_ZOOM,
     pan: { x: snap.canvas?.panX ?? 40, y: snap.canvas?.panY ?? 24 },
     showGrid: snap.canvas?.showGrid ?? false,
     showRulers: snap.canvas?.showRulers ?? true,
@@ -194,7 +195,7 @@ export function initialPagesFromCanvas(
     name: "Page 1",
     nodes,
     childOrder,
-    zoom: opts?.zoom ?? 0.55,
+    zoom: opts?.zoom ?? DEFAULT_CANVAS_ZOOM,
     pan: opts?.pan ?? { x: 40, y: 24 },
     showGrid: opts?.showGrid ?? false,
     showRulers: opts?.showRulers ?? true,

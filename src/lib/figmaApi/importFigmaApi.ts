@@ -1,4 +1,5 @@
 import { FIGMA_API_IMPORT_TIMEOUT_MS } from "@/lib/figImport/figImportConstants";
+import { getFigImportAbortSignal } from "@/lib/figImport/figImportSession";
 import type { PaytmCraftDocument } from "@/lib/documentPersistence";
 import type { ImportFigmaApiRequest } from "@/integrations/figma/types";
 
@@ -7,6 +8,9 @@ export async function importFigmaFromApi(
 ): Promise<PaytmCraftDocument> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), FIGMA_API_IMPORT_TIMEOUT_MS);
+  const userSignal = getFigImportAbortSignal();
+  const onUserAbort = () => controller.abort();
+  userSignal?.addEventListener("abort", onUserAbort);
 
   try {
     const res = await fetch("/api/import-figma", {

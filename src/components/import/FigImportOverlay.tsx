@@ -57,8 +57,7 @@ export function FigImportOverlay() {
           <Loader2 className="h-5 w-5 animate-spin text-accent" aria-hidden />
           <p className="text-[15px] font-semibold text-app-fg">Importing from Figma</p>
         </div>
-        <p className="text-[13px] font-medium text-accent">Stay tuned — we&apos;re on it</p>
-        <p className="mt-2 text-[13px] leading-relaxed text-app-muted">{detail}</p>
+        <p className="text-[13px] leading-relaxed text-app-muted">{detail}</p>
         {elapsedSec >= 5 ? (
           <p className="mt-2 text-[12px] tabular-nums text-app-subtle">
             {elapsedSec}s elapsed · keep this tab open

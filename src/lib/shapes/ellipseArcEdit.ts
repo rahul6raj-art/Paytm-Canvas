@@ -29,14 +29,14 @@ export function ellipseArcPatchFromDrag(
 
   if (kind === "ellipseArcStart") {
     const moveAngle = degreesFromLocalPoint(cx, cy, localX, localY);
-    const fixedEnd = ellipseEndAngleUnwrapped(arc.startDeg, arc.sweepDeg);
+    const fixedEnd = ellipseEndAngleUnwrapped(arc.startDeg, arc.sweepDeg, moveAngle);
     const next = startDegAndSweepFromStartHandleDrag(fixedEnd, moveAngle, opts);
     return { arcStartDeg: next.startDeg, arcSweepDeg: next.sweepDeg };
   }
 
   if (kind === "ellipseArcEnd" || kind === "ellipseArcSweep") {
     const moveAngle = degreesFromLocalPoint(cx, cy, localX, localY);
-    const fixedEnd = ellipseEndAngleUnwrapped(arc.startDeg, arc.sweepDeg);
+    const fixedEnd = ellipseEndAngleUnwrapped(arc.startDeg, arc.sweepDeg, moveAngle);
     const sweepDeg = sweepDegFromEndHandleDrag(arc.startDeg, fixedEnd, moveAngle, {
       shiftKey: opts?.shiftKey,
       fromFullCircle: isFullEllipseArc(arc.sweepDeg),

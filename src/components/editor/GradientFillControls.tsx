@@ -1,12 +1,14 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { Plus, RotateCcw, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ColorInput } from "./ColorInput";
+import { GradientStopColorPopover } from "./GradientStopColorPopover";
 import { PropertyNumberInput } from "./PropertyInput";
 import {
-  fillPaintCss,
+  gradientInspectorBarPaintCss,
   newGradientStopId,
   normalizeFillGradient,
   type FillGradient,
@@ -19,6 +21,8 @@ type GradientFillControlsProps = {
   fallbackFill?: string;
   fillEnabled: boolean;
   fillOpacity: number;
+  /** Preview bar uses fill or stroke paint CSS. */
+  paintMode?: "fill" | "stroke";
   locked?: boolean;
   instanceKey: string;
   /** When set, edits update the linked style instead of the layer only. */
@@ -32,6 +36,7 @@ export function GradientFillControls({
   fallbackFill,
   fillEnabled,
   fillOpacity,
+  paintMode = "fill",
   locked,
   instanceKey,
   linkedStyleName,
@@ -43,7 +48,13 @@ export function GradientFillControls({
     [gradientIn, fallbackFill],
   );
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
+  const [colorPickerStopId, setColorPickerStopId] = useState<string | null>(null);
   const barDragRef = useRef<{ stopId: string; pointerId: number } | null>(null);
+  const stopButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const colorPickerAnchorRef = useRef<HTMLButtonElement | null>(null);
+  const [pickerAnchorEl, setPickerAnchorEl] = useState<HTMLButtonElement | null>(null);
+
+  const POINTER_CLICK_SLOP = 5;
 
   const commit = useCallback(
     (next: FillGradient, opts?: { skipHistory?: boolean }) => {
@@ -52,15 +63,9 @@ export function GradientFillControls({
     [onChange, fallbackFill],
   );
 
-  const previewCss = fillPaintCss({
-    fillType: "gradient",
-    fillGradient: g,
-    fill: fallbackFill,
-    fillEnabled,
-    fillOpacity,
-  });
+  const previewCss = gradientInspectorBarPaintCss(g, fillEnabled ? fillOpacity : 0);
 
-  const addStopAt = (position: number) => {
+  const addStopAt = (position: number): string => {
     const sorted = [...g.stops].sort((a, b) => a.position - b.position);
     const before = sorted.filter((s) => s.position <= position).pop();
     const after = sorted.find((s) => s.position > position);
@@ -74,6 +79,7 @@ export function GradientFillControls({
       stops: [...g.stops, { id, color, position }].sort((a, b) => a.position - b.position),
     });
     setSelectedStopId(id);
+    return id;
   };
 
   const updateStop = (
@@ -100,8 +106,7 @@ export function GradientFillControls({
     const onMove = (ev: PointerEvent) => {
       const d = barDragRef.current;
       if (!d || d.stopId !== stopId || ev.pointerId !== d.pointerId) return;
-      const rect = barEl.getBoundingClientRect();
-      const pct = Math.min(100, Math.max(0, ((ev.clientX - rect.left) / rect.width) * 100));
+      const pct = positionFromBarPointer(barEl, ev.clientX, ev.clientY);
       updateStop(stopId, { position: pct }, { skipHistory: true });
     };
     const onUp = (ev: PointerEvent) => {
@@ -117,32 +122,93 @@ export function GradientFillControls({
     window.addEventListener("pointercancel", onUp);
   };
 
+  const setStopButtonRef = (stopId: string) => (el: HTMLButtonElement | null) => {
+    if (el) stopButtonRefs.current.set(stopId, el);
+    else stopButtonRefs.current.delete(stopId);
+  };
+
+  const openColorPickerForStop = (stopId: string) => {
+    setSelectedStopId(stopId);
+    setColorPickerStopId(stopId);
+  };
+
+  const positionFromBarPointer = (barEl: HTMLDivElement, clientX: number, clientY: number) => {
+    const rect = barEl.getBoundingClientRect();
+    return Math.min(100, Math.max(0, ((clientX - rect.left) / rect.width) * 100));
+  };
+
+  useLayoutEffect(() => {
+    if (!colorPickerStopId) {
+      colorPickerAnchorRef.current = null;
+      setPickerAnchorEl(null);
+      return;
+    }
+    const el = stopButtonRefs.current.get(colorPickerStopId) ?? null;
+    colorPickerAnchorRef.current = el;
+    setPickerAnchorEl(el);
+  }, [colorPickerStopId, g.stops]);
+
   const onStopHandlePointerDown = (
     stop: GradientStop,
-    e: React.PointerEvent<HTMLButtonElement>,
+    e: ReactPointerEvent<HTMLButtonElement>,
     barEl: HTMLDivElement,
   ) => {
     if (locked || !fillEnabled) return;
     e.stopPropagation();
-    e.preventDefault();
     setSelectedStopId(stop.id);
-    onBeginDrag?.();
-    barDragRef.current = { stopId: stop.id, pointerId: e.pointerId };
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch {
-      /* ignore */
-    }
-    bindBarStopDrag(barEl, stop.id);
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let dragging = false;
+
+    const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return;
+      if (dragging) return;
+      if (Math.hypot(ev.clientX - startX, ev.clientY - startY) <= POINTER_CLICK_SLOP) return;
+      dragging = true;
+      onBeginDrag?.();
+      barDragRef.current = { stopId: stop.id, pointerId: e.pointerId };
+      bindBarStopDrag(barEl, stop.id);
+    };
+
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      if (!dragging) {
+        openColorPickerForStop(stop.id);
+      }
+      barDragRef.current = null;
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
   };
 
-  const onPreviewPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (locked || !fillEnabled || e.detail < 2) return;
+  const onBarPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (locked || !fillEnabled) return;
     if ((e.target as HTMLElement).closest("button")) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const pct = Math.min(100, Math.max(0, ((e.clientX - rect.left) / rect.width) * 100));
-    addStopAt(pct);
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const barEl = e.currentTarget;
+
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return;
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > POINTER_CLICK_SLOP) return;
+      const id = addStopAt(positionFromBarPointer(barEl, ev.clientX, ev.clientY));
+      requestAnimationFrame(() => openColorPickerForStop(id));
+    };
+
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
   };
+
+  const colorPickerStop = colorPickerStopId
+    ? g.stops.find((s) => s.id === colorPickerStopId)
+    : undefined;
 
   const kinds: { kind: GradientKind; label: string }[] = [
     { kind: "linear", label: "Linear" },
@@ -168,16 +234,17 @@ export function GradientFillControls({
           (!fillEnabled || locked) && "pointer-events-none opacity-50",
         )}
         style={{ background: previewCss }}
-        onPointerDown={onPreviewPointerDown}
+        onPointerDown={onBarPointerDown}
       >
         {g.stops.map((stop) => (
           <button
             key={stop.id}
+            ref={setStopButtonRef(stop.id)}
             type="button"
-            title={`Stop ${Math.round(stop.position)}% — drag to move along gradient`}
+            title={`Stop ${Math.round(stop.position)}% — click for color, drag to move`}
             className={cn(
               "absolute top-1/2 z-[1] h-4 w-4 -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-full border-2 shadow-sm active:cursor-grabbing",
-              selectedStopId === stop.id
+              selectedStopId === stop.id || colorPickerStopId === stop.id
                 ? "scale-110 border-amber-300 ring-1 ring-amber-300/50"
                 : "border-white hover:scale-105",
             )}
@@ -191,15 +258,29 @@ export function GradientFillControls({
             }}
             onDoubleClick={(e) => {
               e.stopPropagation();
+              if (colorPickerStopId === stop.id) setColorPickerStopId(null);
               removeStop(stop.id);
             }}
           />
         ))}
       </div>
       <p className="text-[10px] leading-snug text-app-subtle">
-        Drag stops on the bar or canvas to move them. Double-click empty bar or canvas line to add; double-click a
-        stop to remove. Purple handle rotates; blue moves center.
+        Click the bar to add a stop; click a stop for the color picker; drag stops to move. Double-click a stop to
+        remove. Canvas: drag stops, double-click line to add.
       </p>
+
+      {colorPickerStop && pickerAnchorEl ? (
+        <GradientStopColorPopover
+          open={Boolean(colorPickerStopId)}
+          anchorRef={colorPickerAnchorRef}
+          remeasureKey={pickerAnchorEl}
+          hex={colorPickerStop.color}
+          instanceKey={`${instanceKey}-grad-stop-picker-${colorPickerStop.id}`}
+          disabled={locked || !fillEnabled}
+          onClose={() => setColorPickerStopId(null)}
+          onCommitHex={(hex) => updateStop(colorPickerStop.id, { color: hex })}
+        />
+      ) : null}
 
       <div>
         <div className="mb-0.5 text-[11px] font-medium text-app-subtle">Type</div>
@@ -328,7 +409,8 @@ export function GradientFillControls({
               g.stops.length >= 2
                 ? (g.stops[0]!.position + g.stops.at(-1)!.position) / 2
                 : 50;
-            addStopAt(mid);
+            const id = addStopAt(mid);
+            requestAnimationFrame(() => openColorPickerForStop(id));
           }}
           className="flex h-6 flex-1 items-center justify-center gap-1 rounded border border-app-border bg-app-panel text-[10px] font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
         >
@@ -367,7 +449,7 @@ export function GradientFillControls({
                 <button
                   type="button"
                   className="text-[10px] font-medium text-app-subtle hover:text-app-fg"
-                  onClick={() => setSelectedStopId(stop.id)}
+                  onClick={() => openColorPickerForStop(stop.id)}
                 >
                   Stop {index + 1}
                 </button>

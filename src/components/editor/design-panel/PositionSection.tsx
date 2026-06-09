@@ -1,8 +1,9 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { PropertiesSection } from "../PropertiesSection";
 import { PropertyNumberInput } from "../PropertyInput";
-import type { EditorNode } from "@/stores/useEditorStore";
+import { useEditorStore, type EditorNode } from "@/stores/useEditorStore";
 import { TransformActions } from "./TransformSettingIcons";
 
 export function PositionSection({
@@ -22,13 +23,46 @@ export function PositionSection({
   onPatch: (p: Partial<EditorNode>) => void;
   onResizeFrame: (width: number, height: number) => void;
 }) {
+  const transformMode = useEditorStore((s) => s.transformInteractionMode);
+  const geomSnapshotRef = useRef<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (transformMode === "rotate") {
+      if (!geomSnapshotRef.current) {
+        geomSnapshotRef.current = {
+          x: node.x,
+          y: node.y,
+          width: node.width,
+          height: node.height,
+        };
+      }
+      return;
+    }
+    geomSnapshotRef.current = null;
+  }, [transformMode, node.x, node.y, node.width, node.height]);
+
+  useEffect(() => {
+    geomSnapshotRef.current = null;
+  }, [instanceKey]);
+
+  const freezeGeom = transformMode === "rotate" && geomSnapshotRef.current != null;
+  const displayX = freezeGeom ? geomSnapshotRef.current!.x : node.x;
+  const displayY = freezeGeom ? geomSnapshotRef.current!.y : node.y;
+  const displayW = freezeGeom ? geomSnapshotRef.current!.width : node.width;
+  const displayH = freezeGeom ? geomSnapshotRef.current!.height : node.height;
+
   return (
     <PropertiesSection title="Position" defaultOpen>
       <div className="grid grid-cols-3 gap-1">
         <PropertyNumberInput
           commitOnInput={false}
           label="X"
-          value={node.x}
+          value={displayX}
           instanceKey={`${instanceKey}-x`}
           disabled={locked || parentAutoLayout}
           decimals={2}
@@ -37,7 +71,7 @@ export function PositionSection({
         <PropertyNumberInput
           commitOnInput={false}
           label="Y"
-          value={node.y}
+          value={displayY}
           instanceKey={`${instanceKey}-y`}
           disabled={locked || parentAutoLayout}
           decimals={2}
@@ -56,23 +90,23 @@ export function PositionSection({
         <PropertyNumberInput
           commitOnInput={false}
           label="W"
-          value={node.width}
+          value={displayW}
           instanceKey={`${instanceKey}-w`}
           disabled={locked}
           min={1}
           onCommit={(v) =>
-            isContainer ? onResizeFrame(v, node.height) : onPatch({ width: v })
+            isContainer ? onResizeFrame(v, displayH) : onPatch({ width: v })
           }
         />
         <PropertyNumberInput
           commitOnInput={false}
           label="H"
-          value={node.height}
+          value={displayH}
           instanceKey={`${instanceKey}-h`}
           disabled={locked}
           min={1}
           onCommit={(v) =>
-            isContainer ? onResizeFrame(node.width, v) : onPatch({ height: v })
+            isContainer ? onResizeFrame(displayW, v) : onPatch({ height: v })
           }
         />
       </div>

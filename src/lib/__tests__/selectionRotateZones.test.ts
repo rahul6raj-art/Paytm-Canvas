@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  pointerOnCornerHandleRotateHalf,
   rotateEdgeBandsForAxisBounds,
   rotateEdgeBandsForCorners,
   rotateZonesForAxisBounds,
@@ -32,6 +33,15 @@ describe("selectionRotateZones", () => {
     const cx = bounds.x + bounds.width / 2;
     const cy = bounds.y + bounds.height / 2;
     assert.ok(Math.hypot(nw!.x - cx, nw!.y - cy) > Math.hypot(60 - cx, 40 - cy));
+  });
+
+  it("detects rotate intent on outer half of corner resize handles", () => {
+    const el = {
+      getBoundingClientRect: () => ({ left: 100, top: 100, width: 12, height: 12 }),
+    } as HTMLElement;
+    assert.equal(pointerOnCornerHandleRotateHalf("nw", 103, 103, el), true);
+    assert.equal(pointerOnCornerHandleRotateHalf("nw", 108, 108, el), false);
+    assert.equal(pointerOnCornerHandleRotateHalf("se", 108, 108, el), true);
   });
 
   it("offsets top rotate handle above the top edge", () => {

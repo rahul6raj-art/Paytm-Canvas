@@ -33,34 +33,51 @@ export function applyFigmaImageUrls(
   }
 }
 
+const IMAGE_EMBED_CONCURRENCY = 8;
+const IMAGE_FETCH_TIMEOUT_MS = 12_000;
+
+async function fetchImageAsDataUrl(
+  url: string,
+  maxBytes: number,
+): Promise<string | null> {
+  const res = await Promise.race([
+    figmaFetch(url),
+    new Promise<Response>((_, reject) => {
+      setTimeout(() => reject(new Error("image fetch timeout")), IMAGE_FETCH_TIMEOUT_MS);
+    }),
+  ]);
+  if (!res.ok) return null;
+  const buf = await res.arrayBuffer();
+  if (buf.byteLength > maxBytes) return null;
+  const mime = res.headers.get("content-type")?.split(";")[0]?.trim() || "image/png";
+  const b64 = Buffer.from(buf).toString("base64");
+  return `data:${mime};base64,${b64}`;
+}
+
 /** Server-side: embed remote Figma CDN URLs as data URLs when small enough. */
 export async function embedFigmaImageUrls(
   urlByRef: Record<string, string>,
   maxBytes = 4 * 1024 * 1024,
 ): Promise<Record<string, string>> {
-  const out: Record<string, string> = {};
-  for (const [ref, url] of Object.entries(urlByRef)) {
-    if (!url.startsWith("http")) {
-      out[ref] = url;
-      continue;
-    }
-    try {
-      const res = await figmaFetch(url);
-      if (!res.ok) {
+  const entries = Object.entries(urlByRef);
+  const out: Record<string, string> = { ...urlByRef };
+  let index = 0;
+
+  async function worker(): Promise<void> {
+    while (index < entries.length) {
+      const i = index++;
+      const [ref, url] = entries[i]!;
+      if (!url.startsWith("http")) continue;
+      try {
+        const dataUrl = await fetchImageAsDataUrl(url, maxBytes);
+        out[ref] = dataUrl ?? url;
+      } catch {
         out[ref] = url;
-        continue;
       }
-      const buf = await res.arrayBuffer();
-      if (buf.byteLength > maxBytes) {
-        out[ref] = url;
-        continue;
-      }
-      const mime = res.headers.get("content-type")?.split(";")[0]?.trim() || "image/png";
-      const b64 = Buffer.from(buf).toString("base64");
-      out[ref] = `data:${mime};base64,${b64}`;
-    } catch {
-      out[ref] = url;
     }
   }
+
+  const workers = Math.min(IMAGE_EMBED_CONCURRENCY, Math.max(1, entries.length));
+  await Promise.all(Array.from({ length: workers }, () => worker()));
   return out;
 }

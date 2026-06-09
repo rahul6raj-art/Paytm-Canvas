@@ -63,7 +63,6 @@ function emptyDocument(name: string): unknown {
     childOrder: { [EDITOR_ROOT_KEY]: [] },
     selectedIds: [] as string[],
     comments: [] as unknown[],
-    canvas: { zoom: 0.55, panX: 40, panY: 24, showGrid: true },
   };
 }
 

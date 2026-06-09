@@ -58,7 +58,7 @@ describe("rotateSelection single", () => {
       x: center.x + 100 * Math.cos(startAngle + Math.PI / 4),
       y: center.y + 100 * Math.sin(startAngle + Math.PI / 4),
     };
-    const { rotation } = applySingleRotate(session, pointer, false);
+    const { rotation } = applySingleRotate(session, pointer, false, nodes, childOrder);
     assert.ok(Math.abs(rotation - 75) < 0.5);
   });
 

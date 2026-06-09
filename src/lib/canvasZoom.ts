@@ -1,3 +1,6 @@
+/** Default editor zoom when creating a page or loading without saved canvas zoom (66%). */
+export const DEFAULT_CANVAS_ZOOM = 0.66;
+
 /** Minimum canvas zoom (1% — wide enough to see the full 6000×6000 workspace). */
 export const CANVAS_MIN_ZOOM = 0.01;
 

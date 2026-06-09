@@ -1,4 +1,4 @@
-import type { PathPoint } from "@/lib/pathGeometry";
+import { newPathPointId, type PathPoint } from "@/lib/pathGeometry";
 import { polygonPathPoints } from "@/lib/shapes/polygonGeometry";
 import { starPathPoints } from "@/lib/shapes/starGeometry";
 

@@ -28,6 +28,7 @@ import { applyMatrixToPoint } from "@/lib/transformMath";
 import { useCanvasToWorld } from "./CanvasToWorldContext";
 import { clientToWorldFromDocument } from "@/lib/canvasCoordinates";
 import { useShapeEditHandlesGate } from "./useShapeEditHandles";
+import { CanvasEditValueBadge } from "./CanvasEditValueBadge";
 
 function localToWorld(
   nodeId: string,
@@ -127,6 +128,15 @@ export function StarHandles() {
 
   if (!show || !handles) return null;
 
+  const cornerRadiusBadge =
+    dragKind === "cornerRadius" && starPreview?.nodeId === id
+      ? {
+          x: handles.corner.x,
+          y: handles.corner.y,
+          value: Math.round(starPreview.cornerRadius),
+        }
+      : null;
+
   const handleWorld = screenPxToWorld(CANVAS_HANDLE_SCREEN_PX, zoom);
   const borderWorld = screenPxToWorld(CANVAS_OUTLINE_SCREEN_PX, zoom);
   const dragging = dragKind != null;
@@ -166,6 +176,15 @@ export function StarHandles() {
         }}
         onPointerDown={makePointerDown("cornerRadius")}
       />
+      {cornerRadiusBadge ? (
+        <CanvasEditValueBadge
+          x={cornerRadiusBadge.x}
+          y={cornerRadiusBadge.y}
+          zoom={zoom}
+        >
+          {cornerRadiusBadge.value}
+        </CanvasEditValueBadge>
+      ) : null}
     </>
   );
 }

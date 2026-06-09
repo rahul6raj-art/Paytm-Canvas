@@ -65,17 +65,28 @@ export function getEditHandles(
       {
         id: "arc-start",
         kind: "ellipseArcStart",
-        local: ellipseStartHandleLocal(node.width, node.height, arc),
+        local: ellipseStartHandleLocal(node.width, node.height, arc.startDeg),
       },
       {
         id: "arc-sweep",
         kind: "ellipseArcEnd",
-        local: ellipseSweepHandleLocal(node.width, node.height, arc),
+        local: ellipseSweepHandleLocal(
+          node.width,
+          node.height,
+          arc.startDeg,
+          arc.sweepDeg,
+        ),
       },
       {
         id: "arc-ratio",
         kind: "ellipseArcRatio",
-        local: ellipseRatioHandleLocal(node.width, node.height, arc),
+        local: ellipseRatioHandleLocal(
+          node.width,
+          node.height,
+          arc.startDeg,
+          arc.sweepDeg,
+          arc.innerRadiusRatio,
+        ),
       },
     );
   }
@@ -108,13 +119,19 @@ export function getEditHandles(
       {
         id: "star-ratio",
         kind: "starRatio",
-        local: starRatioHandleLocal(params.points, node.width, node.height, params.ratio),
+        local: starRatioHandleLocal(
+          params.pointCount,
+          params.ratio,
+          node.width,
+          node.height,
+        ),
       },
       {
         id: "star-corner",
         kind: "starCornerRadius",
         local: starCornerRadiusHandleLocal(
-          params.points,
+          params.pointCount,
+          params.ratio,
           node.width,
           node.height,
           params.cornerRadius,
@@ -242,7 +259,7 @@ export function updateFromHandle(
       const ratio = starRatioFromLocalPoint(
         localX,
         localY,
-        params.points,
+        params.pointCount,
         node.width,
         node.height,
       );

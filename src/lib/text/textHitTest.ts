@@ -16,7 +16,10 @@ import { verticalContentOffsetY } from "@/lib/text/textVerticalAlign";
 export function hitTestTextLocal(
   localX: number,
   localY: number,
-  node: Pick<EditorNode, "width" | "height" | "content" | "textResizeMode" | "verticalAlign"> &
+  node: Pick<
+    EditorNode,
+    "width" | "height" | "content" | "textResizeMode" | "verticalAlign" | "autoResize"
+  > &
     Parameters<typeof resolveTextTypo>[0],
 ): boolean {
   const w = Math.max(MIN_TEXT_BOX, node.width);

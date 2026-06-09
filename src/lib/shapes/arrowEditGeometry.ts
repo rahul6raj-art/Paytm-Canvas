@@ -9,9 +9,23 @@ import {
 import { lineEndpointsFromNode } from "@/lib/shapes/lineGeometry";
 
 /** Offset cap control along the shaft near the start tip. */
-export function arrowStartCapHandleLocal(
-  node: Pick<EditorNode, "type" | "width" | "height">,
-): { x: number; y: number } {
+type ArrowLineNode = Pick<
+  EditorNode,
+  | "type"
+  | "width"
+  | "height"
+  | "x"
+  | "y"
+  | "rotation"
+  | "lineX1"
+  | "lineY1"
+  | "lineX2"
+  | "lineY2"
+  | "arrowHeadSize"
+  | "strokeWidth"
+>;
+
+export function arrowStartCapHandleLocal(node: ArrowLineNode): { x: number; y: number } {
   const ep = lineEndpointsFromNode(node);
   const t = 0.15;
   return {
@@ -21,9 +35,7 @@ export function arrowStartCapHandleLocal(
 }
 
 /** Offset cap control along the shaft near the end tip. */
-export function arrowEndCapHandleLocal(
-  node: Pick<EditorNode, "type" | "width" | "height">,
-): { x: number; y: number } {
+export function arrowEndCapHandleLocal(node: ArrowLineNode): { x: number; y: number } {
   const ep = lineEndpointsFromNode(node);
   const t = 0.85;
   return {
@@ -33,9 +45,7 @@ export function arrowEndCapHandleLocal(
 }
 
 /** Perpendicular offset handle for arrowhead size (mid-shaft). */
-export function arrowHeadSizeHandleLocal(
-  node: Pick<EditorNode, "type" | "width" | "height" | "arrowHeadSize" | "strokeWidth">,
-): { x: number; y: number } {
+export function arrowHeadSizeHandleLocal(node: ArrowLineNode): { x: number; y: number } {
   const ep = lineEndpointsFromNode(node);
   const mx = (ep.x1 + ep.x2) / 2;
   const my = (ep.y1 + ep.y2) / 2;
@@ -51,7 +61,7 @@ export function arrowHeadSizeHandleLocal(
 export function arrowHeadSizeFromLocalPoint(
   localX: number,
   localY: number,
-  node: Pick<EditorNode, "type" | "width" | "height" | "arrowHeadSize" | "strokeWidth">,
+  node: ArrowLineNode,
 ): number {
   const ep = lineEndpointsFromNode(node);
   const mx = (ep.x1 + ep.x2) / 2;

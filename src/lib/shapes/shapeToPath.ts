@@ -68,6 +68,7 @@ export function shapeToPathPoints(
     | "arcStartDeg"
     | "arcSweepDeg"
     | "arcInnerRadiusRatio"
+    | "polygonSides"
   >,
 ): { pathPoints: PathPoint[]; pathClosed: boolean } | null {
   const w = Math.max(1, node.width);
@@ -230,7 +231,7 @@ export function vectorShapeOutlineD(
 ): string {
   if (isPolygonNode(node)) {
     const preview = nodeId ? getPolygonPreview() : null;
-    if (preview?.nodeId === nodeId) {
+    if (preview && preview.nodeId === nodeId) {
       return polygonPathDForNode(node, {
         sides: preview.sides,
         cornerRadius: preview.cornerRadius,
@@ -241,7 +242,7 @@ export function vectorShapeOutlineD(
   if (node.type !== "path") return "";
   if (isStarNode(node)) {
     const preview = nodeId ? getStarPreview() : null;
-    if (preview?.nodeId === nodeId) {
+    if (preview && preview.nodeId === nodeId) {
       return starPathDForNode(node, {
         pointCount: preview.pointCount,
         ratio: preview.ratio,

@@ -20,7 +20,7 @@ export function didPointerExitElement(
   return !el.contains(relatedTarget);
 }
 
-function isDomNode(target: EventTarget): boolean {
+function isDomNode(target: EventTarget): target is Node {
   if (typeof Node !== "undefined" && target instanceof Node) return true;
   const nodeType = (target as { nodeType?: unknown }).nodeType;
   return typeof nodeType === "number" && nodeType >= 1;

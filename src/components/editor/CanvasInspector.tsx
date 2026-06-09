@@ -31,7 +31,7 @@ export function CanvasInspector() {
         <ColorInput
           label="Background"
           hex={canvasBackgroundColor}
-          onCommitHex={setCanvasBackgroundColor}
+          onCommitHex={(hex, opts) => setCanvasBackgroundColor(hex, opts)}
         />
         <div className="flex flex-wrap gap-1 pt-0.5">
           {BACKGROUND_PRESETS.map((hex) => (

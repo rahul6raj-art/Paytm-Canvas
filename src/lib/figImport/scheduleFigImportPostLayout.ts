@@ -7,9 +7,7 @@ import {
 import { applyFigDocumentPostImportLayout } from "@/lib/figImport/figToPaytmCraft";
 
 type EditorSetter = (
-  partial:
-    | Record<string, unknown>
-    | ((state: Record<string, unknown>) => Record<string, unknown>),
+  partial: EditorPersistSlice | ((state: EditorPersistSlice) => EditorPersistSlice),
 ) => void;
 
 /** Apply auto-layout after .fig import when the browser is idle. */

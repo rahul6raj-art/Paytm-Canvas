@@ -11,6 +11,7 @@ export type InstanceOverridePatch = Partial<
     | "fillOpacity"
     | "fillEnabled"
     | "strokeColor"
+    | "strokeEnabled"
     | "strokeWidth"
     | "strokePosition"
     | "strokeSides"

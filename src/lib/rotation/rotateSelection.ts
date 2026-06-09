@@ -118,11 +118,23 @@ export function applySingleRotate(
   session: SingleRotateSession,
   pointerWorld: { x: number; y: number },
   shiftKey: boolean,
-): { id: string; rotation: number } {
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): { id: string; rotation: number; x: number; y: number } {
   const delta = rotationDeltaDegrees(pointerWorld, session.centerWorld, session.startAngle);
   let next = normalizeRotationDegrees(session.startRotation + delta);
   next = snapRotationDegrees(next, shiftKey);
-  return { id: session.id, rotation: next };
+  const n = nodes[session.id];
+  if (!n) return { id: session.id, rotation: next, x: 0, y: 0 };
+  const xy = worldCenterToNodeXYFromChildOrder(
+    session.id,
+    nodes,
+    childOrder,
+    session.centerWorld,
+    next,
+    { x: n.x, y: n.y },
+  );
+  return { id: session.id, rotation: next, x: xy.x, y: xy.y };
 }
 
 export function applyMultiRotatePatches(
@@ -164,7 +176,10 @@ export function singleRotateLabelDegrees(
   pointerWorld: { x: number; y: number },
   shiftKey: boolean,
 ): number {
-  return applySingleRotate(session, pointerWorld, shiftKey).rotation;
+  const delta = rotationDeltaDegrees(pointerWorld, session.centerWorld, session.startAngle);
+  let next = normalizeRotationDegrees(session.startRotation + delta);
+  next = snapRotationDegrees(next, shiftKey);
+  return next;
 }
 
 /** Live angle label for multi rotate (delta applied to selection). */

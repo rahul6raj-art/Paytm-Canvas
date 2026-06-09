@@ -4,11 +4,52 @@ import { screenPxToWorld } from "@/lib/canvasVisual";
 /** Corner handles that support Figma-style rotate-from-corner. */
 export const ROTATE_CORNER_HANDLES: ResizeHandle[] = ["nw", "ne", "se", "sw"];
 
+/**
+ * True when the pointer is on the outward half of a corner resize handle (rotate intent).
+ * Pass `outwardScreen` (viewport px, center → corner) for rotated selections.
+ */
+export function pointerOnCornerHandleRotateHalf(
+  handle: ResizeHandle,
+  clientX: number,
+  clientY: number,
+  handleEl: HTMLElement,
+  outwardScreen?: { x: number; y: number },
+): boolean {
+  if (!ROTATE_CORNER_HANDLES.includes(handle)) return false;
+  const rect = handleEl.getBoundingClientRect();
+  if (rect.width < 1 || rect.height < 1) return false;
+
+  if (outwardScreen) {
+    const len = Math.hypot(outwardScreen.x, outwardScreen.y);
+    if (len < 1e-6) return false;
+    const ux = outwardScreen.x / len;
+    const uy = outwardScreen.y / len;
+    const px = clientX - (rect.left + rect.width / 2);
+    const py = clientY - (rect.top + rect.height / 2);
+    return px * ux + py * uy > 0;
+  }
+
+  const lx = (clientX - rect.left) / rect.width;
+  const ly = (clientY - rect.top) / rect.height;
+  switch (handle) {
+    case "nw":
+      return lx < 0.5 && ly < 0.5;
+    case "ne":
+      return lx > 0.5 && ly < 0.5;
+    case "se":
+      return lx > 0.5 && ly > 0.5;
+    case "sw":
+      return lx < 0.5 && ly > 0.5;
+    default:
+      return false;
+  }
+}
+
 /** Screen distance from corner along outward diagonal to the rotate hit zone center. */
-export const CANVAS_ROTATE_ZONE_OFFSET_SCREEN_PX = 18;
+export const CANVAS_ROTATE_ZONE_OFFSET_SCREEN_PX = 14;
 
 /** Rotate hit target size in screen pixels. */
-export const CANVAS_ROTATE_HIT_SCREEN_PX = 16;
+export const CANVAS_ROTATE_HIT_SCREEN_PX = 28;
 
 /** Thickness of rotate hit bands just outside selection edges (screen px). */
 export const CANVAS_ROTATE_EDGE_BAND_THICKNESS_SCREEN_PX = 12;
@@ -17,27 +58,31 @@ export const CANVAS_ROTATE_EDGE_BAND_THICKNESS_SCREEN_PX = 12;
 export const CANVAS_ROTATE_EDGE_BAND_LENGTH_SCREEN_PX = 52;
 
 import {
-  CANVAS_ROTATE_CURSOR,
   CANVAS_ROTATE_CURSOR_FALLBACK,
   canvasViewportRotateCursorCss,
+  rotateCursorCssForHandle,
 } from "@/lib/canvasRotateCursor";
 
-export { CANVAS_ROTATE_CURSOR } from "@/lib/canvasRotateCursor";
+export { rotateCursorCssForHandle } from "@/lib/canvasRotateCursor";
 
 function canvasViewportEl(): HTMLElement | null {
   return document.querySelector("[data-canvas-viewport]") as HTMLElement | null;
 }
 
 /** Keep rotate cursor visible while dragging (viewport inline cursor overrides `body`). */
-export function applyRotateDragCursor(captureEl?: HTMLElement | null): void {
-  const cursor = canvasViewportRotateCursorCss();
+export function applyRotateDragCursor(
+  captureEl?: HTMLElement | null,
+  handle?: ResizeHandle | "top",
+  selectionRotationDeg = 0,
+): void {
+  const cursor = canvasViewportRotateCursorCss(handle ?? null, selectionRotationDeg);
   document.body.style.cursor = cursor;
   const viewport = canvasViewportEl();
   if (viewport) {
     viewport.style.cursor = cursor;
     viewport.setAttribute("data-rotate-active", "true");
   }
-  if (captureEl) captureEl.style.cursor = CANVAS_ROTATE_CURSOR_FALLBACK;
+  if (captureEl) captureEl.style.cursor = cursor;
 }
 
 export function clearRotateDragCursor(captureEl?: HTMLElement | null): void {

@@ -12,7 +12,9 @@ import {
   type EditorPageSnapshot,
 } from "@/lib/editorPages";
 import { DEFAULT_CANVAS_BACKGROUND } from "@/lib/canvasVisual";
+import { DEFAULT_CANVAS_ZOOM } from "@/lib/canvasZoom";
 import { needsChildOrderReconcile, repairNodeHierarchyIfNeeded } from "@/lib/editorGraph";
+import { migrateAllNodeStrokes } from "@/lib/strokeSpec";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import type { EditorNode, LayoutGuide } from "@/stores/useEditorStore";
 
@@ -30,10 +32,13 @@ function lightRepairForImport(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
 ): { nodes: Record<string, EditorNode>; childOrder: Record<string, string[]> } {
-  if (!needsChildOrderReconcile(nodes, childOrder)) {
-    return { nodes, childOrder };
+  const migrated = migrateAllNodeStrokes(nodes);
+  const base = migrated !== nodes ? migrated : nodes;
+  if (!needsChildOrderReconcile(base, childOrder)) {
+    return { nodes: base, childOrder };
   }
-  return repairNodeHierarchyIfNeeded(nodes, childOrder, { maxNodesForFullRepair: 1 });
+  const repaired = repairNodeHierarchyIfNeeded(base, childOrder, { maxNodesForFullRepair: 1 });
+  return { nodes: repaired.nodes, childOrder: repaired.childOrder };
 }
 
 /** Light hierarchy reconcile only — avoids geometry repair that freezes the UI on import. */
@@ -259,7 +264,7 @@ export function documentToEditorPatch(
     ? { nodes: doc.nodes, childOrder: doc.childOrder }
     : repairNodeHierarchyIfNeeded(doc.nodes, doc.childOrder);
   const pageMeta = initialPagesFromCanvas(repaired.nodes, repaired.childOrder, {
-    zoom: doc.canvas?.zoom ?? 0.55,
+    zoom: doc.canvas?.zoom ?? DEFAULT_CANVAS_ZOOM,
     pan: { x: doc.canvas?.panX ?? 40, y: doc.canvas?.panY ?? 24 },
     showGrid: doc.canvas?.showGrid ?? true,
     showRulers: doc.canvas?.showRulers ?? true,
@@ -277,7 +282,7 @@ export function documentToEditorPatch(
     nodes: repaired.nodes,
     childOrder: repaired.childOrder,
     selectedIds: doc.selectedIds ?? [],
-    zoom: doc.canvas?.zoom ?? 0.55,
+    zoom: doc.canvas?.zoom ?? DEFAULT_CANVAS_ZOOM,
     pan: { x: doc.canvas?.panX ?? 40, y: doc.canvas?.panY ?? 24 },
     showGrid: doc.canvas?.showGrid ?? true,
     showRulers: doc.canvas?.showRulers ?? true,

@@ -90,6 +90,19 @@ describe("editorKeyboardFocus shortcuts", () => {
     assert.equal(shouldYieldShortcutsToTyping(e, fakeTextarea()), true);
   });
 
+  it("yields tool shortcut letters in inspector text inputs (hex fields)", () => {
+    const e = {
+      key: "f",
+      code: "KeyF",
+      metaKey: false,
+      ctrlKey: false,
+      altKey: false,
+      shiftKey: false,
+    } as KeyboardEvent;
+    assert.equal(isToolShortcutEvent(e), true);
+    assert.equal(shouldYieldShortcutsToTyping(e, fakeInput()), true);
+  });
+
   it("allows native paste in code import textarea", () => {
     const e = {
       key: "v",

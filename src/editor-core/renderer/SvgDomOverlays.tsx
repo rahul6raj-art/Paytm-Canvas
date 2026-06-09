@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useSyncExternalStore } from "react";
 import { clientToWorldFromDocument } from "@/lib/canvasCoordinates";
 import {
   applyMatrixToPoint,
@@ -10,7 +10,12 @@ import {
 } from "@/lib/transformMath";
 import { pathHandleMirroring } from "@/lib/pathHandles";
 import { getNodeCornerRadii } from "@/lib/cornerRadius";
-import { beginCornerRadiusDrag } from "@/lib/cornerRadiusDrag";
+import {
+  beginCornerRadiusDrag,
+  getCornerRadiusPreview,
+  subscribeCornerRadiusPreview,
+} from "@/lib/cornerRadiusDrag";
+import { CanvasEditValueBadge } from "@/components/editor/CanvasEditValueBadge";
 import {
   cornerRadiusHandlePosition,
   isRoundedRectPath,
@@ -58,6 +63,11 @@ function PathEditOverlay({ nodeId }: { nodeId: string }) {
   const setPathEditMode = useEditorStore((s) => s.setPathEditMode);
   const pushHistory = useEditorStore((s) => s.pushHistory);
   const toWorld = useCanvasToWorld();
+  const cornerPreview = useSyncExternalStore(
+    subscribeCornerRadiusPreview,
+    getCornerRadiusPreview,
+    () => null,
+  );
 
   const pathPointDragRef = useRef<{
     pointerId: number;
@@ -212,10 +222,20 @@ function PathEditOverlay({ nodeId }: { nodeId: string }) {
   const mirroring = pathHandleMirroring(node);
   const roundedRect = isRoundedRectPath(node);
   const selectedCornerIndex = pathPointCornerIndex(node, selectedPathPointId);
-  const cornerRadii = getNodeCornerRadii(node);
+  const cornerRadii =
+    cornerPreview?.nodeId === nodeId ? cornerPreview.radii : getNodeCornerRadii(node);
+  const activeCornerIndex =
+    cornerPreview?.nodeId === nodeId
+      ? cornerPreview.cornerIndex
+      : selectedCornerIndex;
   const radiusHandlePos =
-    roundedRect && selectedCornerIndex != null
-      ? cornerRadiusHandlePosition(node.width, node.height, cornerRadii, selectedCornerIndex)
+    roundedRect && activeCornerIndex != null
+      ? cornerRadiusHandlePosition(
+          node.width,
+          node.height,
+          cornerRadii,
+          activeCornerIndex,
+        )
       : null;
 
   return (
@@ -224,15 +244,24 @@ function PathEditOverlay({ nodeId }: { nodeId: string }) {
       data-svg-dom-overlay="path-edit"
       style={overlayWorldStyle(nodeId, node, nodes)}
     >
-      {radiusHandlePos && selectedCornerIndex != null ? (
+      {radiusHandlePos && activeCornerIndex != null ? (
         <button
           type="button"
           aria-label="Corner radius"
           title="Drag to adjust corner radius"
           className="pointer-events-auto absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 border border-[color:var(--pc-canvas-selection)] bg-white shadow-sm"
           style={{ left: radiusHandlePos.x, top: radiusHandlePos.y }}
-          onPointerDown={(ev) => startCornerRadiusDrag(selectedCornerIndex, ev)}
+          onPointerDown={(ev) => startCornerRadiusDrag(activeCornerIndex, ev)}
         />
+      ) : null}
+      {cornerPreview?.nodeId === nodeId && radiusHandlePos ? (
+        <CanvasEditValueBadge
+          x={radiusHandlePos.x}
+          y={radiusHandlePos.y}
+          zoom={zoom}
+        >
+          {Math.round(cornerPreview.radii[cornerPreview.cornerIndex] ?? 0)}
+        </CanvasEditValueBadge>
       ) : null}
       {selectedPt && !roundedRect ? (
         <>

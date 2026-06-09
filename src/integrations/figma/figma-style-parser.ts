@@ -1,6 +1,7 @@
 import { DEFAULT_GRADIENT_TRANSFORM, newGradientStopId, type FillGradient } from "@/lib/fillGradient";
 import { newNodeEffectId, type NodeEffect } from "@/lib/nodeEffects";
 import type { FigmaColor, FigmaPaint } from "@/integrations/figma/types";
+import { mergeStrokeIntoNode } from "@/lib/strokeSpec";
 import type { EditorNode } from "@/stores/useEditorStore";
 import type { FigmaApiNode } from "@/integrations/figma/types";
 
@@ -100,14 +101,58 @@ export function effectsFromApi(raw: unknown[] | undefined): NodeEffect[] | undef
   return out.length ? out : undefined;
 }
 
+function mapFigmaStrokeAlign(
+  align: FigmaApiNode["strokeAlign"],
+): EditorNode["strokePosition"] | undefined {
+  if (align === "INSIDE") return "inside";
+  if (align === "OUTSIDE") return "outside";
+  if (align === "CENTER") return "center";
+  return undefined;
+}
+
+function strokeSidesFromIndividualWeights(
+  weights: NonNullable<FigmaApiNode["individualStrokeWeights"]>,
+  fallbackWeight: number,
+): Pick<EditorNode, "strokeSides" | "strokeSidesCustom" | "strokeWidth"> | null {
+  const custom = {
+    top: Math.max(0, weights.top ?? 0),
+    right: Math.max(0, weights.right ?? 0),
+    bottom: Math.max(0, weights.bottom ?? 0),
+    left: Math.max(0, weights.left ?? 0),
+  };
+  const maxW = Math.max(custom.top, custom.right, custom.bottom, custom.left);
+  if (maxW <= 0) return null;
+  const allOn =
+    custom.top > 0 && custom.right > 0 && custom.bottom > 0 && custom.left > 0;
+  const uniform =
+    custom.top === custom.right &&
+    custom.right === custom.bottom &&
+    custom.bottom === custom.left;
+  return {
+    strokeWidth: fallbackWeight > 0 ? fallbackWeight : maxW,
+    strokeSides: allOn && uniform ? "all" : "custom",
+    strokeSidesCustom: custom,
+  };
+}
+
 export function strokeFromFigmaNode(node: FigmaApiNode): Partial<EditorNode> {
   const solid = solidFromPaints(node.strokes);
   const weight = node.strokeWeight ?? 0;
-  if (!solid.fill && weight <= 0) return {};
-  return {
+  const perSide = node.individualStrokeWeights
+    ? strokeSidesFromIndividualWeights(node.individualStrokeWeights, weight)
+    : null;
+  if (!solid.fill && weight <= 0 && !perSide) return {};
+  const position = mapFigmaStrokeAlign(node.strokeAlign);
+  const legacy: Partial<EditorNode> = {
     strokeColor: solid.fill ?? "#000000",
-    strokeWidth: weight,
+    strokeWidth: perSide?.strokeWidth ?? weight,
+    strokeEnabled: true,
+    ...(perSide
+      ? { strokeSides: perSide.strokeSides, strokeSidesCustom: perSide.strokeSidesCustom }
+      : {}),
+    ...(position ? { strokePosition: position } : {}),
   };
+  return mergeStrokeIntoNode(legacy, legacy);
 }
 
 export function cornerRadiusFromFigmaNode(

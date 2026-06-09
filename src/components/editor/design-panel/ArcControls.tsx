@@ -211,7 +211,7 @@ export function ArcControls({
           title="Sweep (% of full circle)"
           onChange={setSweepText}
           onCommit={commitSweep}
-          onNudge={nudgeSweep}
+          onNudge={(d, shift, alt) => nudgeSweep(d > 0 ? 1 : -1, shift, alt)}
         />
         <ArcSegmentInput
           value={ratioText}
@@ -221,7 +221,7 @@ export function ArcControls({
           title="Inner radius ratio"
           onChange={setRatioText}
           onCommit={commitRatio}
-          onNudge={nudgeRatio}
+          onNudge={(d, shift, alt) => nudgeRatio(d > 0 ? 1 : -1, shift, alt)}
         />
       </div>
     </div>

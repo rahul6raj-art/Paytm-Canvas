@@ -301,6 +301,7 @@ export function Canvas() {
   const zoom = useEditorStore((s) => s.zoom);
   const transformInteractionMode = useEditorStore((s) => s.transformInteractionMode);
   const rotateHandleHoverCount = useEditorStore((s) => s.rotateHandleHoverCount);
+  const rotateHandleHoverHandle = useEditorStore((s) => s.rotateHandleHoverHandle);
   const pan = useEditorStore((s) => s.pan);
   const setPan = useEditorStore((s) => s.setPan);
   const showGrid = useEditorStore((s) => s.showGrid);
@@ -1183,6 +1184,11 @@ export function Canvas() {
     rotateHandleHoverCount,
   });
 
+  const selectionRotationDeg =
+    selectedIds.length === 1 && selectedIds[0]
+      ? (nodes[selectedIds[0]]?.rotation ?? 0)
+      : 0;
+
   useEffect(() => {
     const vp = viewportRef.current;
     if (!vp) return;
@@ -1214,7 +1220,10 @@ export function Canvas() {
                   : crosshairTool
                     ? "crosshair"
                     : rotateCursorActive
-                      ? canvasViewportRotateCursorCss()
+                      ? canvasViewportRotateCursorCss(
+                          rotateHandleHoverHandle,
+                          selectionRotationDeg,
+                        )
                       : "default";
 
   return (

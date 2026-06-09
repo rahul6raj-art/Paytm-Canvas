@@ -13,11 +13,12 @@ import {
   worldRect,
 } from "@/lib/tree";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
-import { clampCanvasZoom, viewportForRootNodes } from "@/lib/canvasZoom";
-import { finalizeFigmaImportToEditor } from "@/lib/figImport/finalizeFigmaImport";
+import { clampCanvasZoom, DEFAULT_CANVAS_ZOOM, viewportForRootNodes } from "@/lib/canvasZoom";
 import { waitForNextPaint } from "@/lib/figImport/figImportRuntime";
 import { fitCanvasToImportedDocument } from "@/lib/viewportZoom";
 import { normalizeHex } from "@/lib/color";
+import type { StrokeSpec } from "@/lib/strokeSpec";
+import { mergeStrokeIntoNode } from "@/lib/strokeSpec";
 import { canvasChromeForeground } from "@/lib/canvasForeground";
 import {
   createEmptyDocumentFields,
@@ -135,7 +136,13 @@ import {
   shouldProportionalFrameScale,
 } from "@/lib/resizeContent";
 import { convertFigFileAsync, isFigmaFigFile } from "@/lib/figImport";
+import {
+  abortFigImport,
+  beginFigImport,
+  isFigImportCancelled,
+} from "@/lib/figImport/figImportSession";
 import { importFigmaFromApi } from "@/lib/figmaApi/importFigmaApi";
+import { fetchFigmaServerConfig } from "@/lib/figmaApi/figmaServerConfig";
 import { readFigmaAccessToken } from "@/lib/figmaImportConnection";
 import { isFigmaDesignUrl, parseFigmaFileKey, parseFigmaUrl } from "@/integrations/figma/parse-figma-url";
 import { startTransition } from "react";
@@ -319,6 +326,8 @@ export type LayoutSizingMode = "fixed" | "hug" | "fill";
 
 export type StrokePosition = "inside" | "center" | "outside";
 
+export type { StrokeSpec } from "@/lib/strokeSpec";
+
 export type { LayoutMode, PrimaryAxisAlign, CrossAxisAlign, ConstraintHorizontal, ConstraintVertical };
 
 export type { InstanceOverridePatch } from "@/lib/componentModel";
@@ -349,7 +358,12 @@ export interface EditorNode {
   fillOpacity?: number;
   /** default true */
   fillEnabled?: boolean;
+  /** Canonical Figma-like stroke (synced with legacy flat fields below). */
+  stroke?: StrokeSpec;
   strokeColor?: string;
+  /** Solid or gradient stroke paint */
+  strokeType?: import("@/lib/fillGradient").FillType;
+  strokeGradient?: import("@/lib/fillGradient").FillGradient;
   strokeWidth?: number;
   /** 0–1 stroke color opacity */
   strokeOpacity?: number;
@@ -387,8 +401,8 @@ export interface EditorNode {
   strokeLinejoin?: "miter" | "round" | "bevel";
   /** Minimum corner angle (degrees) before miter becomes bevel */
   strokeMiterAngle?: number;
-  /** Variable width profile (v1: uniform only) */
-  strokeWidthProfile?: "uniform";
+  /** Variable width along path (partial sides default to taper). */
+  strokeWidthProfile?: "uniform" | "taper";
   /** Flip width profile along path */
   strokeWidthProfileFlipped?: boolean;
   /** Ellipse arc start angle in degrees (0° = 3 o'clock, clockwise). */
@@ -535,7 +549,10 @@ export type NodeStylePatch = Partial<
     | "fillGradient"
     | "fillOpacity"
     | "fillEnabled"
+    | "stroke"
     | "strokeColor"
+    | "strokeType"
+    | "strokeGradient"
     | "strokeWidth"
     | "strokeOpacity"
     | "strokeEnabled"
@@ -668,6 +685,8 @@ export interface EditorState {
   isMovingSelection: boolean;
   /** Pointer over rotate-from-corner hit targets (nested enter/leave safe). */
   rotateHandleHoverCount: number;
+  /** Corner/edge under the pointer for rotate cursor orientation. */
+  rotateHandleHoverHandle: import("@/lib/resize").ResizeHandle | "top" | null;
   /** Edit children inside a boolean group (Figma-style). */
   objectEditModeNodeId: string | null;
   selectedPathPointId: string | null;
@@ -750,6 +769,10 @@ export interface EditorState {
   updateNode: (id: string, patch: Partial<EditorNode>, opts?: { skipHistory?: boolean }) => void;
   updateNodes: (patches: Record<string, Partial<EditorNode>>, opts?: { skipHistory?: boolean }) => void;
   updateNodeStyle: (id: string, patch: NodeStylePatch, opts?: { skipHistory?: boolean }) => void;
+  /** Apply a solid fill hex on one layer (clears linked fill color token, handles instances/booleans). */
+  setNodeFillHex: (nodeId: string, hex: string, opts?: { skipHistory?: boolean }) => void;
+  /** Apply text color hex (clears linked color token when used for text). */
+  setNodeTextColorHex: (nodeId: string, hex: string, opts?: { skipHistory?: boolean }) => void;
   toggleVisible: (id: string) => void;
   toggleLock: (id: string) => void;
   setNodeVisible: (id: string, visible: boolean) => void;
@@ -875,7 +898,7 @@ export interface EditorState {
   updateLayoutGuidePosition: (id: string, pos: number, opts?: { skipHistory?: boolean }) => void;
   toggleGrid: () => void;
   toggleRulers: () => void;
-  setCanvasBackgroundColor: (hex: string) => void;
+  setCanvasBackgroundColor: (hex: string, opts?: { skipHistory?: boolean }) => void;
 
   startPlacingComment: () => void;
   cancelPlacingComment: () => void;
@@ -916,7 +939,10 @@ export interface EditorState {
   toggleEditMode: (nodeId?: string) => void;
   setTransformInteractionMode: (mode: "none" | "resize" | "rotate") => void;
   setIsMovingSelection: (active: boolean) => void;
-  setRotateHandleHovered: (hovered: boolean) => void;
+  setRotateHandleHovered: (
+    hovered: boolean,
+    handle?: import("@/lib/resize").ResizeHandle | "top",
+  ) => void;
   enterVectorEditMode: (nodeId?: string) => void;
   setPathHandleMirroring: (mode: import("@/lib/pathHandles").PathHandleMirroring) => void;
   setSelectedPathPointId: (id: string | null) => void;
@@ -1857,6 +1883,7 @@ const INSTANCE_STYLE_KEYS = new Set<string>([
   "fillGradient",
   "fillOpacity",
   "fillEnabled",
+  "stroke",
   "strokeColor",
   "strokeWidth",
   "strokePosition",
@@ -2086,6 +2113,7 @@ function editorStateAfterDocumentImport(
     transformInteractionMode: "none",
     isMovingSelection: false,
     rotateHandleHoverCount: 0,
+    rotateHandleHoverHandle: null,
     objectEditModeNodeId: null,
     selectedPathPointId: null,
     presenceUsers: [],
@@ -2143,6 +2171,7 @@ function editorPartialFromPaytmCraftDocument(doc: PaytmCraftDocument, s: EditorS
     transformInteractionMode: "none",
     isMovingSelection: false,
     rotateHandleHoverCount: 0,
+    rotateHandleHoverHandle: null,
     objectEditModeNodeId: null,
     selectedPathPointId: null,
     presenceUsers: [],
@@ -2297,6 +2326,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   transformInteractionMode: "none",
   isMovingSelection: false,
   rotateHandleHoverCount: 0,
+  rotateHandleHoverHandle: null,
   objectEditModeNodeId: null,
   selectedPathPointId: null,
   editingTextId: null,
@@ -2879,6 +2909,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
           isPlacingComment: true,
           activeCommentId: null,
           rotateHandleHoverCount: 0,
+          rotateHandleHoverHandle: null,
           ...(enteringCreation ? { shapeEditModeNodeId: null, pathEditModeNodeId: null } : {}),
         };
       }
@@ -2888,6 +2919,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         isPlacingComment: false,
         activeCommentId: null,
         rotateHandleHoverCount: 0,
+        rotateHandleHoverHandle: null,
         ...(enteringCreation ? { shapeEditModeNodeId: null, pathEditModeNodeId: null } : {}),
       };
     });
@@ -3265,10 +3297,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const layoutSelf =
         (merged.type === "frame" || merged.type === "group") &&
         keys.some((k) => LAYOUT_FIELD_KEYS.has(k));
-      const geom = keys.some((k) => GEOM_KEYS.has(k) || k === "rotation");
+      const positionGeom = keys.some((k) => GEOM_KEYS.has(k));
+      const rotationOnly =
+        layoutAwarePatch.rotation != null &&
+        keys.every((k) => k === "rotation" || k === "x" || k === "y");
+      const geom = positionGeom || layoutAwarePatch.rotation != null;
       const refresh = new Set<string>();
       if (layoutSelf) refresh.add(id);
-      if (geom) {
+      if (positionGeom && !rotationOnly) {
         if (merged.parentId) refresh.add(merged.parentId);
         if ((merged.type === "frame" || merged.type === "group") && (merged.layoutMode ?? "none") !== "none") {
           refresh.add(id);
@@ -3282,7 +3318,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       ) {
         refresh.add(n.parentId);
       }
-      if (geom) {
+      if (positionGeom && !rotationOnly) {
         const parent = merged.parentId ? nodes[merged.parentId] : undefined;
         if (parent && (isMaskGroup(parent) || isBooleanGroup(parent))) {
           nodes = syncGroupFrameToVisible(parent.id, nodes, s.childOrder);
@@ -3293,7 +3329,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
           nodes = syncGroupFrameToVisible(id, nodes, s.childOrder);
         }
       }
-      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
+      if (!rotationOnly) {
+        nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
+      }
       if (geom) {
         warnInvalidNodeGeometry("updateNode", id, nodes[id] ?? merged, nodes);
       }
@@ -3312,6 +3350,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       let nodes = { ...s.nodes };
       const refresh = new Set<string>();
       let changed = false;
+      let rotationOnlyBatch = true;
       for (const id of ids) {
         const n = nodes[id];
         const patch = patches[id];
@@ -3320,12 +3359,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
         nodes[id] = { ...n, ...layoutAwarePatch };
         changed = true;
         const keys = Object.keys(layoutAwarePatch);
+        const rotationOnly =
+          layoutAwarePatch.rotation != null &&
+          keys.every((k) => k === "rotation" || k === "x" || k === "y");
+        if (!rotationOnly) rotationOnlyBatch = false;
         const layoutSelf =
           (n.type === "frame" || n.type === "group") &&
           keys.some((k) => LAYOUT_FIELD_KEYS.has(k));
-        const geom = keys.some((k) => GEOM_KEYS.has(k) || k === "rotation");
+        const positionGeom = keys.some((k) => GEOM_KEYS.has(k));
         if (layoutSelf) refresh.add(id);
-        if (geom) {
+        if (positionGeom && !rotationOnly) {
           if (n.parentId) refresh.add(n.parentId);
           if ((n.type === "frame" || n.type === "group") && (n.layoutMode ?? "none") !== "none") {
             refresh.add(id);
@@ -3341,7 +3384,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
         }
       }
       if (!changed) return s;
-      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
+      if (!rotationOnlyBatch) {
+        nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
+      }
       for (const id of ids) {
         const merged = nodes[id];
         if (merged && patches[id]) {
@@ -3369,8 +3414,27 @@ export const useEditorStore = create<EditorState>((set, get) => {
         n.type === "text" && instRoot && instRoot !== id
           ? mergeInstanceOverrides(n, s.nodes)
           : n;
+      const strokeKeys = [
+        "stroke",
+        "strokeColor",
+        "strokeType",
+        "strokeGradient",
+        "strokeWidth",
+        "strokeOpacity",
+        "strokeEnabled",
+        "strokePosition",
+        "strokeStyle",
+        "strokeDashLength",
+        "strokeDashGap",
+        "strokeLinecap",
+        "strokeLinejoin",
+      ] as const;
+      const touchesStroke = strokeKeys.some((k) => k in patch);
+      const mergedPatch = touchesStroke
+        ? { ...patch, ...mergeStrokeIntoNode(layoutBase, patch) }
+        : patch;
       const finalPatch =
-        n.type === "text" ? withTextLayoutPatch(layoutBase, patch) : patch;
+        n.type === "text" ? withTextLayoutPatch(layoutBase, mergedPatch) : mergedPatch;
 
       let nodes: Record<string, EditorNode>;
       if (instRoot && instRoot !== id) {
@@ -3402,6 +3466,86 @@ export const useEditorStore = create<EditorState>((set, get) => {
         (n.type === "text" ? patchAffectsTextLayout(patch) : true)
       ) {
         nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId]);
+      }
+      return { nodes };
+    });
+  },
+
+  setNodeFillHex: (nodeId, hex, opts) => {
+    const normalized = normalizeHex(hex.trim().startsWith("#") ? hex.trim() : `#${hex.trim()}`);
+    if (!normalized) return;
+    if (!opts?.skipHistory && !get().isApplyingHistory) {
+      const n0 = get().nodes[nodeId];
+      if (n0 && !n0.locked) get().pushHistory();
+    }
+    set((s) => {
+      const n = s.nodes[nodeId];
+      if (!n || n.locked) return s;
+      const stylePatch: NodeStylePatch = { fill: normalized, fillType: "solid" };
+      const instRoot = findInstanceRoot(s.nodes, nodeId);
+      let nodes = { ...s.nodes };
+
+      const applyFill = (targetId: string, base: EditorNode) => {
+        const expanded = expandBooleanFillStylePatches(targetId, stylePatch, nodes, s.childOrder);
+        if (expanded) {
+          for (const [nid, p] of Object.entries(expanded)) {
+            const cur = nodes[nid];
+            if (cur && !cur.locked) {
+              nodes[nid] = { ...cur, ...p, fillTokenId: undefined };
+            }
+          }
+          return;
+        }
+        nodes[targetId] = { ...base, ...stylePatch, fillTokenId: undefined };
+      };
+
+      if (instRoot && instRoot !== nodeId) {
+        nodes[nodeId] = { ...nodes[nodeId]!, fillTokenId: undefined };
+        const rn = nodes[instRoot]!;
+        const io: Record<string, Record<string, unknown>> = { ...(rn.instanceOverrides ?? {}) };
+        const prev =
+          io[nodeId] && typeof io[nodeId] === "object" && !Array.isArray(io[nodeId])
+            ? { ...(io[nodeId] as Record<string, unknown>) }
+            : {};
+        const nextOv: Record<string, unknown> = { ...prev, ...stylePatch };
+        delete nextOv.fillTokenId;
+        io[nodeId] = nextOv;
+        nodes[instRoot] = { ...rn, instanceOverrides: io };
+      } else {
+        applyFill(nodeId, n);
+      }
+      return { nodes };
+    });
+  },
+
+  setNodeTextColorHex: (nodeId, hex, opts) => {
+    const normalized = normalizeHex(hex.trim().startsWith("#") ? hex.trim() : `#${hex.trim()}`);
+    if (!normalized) return;
+    if (!opts?.skipHistory && !get().isApplyingHistory) {
+      const n0 = get().nodes[nodeId];
+      if (n0 && !n0.locked) get().pushHistory();
+    }
+    set((s) => {
+      const n = s.nodes[nodeId];
+      if (!n || n.locked) return s;
+      const stylePatch: NodeStylePatch = { textColor: normalized };
+      const instRoot = findInstanceRoot(s.nodes, nodeId);
+      let nodes = { ...s.nodes };
+
+      if (instRoot && instRoot !== nodeId) {
+        nodes[nodeId] = { ...nodes[nodeId]!, fillTokenId: undefined };
+        const rn = nodes[instRoot]!;
+        const io: Record<string, Record<string, unknown>> = { ...(rn.instanceOverrides ?? {}) };
+        const prev =
+          io[nodeId] && typeof io[nodeId] === "object" && !Array.isArray(io[nodeId])
+            ? { ...(io[nodeId] as Record<string, unknown>) }
+            : {};
+        const nextOv: Record<string, unknown> = { ...prev, ...stylePatch };
+        delete nextOv.fillTokenId;
+        io[nodeId] = nextOv;
+        nodes[instRoot] = { ...rn, instanceOverrides: io };
+      } else {
+        nodes[nodeId] = { ...n, ...stylePatch, fillTokenId: undefined };
       }
       return { nodes };
     });
@@ -5824,12 +5968,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
   },
 
   resizeNode: (id, handle, startBounds, currentPoint, modifiers, opts) => {
+    if (get().transformInteractionMode === "rotate") return;
     if (!opts?.skipHistory && !get().isApplyingHistory) {
       const pre = get();
       const n0 = pre.nodes[id];
       if (n0 && !n0.locked && n0.visible) get().pushHistory();
     }
     set((s) => {
+      if (s.transformInteractionMode === "rotate") return s;
       const n = s.nodes[id];
       if (!n || n.locked || !n.visible) return s;
       const kind: ResizeKind =
@@ -5845,13 +5991,18 @@ export const useEditorStore = create<EditorState>((set, get) => {
         n.type === "image"
           ? n.type
           : "rectangle";
-      const next = computeResizedBounds(handle, startBounds, currentPoint, modifiers, kind);
-      let x = finiteCoord(next.x, n.x);
-      let y = finiteCoord(next.y, n.y);
+      const rotated = hasRotation(n.rotation);
+      /** Resize drags on rotated layers pass pointer in node-local space; bounds are 0,0,w,h. */
+      const resizeStart: Bounds = rotated
+        ? { x: 0, y: 0, width: startBounds.width, height: startBounds.height }
+        : startBounds;
+      const next = computeResizedBounds(handle, resizeStart, currentPoint, modifiers, kind);
+      let x = rotated ? n.x : finiteCoord(next.x, n.x);
+      let y = rotated ? n.y : finiteCoord(next.y, n.y);
       const width = finiteDimension(next.width, RESIZE_MIN_DIMENSION);
       const height = finiteDimension(next.height, RESIZE_MIN_DIMENSION);
 
-      if (opts?.fixedWorld && hasRotation(n.rotation)) {
+      if (opts?.fixedWorld && rotated) {
         const anchorLocal = getResizeAnchorLocal(handle, width, height);
         const solved = solveNodeXYForAnchorWorld(
           n,
@@ -5860,7 +6011,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
           height,
           anchorLocal,
           opts.fixedWorld,
-          { x: next.x, y: next.y },
+          { x: n.x, y: n.y },
         );
         x = solved.x;
         y = solved.y;
@@ -6108,12 +6259,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
     });
   },
 
-  setCanvasBackgroundColor: (hex) => {
+  setCanvasBackgroundColor: (hex, opts) => {
     const normalized = normalizeHex(hex.startsWith("#") ? hex : `#${hex}`);
     if (!normalized) return;
     const s = get();
     if (s.canvasBackgroundColor === normalized) return;
-    get().pushHistory();
+    if (!opts?.skipHistory && !get().isApplyingHistory) get().pushHistory();
     set((state) => {
       const next = { canvasBackgroundColor: normalized };
       return { ...next, ...syncActivePageRecord({ ...state, ...next }) };
@@ -6840,13 +6991,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   setIsMovingSelection: (active) => set({ isMovingSelection: active }),
 
-  setRotateHandleHovered: (hovered) =>
-    set((s) => ({
-      rotateHandleHoverCount: Math.max(
+  setRotateHandleHovered: (hovered, handle) =>
+    set((s) => {
+      const rotateHandleHoverCount = Math.max(
         0,
         s.rotateHandleHoverCount + (hovered ? 1 : -1),
-      ),
-    })),
+      );
+      let rotateHandleHoverHandle = s.rotateHandleHoverHandle;
+      if (hovered && handle) rotateHandleHoverHandle = handle;
+      else if (!hovered && rotateHandleHoverCount === 0) rotateHandleHoverHandle = null;
+      return { rotateHandleHoverCount, rotateHandleHoverHandle };
+    }),
 
   enterVectorEditMode: (nodeId) => {
     const s = get();
@@ -7303,6 +7458,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   },
 
   resetEditorBlockingState: () => {
+    abortFigImport();
     set({
       documentHydrating: false,
       figImportInProgress: false,
@@ -7379,6 +7535,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   },
 
   importFigmaFile: async (file) => {
+    const importGen = beginFigImport();
     set({
       figImportInProgress: true,
       figImportStatus: "Reading file…",
@@ -7387,23 +7544,34 @@ export const useEditorStore = create<EditorState>((set, get) => {
     });
     try {
       await waitForNextPaint();
+      if (isFigImportCancelled(importGen)) return;
       const bytes = new Uint8Array(await file.arrayBuffer());
       const onProgress = (message: string) => {
-        useEditorStore.setState({ figImportStatus: message });
+        if (!isFigImportCancelled(importGen)) {
+          useEditorStore.setState({ figImportStatus: message });
+        }
       };
       const result = await convertFigFileAsync(bytes, file.name, onProgress);
+      if (isFigImportCancelled(importGen)) return;
       if (!result.ok) {
         throw new Error(result.error);
       }
+      set({ figImportStatus: "Preparing canvas…" });
       const prepared = prepareDocumentForEditorImport(result.document);
+      if (isFigImportCancelled(importGen)) return;
+      const { finalizeFigmaImportToEditor } = await import("@/lib/figImport/finalizeFigmaImport");
       await finalizeFigmaImportToEditor({
         prepared,
         fileName: result.document.name || file.name.replace(/\.fig$/i, ""),
         runPostLayout: true,
+        importGen,
       });
     } catch (e) {
+      if (!isFigImportCancelled(importGen)) {
+        get().resetEditorBlockingState();
+        throw e;
+      }
       get().resetEditorBlockingState();
-      throw e;
     }
   },
 
@@ -7435,12 +7603,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }
     }
     if (!accessToken) {
-      abortImport(
-        "A Figma access token is required. Paste your token in Import from Figma and click Verify & connect.",
-      );
-      return;
+      const server = await fetchFigmaServerConfig();
+      if (!server.serverTokenValid) {
+        abortImport(
+          "Connect Figma once: open Import from Figma, paste your personal access token, and click Verify & connect. It stays saved in this browser. Your team can also set FIGMA_ACCESS_TOKEN in .env.local so nobody needs a personal token.",
+        );
+        return;
+      }
     }
 
+    const importGen = beginFigImport();
     const alreadyBusy = get().figImportInProgress;
     if (!alreadyBusy) {
       set({
@@ -7460,13 +7632,22 @@ export const useEditorStore = create<EditorState>((set, get) => {
         fileKey: fileKey || (url && !isFigmaDesignUrl(url) ? parseFigmaFileKey(url) ?? undefined : undefined),
         nodeId,
       });
+      if (isFigImportCancelled(importGen)) return;
+      set({ figImportStatus: "Preparing canvas…" });
       const prepared = prepareDocumentForEditorImport(doc);
+      if (isFigImportCancelled(importGen)) return;
+      const { finalizeFigmaImportToEditor } = await import("@/lib/figImport/finalizeFigmaImport");
       await finalizeFigmaImportToEditor({
         prepared,
         fileName: doc.name,
         runPostLayout: false,
+        importGen,
       });
     } catch (e) {
+      if (isFigImportCancelled(importGen)) {
+        get().resetEditorBlockingState();
+        return;
+      }
       const message = e instanceof Error ? e.message : "Could not import from Figma.";
       set({ figImportStatus: message });
       get().resetEditorBlockingState();
@@ -7758,7 +7939,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     }
     const { nodes, childOrder } = buildMock();
     const pageInit = initialPagesFromCanvas(nodes, childOrder, {
-      zoom: 0.55,
+      zoom: DEFAULT_CANVAS_ZOOM,
       pan: { x: 40, y: 24 },
       showGrid: false,
       showRulers: true,
@@ -7773,7 +7954,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       designTokens: {},
       fileName: "Untitled",
       selectedIds: [],
-      zoom: 0.55,
+      zoom: DEFAULT_CANVAS_ZOOM,
       pan: { x: 40, y: 24 },
       showGrid: false,
       showRulers: true,

@@ -273,7 +273,10 @@ export function buildTokensByVariableKey(
     const hex = rgbaToHex(color);
     for (const token of Object.values(tokens)) {
       if (token.type !== "color") continue;
-      if (token.value.hex.toLowerCase() === hex.toLowerCase()) {
+      if (
+        "hex" in token.value &&
+        token.value.hex.toLowerCase() === hex.toLowerCase()
+      ) {
         map.set(varKey, token.id);
         break;
       }

@@ -1,6 +1,7 @@
 import { readLocalDocument, documentToEditorPatch } from "@/lib/documentPersistence";
 import { initialPagesFromCanvas, createEmptyPage } from "@/lib/editorPages";
 import { ROOT } from "@/lib/editorPages";
+import { DEFAULT_CANVAS_ZOOM } from "@/lib/canvasZoom";
 import type { EditorPersistSlice } from "@/lib/documentPersistence";
 
 /** Document fields used to seed the editor store on first client init. */
@@ -57,7 +58,7 @@ export function mergeSampleDocumentFields(
   fileName: string,
 ): InitialDocumentFields {
   const pageInit = initialPagesFromCanvas(mock.nodes, mock.childOrder, {
-    zoom: 0.55,
+    zoom: DEFAULT_CANVAS_ZOOM,
     pan: { x: 40, y: 24 },
     showGrid: false,
   });

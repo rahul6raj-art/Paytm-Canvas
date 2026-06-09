@@ -9,7 +9,7 @@ export function ZoomControls() {
   const pct = formatZoomPercent(zoom);
   return (
     <div className="flex items-center gap-1">
-      <span className="min-w-[36px] text-right text-[11px] tabular-nums text-app-subtle">{pct}%</span>
+      <span className="min-w-[36px] text-right text-[11px] tabular-nums text-app-subtle">{pct}</span>
       <div className="flex items-center overflow-hidden rounded border border-app-border bg-app-panel text-[11px] font-medium">
         <button
           type="button"

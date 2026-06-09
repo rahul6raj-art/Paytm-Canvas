@@ -32,6 +32,7 @@ import { applyMatrixToPoint } from "@/lib/transformMath";
 import { useCanvasToWorld } from "./CanvasToWorldContext";
 import { clientToWorldFromDocument } from "@/lib/canvasCoordinates";
 import { useShapeEditHandlesGate } from "./useShapeEditHandles";
+import { CanvasEditValueBadge } from "./CanvasEditValueBadge";
 
 function localToWorld(
   nodeId: string,
@@ -114,6 +115,11 @@ export function PolygonHandles() {
 
   if (!show || !cornerWorld || !sidesWorld) return null;
 
+  const cornerRadiusBadge =
+    dragging === "corner" && polygonPreview?.nodeId === id
+      ? { x: cornerWorld.x, y: cornerWorld.y, value: Math.round(polygonPreview.cornerRadius) }
+      : null;
+
   const size = screenPxToWorld(CANVAS_HANDLE_SCREEN_PX, zoom);
   const borderWorld = screenPxToWorld(CANVAS_OUTLINE_SCREEN_PX, zoom);
 
@@ -190,6 +196,15 @@ export function PolygonHandles() {
           window.removeEventListener("pointercancel", onEnd);
         }}
       />
+      {cornerRadiusBadge ? (
+        <CanvasEditValueBadge
+          x={cornerRadiusBadge.x}
+          y={cornerRadiusBadge.y}
+          zoom={zoom}
+        >
+          {cornerRadiusBadge.value}
+        </CanvasEditValueBadge>
+      ) : null}
     </>
   );
 }

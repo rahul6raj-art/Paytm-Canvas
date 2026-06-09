@@ -17,7 +17,7 @@ import { topLevelSelectedIds } from "@/lib/editorGraph";
 import { canAddAutoLayoutToSelection } from "@/lib/autoLayoutSelection";
 import {
   activateCanvasForShortcuts,
-  isMultilineEditableElement,
+  isEditableFieldElement,
   isShortcutOverlayOpen,
   shouldAllowNativeFieldClipboard,
   shouldBlockDeleteSelectionShortcut,
@@ -156,7 +156,7 @@ export function EditorKeyboardShortcuts() {
         return;
       }
 
-      if (!mod && !e.altKey && !isMultilineEditableElement(e.target)) {
+      if (!mod && !e.altKey && !isEditableFieldElement(e.target)) {
         const nextTool = resolveToolFromKeyboardEvent(e);
         if (nextTool) {
           const stTool = useEditorStore.getState();

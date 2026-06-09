@@ -10,6 +10,20 @@ export function normalizeHex(input: string): string | null {
   return null;
 }
 
+/**
+ * Hex ready to apply while typing: only a full 6-digit #RRGGBB (no partial padding).
+ * e.g. "cf" → null, "cfcfcf" → #cfcfcf. Use normalizeHex on blur for #RGB shorthand.
+ */
+export function parseHexInputLive(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const body = trimmed.replace(/^#/, "");
+  if (body.length === 6 && /^[0-9a-fA-F]{6}$/.test(body)) {
+    return `#${body.toLowerCase()}`;
+  }
+  return null;
+}
+
 export function clamp01(n: number): number {
   if (!Number.isFinite(n)) return 1;
   return Math.min(1, Math.max(0, n));

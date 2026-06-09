@@ -57,6 +57,14 @@ export interface FigmaApiNode {
   fills?: FigmaPaint[];
   strokes?: FigmaPaint[];
   strokeWeight?: number;
+  /** Per-side stroke weights (Figma Individual strokes). */
+  individualStrokeWeights?: {
+    top: number;
+    right: number;
+    bottom: number;
+    left: number;
+  };
+  strokeAlign?: "INSIDE" | "OUTSIDE" | "CENTER" | string;
   effects?: unknown[];
   cornerRadius?: number;
   rectangleCornerRadii?: [number, number, number, number];

@@ -96,4 +96,20 @@ export function clearFigmaConnection(): void {
   writeFigmaAccessToken(null);
 }
 
+export function hasPersistedFigmaAccessToken(): boolean {
+  return Boolean(readFigmaAccessToken());
+}
+
+/** True when verify failed due to an invalid / revoked token (safe to clear storage). */
+export function isFigmaTokenInvalidError(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    m.includes("invalid token") ||
+    m.includes("expired") ||
+    m.includes("401") ||
+    m.includes("403") ||
+    m.includes("denied access")
+  );
+}
+
 export { isFigmaDesignUrl } from "@/integrations/figma/parse-figma-url";

@@ -165,7 +165,7 @@ export function resolveFrameParentForShapeInsert(
     const seen = new Set<string>();
     while (walk && !seen.has(walk)) {
       seen.add(walk);
-      const n = nodes[walk];
+      const n: EditorNode | undefined = nodes[walk];
       if (!n) break;
       if (n.type === "frame" && n.visible && !n.locked) {
         if (shapeBoundsOverlapRenderedFrame(bounds, walk, nodes, childOrder)) {

@@ -1,4 +1,3 @@
-import { startTransition } from "react";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import type { PaytmCraftDocument } from "@/lib/documentPersistence";
 import {
@@ -7,29 +6,33 @@ import {
   isOversizedLocalDocument,
 } from "@/lib/documentPersistence";
 import { scheduleFigImportPostLayout } from "@/lib/figImport/scheduleFigImportPostLayout";
-import { deferFigImportSave } from "@/lib/figImport/figImportRuntime";
+import {
+  deferFigImportSave,
+  scheduleFigImportStateApply,
+  waitForNextPaint,
+} from "@/lib/figImport/figImportRuntime";
+import { isFigImportCancelled } from "@/lib/figImport/figImportSession";
+import { formatImportToast, type FigmaImportSummary } from "@/lib/figImport/figImportSummary";
 import { fitCanvasToImportedDocumentWithRetry } from "@/lib/viewportZoom";
-import { useEditorStore, toPersistSlice } from "@/stores/useEditorStore";
+
+export type { FigmaImportSummary } from "@/lib/figImport/figImportSummary";
+export { formatImportToast } from "@/lib/figImport/figImportSummary";
 
 export type FinalizeFigmaImportOptions = {
   prepared: PaytmCraftDocument;
   fileName?: string;
   /** Idle auto-layout pass for .fig imports (REST parser already runs layout on the server). */
   runPostLayout?: boolean;
-};
-
-export type FigmaImportSummary = {
-  layerCount: number;
-  rootCount: number;
-  fileName: string;
-  warning?: string;
+  importGen?: number;
 };
 
 function deferImportFollowUp(opts: {
   runPostLayout: boolean;
   summary: FigmaImportSummary;
 }): void {
-  const run = () => {
+  const run = async () => {
+    const { useEditorStore, toPersistSlice } = await import("@/stores/useEditorStore");
+
     if (opts.runPostLayout) {
       scheduleFigImportPostLayout(
         () => toPersistSlice(useEditorStore.getState()),
@@ -57,22 +60,30 @@ function deferImportFollowUp(opts: {
   };
 
   if (typeof requestIdleCallback === "function") {
-    requestIdleCallback(run, { timeout: 1500 });
+    requestIdleCallback(() => void run(), { timeout: 1500 });
   } else {
-    setTimeout(run, 50);
+    setTimeout(() => void run(), 50);
   }
 }
 
 /**
- * Phase 3: dismiss overlay synchronously, apply document on a transition, finalize on idle.
+ * Dismiss overlay first, then apply the document on the next task so the UI stays responsive.
  */
 export async function finalizeFigmaImportToEditor(
   opts: FinalizeFigmaImportOptions,
 ): Promise<FigmaImportSummary> {
-  const { prepared, fileName, runPostLayout = false } = opts;
+  const { prepared, fileName, runPostLayout = false, importGen } = opts;
+  const { useEditorStore } = await import("@/stores/useEditorStore");
+
+  if (importGen != null && isFigImportCancelled(importGen)) {
+    throw new Error("Import cancelled.");
+  }
+
   const layerCount = Object.keys(prepared.nodes).length;
   const rootCount = (prepared.childOrder[EDITOR_ROOT_KEY] ?? []).length;
   const resolvedName = fileName ?? prepared.name ?? "Imported Figma";
+
+  useEditorStore.setState({ figImportStatus: "Applying to canvas…" });
 
   const revision = useEditorStore.getState().documentHydrationRevision;
   const patch = editorPatchFromFigmaImport(prepared, revision);
@@ -89,15 +100,25 @@ export async function finalizeFigmaImportToEditor(
     fileName: resolvedName,
   };
 
-  // Dismiss overlay on the main thread immediately — startTransition defers state and kept the overlay stuck.
+  if (importGen != null && isFigImportCancelled(importGen)) {
+    throw new Error("Import cancelled.");
+  }
+
   useEditorStore.setState({
     figImportInProgress: false,
-    figImportStatus: null,
+    figImportStatus: "Applying to canvas…",
   });
 
-  startTransition(() => {
+  await waitForNextPaint();
+
+  if (importGen != null && isFigImportCancelled(importGen)) {
+    throw new Error("Import cancelled.");
+  }
+
+  await scheduleFigImportStateApply(() => {
     useEditorStore.setState({
       ...patch,
+      figImportStatus: null,
       documentSaveStatus: "unsaved",
       documentHydrating: false,
       fileName: resolvedName,
@@ -110,9 +131,4 @@ export async function finalizeFigmaImportToEditor(
   deferImportFollowUp({ runPostLayout, summary });
 
   return summary;
-}
-
-export function formatImportToast(summary: FigmaImportSummary): string {
-  const base = `Imported “${summary.fileName}” — ${summary.rootCount} frame(s), ${summary.layerCount} layer(s).`;
-  return summary.warning ? `${base} ${summary.warning}` : base;
 }

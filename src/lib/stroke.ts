@@ -1,10 +1,60 @@
 import { effectColorToRgba } from "@/lib/nodeEffects";
+import { effectiveStrokeType, svgStrokePaint, type StrokePaintNode } from "@/lib/fillGradient";
+import {
+  mergeStrokeIntoNode,
+  migrateAllNodeStrokes,
+  migrateNodeStroke,
+  resolveStrokeSpec,
+  strokeSpecCanvasDash,
+  strokeSpecColorRgba,
+  strokeSpecDashArray,
+  strokeSpecIsVisible,
+  type StrokeSpec,
+} from "@/lib/strokeSpec";
 import type { EditorNode } from "@/stores/useEditorStore";
+
+export type { StrokeSpec, StrokeAlign } from "@/lib/strokeSpec";
+export {
+  DEFAULT_STROKE_SPEC,
+  mergeStrokeIntoNode,
+  migrateAllNodeStrokes,
+  migrateNodeStroke,
+  resolveStrokeSpec,
+} from "@/lib/strokeSpec";
 
 export type StrokeLinecap = "butt" | "round" | "square";
 export type StrokeLinejoin = "miter" | "round" | "bevel";
 export type StrokeStyleKind = "solid" | "dashed" | "dotted";
-export type StrokeWidthProfile = "uniform";
+export type StrokeWidthProfile = "uniform" | "taper";
+
+export type StrokeResolvableNode = Pick<
+  EditorNode,
+  | "stroke"
+  | "strokeColor"
+  | "strokeWidth"
+  | "strokeOpacity"
+  | "strokeEnabled"
+  | "strokePosition"
+  | "strokeType"
+  | "strokeGradient"
+  | "strokeStyle"
+  | "strokeDashLength"
+  | "strokeDashGap"
+  | "strokeLinecap"
+  | "strokeLinejoin"
+  | "strokeMiterAngle"
+  | "strokeWidthProfile"
+>;
+
+export type { StrokePaintNode } from "@/lib/fillGradient";
+export { effectiveStrokeType, strokePaintCss, svgStrokePaint } from "@/lib/fillGradient";
+
+/** Partial-side strokes taper at path ends unless explicitly uniform. */
+export function resolveStrokeWidthProfile(
+  node: Pick<EditorNode, "strokeWidthProfile">,
+): StrokeWidthProfile {
+  return node.strokeWidthProfile ?? "taper";
+}
 
 export const DEFAULT_STROKE_MITER_ANGLE = 28.967;
 export const DEFAULT_STROKE_DASH_LENGTH = 2;
@@ -20,56 +70,61 @@ export function defaultDashGapForStyle(
   return { dash: DEFAULT_STROKE_DASH_LENGTH, gap: DEFAULT_STROKE_DASH_GAP };
 }
 
-export function resolveStrokeColor(
-  node: Pick<EditorNode, "strokeColor" | "strokeOpacity">,
+export function resolveStrokeColor(node: StrokeResolvableNode): string {
+  return strokeSpecColorRgba(resolveStrokeSpec(node));
+}
+
+/** SVG stroke attribute: solid rgba or `url(#gradientId)` when defs are registered. */
+export function resolveSvgStrokePaint(
+  node: StrokeResolvableNode,
+  opts?: {
+    gradientId: string;
+    width: number;
+    height: number;
+    registerGradient: (id: string, markup: string) => void;
+  },
 ): string {
-  return effectColorToRgba(node.strokeColor ?? "#0f172a", node.strokeOpacity ?? 1);
+  if (!strokeIsVisible(node)) return "none";
+  if (effectiveStrokeType(node) !== "gradient" || !opts) {
+    return resolveStrokeColor(node);
+  }
+  return svgStrokePaint(node, opts);
 }
 
-export function strokeIsVisible(
-  node: Pick<EditorNode, "strokeWidth" | "strokeEnabled">,
-): boolean {
-  return (node.strokeWidth ?? 0) > 0 && node.strokeEnabled !== false;
+export function strokeIsVisible(node: StrokeResolvableNode): boolean {
+  return strokeSpecIsVisible(resolveStrokeSpec(node));
 }
 
-export function resolveStrokeStyle(node: Pick<EditorNode, "strokeStyle">): StrokeStyleKind {
-  return node.strokeStyle ?? "solid";
+export function resolveStrokeStyle(node: StrokeResolvableNode): StrokeStyleKind {
+  const spec = resolveStrokeSpec(node);
+  if (!spec.dashPattern.length) return "solid";
+  const w = spec.width || 1;
+  if (spec.dashPattern[0] === w && spec.dashPattern[1] === w * 1.5) return "dotted";
+  return "dashed";
 }
 
-export function resolveStrokeDashLength(
-  node: Pick<EditorNode, "strokeStyle" | "strokeWidth" | "strokeDashLength">,
-): number {
-  const style = resolveStrokeStyle(node);
-  if (style === "solid") return 0;
-  if (node.strokeDashLength != null) return Math.max(0, node.strokeDashLength);
-  return defaultDashGapForStyle(style, node.strokeWidth ?? 1).dash;
+export function resolveStrokeDashLength(node: StrokeResolvableNode): number {
+  const spec = resolveStrokeSpec(node);
+  return spec.dashPattern[0] ?? 0;
 }
 
-export function resolveStrokeDashGap(
-  node: Pick<EditorNode, "strokeStyle" | "strokeWidth" | "strokeDashGap">,
-): number {
-  const style = resolveStrokeStyle(node);
-  if (style === "solid") return 0;
-  if (node.strokeDashGap != null) return Math.max(0, node.strokeDashGap);
-  return defaultDashGapForStyle(style, node.strokeWidth ?? 1).gap;
+export function resolveStrokeDashGap(node: StrokeResolvableNode): number {
+  const spec = resolveStrokeSpec(node);
+  return spec.dashPattern[1] ?? 0;
 }
 
-export function resolveStrokeLinecap(node: Pick<EditorNode, "strokeStyle" | "strokeLinecap">): StrokeLinecap {
-  if (node.strokeLinecap) return node.strokeLinecap;
-  const style = resolveStrokeStyle(node);
-  if (style === "dotted") return "round";
-  return "butt";
+export function resolveStrokeLinecap(node: StrokeResolvableNode): StrokeLinecap {
+  return resolveStrokeSpec(node).cap;
 }
 
-export function resolveStrokeLinejoin(node: Pick<EditorNode, "strokeLinejoin">): StrokeLinejoin {
-  return node.strokeLinejoin ?? "miter";
+export function resolveStrokeLinejoin(node: StrokeResolvableNode): StrokeLinejoin {
+  return resolveStrokeSpec(node).join;
 }
 
 export function resolveStrokeMiterAngle(node: Pick<EditorNode, "strokeMiterAngle">): number {
   return node.strokeMiterAngle ?? DEFAULT_STROKE_MITER_ANGLE;
 }
 
-/** SVG `stroke-miterlimit` from Figma-style miter angle (degrees). */
 export function strokeMiterAngleToLimit(angleDeg: number): number {
   const halfRad = (angleDeg * Math.PI) / 360;
   const s = Math.sin(halfRad);
@@ -82,18 +137,8 @@ export function resolveStrokeMiterLimit(node: Pick<EditorNode, "strokeMiterAngle
   return strokeMiterAngleToLimit(resolveStrokeMiterAngle(node));
 }
 
-export function resolveStrokeDashArray(
-  node: Pick<
-    EditorNode,
-    "strokeStyle" | "strokeWidth" | "strokeDashLength" | "strokeDashGap"
-  >,
-): string | undefined {
-  const style = resolveStrokeStyle(node);
-  if (style === "solid") return undefined;
-  const dash = resolveStrokeDashLength(node);
-  const gap = resolveStrokeDashGap(node);
-  if (dash <= 0 && gap <= 0) return undefined;
-  return `${dash} ${gap}`;
+export function resolveStrokeDashArray(node: StrokeResolvableNode): string | undefined {
+  return strokeSpecDashArray(resolveStrokeSpec(node));
 }
 
 export type SvgStrokePresentation = {
@@ -103,41 +148,19 @@ export type SvgStrokePresentation = {
   strokeMiterlimit: number;
 };
 
-export function svgStrokePresentationFromNode(
-  node: Pick<
-    EditorNode,
-    | "strokeStyle"
-    | "strokeWidth"
-    | "strokeDashLength"
-    | "strokeDashGap"
-    | "strokeLinecap"
-    | "strokeLinejoin"
-    | "strokeMiterAngle"
-  >,
-): SvgStrokePresentation {
-  const strokeDasharray = resolveStrokeDashArray(node);
-  const strokeLinejoin = resolveStrokeLinejoin(node);
+export function svgStrokePresentationFromNode(node: StrokeResolvableNode): SvgStrokePresentation {
+  const spec = resolveStrokeSpec(node);
+  const strokeLinejoin = spec.join;
   return {
-    strokeDasharray,
-    strokeLinecap: resolveStrokeLinecap(node),
+    strokeDasharray: strokeSpecDashArray(spec),
+    strokeLinecap: spec.cap,
     strokeLinejoin,
-    strokeMiterlimit: resolveStrokeMiterLimit(node),
+    strokeMiterlimit:
+      strokeLinejoin !== "miter" ? 4 : strokeMiterAngleToLimit(resolveStrokeMiterAngle(node)),
   };
 }
 
-/** React/SVG spread props for stroke presentation. */
-export function svgStrokePropsFromNode(
-  node: Pick<
-    EditorNode,
-    | "strokeStyle"
-    | "strokeWidth"
-    | "strokeDashLength"
-    | "strokeDashGap"
-    | "strokeLinecap"
-    | "strokeLinejoin"
-    | "strokeMiterAngle"
-  >,
-): {
+export function svgStrokePropsFromNode(node: StrokeResolvableNode): {
   strokeDasharray?: string;
   strokeLinecap: StrokeLinecap;
   strokeLinejoin: StrokeLinejoin;
@@ -146,50 +169,23 @@ export function svgStrokePropsFromNode(
   return svgStrokePresentationFromNode(node);
 }
 
-/** Canvas2D dash array from node stroke settings. */
-export function canvasLineDashFromNode(
-  node: Pick<
-    EditorNode,
-    "strokeStyle" | "strokeWidth" | "strokeDashLength" | "strokeDashGap"
-  >,
-): number[] {
-  const style = resolveStrokeStyle(node);
-  if (style === "solid") return [];
-  return [resolveStrokeDashLength(node), resolveStrokeDashGap(node)];
+export function canvasLineDashFromNode(node: StrokeResolvableNode): number[] {
+  return strokeSpecCanvasDash(resolveStrokeSpec(node));
 }
 
 export function applyCanvasStrokeStyle(
   ctx: CanvasRenderingContext2D,
-  node: Pick<
-    EditorNode,
-    | "strokeStyle"
-    | "strokeWidth"
-    | "strokeDashLength"
-    | "strokeDashGap"
-    | "strokeLinecap"
-    | "strokeLinejoin"
-    | "strokeMiterAngle"
-  >,
+  node: StrokeResolvableNode,
 ): void {
-  const dash = canvasLineDashFromNode(node);
-  ctx.setLineDash(dash);
-  ctx.lineCap = resolveStrokeLinecap(node);
-  ctx.lineJoin = resolveStrokeLinejoin(node);
-  ctx.miterLimit = resolveStrokeMiterLimit(node);
+  const spec = resolveStrokeSpec(node);
+  ctx.setLineDash(strokeSpecCanvasDash(spec));
+  ctx.lineCap = spec.cap;
+  ctx.lineJoin = spec.join;
+  ctx.miterLimit =
+    spec.join !== "miter" ? 4 : strokeMiterAngleToLimit(resolveStrokeMiterAngle(node));
 }
 
-export function strokeAttrsForSvgMarkup(
-  node: Pick<
-    EditorNode,
-    | "strokeStyle"
-    | "strokeWidth"
-    | "strokeDashLength"
-    | "strokeDashGap"
-    | "strokeLinecap"
-    | "strokeLinejoin"
-    | "strokeMiterAngle"
-  >,
-): string {
+export function strokeAttrsForSvgMarkup(node: StrokeResolvableNode): string {
   const p = svgStrokePresentationFromNode(node);
   const parts = [
     `stroke-linecap="${p.strokeLinecap}"`,

@@ -17,9 +17,11 @@ import {
   resolveStrokeLinejoin,
   resolveStrokeMiterAngle,
   resolveStrokeStyle,
+  resolveStrokeWidthProfile,
   type StrokeLinecap,
   type StrokeLinejoin,
   type StrokeStyleKind,
+  type StrokeWidthProfile,
 } from "@/lib/stroke";
 import type { StrokeStylePatch } from "./StrokeSection";
 
@@ -36,6 +38,7 @@ export function StrokeAdvancedPanel({
   strokeLinecap,
   strokeLinejoin,
   strokeMiterAngle,
+  strokeWidthProfile,
   strokeWidthProfileFlipped,
   onStyle,
 }: {
@@ -48,9 +51,11 @@ export function StrokeAdvancedPanel({
   strokeLinecap?: StrokeLinecap;
   strokeLinejoin?: StrokeLinejoin;
   strokeMiterAngle?: number;
+  strokeWidthProfile?: StrokeWidthProfile;
   strokeWidthProfileFlipped?: boolean;
   onStyle: (patch: StrokeStylePatch) => void;
 }) {
+  const widthProfile = resolveStrokeWidthProfile({ strokeWidthProfile });
   const style = resolveStrokeStyle({ strokeStyle });
   const dashedLike = style !== "solid";
   const dash = resolveStrokeDashLength({
@@ -134,8 +139,8 @@ export function StrokeAdvancedPanel({
         <div className="mb-0.5 text-[11px] font-medium text-app-subtle">Width profile</div>
         <div className="flex items-center gap-1">
           <div className="flex h-6 min-w-0 flex-1 items-center gap-2 rounded border border-app-border bg-app-field px-2">
-            <StrokeWidthProfilePreview flipped={strokeWidthProfileFlipped} />
-            <span className="text-[11px] text-app-muted">Uniform</span>
+            <StrokeWidthProfilePreview profile={widthProfile} flipped={strokeWidthProfileFlipped} />
+            <span className="text-[11px] text-app-muted capitalize">{widthProfile}</span>
           </div>
           <button
             type="button"

@@ -160,6 +160,24 @@ export function gradientEndpoints(angleDeg: number, width: number, height: numbe
   );
 }
 
+/**
+ * Horizontal inspector stop-bar preview — angle/transform do not rotate the bar
+ * (Figma-style: stops left→right by position %; angle is edited separately).
+ */
+export function gradientInspectorBarPaintCss(g: FillGradient, opacity: number): string {
+  const grad = normalizeFillGradient(g);
+  const stops = stopsCssList(grad.stops, clamp01(opacity));
+  switch (grad.kind) {
+    case "radial":
+      return `radial-gradient(ellipse 100% 100% at 50% 50%, ${stops})`;
+    case "angular":
+    case "diamond":
+    case "linear":
+    default:
+      return `linear-gradient(to right, ${stops})`;
+  }
+}
+
 export function fillPaintCss(node: FillPaintNode): string {
   if (node.fillEnabled === false) return "transparent";
   const opacity = clamp01(node.fillOpacity ?? 1);
@@ -416,4 +434,56 @@ export function cloneFillGradient(g: FillGradient): FillGradient {
     transform: { ...n.transform },
     stops: n.stops.map((s) => ({ ...s, id: newGradientStopId() })),
   };
+}
+
+export type StrokePaintNode = Pick<
+  EditorNode,
+  "strokeColor" | "strokeOpacity" | "strokeEnabled" | "strokeType" | "strokeGradient"
+>;
+
+export function effectiveStrokeType(node: StrokePaintNode): FillType {
+  if (node.strokeType === "gradient") return "gradient";
+  if (node.strokeType === "solid") return "solid";
+  return node.strokeGradient ? "gradient" : "solid";
+}
+
+function strokeAsFillNode(node: StrokePaintNode): FillPaintNode {
+  return {
+    fill: node.strokeColor,
+    fillOpacity: node.strokeOpacity,
+    fillEnabled: node.strokeEnabled,
+    fillType: effectiveStrokeType(node) === "gradient" ? "gradient" : "solid",
+    fillGradient: node.strokeGradient,
+  };
+}
+
+/** CSS background for stroke gradient preview (inspector). */
+export function strokePaintCss(node: StrokePaintNode): string {
+  if (node.strokeEnabled === false) return "transparent";
+  return fillPaintCss(strokeAsFillNode(node));
+}
+
+/** Register SVG gradient in defs; returns stroke paint (`url(#id)` or solid). */
+export function svgStrokePaint(
+  node: StrokePaintNode,
+  opts: {
+    gradientId: string;
+    width: number;
+    height: number;
+    registerGradient: (id: string, markup: string) => void;
+  },
+): string {
+  if (node.strokeEnabled === false) return "none";
+  return svgFillPaint(strokeAsFillNode(node), opts);
+}
+
+export function defaultStrokeGradient(fromColor?: string, kind: GradientKind = "linear"): FillGradient {
+  return defaultFillGradient(fromColor ?? "#000000", kind);
+}
+
+export function normalizeStrokeGradient(
+  g: FillGradient | LegacyLinearFillGradient | undefined,
+  fallbackColor?: string,
+): FillGradient {
+  return normalizeFillGradient(g, fallbackColor);
 }

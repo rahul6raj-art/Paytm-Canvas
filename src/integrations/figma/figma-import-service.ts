@@ -44,7 +44,12 @@ export async function importFigmaFromRestApi(
 
   let imageUrlByRef = await getFigmaImageUrls(fetched.fileKey, [...imageRefs], token);
 
-  if (opts.embedImages !== false && typeof window === "undefined") {
+  const shouldEmbed =
+    opts.embedImages !== false &&
+    typeof window === "undefined" &&
+    imageRefs.size > 0 &&
+    imageRefs.size <= 40;
+  if (shouldEmbed) {
     imageUrlByRef = await embedFigmaImageUrls(imageUrlByRef);
   }
 

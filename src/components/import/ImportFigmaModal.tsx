@@ -6,9 +6,12 @@ import { X } from "lucide-react";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { waitForNextPaint } from "@/lib/figImport/figImportRuntime";
 import { verifyFigmaAccessToken } from "@/lib/figmaApi/verifyFigmaConnection";
+import { fetchFigmaServerConfig } from "@/lib/figmaApi/figmaServerConfig";
 import {
   clearFigmaConnection,
+  hasPersistedFigmaAccessToken,
   isFigmaDesignUrl,
+  isFigmaTokenInvalidError,
   readFigmaAccessToken,
   readFigmaConnectionProfile,
   writeFigmaAccessToken,
@@ -75,6 +78,7 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
   const [verifying, setVerifying] = useState(false);
   const [figFile, setFigFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showTokenField, setShowTokenField] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const preserveErrorOnOpenRef = useRef(false);
   const figImportInProgress = useEditorStore((s) => s.figImportInProgress);
@@ -94,6 +98,7 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
       : null);
 
   const hasPersonalConnection = personalProfile?.source === "personal";
+  const savedTokenInBrowser = hasPersistedFigmaAccessToken();
 
   useEffect(() => {
     if (!open) {
@@ -102,47 +107,47 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
       setFigFile(null);
       setError(null);
       setVerifying(false);
+      setShowTokenField(false);
       preserveErrorOnOpenRef.current = false;
       return;
     }
 
     if (!preserveErrorOnOpenRef.current) setError(null);
     preserveErrorOnOpenRef.current = false;
-    setPersonalProfile(readFigmaConnectionProfile());
-    setAccessToken(readFigmaAccessToken() ?? "");
-
-    void fetch("/api/import-figma/config")
-      .then((r) => r.json())
-      .then(
-        (j: {
-          serverTokenConfigured?: boolean;
-          serverTokenValid?: boolean;
-          serverUser?: ServerFigmaUser | null;
-        }) => {
-          setServerTokenConfigured(Boolean(j.serverTokenConfigured));
-          setServerTokenValid(Boolean(j.serverTokenValid));
-          setServerUser(j.serverUser ?? null);
-        },
-      )
-      .catch(() => {
-        setServerTokenConfigured(false);
-        setServerTokenValid(false);
-        setServerUser(null);
-      });
-
-    const storedToken = readFigmaAccessToken();
     const storedProfile = readFigmaConnectionProfile();
-    if (storedToken && storedProfile?.source === "personal") {
+    const storedToken = readFigmaAccessToken();
+    setPersonalProfile(storedProfile?.source === "personal" ? storedProfile : null);
+    setAccessToken("");
+    setShowTokenField(!storedToken && !storedProfile);
+
+    void fetchFigmaServerConfig({ force: true }).then((cfg) => {
+      setServerTokenConfigured(cfg.serverTokenConfigured);
+      setServerTokenValid(cfg.serverTokenValid);
+      setServerUser(cfg.serverUser);
+    });
+
+    if (storedToken) {
       setVerifying(true);
       void verifyFigmaAccessToken(storedToken)
         .then((user) => {
+          writeFigmaAccessToken(storedToken);
           writeFigmaConnectionProfile(user);
-          setPersonalProfile(user);
+          setPersonalProfile(user.source === "personal" ? user : null);
+          setShowTokenField(false);
         })
-        .catch(() => {
-          clearFigmaConnection();
-          setPersonalProfile(null);
-          setAccessToken("");
+        .catch((e) => {
+          const msg = e instanceof Error ? e.message : "Could not verify Figma token.";
+          if (isFigmaTokenInvalidError(msg)) {
+            clearFigmaConnection();
+            setPersonalProfile(null);
+            setShowTokenField(true);
+            setError("Your saved Figma token expired. Paste a new token and click Verify & connect once.");
+          } else {
+            if (storedProfile) setPersonalProfile(storedProfile.source === "personal" ? storedProfile : null);
+            setError(
+              "Could not refresh your Figma connection. Your saved token is still stored — you can try Import.",
+            );
+          }
         })
         .finally(() => setVerifying(false));
     }
@@ -174,7 +179,7 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
 
   const onVerifyAndConnect = async () => {
     setError(null);
-    const token = accessToken.trim();
+    const token = accessToken.trim() || readFigmaAccessToken() || "";
     if (!token && !serverTokenReady) {
       setError("Paste your Figma personal access token first.");
       return;
@@ -184,6 +189,8 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
       const user = await verifyFigmaAccessToken(token || undefined);
       if (user.source === "personal" && token) {
         writeFigmaAccessToken(token);
+        setAccessToken("");
+        setShowTokenField(false);
       }
       writeFigmaConnectionProfile(user);
       setPersonalProfile(user.source === "personal" ? user : null);
@@ -258,7 +265,7 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
       await ensureEditorRoute();
       if (accessToken.trim()) writeFigmaAccessToken(accessToken.trim());
       await importFigmaFromLink({
-        accessToken: tokenForImport!,
+        accessToken: tokenForImport,
         url: parsedUrl ? trimmedLink : undefined,
         fileKey:
           trimmedKey ||
@@ -358,39 +365,65 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
                     </button>
                   ) : null}
                 </div>
+              ) : savedTokenInBrowser ? (
+                <p className="mt-1.5 text-[12px] text-app-muted">
+                  Token saved in this browser — paste a design link below and Import.
+                </p>
               ) : (
-                <p className="mt-1.5 text-[12px] text-app-muted">Not connected — add a token below.</p>
+                <p className="mt-1.5 text-[12px] text-app-muted">
+                  Paste your token once — it stays saved in this browser.
+                </p>
               )}
 
-              <label className="mt-2 block">
-                <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-app-subtle">
-                  Personal access token
-                </span>
-                <input
-                  type="password"
-                  value={accessToken}
-                  onChange={(e) => {
-                    setAccessToken(e.target.value);
-                    setError(null);
-                  }}
-                  placeholder="figd_…"
-                  autoComplete="off"
-                  className={cn(fieldClass, "font-mono text-[11px]")}
-                />
-              </label>
+              {showTokenField || !savedTokenInBrowser ? (
+                <>
+                  <label className="mt-2 block">
+                    <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-app-subtle">
+                      Personal access token
+                    </span>
+                    <input
+                      type="password"
+                      value={accessToken}
+                      onChange={(e) => {
+                        setAccessToken(e.target.value);
+                        setError(null);
+                      }}
+                      placeholder={
+                        savedTokenInBrowser
+                          ? "Enter new token to replace saved token"
+                          : "figd_…"
+                      }
+                      autoComplete="off"
+                      className={cn(fieldClass, "font-mono text-[11px]")}
+                    />
+                  </label>
 
-              <button
-                type="button"
-                disabled={verifying || (!accessToken.trim() && !serverTokenReady)}
-                onClick={() => void onVerifyAndConnect()}
-                className={cn(
-                  "mt-2 w-full rounded-lg border border-app-border bg-app-raised px-3 py-1.5 text-[12px] font-medium text-app-fg transition-colors hover:bg-app-hover",
-                  (verifying || (!accessToken.trim() && !serverTokenReady)) &&
-                    "cursor-not-allowed opacity-50",
-                )}
-              >
-                {verifying ? "Verifying with Figma…" : "Verify & connect"}
-              </button>
+                  <button
+                    type="button"
+                    disabled={
+                      verifying ||
+                      (!accessToken.trim() && !serverTokenReady && !savedTokenInBrowser)
+                    }
+                    onClick={() => void onVerifyAndConnect()}
+                    className={cn(
+                      "mt-2 w-full rounded-lg border border-app-border bg-app-raised px-3 py-1.5 text-[12px] font-medium text-app-fg transition-colors hover:bg-app-hover",
+                      (verifying ||
+                        (!accessToken.trim() && !serverTokenReady && !savedTokenInBrowser)) &&
+                        "cursor-not-allowed opacity-50",
+                    )}
+                  >
+                    {verifying ? "Verifying with Figma…" : "Verify & connect"}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="mt-2 text-[12px] font-medium text-accent underline-offset-2 hover:underline"
+                  onClick={() => setShowTokenField(true)}
+                >
+                  Change token
+                </button>
+              )}
             </section>
 
             <div className="border-t border-app-border-subtle bg-app-panel px-4 py-3">

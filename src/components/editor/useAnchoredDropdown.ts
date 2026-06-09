@@ -16,8 +16,12 @@ export type AnchoredDropdownOptions = {
   viewportClamp?: boolean;
   /** Preferred max height (px) before clamping to available space. */
   maxHeight?: number;
+  /** Minimum comfortable height (px) — triggers flip-above when space below is smaller. */
+  minHeight?: number;
   /** Menu width (px) used for horizontal clamping. */
   width?: number;
+  /** Re-run layout when content size changes (e.g. expanded panel). */
+  remeasureKey?: unknown;
 };
 
 export function anchoredMenuStyle(position: AnchoredMenuPosition): CSSProperties {
@@ -59,7 +63,7 @@ export function useAnchoredDropdownPosition(
       const maxPreferred = Math.min(options.maxHeight ?? 420, vh * 0.7);
       const spaceBelow = vh - r.bottom - gap - pad;
       const spaceAbove = r.top - gap - pad;
-      const minComfortable = Math.min(160, maxPreferred);
+      const minComfortable = Math.min(options?.minHeight ?? 160, maxPreferred);
 
       const placeAbove = spaceBelow < minComfortable && spaceAbove > spaceBelow;
 
@@ -84,7 +88,16 @@ export function useAnchoredDropdownPosition(
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
     };
-  }, [open, anchorRef, gap, options?.viewportClamp, options?.maxHeight, options?.width]);
+  }, [
+    open,
+    anchorRef,
+    gap,
+    options?.viewportClamp,
+    options?.maxHeight,
+    options?.minHeight,
+    options?.width,
+    options?.remeasureKey,
+  ]);
 
   return position;
 }

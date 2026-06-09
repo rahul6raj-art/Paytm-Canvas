@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { formatImportToast } from "@/lib/figImport/finalizeFigmaImport";
+import { formatImportToast } from "@/lib/figImport/figImportSummary";
 
 describe("formatImportToast", () => {
   it("formats success without warning", () => {

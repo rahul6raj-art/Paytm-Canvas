@@ -31,7 +31,7 @@ import {
 } from "@/lib/figImport/figImportRuntime";
 import type { FigImportProgress } from "@/lib/figImport/figImportRuntime";
 import { applyDeepAutoLayoutAll, type CrossAxisAlign, type LayoutFields, type LayoutNode, type PrimaryAxisAlign } from "@/lib/autoLayout";
-import { pickViewportRootIds, viewportForRootNodes } from "@/lib/canvasZoom";
+import { DEFAULT_CANVAS_ZOOM, pickViewportRootIds, viewportForRootNodes } from "@/lib/canvasZoom";
 import { CANVAS_FRAME_ORIGIN } from "@/lib/codeExport/frameRelativeExport";
 import { DEFAULT_CANVAS_BACKGROUND } from "@/lib/canvasVisual";
 import {
@@ -1372,7 +1372,7 @@ async function buildPaytmCraftFromFig(
         childOrder: ctx.childOrder,
         selectedIds: [],
         canvas: {
-          zoom: 0.55,
+          zoom: DEFAULT_CANVAS_ZOOM,
           panX: 40,
           panY: 24,
           showGrid: false,
@@ -1500,7 +1500,7 @@ function buildPaytmCraftFromFigSync(fig: FigDocument, fileName: string): FigImpo
         childOrder: ctx.childOrder,
         selectedIds: [],
         canvas: {
-          zoom: 0.55,
+          zoom: DEFAULT_CANVAS_ZOOM,
           panX: 40,
           panY: 24,
           showGrid: false,

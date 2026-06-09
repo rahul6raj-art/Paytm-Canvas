@@ -20,6 +20,8 @@ export type ClientToWorldFn = (clientX: number, clientY: number) => { x: number;
 export type CornerRadiusPreview = {
   nodeId: string;
   radii: CornerRadii;
+  /** Corner being dragged (for on-canvas value badge). */
+  cornerIndex: CornerIndex;
 } | null;
 
 export type CornerRadiusDragCallbacks = {
@@ -49,8 +51,8 @@ export function getCornerRadiusPreview(): CornerRadiusPreview {
   return livePreview;
 }
 
-function setPreview(nodeId: string, radii: CornerRadii): void {
-  livePreview = { nodeId, radii };
+function setPreview(nodeId: string, radii: CornerRadii, cornerIndex: CornerIndex): void {
+  livePreview = { nodeId, radii, cornerIndex };
   notifyPreview();
 }
 
@@ -149,9 +151,10 @@ function applyAtPointer(session: DragSession, clientX: number, clientY: number, 
   }
   next = clampCornerRadii(next, n.width, n.height);
 
-  setPreview(session.nodeId, next);
+  setPreview(session.nodeId, next, session.cornerIndex);
   scheduleStoreUpdate(next);
-  session.callbacks?.onDrag?.(session.cornerIndex, raw);
+  const displayRadius = session.linkCorners ? next[0] : next[session.cornerIndex];
+  session.callbacks?.onDrag?.(session.cornerIndex, displayRadius);
 }
 
 export function beginCornerRadiusDrag(opts: {
@@ -190,7 +193,7 @@ export function beginCornerRadiusDrag(opts: {
     startRadii,
     callbacks: opts.callbacks,
   };
-  setPreview(opts.nodeId, startRadii);
+  setPreview(opts.nodeId, startRadii, opts.cornerIndex);
 
   try {
     opts.captureTarget.setPointerCapture(opts.pointerId);

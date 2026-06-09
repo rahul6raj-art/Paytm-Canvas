@@ -37,17 +37,17 @@ import {
 } from "@/stores/useEditorStore";
 import { canCreateComponentFromSelection, findInstanceRoot } from "@/lib/componentModel";
 import {
-  isColorValue,
   isGradientValue,
   isTypographyValue,
   resolveNodeWithDesignTokens,
-  type ColorTokenValue,
   type TypographyTokenValue,
   type EffectTokenValue,
 } from "@/lib/designTokens";
 import {
   effectiveFillType,
+  effectiveStrokeType,
   normalizeFillGradient,
+  normalizeStrokeGradient,
   type FillGradient,
 } from "@/lib/fillGradient";
 import { inferAutoLayoutGap, type LayoutNode } from "@/lib/autoLayout";
@@ -217,6 +217,18 @@ export function DesignInspector({ node }: { node: EditorNode }) {
     );
   };
   const strokePos: StrokePosition = node.strokePosition ?? "center";
+  const strokeType = effectiveStrokeType(node);
+  const strokeGradient = normalizeStrokeGradient(node.strokeGradient, node.strokeColor);
+
+  const applyStrokeGradient = (next: FillGradient, opts?: { skipHistory?: boolean }) => {
+    style(
+      {
+        strokeType: "gradient",
+        strokeGradient: normalizeStrokeGradient(next, node.strokeColor),
+      },
+      opts,
+    );
+  };
 
   return (
     <>
@@ -987,7 +999,10 @@ export function DesignInspector({ node }: { node: EditorNode }) {
           locked={locked}
           strokeWidth={node.strokeWidth ?? 0}
           strokeColor={node.strokeColor ?? "#000000"}
+          strokeType={strokeType}
+          strokeGradient={strokeGradient}
           strokeOpacity={node.strokeOpacity ?? 1}
+          onApplyStrokeGradient={applyStrokeGradient}
           strokeEnabled={node.strokeEnabled !== false}
           strokeStyle={node.strokeStyle ?? "solid"}
           strokePosition={strokePos}
@@ -999,6 +1014,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
           strokeLinecap={node.strokeLinecap}
           strokeLinejoin={node.strokeLinejoin}
           strokeMiterAngle={node.strokeMiterAngle}
+          strokeWidthProfile={node.strokeWidthProfile}
           strokeWidthProfileFlipped={node.strokeWidthProfileFlipped}
           strokeStartPoint={
             isArrow
@@ -1276,15 +1292,8 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               hex={display.textColor ?? display.fill ?? "#111111"}
               instanceKey={`${key}-tc`}
               disabled={locked}
-              onCommitHex={(hex) => {
-                if (node.fillTokenId) {
-                  const t = designTokens[node.fillTokenId];
-                  if (t?.type === "color" && isColorValue(t.value)) {
-                    updateDesignToken(node.fillTokenId, { value: { ...(t.value as ColorTokenValue), hex } });
-                    return;
-                  }
-                }
-                style({ textColor: hex });
+              onCommitHex={(hex, opts) => {
+                useEditorStore.getState().setNodeTextColorHex(id, hex, opts);
               }}
             />
           </div>

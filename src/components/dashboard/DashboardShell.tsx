@@ -347,8 +347,8 @@ export function DashboardShell() {
         await waitForNextPaint();
         try {
           await useEditorStore.getState().importFigmaFile(file);
-        } catch {
-          window.alert("Could not import that Figma file.");
+        } catch (e) {
+          window.alert(e instanceof Error ? e.message : "Could not import that Figma file.");
         }
         return;
       }

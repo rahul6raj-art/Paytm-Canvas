@@ -114,7 +114,8 @@ export function shouldAllowNativeFieldClipboard(
 }
 
 /**
- * Block canvas shortcuts while typing in fields — except tool keys and modifier shortcuts.
+ * Block canvas shortcuts while typing in fields (including single-line hex/number inputs).
+ * Modifier shortcuts (undo, copy, etc.) still reach the canvas handler when appropriate.
  */
 export function shouldYieldShortcutsToTyping(e: KeyboardEvent, target: EventTarget | null): boolean {
   const st = useEditorStore.getState();
@@ -126,7 +127,6 @@ export function shouldYieldShortcutsToTyping(e: KeyboardEvent, target: EventTarg
   if (!isEditableFieldElement(target)) return false;
   if (e.metaKey || e.ctrlKey) return false;
   if (e.key === "Escape") return false;
-  if (isToolShortcutEvent(e)) return false;
   if (shouldBlockDeleteSelectionShortcut(e, target)) return true;
   return true;
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { PropertiesSection } from "../PropertiesSection";
+import { OpacityPercentInput } from "../PropertyInput";
 import { ColorInput } from "../ColorInput";
 import { ColorLibrary } from "../ColorLibrary";
 import { GradientFillControls } from "../GradientFillControls";
@@ -8,7 +9,7 @@ import { InspectorSegmented } from "./InspectorPrimitives";
 import { cn } from "@/lib/utils";
 import { isColorValue, type ColorTokenValue, type DesignToken } from "@/lib/designTokens";
 import type { FillGradient } from "@/lib/fillGradient";
-import type { EditorNode, NodeStylePatch } from "@/stores/useEditorStore";
+import { useEditorStore, type EditorNode, type NodeStylePatch } from "@/stores/useEditorStore";
 import { DEFAULT_FRAME_FILL, DEFAULT_SHAPE_FILL } from "@/lib/shapes/shapeModel";
 
 export function FillSection({
@@ -130,30 +131,17 @@ export function FillSection({
             libraryTokenId={node.fillTokenId}
             instanceKey={instanceKey}
             disabled={locked || !fillEnabled}
-            onCommitHex={(hex) => {
-              if (node.fillTokenId) {
-                const t = designTokens[node.fillTokenId];
-                if (t?.type === "color" && isColorValue(t.value)) {
-                  onUpdateDesignToken(node.fillTokenId, {
-                    value: { ...(t.value as ColorTokenValue), hex },
-                  });
-                  return;
-                }
-              }
-              onStyle({ fill: hex, fillType: "solid" });
+            onCommitHex={(hex, opts) => {
+              useEditorStore.getState().setNodeFillHex(node.id, hex, opts);
             }}
           />
           <div className="flex items-center gap-1.5">
             <span className="shrink-0 text-[11px] text-app-subtle">Opacity</span>
-            <input
-              type="text"
+            <OpacityPercentInput
+              value={fillOpacity}
               disabled={locked || !fillEnabled}
-              className="h-6 min-w-0 flex-1 rounded border border-app-border bg-app-field px-1.5 text-right text-[12px] text-app-field-fg disabled:opacity-40"
-              value={`${Math.round(fillOpacity * 100)} %`}
-              onChange={(e) => {
-                const n = parseInt(e.target.value.replace(/%/g, ""), 10);
-                if (!Number.isFinite(n)) return;
-                const op = Math.min(100, Math.max(0, n)) / 100;
+              instanceKey={`${instanceKey}-fill-op`}
+              onCommit={(op) => {
                 if (node.fillTokenId) {
                   const t = designTokens[node.fillTokenId];
                   if (t?.type === "color" && isColorValue(t.value)) {

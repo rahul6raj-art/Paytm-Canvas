@@ -116,7 +116,13 @@ export function StrokeLinejoinControl({
   );
 }
 
-export function StrokeWidthProfilePreview({ flipped }: { flipped?: boolean }) {
+export function StrokeWidthProfilePreview({
+  flipped,
+  profile = "taper",
+}: {
+  flipped?: boolean;
+  profile?: "uniform" | "taper";
+}) {
   return (
     <svg
       width="48"
@@ -125,7 +131,15 @@ export function StrokeWidthProfilePreview({ flipped }: { flipped?: boolean }) {
       aria-hidden
       className={cn("text-app-fg", flipped && "scale-x-[-1]")}
     >
-      <line x1="4" y1="6" x2="44" y2="6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      {profile === "uniform" ? (
+        <line x1="4" y1="6" x2="44" y2="6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      ) : (
+        <path
+          d="M 4 6 Q 24 2 44 6 Q 24 10 4 6 Z"
+          fill="currentColor"
+          stroke="none"
+        />
+      )}
     </svg>
   );
 }

@@ -82,7 +82,8 @@ export interface LayoutNode extends LayoutFields, ConstraintFields {
   textResizeMode?: "auto-width" | "auto-height" | "fixed";
 }
 
-export type LayoutPatch = Partial<LayoutFields>;
+export type LayoutPatch = Partial<LayoutFields> &
+  Partial<Pick<LayoutNode, "minWidth" | "minHeight" | "maxWidth" | "maxHeight">>;
 export type ConstraintsPatch = Partial<ConstraintFields>;
 
 export type AutoLayoutComputeResult = {

@@ -1,8 +1,9 @@
-import { OPENAI_MODEL_OPTIONS, DEFAULT_OPENAI_MODEL_ID } from "@/lib/openaiModels";
+import { AI_MODEL_OPTIONS, DEFAULT_AI_MODEL_ID, aiModelSelectGroups } from "@/lib/aiModels";
 
 export async function GET() {
   return Response.json({
-    defaultModelId: DEFAULT_OPENAI_MODEL_ID,
-    models: OPENAI_MODEL_OPTIONS,
+    defaultModelId: DEFAULT_AI_MODEL_ID,
+    models: AI_MODEL_OPTIONS,
+    groups: aiModelSelectGroups(),
   });
 }

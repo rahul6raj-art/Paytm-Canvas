@@ -135,6 +135,91 @@ export function PropertyNumberInput({
   );
 }
 
+/** 0–1 opacity as a percent field with ArrowUp/ArrowDown nudging (Shift ×10, Alt ÷10). */
+export function OpacityPercentInput({
+  value,
+  onCommit,
+  disabled,
+  instanceKey = "",
+  className,
+  commitOnInput = true,
+}: {
+  /** Opacity 0–1 */
+  value: number;
+  onCommit: (opacity: number) => void;
+  disabled?: boolean;
+  instanceKey?: string;
+  className?: string;
+  commitOnInput?: boolean;
+}) {
+  const percent = Math.round(Math.min(1, Math.max(0, value)) * 100);
+
+  const [text, setText] = useState(() => String(percent));
+
+  useEffect(() => {
+    setText(String(Math.round(Math.min(1, Math.max(0, value)) * 100)));
+  }, [value, instanceKey]);
+
+  const commitPercent = (n: number) => {
+    const clamped = Math.min(100, Math.max(0, Math.round(n)));
+    onCommit(clamped / 100);
+    setText(String(clamped));
+  };
+
+  const applyDraft = (raw: string) => {
+    const digits = raw.replace(/%/g, "").trim();
+    if (digits === "") return false;
+    const n = parseInt(digits, 10);
+    if (!Number.isFinite(n)) return false;
+    commitPercent(n);
+    return true;
+  };
+
+  const nudge = (direction: 1 | -1, shift: boolean, alt: boolean) => {
+    const step = keyboardStep(1, 0, shift, alt);
+    const current = parseInt(text.replace(/%/g, ""), 10);
+    const base = Number.isFinite(current) ? current : percent;
+    commitPercent(base + step * direction);
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      disabled={disabled}
+      className={cn(
+        baseField,
+        "min-w-0 flex-1 text-right tabular-nums",
+        className,
+      )}
+      value={`${text}%`}
+      onChange={(e) => {
+        const digits = e.target.value.replace(/%/g, "").replace(/[^\d]/g, "");
+        setText(digits);
+        if (commitOnInput && digits !== "") {
+          const n = parseInt(digits, 10);
+          if (Number.isFinite(n)) commitPercent(n);
+        }
+      }}
+      onBlur={() => {
+        if (!applyDraft(text)) setText(String(percent));
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          if (!applyDraft(text)) setText(String(percent));
+          (e.target as HTMLInputElement).blur();
+          return;
+        }
+        if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+          e.preventDefault();
+          nudge(e.key === "ArrowUp" ? 1 : -1, e.shiftKey, e.altKey);
+        }
+      }}
+    />
+  );
+}
+
 type PropertyTextInputProps = {
   label: string;
   value: string;

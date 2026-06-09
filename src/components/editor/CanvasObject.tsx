@@ -2,7 +2,6 @@
 
 import { useCallback, useMemo, useRef } from "react";
 import { Artboard } from "./Artboard";
-import { effectiveFillType, fillPaintCss } from "@/lib/fillGradient";
 import { ShapeGradientFill } from "./ShapeGradientFill";
 import { releaseFieldFocusForCanvas } from "@/lib/editorKeyboardFocus";
 import { cn } from "@/lib/utils";
@@ -53,7 +52,6 @@ import { TextCanvasView } from "./TextCanvasView";
 import { ShapeVectorView } from "./ShapeVectorView";
 import { BooleanGroupView, MaskGroupView } from "./BooleanGroupView";
 import { shouldClipChildren } from "@/lib/clipChildren";
-import { DEFAULT_FRAME_FILL } from "@/lib/shapes/shapeModel";
 import { cssRotationStyle } from "@/lib/transformMath";
 import { shouldSuppressCanvasPointer } from "@/lib/canvasCreationGuard";
 import { didPointerExitElement } from "@/lib/domPointer";
@@ -400,10 +398,6 @@ export function CanvasObject({ id }: { id: string }) {
     node.type === "rectangle" || node.type === "frame"
       ? cornerRadiiToCss(clampCornerRadii(getNodeCornerRadii(node), node.width, node.height))
       : undefined;
-  const sw = node.strokeWidth ?? 0;
-  const fill = fillPaintCss(node);
-  const isGradientFill = effectiveFillType(node) === "gradient";
-  const showShapeFill = node.fillEnabled !== false && isGradientFill;
   const renderParentId = useMemo(() => {
     const parentOf = buildParentMapFromChildOrder(childOrder);
     return parentOf.get(id) ?? null;
@@ -474,31 +468,38 @@ export function CanvasObject({ id }: { id: string }) {
         />
       );
     } else {
-      body = shouldClipChildren(node) ? (
-        <div className="relative h-full w-full overflow-hidden">{childrenTree}</div>
-      ) : (
-        childrenTree
+      const clipGroup = shouldClipChildren(node);
+      body = (
+        <div className="relative h-full w-full" style={{ overflow: "visible" }}>
+          <div
+            className="absolute inset-0"
+            style={{ overflow: clipGroup ? "hidden" : "visible" }}
+          >
+            {childrenTree}
+          </div>
+        </div>
       );
     }
   } else if (node.type === "frame") {
+    const clipFrame = shouldClipChildren(node);
     const shell = (
       <div
         className="relative h-full w-full"
         style={{
-          background: showShapeFill
-            ? undefined
-            : node.fillEnabled === false
-              ? "transparent"
-              : (fill ?? DEFAULT_FRAME_FILL),
           borderRadius: cornerRadiusCss,
-          overflow: shouldClipChildren(node) ? "hidden" : "visible",
+          overflow: "visible",
         }}
       >
-        {showShapeFill ? <ShapeGradientFill node={node} nodeId={id} shape="rect" /> : null}
-        {!isRootFrame && sw > 0 && node.strokeEnabled !== false ? (
-          <ShapeVectorView node={node} nodeId={id} strokeOnly />
-        ) : null}
-        {childrenTree}
+        <ShapeVectorView node={node} nodeId={id} />
+        <div
+          className="absolute inset-0"
+          style={{
+            borderRadius: cornerRadiusCss,
+            overflow: clipFrame ? "hidden" : "visible",
+          }}
+        >
+          {childrenTree}
+        </div>
       </div>
     );
     body = isRootFrame ? <Artboard>{shell}</Artboard> : shell;
@@ -587,7 +588,9 @@ export function CanvasObject({ id }: { id: string }) {
   const layerOpacity = node.opacity ?? 1;
   const imageAlpha = node.type === "image" ? layerOpacity * (node.fillOpacity ?? 1) : layerOpacity;
   const blendStyle = layerBlendCanvasStyle(node);
-  const clipOverflow = shouldClipChildren(node) ? "hidden" : "visible";
+  /** Clip only on inner child layers; vector stroke/fill stays unclipped (Figma-like). */
+  const clipOverflow =
+    node.type === "frame" || node.type === "group" ? "visible" : shouldClipChildren(node) ? "hidden" : "visible";
 
   return (
     <div

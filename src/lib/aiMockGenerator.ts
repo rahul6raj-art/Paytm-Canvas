@@ -1,7 +1,7 @@
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import type { EditorPersistSlice } from "@/lib/documentPersistence";
 import { wrapPersistSliceWithPages } from "@/lib/documentPersistence";
-import { DEFAULT_OPENAI_MODEL_ID, getOpenAIModelById } from "@/lib/openaiModels";
+import { DEFAULT_AI_MODEL_ID, getAIModelById } from "@/lib/aiModels";
 import type { EditorNode } from "@/stores/useEditorStore";
 
 const ROOT = EDITOR_ROOT_KEY;
@@ -12,8 +12,12 @@ export interface AIGenerateOptions {
   /** Extra hint merged into routing (e.g. preset chip label). */
   preset?: string;
   style: AIStyleId;
-  /** OpenAI model id (see `openaiModels.ts`). */
+  /** Model id (`ollama:…` local or OpenAI id — see `aiModels.ts`). */
   model?: string;
+  /** Merged prompt text from attached context files. */
+  contextPrompt?: string;
+  /** Number of ready context attachments (for preview). */
+  contextAttachmentCount?: number;
 }
 
 export interface AIGeneratePreview {
@@ -23,6 +27,7 @@ export interface AIGeneratePreview {
   flowLabel: string;
   modelId?: string;
   modelLabel?: string;
+  contextAttachmentCount?: number;
 }
 
 export type AIRoutedFlow = "auth" | "dashboard" | "checkout" | "landing" | "profile" | "mobile";
@@ -475,7 +480,7 @@ function titleFromPrompt(prompt: string, flow: AIRoutedFlow): string {
 }
 
 function withModelPreview(result: AIGenerateResult, modelId: string): AIGenerateResult {
-  const meta = getOpenAIModelById(modelId);
+  const meta = getAIModelById(modelId);
   return {
     ...result,
     preview: {
@@ -486,11 +491,20 @@ function withModelPreview(result: AIGenerateResult, modelId: string): AIGenerate
   };
 }
 
+function effectivePrompt(prompt: string, options: AIGenerateOptions): string {
+  const ctx = options.contextPrompt?.trim();
+  if (!ctx) return prompt;
+  const trimmed = prompt.trim();
+  if (!trimmed) return ctx;
+  return `${trimmed}\n\n--- Attached context ---\n${ctx}`;
+}
+
 export function generateDesignFromPrompt(prompt: string, options: AIGenerateOptions): AIGenerateResult {
-  const flow = routeFlowFromPrompt(prompt, options.preset);
+  const merged = effectivePrompt(prompt, options);
+  const flow = routeFlowFromPrompt(merged, options.preset);
   const palette = getPalette(options.style);
-  const name = titleFromPrompt(prompt, flow);
-  const modelId = options.model ?? DEFAULT_OPENAI_MODEL_ID;
+  const name = titleFromPrompt(merged, flow);
+  const modelId = options.model ?? DEFAULT_AI_MODEL_ID;
   let result: AIGenerateResult;
   switch (flow) {
     case "auth":
@@ -513,19 +527,36 @@ export function generateDesignFromPrompt(prompt: string, options: AIGenerateOpti
       result = buildMobile(palette, name);
       break;
   }
-  return withModelPreview(result, modelId);
+  const withModel = withModelPreview(result, modelId);
+  if (options.contextAttachmentCount && options.contextAttachmentCount > 0) {
+    return {
+      ...withModel,
+      preview: {
+        ...withModel.preview,
+        contextAttachmentCount: options.contextAttachmentCount,
+      },
+    };
+  }
+  return withModel;
 }
 
 export async function generateDesignFromPromptAsync(
   prompt: string,
   options: AIGenerateOptions,
 ): Promise<AIGenerateResult> {
-  const model = options.model ?? DEFAULT_OPENAI_MODEL_ID;
+  const model = options.model ?? DEFAULT_AI_MODEL_ID;
   try {
     const res = await fetch("/api/v1/ai/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, preset: options.preset, style: options.style, model }),
+      body: JSON.stringify({
+        prompt,
+        preset: options.preset,
+        style: options.style,
+        model,
+        contextPrompt: options.contextPrompt,
+        contextAttachmentCount: options.contextAttachmentCount,
+      }),
     });
     if (res.ok) {
       const data = (await res.json()) as { result?: AIGenerateResult };

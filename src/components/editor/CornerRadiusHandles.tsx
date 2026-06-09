@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { useEditorStore } from "@/stores/useEditorStore";
 import {
   CANVAS_HANDLE_SCREEN_PX,
@@ -28,6 +28,7 @@ import { applyMatrixToPoint } from "@/lib/transformMath";
 import { useCanvasToWorld } from "./CanvasToWorldContext";
 import { clientToWorldFromDocument } from "@/lib/canvasCoordinates";
 import { useShapeEditHandlesGate } from "./useShapeEditHandles";
+import { CanvasEditValueBadge } from "./CanvasEditValueBadge";
 
 const CORNERS: CornerIndex[] = [0, 1, 2, 3];
 
@@ -59,11 +60,6 @@ export function CornerRadiusHandles() {
     () => null,
   );
 
-  const [dragUi, setDragUi] = useState<{
-    cornerIndex: CornerIndex;
-    radius: number;
-  } | null>(null);
-
   const show =
     editActive &&
     node &&
@@ -72,7 +68,6 @@ export function CornerRadiusHandles() {
   const handlePx = screenPxToWorld(CANVAS_HANDLE_SCREEN_PX, zoom);
   const borderWorld = screenPxToWorld(CANVAS_OUTLINE_SCREEN_PX, zoom);
   const dotPx = screenPxToWorld(6, zoom);
-  const off = handlePx / 2;
   const dotOff = dotPx / 2;
 
   const radii = useMemo(() => {
@@ -89,13 +84,16 @@ export function CornerRadiusHandles() {
     }));
   }, [show, id, node, radii]);
 
-  const labelWorld = useMemo(() => {
-    if (!dragUi || !id || !node || !handleWorldPositions) return null;
-    const entry = handleWorldPositions.find((h) => h.cornerIndex === dragUi.cornerIndex);
+  const radiusBadge = useMemo(() => {
+    if (!cornerPreview || cornerPreview.nodeId !== id || !handleWorldPositions) return null;
+    const entry = handleWorldPositions.find(
+      (h) => h.cornerIndex === cornerPreview.cornerIndex,
+    );
     if (!entry) return null;
-    const w = localToWorld(id, entry.local, nodes, childOrder);
-    return { x: w.x, y: w.y - dotOff - screenPxToWorld(20, zoom), radius: dragUi.radius };
-  }, [dragUi, id, node, handleWorldPositions, nodes, childOrder, zoom, dotOff]);
+    const w = localToWorld(id!, entry.local, nodes, childOrder);
+    const r = cornerPreview.radii[cornerPreview.cornerIndex] ?? 0;
+    return { x: w.x, y: w.y, radius: Math.round(r) };
+  }, [cornerPreview, id, handleWorldPositions, nodes, childOrder]);
 
   const makePointerDown = useCallback(
     (cornerIndex: CornerIndex) => (e: React.PointerEvent) => {
@@ -104,8 +102,6 @@ export function CornerRadiusHandles() {
       const toWorld =
         clientToWorld ??
         ((cx: number, cy: number) => clientToWorldFromDocument(cx, cy, { pan, zoom }));
-      const initialRadius = radii[cornerIndex] ?? 0;
-      setDragUi({ cornerIndex, radius: initialRadius });
       beginCornerRadiusDrag({
         nodeId: id,
         cornerIndex,
@@ -114,13 +110,9 @@ export function CornerRadiusHandles() {
         clientY: e.clientY,
         clientToWorld: toWorld,
         captureTarget: e.currentTarget,
-        callbacks: {
-          onDrag: (_, radius) => setDragUi({ cornerIndex, radius }),
-          onEnd: () => setDragUi(null),
-        },
       });
     },
-    [id, clientToWorld, zoom, radii],
+    [id, clientToWorld, pan, zoom],
   );
 
   if (!show || !handleWorldPositions) return null;
@@ -149,18 +141,10 @@ export function CornerRadiusHandles() {
           />
         );
       })}
-      {labelWorld ? (
-        <div
-          className="pointer-events-none absolute z-[32] whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-white"
-          style={{
-            left: labelWorld.x,
-            top: labelWorld.y,
-            transform: "translate(-50%, -100%)",
-            background: CANVAS_VISUAL.selection,
-          }}
-        >
-          Radius {Math.round(labelWorld.radius)}
-        </div>
+      {radiusBadge ? (
+        <CanvasEditValueBadge x={radiusBadge.x} y={radiusBadge.y} zoom={zoom}>
+          {radiusBadge.radius}
+        </CanvasEditValueBadge>
       ) : null}
     </>
   );
