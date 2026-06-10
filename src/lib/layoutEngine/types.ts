@@ -137,6 +137,25 @@ export function parentCounterAxisHug(parent: LayoutEngineNode): boolean {
   return sizingMode(parent.layoutSizingHorizontal) === "hug";
 }
 
+/** Layout box used for child positioning — each axis hugs or stays fixed independently. */
+export function resolveParentLayoutSize(
+  parent: LayoutEngineNode,
+  hugSize: Size2,
+): Size2 {
+  const mode = parent.layoutMode ?? "none";
+  if (mode === "none") return { width: parent.width, height: parent.height };
+  if (mode === "horizontal") {
+    return {
+      width: parentPrimaryAxisHug(parent) ? hugSize.width : parent.width,
+      height: parentCounterAxisHug(parent) ? hugSize.height : parent.height,
+    };
+  }
+  return {
+    width: parentCounterAxisHug(parent) ? hugSize.width : parent.width,
+    height: parentPrimaryAxisHug(parent) ? hugSize.height : parent.height,
+  };
+}
+
 export function childMainSizing(
   child: LayoutEngineNode,
   mode: Exclude<LayoutMode, "none">,

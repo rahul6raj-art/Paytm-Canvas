@@ -4,6 +4,11 @@
  */
 
 export {
+  autoLayoutPaddingGuideSize,
+  autoLayoutPointInsideGuide,
+  flowContentExtentLocal,
+} from "./autoLayoutGuideBounds";
+export {
   getAutoLayoutInteractionHandles,
   type AutoLayoutInteractionHandles,
   type SpacingHandle,

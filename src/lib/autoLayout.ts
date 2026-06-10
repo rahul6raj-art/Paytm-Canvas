@@ -30,6 +30,7 @@ import {
   parentPrimaryAxisHug,
   type LayoutEngineNode,
 } from "@/lib/layoutEngine/types";
+import { shouldClipChildren } from "@/lib/clipChildren";
 
 export interface LayoutFields {
   layoutMode?: LayoutMode;
@@ -73,6 +74,7 @@ export interface LayoutNode extends LayoutFields, ConstraintFields {
   computedWidth?: number;
   computedHeight?: number;
   layoutDirty?: boolean;
+  clipChildren?: boolean;
   content?: string;
   fontFamily?: string;
   fontSize?: number;
@@ -240,7 +242,7 @@ function patchTouchesGap(patch: LayoutPatch): boolean {
 
 /**
  * After gap changes on a fixed-size auto-layout frame, resize the primary axis to fit
- * children + gap + padding (padding-only edits keep the frame size fixed).
+ * children + gap + padding — unless clip content is on (frame size stays fixed).
  */
 export function applyGapResponsivePrimarySize(
   nodes: Record<string, LayoutNode>,
@@ -252,6 +254,10 @@ export function applyGapResponsivePrimarySize(
 
   const mode = parent.layoutMode as Exclude<LayoutMode, "none">;
   if (parentPrimaryAxisHug(parent)) {
+    return applyDeepAutoLayout(nodes, childOrder, containerId);
+  }
+
+  if (shouldClipChildren(parent)) {
     return applyDeepAutoLayout(nodes, childOrder, containerId);
   }
 
@@ -341,6 +347,28 @@ export function defaultHugSizingForContainer(
   return { layoutSizingHorizontal: "hug", layoutSizingVertical: "hug" };
 }
 
+/** Keep existing frame bounds when enabling auto layout (Figma: switch to Fixed to resize / clip). */
+export function defaultFixedSizingForContainer(): Pick<
+  LayoutNode,
+  "layoutSizingHorizontal" | "layoutSizingVertical"
+> {
+  return { layoutSizingHorizontal: "fixed", layoutSizingVertical: "fixed" };
+}
+
+/**
+ * Figma: dragging a resize handle on an auto-layout frame pins both axes to Fixed
+ * so the frame keeps the new size and children reflow inside (clip / fill shrink).
+ */
+export function layoutSizingPatchesForManualResize(
+  node: Pick<LayoutNode, "layoutMode" | "layoutSizingHorizontal" | "layoutSizingVertical">,
+  widthChanged: boolean,
+  heightChanged: boolean,
+): Partial<Pick<LayoutNode, "layoutSizingHorizontal" | "layoutSizingVertical">> {
+  if ((node.layoutMode ?? "none") === "none") return {};
+  if (!widthChanged && !heightChanged) return {};
+  return { layoutSizingHorizontal: "fixed", layoutSizingVertical: "fixed" };
+}
+
 // ——— Spec-aligned aliases (recursive layout engine public API) ———
 
 export {
@@ -394,6 +422,12 @@ export {
 } from "./autoLayout/spacingPaddingDrag";
 
 export { getAutoLayoutHoverContext, type AutoLayoutHoverContext } from "./autoLayout/autoLayoutHover";
+
+export {
+  autoLayoutPaddingGuideSize,
+  autoLayoutPointInsideGuide,
+  flowContentExtentLocal,
+} from "./autoLayout/autoLayoutGuideBounds";
 
 export {
   LAYOUT_DIRECTION_OPTIONS,

@@ -8,6 +8,7 @@ import { nextNumberedLayerName } from "@/lib/layerNaming";
 import { worldRect } from "@/lib/tree";
 import {
   applyDeepAutoLayout,
+  defaultFixedSizingForContainer,
   defaultHugSizingForContainer,
   inferAutoLayoutGap,
   inferAutoLayoutFlow,
@@ -110,6 +111,7 @@ function layoutFieldsForChildren(
   childIds: string[],
   frameW: number,
   frameH: number,
+  sizing: "hug" | "fixed" = "hug",
 ): LayoutFields & Pick<EditorNode, "layoutSizingHorizontal" | "layoutSizingVertical"> {
   const mode = inferAutoLayoutFlow(nodes as Record<string, LayoutNode>, childIds);
   const gap = inferAutoLayoutGap(nodes as Record<string, LayoutNode>, childIds, mode);
@@ -125,7 +127,9 @@ function layoutFieldsForChildren(
     layoutGap: gap,
     layoutGapAuto: childIds.length >= 2,
     ...padding,
-    ...defaultHugSizingForContainer(mode),
+    ...(sizing === "fixed"
+      ? defaultFixedSizingForContainer()
+      : defaultHugSizingForContainer(mode)),
   };
 }
 
@@ -171,7 +175,7 @@ function enableAutoLayoutOnContainer(
 
   if ((n.layoutMode ?? "none") === "none") {
     sortChildOrderInPlace(nextOrder, containerId, nodes, mode);
-    const layout = layoutFieldsForChildren(nodes, kids, n.width, n.height);
+    const layout = layoutFieldsForChildren(nodes, kids, n.width, n.height, "fixed");
     let next = {
       ...nodes,
       [containerId]: { ...n, ...layout },
@@ -261,7 +265,6 @@ function wrapInAutoLayoutFrame(
     expanded: true,
     fillEnabled: false,
     fill: "#ffffff",
-    clipChildren: true,
     ...layout,
   };
 
@@ -344,7 +347,6 @@ function wrapInPlainFrame(
     expanded: true,
     fillEnabled: false,
     fill: "#ffffff",
-    clipChildren: true,
     layoutMode: "none",
   };
 

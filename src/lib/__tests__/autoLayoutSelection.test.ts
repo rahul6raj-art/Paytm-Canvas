@@ -95,6 +95,8 @@ describe("applyAutoLayoutToContainer — existing frame", () => {
     const result = applyAutoLayoutToContainer(nodes, childOrder, "f");
     assert.ok(result);
     assert.equal(result!.nodes.f.layoutMode, "horizontal");
+    assert.equal(result!.nodes.f.layoutSizingHorizontal, "fixed");
+    assert.equal(result!.nodes.f.layoutSizingVertical, "fixed");
     assert.ok(result!.nodes.b.x > result!.nodes.a.x);
   });
 

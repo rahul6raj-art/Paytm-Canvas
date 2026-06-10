@@ -13,6 +13,8 @@ import {
   paddingBox,
   parentCounterAxisHug,
   parentPrimaryAxisHug,
+  resolveParentLayoutSize,
+  sizingMode,
   type LayoutAutoNodeResult,
   type LayoutEngineNode,
 } from "./types";
@@ -89,10 +91,9 @@ export function layoutAutoNode(
     : 1;
 
   const hugSize = resolveHugSize(parent, measures, mode, gap, lineCount);
-  const parentW =
-    parentPrimaryAxisHug(parent) || parentCounterAxisHug(parent) ? hugSize.width : parent.width;
-  const parentH =
-    parentPrimaryAxisHug(parent) || parentCounterAxisHug(parent) ? hugSize.height : parent.height;
+  const layoutSize = resolveParentLayoutSize(parent, hugSize);
+  const parentW = layoutSize.width;
+  const parentH = layoutSize.height;
 
   const innerW = Math.max(0, parentW - p.left - p.right);
   const innerH = Math.max(0, parentH - p.top - p.bottom);
@@ -189,7 +190,18 @@ export function applyLayoutResult(
   let next = { ...nodes };
   if (result.parent) {
     const pn = next[parentId];
-    if (pn) next[parentId] = { ...pn, ...result.parent };
+    if (pn) {
+      const parentPatch = { ...result.parent };
+      const mode = pn.layoutMode ?? "none";
+      if (mode === "horizontal") {
+        if (sizingMode(pn.layoutSizingHorizontal) === "fixed") delete parentPatch.width;
+        if (sizingMode(pn.layoutSizingVertical) === "fixed") delete parentPatch.height;
+      } else if (mode === "vertical") {
+        if (sizingMode(pn.layoutSizingVertical) === "fixed") delete parentPatch.height;
+        if (sizingMode(pn.layoutSizingHorizontal) === "fixed") delete parentPatch.width;
+      }
+      next[parentId] = { ...pn, ...parentPatch };
+    }
   }
   for (const [cid, patch] of Object.entries(result.children)) {
     const cn = next[cid];

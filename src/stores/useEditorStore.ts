@@ -31,6 +31,7 @@ import {
   computeAutoLayout,
   computeAutoLayoutPatches,
   constraintResizeChildPatches,
+  layoutSizingPatchesForManualResize,
   markLayoutDirty,
   relayoutDirtyTree,
   type ConstraintHorizontal,
@@ -2044,7 +2045,18 @@ function applyAutoLayoutMerge(
   const next = { ...nodes };
   if (result.parent) {
     const pn = next[parentId];
-    if (pn) next[parentId] = { ...pn, ...result.parent };
+    if (pn) {
+      const parentPatch = { ...result.parent };
+      const mode = pn.layoutMode ?? "none";
+      if (mode === "horizontal") {
+        if ((pn.layoutSizingHorizontal ?? "fixed") === "fixed") delete parentPatch.width;
+        if ((pn.layoutSizingVertical ?? "fixed") === "fixed") delete parentPatch.height;
+      } else if (mode === "vertical") {
+        if ((pn.layoutSizingVertical ?? "fixed") === "fixed") delete parentPatch.height;
+        if ((pn.layoutSizingHorizontal ?? "fixed") === "fixed") delete parentPatch.width;
+      }
+      next[parentId] = { ...pn, ...parentPatch };
+    }
   }
   for (const [cid, p] of Object.entries(result.children)) {
     const cn = next[cid];
@@ -4474,7 +4486,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
         fillEnabled: true,
         fillOpacity: 1,
         strokePosition: "center",
-        clipChildren: true,
       };
       const inserted = insertNodeWithFrameParenting(
         node,
@@ -6376,6 +6387,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
           }
         }
       } else if (isContainer && layoutMode !== "none") {
+        const sizingPatch = layoutSizingPatchesForManualResize(
+          n,
+          width !== startBounds.width,
+          height !== startBounds.height,
+        );
+        if (Object.keys(sizingPatch).length > 0) {
+          nodes[id] = { ...nodes[id]!, ...sizingPatch };
+        }
         nodes = deepAutoLayout(nodes, s.childOrder, id);
       }
       if (n.parentId) {
@@ -6423,6 +6442,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
           if (cn && !cn.locked) nodes[cid] = { ...cn, ...patch };
         }
       } else {
+        const sizingPatch = layoutSizingPatchesForManualResize(
+          next,
+          Math.abs(W - oldW) > 0.01,
+          Math.abs(H - oldH) > 0.01,
+        );
+        if (Object.keys(sizingPatch).length > 0) {
+          nodes[frameId] = { ...nodes[frameId]!, ...sizingPatch };
+        }
         nodes = deepAutoLayout(nodes, s.childOrder, frameId);
       }
       if (next.parentId && !opts?.skipParentRelayout) {

@@ -362,14 +362,15 @@ export function DesignInspector({ node }: { node: EditorNode }) {
             <input
               type="checkbox"
               className="h-3.5 w-3.5 rounded border-white/20 bg-app-panel accent-[#0d99ff]"
-              checked={node.clipChildren !== false}
+              checked={node.clipChildren === true}
               disabled={locked}
               onChange={(e) => patch({ clipChildren: e.target.checked })}
             />
             <span className="text-[11px] text-app-fg">Clip content</span>
           </label>
           <p className="mt-1 text-[10px] leading-snug text-app-subtle">
-            When enabled, layers outside the frame bounds are hidden.
+            When enabled, layers outside the frame bounds are hidden. Resize the frame (Fixed
+            width/height) to clip auto-layout overflow.
           </p>
         </PropertiesSection>
       ) : null}

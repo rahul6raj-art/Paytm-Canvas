@@ -218,4 +218,36 @@ describe("auto layout", () => {
     assert.equal(next.parent!.width, 200);
     assert.equal(next.a!.width, 200 - 24 - 24);
   });
+
+  it("fixed width keeps children overflowing for clip (horizontal auto layout)", () => {
+    const nodes: Record<string, LayoutNode> = {
+      parent: {
+        id: "parent",
+        parentId: null,
+        type: "frame",
+        x: 0,
+        y: 0,
+        width: 120,
+        height: 60,
+        visible: true,
+        locked: false,
+        layoutMode: "horizontal",
+        layoutGap: 8,
+        paddingLeft: 0,
+        paddingRight: 0,
+        paddingTop: 0,
+        paddingBottom: 0,
+        layoutSizingHorizontal: "fixed",
+        layoutSizingVertical: "fixed",
+        clipChildren: true,
+      },
+      a: frame("a", 0, 0, 50, 40, { parentId: "parent" }),
+      b: frame("b", 0, 0, 50, 40, { parentId: "parent" }),
+      c: frame("c", 0, 0, 50, 40, { parentId: "parent" }),
+    };
+    const childOrder = { parent: ["a", "b", "c"] };
+    const next = applyDeepAutoLayout(nodes, childOrder, "parent");
+    assert.equal(next.parent!.width, 120);
+    assert.ok((next.c!.x ?? 0) + (next.c!.width ?? 0) > 120);
+  });
 });

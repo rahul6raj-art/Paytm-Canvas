@@ -10,7 +10,10 @@ import {
   beginFillDividerDrag,
   subscribeAutoLayoutDragPreview,
   getAutoLayoutDragPreview,
+  autoLayoutPaddingGuideSize,
+  autoLayoutPointInsideGuide,
 } from "@/lib/autoLayout";
+import { shouldClipChildren } from "@/lib/clipChildren";
 import {
   AUTO_LAYOUT_SPACING_LINE_SCREEN_PX,
   AUTO_LAYOUT_SPACING_TICK_SCREEN_PX,
@@ -161,8 +164,35 @@ export function AutoLayoutHandlesOverlay() {
     left: parent.paddingLeft ?? 0,
   };
 
-  const innerW = Math.max(0, parent.width - pad.left - pad.right);
-  const innerH = Math.max(0, parent.height - pad.top - pad.bottom);
+  const guideSize = autoLayoutPaddingGuideSize(id, nodes, childOrder);
+  const clipGuides = shouldClipChildren(parent);
+  const innerW = Math.max(0, guideSize.width - pad.left - pad.right);
+  const innerH = Math.max(0, guideSize.height - pad.top - pad.bottom);
+
+  const spacingHandles = handles.spacing.filter((h) =>
+    clipGuides
+      ? autoLayoutPointInsideGuide(h.localX, h.localY, guideSize, parent)
+      : true,
+  );
+  const fillDividers = handles.fillDividers.filter((h) =>
+    clipGuides
+      ? autoLayoutPointInsideGuide(h.localX, h.localY, guideSize, parent)
+      : true,
+  );
+
+  const frameClipId = clipGuides ? `al-frame-clip-${id}` : null;
+  const frameClipRect = clipGuides
+    ? (() => {
+        const nw = toWorld({ x: 0, y: 0 });
+        const se = toWorld({ x: parent.width, y: parent.height });
+        return {
+          x: Math.min(nw.x, se.x),
+          y: Math.min(nw.y, se.y),
+          width: Math.abs(se.x - nw.x),
+          height: Math.abs(se.y - nw.y),
+        };
+      })()
+    : null;
 
   const padGuides = [
     { x1: pad.left, y1: pad.top, x2: pad.left + innerW, y2: pad.top, color: PAD_COLOR },
@@ -178,6 +208,19 @@ export function AutoLayoutHandlesOverlay() {
   return (
     <div className="pointer-events-none absolute inset-0 z-[46] overflow-visible" aria-hidden>
       <svg className="absolute inset-0 h-full w-full overflow-visible">
+        {frameClipId && frameClipRect ? (
+          <defs>
+            <clipPath id={frameClipId}>
+              <rect
+                x={frameClipRect.x}
+                y={frameClipRect.y}
+                width={frameClipRect.width}
+                height={frameClipRect.height}
+              />
+            </clipPath>
+          </defs>
+        ) : null}
+        <g clipPath={frameClipId ? `url(#${frameClipId})` : undefined}>
         {padGuides.map((g, i) => (
           <line
             key={`pad-${i}`}
@@ -191,7 +234,7 @@ export function AutoLayoutHandlesOverlay() {
             opacity={0.85}
           />
         ))}
-        {handles.spacing.map((h) => {
+        {spacingHandles.map((h) => {
           const a =
             handles.mode === "horizontal"
               ? toWorld({ x: h.localX, y: h.localY - spacingTickHalf })
@@ -213,9 +256,10 @@ export function AutoLayoutHandlesOverlay() {
             />
           );
         })}
+        </g>
       </svg>
 
-      {handles.spacing.map((h) => {
+      {spacingHandles.map((h) => {
         const isHorizontal = handles.mode === "horizontal";
         const lineA = isHorizontal
           ? toWorld({ x: h.localX, y: h.localY - spacingTickHalf })
@@ -282,7 +326,7 @@ export function AutoLayoutHandlesOverlay() {
         );
       })}
 
-      {handles.fillDividers.map((h) => {
+      {fillDividers.map((h) => {
         const w = toWorld({ x: h.localX, y: h.localY });
         return (
           <button

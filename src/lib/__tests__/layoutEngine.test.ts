@@ -291,6 +291,86 @@ describe("layoutEngine — fill child", () => {
   });
 });
 
+describe("layoutEngine — fixed width with hug height", () => {
+  it("uses fixed width for inner layout when only counter axis hugs", () => {
+    const nodes: Record<string, LayoutEngineNode> = {
+      parent: rootFrame("parent", {
+        layoutMode: "horizontal",
+        width: 80,
+        height: 200,
+        layoutGap: 0,
+        paddingLeft: 0,
+        paddingRight: 0,
+        paddingTop: 0,
+        paddingBottom: 0,
+        layoutSizingHorizontal: "fixed",
+        layoutSizingVertical: "hug",
+      }),
+      fixed: frame("fixed", 0, 0, 50, 40, { parentId: "parent" }),
+      grow: frame("grow", 0, 0, 10, 40, {
+        parentId: "parent",
+        layoutSizingHorizontal: "fill",
+      }),
+    };
+    const childOrder = { parent: ["fixed", "grow"] };
+    const out = layoutAutoNode("parent", nodes, childOrder);
+    assert.equal(out.children.grow?.width, 30);
+    assert.equal(out.parent?.width, undefined);
+  });
+
+  it("shrinks fill child when fixed frame width decreases", () => {
+    const childOrder = { parent: ["fixed", "grow"] };
+    const baseChild = {
+      fixed: frame("fixed", 0, 0, 50, 40, { parentId: "parent" }),
+      grow: frame("grow", 0, 0, 10, 40, {
+        parentId: "parent",
+        layoutSizingHorizontal: "fill",
+      }),
+    };
+    const wide = layoutAutoNode(
+      "parent",
+      {
+        parent: rootFrame("parent", {
+          layoutMode: "horizontal",
+          width: 200,
+          height: 80,
+          layoutGap: 0,
+          paddingLeft: 0,
+          paddingRight: 0,
+          paddingTop: 0,
+          paddingBottom: 0,
+          layoutSizingHorizontal: "fixed",
+          layoutSizingVertical: "fixed",
+        }),
+        ...baseChild,
+      },
+      childOrder,
+    );
+    const narrow = layoutAutoNode(
+      "parent",
+      {
+        parent: rootFrame("parent", {
+          layoutMode: "horizontal",
+          width: 80,
+          height: 80,
+          layoutGap: 0,
+          paddingLeft: 0,
+          paddingRight: 0,
+          paddingTop: 0,
+          paddingBottom: 0,
+          layoutSizingHorizontal: "fixed",
+          layoutSizingVertical: "fixed",
+        }),
+        ...baseChild,
+      },
+      childOrder,
+    );
+    assert.equal(wide.children.grow?.width, 150);
+    assert.equal(narrow.children.grow?.width, 30);
+    assert.ok((narrow.children.grow?.width ?? 0) < (wide.children.grow?.width ?? 0));
+  });
+});
+
 describe("layoutEngine — absolute child", () => {
   it("does not move absolute children in flow", () => {
     const nodes: Record<string, LayoutEngineNode> = {

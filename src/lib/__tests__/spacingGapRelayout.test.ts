@@ -161,4 +161,37 @@ describe("spacing gap relayout", () => {
     assert.equal(large.f!.width, 12 + 40 + 32 + 40 + 12);
     assert.ok((large.f!.width ?? 0) > (small.f!.width ?? 0));
   });
+
+  it("keeps clipped fixed frame size when layoutGap changes", () => {
+    const nodes: Record<string, LayoutNode> = {
+      f: alFrame({
+        layoutMode: "horizontal",
+        layoutSizingHorizontal: "fixed",
+        layoutSizingVertical: "fixed",
+        width: 120,
+        height: 80,
+        clipChildren: true,
+        primaryAxisAlign: "start",
+        paddingTop: 0,
+        paddingRight: 0,
+        paddingBottom: 0,
+        paddingLeft: 0,
+      }),
+      a: { ...rect("a", 0), x: 0, y: 0, width: 50, height: 40 },
+      b: { ...rect("b", 0), x: 58, y: 0, width: 50, height: 40 },
+    };
+    const childOrder = { f: ["a", "b"] };
+    const gap8 = applyLayoutPatchWithAutoLayout(nodes, childOrder, "f", {
+      layoutGap: 8,
+      layoutGapAuto: false,
+    });
+    const gap32 = applyLayoutPatchWithAutoLayout(nodes, childOrder, "f", {
+      layoutGap: 32,
+      layoutGapAuto: false,
+    });
+    assert.equal(gap8.f!.width, 120);
+    assert.equal(gap32.f!.width, 120);
+    assert.equal(gap32.f!.height, 80);
+    assert.equal((gap32.b!.x ?? 0) - ((gap32.a!.x ?? 0) + (gap32.a!.width ?? 0)), 32);
+  });
 });
