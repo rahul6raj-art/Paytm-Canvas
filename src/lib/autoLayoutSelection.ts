@@ -40,6 +40,49 @@ function isContainer(n: EditorNode): boolean {
   return n.type === "frame" || n.type === "group";
 }
 
+function isLayoutContainer(n: EditorNode | undefined): n is EditorNode {
+  return !!n && isContainer(n) && (n.layoutMode ?? "none") === "none";
+}
+
+/** Visible, unlocked direct children — childOrder first, parentId fallback. */
+function directChildIds(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  containerId: string,
+): string[] {
+  const fromOrder = (childOrder[containerId] ?? []).filter((cid) => {
+    const c = nodes[cid];
+    return c && c.visible && !c.locked && c.parentId === containerId;
+  });
+  if (fromOrder.length > 0) return fromOrder;
+
+  const orderIndex = new Map<string, number>();
+  let idx = 0;
+  for (const list of Object.values(childOrder)) {
+    for (const id of list) {
+      if (!orderIndex.has(id)) orderIndex.set(id, idx++);
+    }
+  }
+
+  return Object.keys(nodes)
+    .filter((cid) => {
+      const c = nodes[cid];
+      return c && c.parentId === containerId && c.visible && !c.locked;
+    })
+    .sort((a, b) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0));
+}
+
+function syncContainerChildOrder(
+  childOrder: Record<string, string[]>,
+  containerId: string,
+  childIds: string[],
+): void {
+  if (childIds.length === 0) return;
+  const existing = childOrder[containerId] ?? [];
+  if (existing.length > 0) return;
+  childOrder[containerId] = [...childIds];
+}
+
 export function canAddAutoLayoutToSelection(
   selectedIds: string[],
   nodes: Record<string, EditorNode>,
@@ -49,8 +92,17 @@ export function canAddAutoLayoutToSelection(
     return n && n.visible && !n.locked;
   });
   if (tops.length === 0) return false;
+
+  if (tops.length === 1 && isContainer(nodes[tops[0]!]!)) return true;
+
   const parentId = nodes[tops[0]!]!.parentId;
-  return tops.every((id) => nodes[id]!.parentId === parentId);
+  if (!tops.every((id) => nodes[id]!.parentId === parentId)) return false;
+
+  if (parentId && isLayoutContainer(nodes[parentId])) {
+    return tops.every((id) => id !== parentId);
+  }
+
+  return true;
 }
 
 function layoutFieldsForChildren(
@@ -109,10 +161,8 @@ function enableAutoLayoutOnContainer(
   if (!n || !isContainer(n)) return { nodes, childOrder };
 
   const nextOrder = { ...childOrder };
-  const kids = (nextOrder[containerId] ?? []).filter((cid) => {
-    const c = nodes[cid];
-    return c && c.visible && !c.locked;
-  });
+  const kids = directChildIds(nodes, nextOrder, containerId);
+  syncContainerChildOrder(nextOrder, containerId, kids);
 
   const mode =
     (n.layoutMode ?? "none") !== "none"
@@ -334,6 +384,33 @@ export type ApplyAutoLayoutSelectionResult = {
   selectedIds: string[];
 };
 
+/** Enable auto layout on a specific frame/group (⇧A on a selected container). */
+export function applyAutoLayoutToContainer(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  containerId: string,
+): ApplyAutoLayoutSelectionResult | null {
+  const n = nodes[containerId];
+  if (!n || !isContainer(n)) return null;
+  const result = enableAutoLayoutOnContainer(nodes, childOrder, containerId);
+  return {
+    nodes: result.nodes,
+    childOrder: result.childOrder,
+    selectedIds: [containerId],
+  };
+}
+
+function sharedManualLayoutParentId(
+  tops: string[],
+  nodes: Record<string, EditorNode>,
+): string | null {
+  if (tops.length === 0) return null;
+  const parentId = nodes[tops[0]!]!.parentId;
+  if (!parentId || !tops.every((id) => nodes[id]!.parentId === parentId)) return null;
+  if (tops.some((id) => id === parentId)) return null;
+  return isLayoutContainer(nodes[parentId]) ? parentId : null;
+}
+
 export function applyAutoLayoutToSelection(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
@@ -344,6 +421,12 @@ export function applyAutoLayoutToSelection(
     return n && n.visible && !n.locked;
   });
   if (tops.length === 0) return null;
+
+  const parentFrameId = sharedManualLayoutParentId(tops, nodes);
+  if (parentFrameId) {
+    return applyAutoLayoutToContainer(nodes, childOrder, parentFrameId);
+  }
+
   const parentId = nodes[tops[0]!]!.parentId;
   if (!tops.every((id) => nodes[id]!.parentId === parentId)) return null;
 
@@ -351,8 +434,7 @@ export function applyAutoLayoutToSelection(
     const id = tops[0]!;
     const n = nodes[id]!;
     if (isContainer(n)) {
-      const result = enableAutoLayoutOnContainer(nodes, childOrder, id);
-      return { nodes: result.nodes, childOrder: result.childOrder, selectedIds: [id] };
+      return applyAutoLayoutToContainer(nodes, childOrder, id);
     }
     const wrapped = wrapInAutoLayoutFrame(nodes, childOrder, tops);
     if (!wrapped) return null;

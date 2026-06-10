@@ -125,6 +125,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
   const updateLayout = useEditorStore((s) => s.updateLayout);
   const updateLayoutPositioning = useEditorStore((s) => s.updateLayoutPositioning);
   const addAutoLayoutToSelection = useEditorStore((s) => s.addAutoLayoutToSelection);
+  const addAutoLayoutToContainer = useEditorStore((s) => s.addAutoLayoutToContainer);
   const updateConstraints = useEditorStore((s) => s.updateConstraints);
   const renameNode = useEditorStore((s) => s.renameNode);
   const parent = useEditorStore((s) => (node.parentId ? s.nodes[node.parentId!] : null));
@@ -873,7 +874,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                 disabled={locked}
                 onChange={(v) => {
                   if (v === "none") updateLayout(id, { layoutMode: "none" });
-                  else if (layoutMode === "none") addAutoLayoutToSelection();
+                  else if (layoutMode === "none") addAutoLayoutToContainer(id);
                 }}
               />
             </div>
@@ -892,10 +893,25 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               Add auto layout
             </button>
           ) : layoutMode === "none" ? (
+            <button
+              type="button"
+              disabled={locked}
+              onClick={() => addAutoLayoutToContainer(id)}
+              className={cn(
+                "mb-2 flex h-6 w-full items-center justify-center gap-1.5 rounded border text-[11px] font-medium transition-colors disabled:opacity-40",
+                "border-app-border bg-app-panel text-app-fg hover:bg-app-hover",
+              )}
+            >
+              <LayoutTemplate className="h-3.5 w-3.5" strokeWidth={1.75} />
+              Add auto layout
+            </button>
+          ) : null}
+          {isContainer && layoutMode === "none" ? (
             <p className="text-[10px] leading-snug text-app-subtle">
-              Switch to Auto to enable horizontal or vertical stack (⇧A).
+              Stack everything inside this frame automatically (⇧A).
             </p>
-          ) : (
+          ) : null}
+          {isContainer && layoutMode !== "none" ? (
             <>
               <div className="mb-1 text-[11px] font-medium text-app-subtle">Direction</div>
               <div className="mb-1.5 flex gap-0.5">
@@ -1198,7 +1214,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                 </div>
               </div>
             </>
-          )}
+          ) : null}
         </PropertiesSection>
       )}
 

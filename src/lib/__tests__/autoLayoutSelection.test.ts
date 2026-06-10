@@ -1,8 +1,30 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
-import { applyAutoLayoutToSelection } from "@/lib/autoLayoutSelection";
+import {
+  applyAutoLayoutToContainer,
+  applyAutoLayoutToSelection,
+} from "@/lib/autoLayoutSelection";
 import type { EditorNode } from "@/stores/useEditorStore";
+
+function frame(id: string, extra: Partial<EditorNode> = {}): EditorNode {
+  return {
+    id,
+    parentId: null,
+    type: "frame",
+    name: extra.name ?? `Frame ${id}`,
+    x: 0,
+    y: 0,
+    width: 200,
+    height: 120,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    layoutMode: "none",
+    ...extra,
+  };
+}
 
 function rect(
   id: string,
@@ -58,5 +80,52 @@ describe("applyAutoLayoutToSelection — frame naming", () => {
     const frame2 = second!.nodes[second!.selectedIds[0]!]!;
     assert.equal(frame2.name, "Frame 2");
     assert.notEqual(frame2.name, "Auto layout");
+  });
+});
+
+describe("applyAutoLayoutToContainer — existing frame", () => {
+  it("enables auto layout on a selected frame and lays out children", () => {
+    const nodes: Record<string, EditorNode> = {
+      f: frame("f"),
+      a: rect("a", 10, 10, 40, 20, { parentId: "f" }),
+      b: rect("b", 60, 10, 40, 20, { parentId: "f", name: "Rectangle b" }),
+    };
+    const childOrder = { f: ["a", "b"] };
+
+    const result = applyAutoLayoutToContainer(nodes, childOrder, "f");
+    assert.ok(result);
+    assert.equal(result!.nodes.f.layoutMode, "horizontal");
+    assert.ok(result!.nodes.b.x > result!.nodes.a.x);
+  });
+
+  it("finds children via parentId when childOrder is missing on the frame", () => {
+    const nodes: Record<string, EditorNode> = {
+      f: frame("f"),
+      a: rect("a", 10, 10, 40, 20, { parentId: "f" }),
+      b: rect("b", 60, 10, 40, 20, { parentId: "f", name: "Rectangle b" }),
+    };
+    const childOrder = { [EDITOR_ROOT_KEY]: ["f"] };
+
+    const result = applyAutoLayoutToContainer(nodes, childOrder, "f");
+    assert.ok(result);
+    assert.equal(result!.childOrder.f?.length, 2);
+    assert.notEqual(result!.nodes.f.layoutMode, "none");
+  });
+});
+
+describe("applyAutoLayoutToSelection — children inside frame", () => {
+  it("enables auto layout on the parent frame instead of nesting", () => {
+    const nodes: Record<string, EditorNode> = {
+      f: frame("f"),
+      a: rect("a", 10, 10, 40, 20, { parentId: "f" }),
+      b: rect("b", 60, 10, 40, 20, { parentId: "f", name: "Rectangle b" }),
+    };
+    const childOrder = { f: ["a", "b"] };
+
+    const result = applyAutoLayoutToSelection(nodes, childOrder, ["a", "b"]);
+    assert.ok(result);
+    assert.deepEqual(result!.selectedIds, ["f"]);
+    assert.equal(result!.nodes.f.layoutMode, "horizontal");
+    assert.equal(Object.keys(result!.nodes).filter((id) => id.startsWith("frame-al-")).length, 0);
   });
 });

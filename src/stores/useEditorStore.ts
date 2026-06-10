@@ -44,6 +44,7 @@ import {
   type PrimaryAxisAlign,
 } from "@/lib/autoLayout";
 import {
+  applyAutoLayoutToContainer,
   applyAutoLayoutToSelection,
   applyWrapSelectionInFrame,
   canAddAutoLayoutToSelection,
@@ -921,6 +922,8 @@ export interface EditorState {
   ungroupSelection: () => void;
   /** Figma ⇧A — wrap selection in auto-layout frame or enable on container. */
   addAutoLayoutToSelection: () => void;
+  /** Enable auto layout on a frame/group (all direct children). */
+  addAutoLayoutToContainer: (containerId: string) => void;
   /** Figma ⌘⌥G — wrap selection in a plain frame. */
   wrapSelectionInFrame: () => void;
   toggleSelectNode: (id: string) => void;
@@ -5716,6 +5719,23 @@ export const useEditorStore = create<EditorState>((set, get) => {
     if (s0.editorMode !== "design") return;
     if (!canAddAutoLayoutToSelection(s0.selectedIds, s0.nodes)) return;
     const result = applyAutoLayoutToSelection(s0.nodes, s0.childOrder, s0.selectedIds);
+    if (!result) return;
+    get().pushHistory();
+    set({
+      nodes: result.nodes,
+      childOrder: result.childOrder,
+      selectedIds: result.selectedIds,
+      tool: "move",
+      editingTextId: null,
+    });
+  },
+
+  addAutoLayoutToContainer: (containerId) => {
+    const s0 = get();
+    if (s0.editorMode !== "design") return;
+    const n = s0.nodes[containerId];
+    if (!n || n.locked || !n.visible || (n.type !== "frame" && n.type !== "group")) return;
+    const result = applyAutoLayoutToContainer(s0.nodes, s0.childOrder, containerId);
     if (!result) return;
     get().pushHistory();
     set({
