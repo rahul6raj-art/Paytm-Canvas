@@ -105,7 +105,7 @@ describe("auto layout", () => {
       a: frame("a", 20, 10, 40, 30),
       b: frame("b", 80, 10, 40, 30),
     };
-    const childOrder = { parent: ["b", "a"] };
+    const childOrder = { parent: ["a", "b"] };
     const padding = inferAutoLayoutPadding(nodes, ["a", "b"], 300, 200);
     nodes.parent = { ...nodes.parent, ...padding, layoutGap: 20 };
     const next = applyDeepAutoLayout(nodes, childOrder, "parent");

@@ -13,13 +13,15 @@ import {
 import { KEYBOARD_ZOOM_STEP } from "@/lib/canvasZoom";
 import { cancelActiveMarqueeFromKeyboard } from "@/lib/canvasMarqueeController";
 import { screenPxToWorld } from "@/lib/canvasVisual";
+import { getAutoLayoutArrowReorderContext } from "@/lib/autoLayoutArrowReorder";
 import { topLevelSelectedIds } from "@/lib/editorGraph";
+import { nodeSupportsStrokeWidth } from "@/lib/strokeAdjust";
 import { canAddAutoLayoutToSelection } from "@/lib/autoLayoutSelection";
 import {
   activateCanvasForShortcuts,
   isEditableFieldElement,
   isShortcutOverlayOpen,
-  shouldAllowNativeFieldClipboard,
+  resolveKeyboardFieldTarget,
   shouldBlockDeleteSelectionShortcut,
   shouldYieldShortcutsToTyping,
   resolveToolFromKeyboardEvent,
@@ -263,9 +265,7 @@ export function EditorKeyboardShortcuts() {
 
       if (shouldYieldShortcutsToTyping(e, e.target)) return;
 
-      if (shouldAllowNativeFieldClipboard(e, e.target)) return;
-
-      if (mod) {
+      if (mod && !resolveKeyboardFieldTarget(e.target)) {
         activateCanvasForShortcuts();
       }
 
@@ -351,6 +351,11 @@ export function EditorKeyboardShortcuts() {
       if (mod && e.altKey && e.code === "KeyF") {
         e.preventDefault();
         useEditorStore.getState().flattenSelection();
+        return;
+      }
+      if (mod && e.altKey && e.code === "KeyO") {
+        e.preventDefault();
+        useEditorStore.getState().outlineStrokeSelection();
         return;
       }
       if (mod && e.altKey && e.code === "KeyM") {
@@ -442,6 +447,31 @@ export function EditorKeyboardShortcuts() {
       }
 
       const stDesign = useEditorStore.getState();
+      if (stDesign.editorMode === "design" && !mod && !e.altKey && !resolveKeyboardFieldTarget(e.target)) {
+        const bracketForward = e.code === "BracketRight" || e.key === "]";
+        const bracketBack = e.code === "BracketLeft" || e.key === "[";
+        if (bracketForward || bracketBack) {
+          const strokeTargets = topLevelSelectedIds(stDesign.selectedIds, stDesign.nodes).filter(
+            (id) => {
+              const n = stDesign.nodes[id];
+              return n && !n.locked && n.visible && nodeSupportsStrokeWidth(n);
+            },
+          );
+          const canNudgeStroke = strokeTargets.length > 0 || stDesign.tool === "pencil";
+          if (
+            canNudgeStroke &&
+            !stDesign.editingTextId &&
+            !stDesign.pathEditModeNodeId &&
+            !stDesign.pencilDrawingNodeId
+          ) {
+            e.preventDefault();
+            const step = e.shiftKey ? 10 : 1;
+            stDesign.nudgeSelectionStrokeWidth(bracketForward ? step : -step);
+            return;
+          }
+        }
+      }
+
       if (stDesign.editorMode === "design" && mod) {
         const bracketForward = e.code === "BracketRight" || e.key === "]";
         const bracketBack = e.code === "BracketLeft" || e.key === "[";
@@ -459,7 +489,12 @@ export function EditorKeyboardShortcuts() {
         }
       }
 
-      if (stDesign.editorMode === "design" && !stDesign.editingTextId && !stDesign.pathEditModeNodeId) {
+      if (
+        stDesign.editorMode === "design" &&
+        !stDesign.editingTextId &&
+        !stDesign.pathEditModeNodeId &&
+        !resolveKeyboardFieldTarget(e.target)
+      ) {
         const arrow =
           e.code === "ArrowUp" ||
           e.code === "ArrowDown" ||
@@ -470,6 +505,17 @@ export function EditorKeyboardShortcuts() {
             const n = stDesign.nodes[id];
             return n && !n.locked && n.visible;
           });
+          if (stDesign.reorderAutoLayoutChildByArrow(e.code)) {
+            e.preventDefault();
+            return;
+          }
+          if (
+            tops.length === 1 &&
+            getAutoLayoutArrowReorderContext(tops, stDesign.nodes, stDesign.childOrder)
+          ) {
+            e.preventDefault();
+            return;
+          }
           if (tops.length > 0) {
             e.preventDefault();
             const step = screenPxToWorld(e.shiftKey ? 10 : 1, stDesign.zoom);

@@ -30,6 +30,7 @@ import {
 } from "@/lib/smoothPointer";
 import {
   applyMoveToolPointerSelection,
+  isAdditiveSelectionClick,
   drillTargetForDoubleClick,
   selectionTargetForClick,
   shouldCollapseContainerHits,
@@ -329,13 +330,13 @@ export function CanvasObject({ id }: { id: string }) {
       if (editorMode === "inspect") {
         e.stopPropagation();
         if (tool === "comment" || tool === "pen" || tool === "pencil" || e.button === 1) return;
-        select(targetId, e.shiftKey);
+        select(targetId, isAdditiveSelectionClick(e));
         return;
       }
 
       if (node.locked) {
         e.stopPropagation();
-        if (isCanvasSelectTool()) select(targetId, e.shiftKey);
+        if (isCanvasSelectTool()) select(targetId, isAdditiveSelectionClick(e));
         return;
       }
       e.stopPropagation();
@@ -343,11 +344,14 @@ export function CanvasObject({ id }: { id: string }) {
       if (tool === "comment" || tool === "pen" || tool === "pencil" || e.button === 1) return;
 
       if (tool !== "move" && tool !== "frame") {
-        select(targetId, e.shiftKey);
+        select(targetId, isAdditiveSelectionClick(e));
         return;
       }
 
-      applyMoveToolPointerSelection(targetId, st.selectedIds, e.shiftKey, select);
+      const additive = isAdditiveSelectionClick(e);
+      applyMoveToolPointerSelection(targetId, st.selectedIds, additive, select);
+
+      if (additive) return;
 
       const dragNode = st.nodes[targetId];
       if (
@@ -379,7 +383,7 @@ export function CanvasObject({ id }: { id: string }) {
       if (e.altKey && !prepareAltDragDuplicate(targetId)) return;
 
       beginCanvasNodeDrag({
-        nodeId: targetId,
+        nodeId: node.id,
         pointerId: e.pointerId,
         clientX: e.clientX,
         clientY: e.clientY,
@@ -392,16 +396,17 @@ export function CanvasObject({ id }: { id: string }) {
 
   const isEditingText = node?.type === "text" && editingTextId === id;
 
+  const renderParentId = useMemo(() => {
+    const parentOf = buildParentMapFromChildOrder(childOrder);
+    return parentOf.get(id) ?? null;
+  }, [childOrder, id]);
+
   if (!node || !node.visible) return null;
 
   const cornerRadiusCss =
     node.type === "rectangle" || node.type === "frame"
       ? cornerRadiiToCss(clampCornerRadii(getNodeCornerRadii(node), node.width, node.height))
       : undefined;
-  const renderParentId = useMemo(() => {
-    const parentOf = buildParentMapFromChildOrder(childOrder);
-    return parentOf.get(id) ?? null;
-  }, [childOrder, id]);
   const isRootFrame = node.type === "frame" && renderParentId === null;
   const showInspectHover =
     editorMode === "inspect" && hoveredCanvasId === id && !selectedIds.includes(id) && node.visible;

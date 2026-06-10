@@ -94,7 +94,7 @@ export function svgLine(n: EditorNode): string {
 export function svgTextMarkup(n: EditorNode): string {
   const color = escXml(n.textColor ?? n.fill ?? "#111111");
   const ff = escXml(n.fontFamily ?? "Inter, system-ui, sans-serif");
-  const fs = n.fontSize ?? 13;
+  const fs = n.fontSize ?? 14;
   const fw = n.fontWeight ?? 500;
   const lh = n.lineHeight ?? 1.25;
   const lineHeightPx = fs * lh;

@@ -9,6 +9,7 @@ import {
   Plus,
 } from "lucide-react";
 import { normalizeHex } from "@/lib/color";
+import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
 import {
   cornerRadiiStylePatch,
   pathPointCornerIndex,
@@ -260,7 +261,9 @@ export function VectorInspector({ node }: { node: EditorNode }) {
               if (n) style({ fill: n, fillType: "solid", fillEnabled: true });
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              handlePanelFieldKeyDown(e, {
+                onEnter: () => e.currentTarget.blur(),
+              });
             }}
           />
           <input
@@ -276,7 +279,17 @@ export function VectorInspector({ node }: { node: EditorNode }) {
               }
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              handlePanelFieldKeyDown(e, {
+                onEnter: () => e.currentTarget.blur(),
+                onArrowNudge: (dir, shift, alt) => {
+                  const step = keyboardNudgeStep(1, 0, shift, alt) * dir;
+                  const v = parseInt(e.currentTarget.value.replace(/%/g, "").trim(), 10);
+                  const base = Number.isFinite(v) ? v : Math.round(fillOpacity * 100);
+                  const next = Math.min(100, Math.max(0, base + step));
+                  e.currentTarget.value = `${next} %`;
+                  style({ fillOpacity: next / 100 });
+                },
+              });
             }}
           />
           <button
@@ -359,7 +372,9 @@ export function VectorInspector({ node }: { node: EditorNode }) {
                   if (n) style({ strokeColor: n });
                 }}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                  handlePanelFieldKeyDown(e, {
+                    onEnter: () => e.currentTarget.blur(),
+                  });
                 }}
               />
               <input
@@ -373,7 +388,17 @@ export function VectorInspector({ node }: { node: EditorNode }) {
                   if (Number.isFinite(v)) style({ strokeWidth: Math.min(64, Math.max(0, v)) });
                 }}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                  handlePanelFieldKeyDown(e, {
+                    onEnter: () => e.currentTarget.blur(),
+                    onArrowNudge: (dir, shift, alt) => {
+                      const step = keyboardNudgeStep(1, 0, shift, alt) * dir;
+                      const v = parseFloat(e.currentTarget.value);
+                      const base = Number.isFinite(v) ? v : strokeWidth;
+                      const next = Math.min(64, Math.max(0, base + step));
+                      e.currentTarget.value = String(next);
+                      style({ strokeWidth: next });
+                    },
+                  });
                 }}
               />
               <button

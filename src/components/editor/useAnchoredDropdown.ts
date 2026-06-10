@@ -63,9 +63,11 @@ export function useAnchoredDropdownPosition(
       const maxPreferred = Math.min(options.maxHeight ?? 420, vh * 0.7);
       const spaceBelow = vh - r.bottom - gap - pad;
       const spaceAbove = r.top - gap - pad;
-      const minComfortable = Math.min(options?.minHeight ?? 160, maxPreferred);
+      const minComfortable = Math.min(options?.minHeight ?? 120, maxPreferred);
 
-      const placeAbove = spaceBelow < minComfortable && spaceAbove > spaceBelow;
+      // Flip above when the preferred menu height won't fit below and there's more room above.
+      const placeAbove =
+        (spaceBelow < maxPreferred || spaceBelow < minComfortable) && spaceAbove > spaceBelow;
 
       if (placeAbove) {
         const maxHeight = Math.max(120, Math.min(maxPreferred, spaceAbove));

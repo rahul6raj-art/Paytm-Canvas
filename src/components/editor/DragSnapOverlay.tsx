@@ -1,23 +1,43 @@
 "use client";
 
-import { CANVAS_VISUAL } from "@/lib/canvasVisual";
+import { CANVAS_VISUAL, screenPxToWorld } from "@/lib/canvasVisual";
 import { useEditorStore } from "@/stores/useEditorStore";
 
 const LINE = CANVAS_VISUAL.guide;
 const LABEL_BG = "rgba(15, 23, 42, 0.92)";
 const LABEL_FG = "#fff7ed";
+const MEASURE_LABEL_FONT_SCREEN_PX = 10;
+const MEASURE_LABEL_PAD_X_SCREEN_PX = 6;
+const MEASURE_LABEL_PAD_Y_SCREEN_PX = 4;
+const MEASURE_LABEL_BORDER_SCREEN_PX = 1;
 
-function MeasureLabel({ x, y, text }: { x: number; y: number; text: string }) {
+function MeasureLabel({
+  x,
+  y,
+  text,
+  zoom,
+}: {
+  x: number;
+  y: number;
+  text: string;
+  zoom: number;
+}) {
+  const font = screenPxToWorld(MEASURE_LABEL_FONT_SCREEN_PX, zoom);
+  const padX = screenPxToWorld(MEASURE_LABEL_PAD_X_SCREEN_PX, zoom);
+  const padY = screenPxToWorld(MEASURE_LABEL_PAD_Y_SCREEN_PX, zoom);
+  const border = screenPxToWorld(MEASURE_LABEL_BORDER_SCREEN_PX, zoom);
   return (
     <div
-      className="pointer-events-none absolute z-[1] whitespace-nowrap rounded px-1 py-0.5 font-mono text-[10px] font-semibold leading-none shadow-sm"
+      className="pointer-events-none absolute z-[1] whitespace-nowrap rounded font-mono font-semibold leading-none shadow-sm"
       style={{
         left: x,
         top: y,
         transform: "translate(-50%, -50%)",
         background: LABEL_BG,
         color: LABEL_FG,
-        border: `1px solid ${LINE}`,
+        border: `${border}px solid ${LINE}`,
+        fontSize: `${font}px`,
+        padding: `${padY}px ${padX}px`,
       }}
     >
       {text}
@@ -25,7 +45,15 @@ function MeasureLabel({ x, y, text }: { x: number; y: number; text: string }) {
   );
 }
 
-function capLine(x1: number, y1: number, x2: number, y2: number, len = 6) {
+function capLine(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  zoom: number,
+  lenScreen = 6,
+) {
+  const len = screenPxToWorld(lenScreen, zoom);
   const dx = x2 - x1;
   const dy = y2 - y1;
   const d = Math.hypot(dx, dy) || 1;
@@ -39,6 +67,7 @@ export function DragSnapOverlay() {
   const guides = useEditorStore((s) => s.guides);
   const measurements = useEditorStore((s) => s.dragMeasurements);
   const editorMode = useEditorStore((s) => s.editorMode);
+  const zoom = useEditorStore((s) => s.zoom);
 
   if (editorMode !== "design") return null;
   if (guides.length === 0 && measurements.length === 0) return null;
@@ -79,7 +108,7 @@ export function DragSnapOverlay() {
           );
         })}
         {measurements.map((m, i) => {
-          const { nx, ny } = capLine(m.x1, m.y1, m.x2, m.y2);
+          const { nx, ny } = capLine(m.x1, m.y1, m.x2, m.y2, zoom);
           return (
             <g key={`m-${i}`}>
               <line
@@ -119,6 +148,7 @@ export function DragSnapOverlay() {
           x={(m.x1 + m.x2) / 2}
           y={(m.y1 + m.y2) / 2}
           text={`${m.distance}`}
+          zoom={zoom}
         />
       ))}
     </div>

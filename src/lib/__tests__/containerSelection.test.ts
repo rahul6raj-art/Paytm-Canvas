@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   applyMoveToolPointerSelection,
   drillTargetForDoubleClick,
+  isAdditiveSelectionClick,
   selectionTargetForClick,
   shouldCollapseContainerHits,
 } from "@/lib/containerSelection";
@@ -58,11 +59,49 @@ describe("containerSelection", () => {
     assert.equal(shouldCollapseContainerHits("f", nodes, childOrder, "f"), false);
   });
 
+  it("exposes auto-layout children for direct hit testing", () => {
+    const nodes = {
+      f: frame("f", { layoutMode: "horizontal" }),
+      r: rect("r", "f"),
+    };
+    const childOrder = { f: ["r"] };
+    assert.equal(shouldCollapseContainerHits("f", nodes, childOrder, null), false);
+    assert.equal(selectionTargetForClick("r", nodes, childOrder, null), "r");
+  });
+
   it("double-click returns container and deepest child", () => {
     const nodes = { f: frame("f"), r: rect("r", "f") };
     const childOrder = { f: ["r"] };
     const drill = drillTargetForDoubleClick("r", 0, 0, nodes, childOrder, null, () => "r");
     assert.deepEqual(drill, { containerId: "f", selectId: "r" });
+  });
+
+  it("isAdditiveSelectionClick detects shift and cmd/ctrl modifiers", () => {
+    assert.equal(isAdditiveSelectionClick({ shiftKey: true }), true);
+    assert.equal(isAdditiveSelectionClick({ shiftKey: false, metaKey: true }), true);
+    assert.equal(isAdditiveSelectionClick({ shiftKey: false, ctrlKey: true }), true);
+    assert.equal(isAdditiveSelectionClick({ shiftKey: false }), false);
+  });
+
+  it("applyMoveToolPointerSelection toggles additive selection", () => {
+    let selected: string[] = ["a"];
+    const select = (id: string | null, additive?: boolean) => {
+      if (!id) {
+        selected = [];
+        return;
+      }
+      if (additive) {
+        selected = selected.includes(id)
+          ? selected.filter((x) => x !== id)
+          : [...selected, id];
+        return;
+      }
+      selected = [id];
+    };
+    applyMoveToolPointerSelection("b", selected, true, select);
+    assert.deepEqual(selected, ["a", "b"]);
+    applyMoveToolPointerSelection("a", selected, true, select);
+    assert.deepEqual(selected, ["b"]);
   });
 
   it("applyMoveToolPointerSelection keeps multi-select when dragging selected layer", () => {

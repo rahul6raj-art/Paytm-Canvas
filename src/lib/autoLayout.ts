@@ -366,3 +366,38 @@ export function applyAlignment(
 ): AutoLayoutComputeResult {
   return computeAutoLayout(parentId, nodes, childOrder);
 }
+
+// ——— On-canvas interaction layer ———
+
+export {
+  getAutoLayoutInteractionHandles,
+  type AutoLayoutInteractionHandles,
+  type SpacingHandle,
+  type PaddingHandle,
+  type FillDividerHandle,
+  type PaddingSide,
+} from "./autoLayout/autoLayoutHandles";
+
+export {
+  beginSpacingDrag,
+  beginPaddingDrag,
+  beginFillDividerDrag,
+  subscribeAutoLayoutDragPreview,
+  getAutoLayoutDragPreview,
+  isAutoLayoutHandleDragActive,
+  sanitizeLayoutGap,
+  sanitizeLayoutGapForFrame,
+  clampLayoutGap,
+  computeSpacingGapFromDrag,
+  resolveGapAtHandleIndex,
+  type AutoLayoutDragPreview,
+} from "./autoLayout/spacingPaddingDrag";
+
+export { getAutoLayoutHoverContext, type AutoLayoutHoverContext } from "./autoLayout/autoLayoutHover";
+
+export {
+  LAYOUT_DIRECTION_OPTIONS,
+  primaryAlignOptions,
+  counterAlignOptions,
+  SIZING_OPTIONS,
+} from "./autoLayout/autoLayoutInspector";

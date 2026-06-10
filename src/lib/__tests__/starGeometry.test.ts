@@ -67,6 +67,22 @@ describe("starGeometry", () => {
     assert.ok(d.endsWith(" Z"));
   });
 
+  it("roundedPolygonPathD rounds convex corners inward (not outward)", () => {
+    const verts = [
+      { x: 50, y: 0 },
+      { x: 100, y: 100 },
+      { x: 0, y: 100 },
+    ];
+    const r = 8;
+    const d = roundedPolygonPathD(verts, r);
+    const arcMatch = /A\s+([\d.]+)\s+([\d.]+)\s+0\s+0\s+1\s+([\d.]+)\s+([\d.]+)/.exec(d);
+    assert.ok(arcMatch, "expected clockwise fillet arc at top vertex");
+    const endX = Number(arcMatch[3]);
+    const endY = Number(arcMatch[4]);
+    assert.ok(endX > 50 && endY > 0, "top corner arc should trim into the triangle");
+    assert.ok(endY < r + 2, "top corner arc should not bulge above the vertex");
+  });
+
   it("maxStarCornerRadius is positive for default star", () => {
     const max = maxStarCornerRadius(5, 0.4, 100, 100);
     assert.ok(max > 5);

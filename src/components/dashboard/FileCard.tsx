@@ -45,8 +45,8 @@ export function FileCard({
   return (
     <div
       className={cn(
-        "flex flex-col overflow-hidden rounded-xl border border-app-border/90 bg-app-card shadow-sm",
-        "transition-shadow hover:border-slate-300 hover:shadow-md",
+        "flex flex-col overflow-hidden rounded-xl border border-app-border-subtle bg-app-card",
+        "transition-colors hover:border-app-border hover:shadow-md",
       )}
     >
       <div
@@ -58,8 +58,8 @@ export function FileCard({
         <div className="absolute left-2 top-2 flex flex-wrap gap-1">
           <FileBadge kind={fileBadge} />
         </div>
-        <div className="absolute inset-0 flex items-center justify-center bg-black/[0.06]">
-          <LayoutTemplate className="h-10 w-10 text-app-bg/90 drop-shadow-sm" strokeWidth={1.25} />
+        <div className="absolute inset-0 flex items-center justify-center bg-black/[0.08] dark:bg-black/20">
+          <LayoutTemplate className="h-10 w-10 text-white/90 drop-shadow-sm" strokeWidth={1.25} />
         </div>
       </div>
       <div className="flex flex-1 flex-col gap-2 p-3">
@@ -85,7 +85,7 @@ export function FileCard({
                 {stack.map((ini) => (
                   <span
                     key={ini}
-                    className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-indigo-100 text-[9px] font-bold text-indigo-900 shadow-sm"
+                    className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-app-card bg-indigo-100 text-[9px] font-bold text-indigo-900 shadow-sm dark:bg-indigo-950/80 dark:text-indigo-200"
                   >
                     {ini}
                   </span>
@@ -96,7 +96,7 @@ export function FileCard({
           <button
             type="button"
             onClick={onOpen}
-            className="shrink-0 rounded-lg border border-app-border bg-app-card px-2.5 py-1 text-[12px] font-medium text-app-fg shadow-sm transition-colors hover:border-slate-300 hover:bg-app-raised"
+            className="shrink-0 rounded-lg border border-app-border-subtle bg-app-card px-2.5 py-1 text-[12px] font-medium text-app-fg transition-colors hover:border-app-border hover:bg-app-raised"
           >
             Open
           </button>

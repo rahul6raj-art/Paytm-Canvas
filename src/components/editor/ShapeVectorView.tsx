@@ -249,6 +249,7 @@ export function ShapeVectorView({
   if (node.type === "path" || node.type === "polygon") {
     const closed = node.type === "polygon" ? true : (node.pathClosed ?? false);
     const d = node.flattenedPathData ?? vectorShapeOutlineD(node, nodeId);
+    const pathFillRule = node.pathFillRule;
     const start = resolveStrokeStartPoint(node);
     const end = resolveStrokeEndPoint(node);
     const markerPrefix = `pc-stroke-${nodeId}`;
@@ -290,6 +291,7 @@ export function ShapeVectorView({
             <path
               d={d || "M0 0"}
               fill={closed && fillVisible && !showShapeFill ? solidFill : "none"}
+              fillRule={pathFillRule}
               {...strokeProps}
               {...(lineCap ? { strokeLinecap: lineCap } : {})}
               markerStart={markerRefs.markerStart}

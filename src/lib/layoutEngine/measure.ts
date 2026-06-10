@@ -1,3 +1,4 @@
+import { textAdvancedStyleFromNode } from "@/lib/text/textAdvancedStyle";
 import { computeTextBoxSize } from "@/lib/text/textLayout";
 import { resolveTextTypo } from "@/lib/textTypography";
 import type { EditorNode } from "@/stores/useEditorStore";
@@ -6,10 +7,13 @@ import {
   childCrossSizing,
   childMainSizing,
   clampDimension,
+  flowGapForSizing,
   isAutoLayoutContainer,
   isFlowChild,
+  paddingBox,
   parentCounterAxisHug,
   parentPrimaryAxisHug,
+  type LayoutChildPatch,
   type LayoutEngineNode,
   type LayoutMode,
   type Size2,
@@ -54,6 +58,7 @@ function intrinsicAxis(
       mode,
       node.width,
       node.height,
+      textAdvancedStyleFromNode(asEditor),
     );
     return axis === "width" ? size.width : size.height;
   }
@@ -109,7 +114,7 @@ function measureHugMainAxis(parentId: string, ctx: MeasureContext): number {
     sumMain += m.main;
     maxCross = Math.max(maxCross, m.cross);
   }
-  sumMain += gap * Math.max(0, kids.length - 1);
+  sumMain += flowGapForSizing(gap, kids.length);
 
   if (mode === "horizontal") {
     return clampDimension(p.left + p.right + sumMain, parent.minWidth, parent.maxWidth);
@@ -189,6 +194,40 @@ export function measureNode(
   return { main, cross, width, height };
 }
 
+/**
+ * Tight frame size from laid-out child bounds (includes negative gap overlap).
+ * Child width/height are unchanged — only the container shrinks/grows to fit.
+ */
+export function resolveFlowLayoutExtent(
+  parent: LayoutEngineNode,
+  childIds: string[],
+  children: Record<string, LayoutChildPatch>,
+): Size2 {
+  const p = paddingBox(parent);
+  if (childIds.length === 0) {
+    return {
+      width: clampDimension(p.left + p.right + 1, parent.minWidth, parent.maxWidth),
+      height: clampDimension(p.top + p.bottom + 1, parent.minHeight, parent.maxHeight),
+    };
+  }
+
+  let maxX = 0;
+  let maxY = 0;
+  for (const id of childIds) {
+    const c = children[id];
+    if (!c || c.x == null || c.y == null) continue;
+    const w = Math.max(1, c.width ?? 1);
+    const h = Math.max(1, c.height ?? 1);
+    maxX = Math.max(maxX, c.x + w);
+    maxY = Math.max(maxY, c.y + h);
+  }
+
+  return {
+    width: clampDimension(maxX + p.right, parent.minWidth, parent.maxWidth),
+    height: clampDimension(maxY + p.bottom, parent.minHeight, parent.maxHeight),
+  };
+}
+
 /** Content size from children + gap + padding (ignores fixed/hug sizing). */
 export function resolveContentSize(
   parent: LayoutEngineNode,
@@ -212,8 +251,8 @@ export function resolveContentSize(
 
   const sumMain = childMeasures.reduce((s, m) => s + m.main, 0);
   const maxCross = Math.max(...childMeasures.map((m) => m.cross));
-  const gaps = gap * Math.max(0, childMeasures.length - 1);
-  const lineGaps = gap * Math.max(0, lineCount - 1);
+  const gaps = flowGapForSizing(gap, childMeasures.length);
+  const lineGaps = flowGapForSizing(gap, lineCount);
 
   if (mode === "horizontal") {
     return {
@@ -258,8 +297,8 @@ export function resolveHugSize(
 
   const sumMain = childMeasures.reduce((s, m) => s + m.main, 0);
   const maxCross = Math.max(...childMeasures.map((m) => m.cross));
-  const gaps = gap * Math.max(0, childMeasures.length - 1);
-  const lineGaps = gap * Math.max(0, lineCount - 1);
+  const gaps = flowGapForSizing(gap, childMeasures.length);
+  const lineGaps = flowGapForSizing(gap, lineCount);
 
   let width = parent.width;
   let height = parent.height;

@@ -1,7 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { EditorNode } from "@/stores/useEditorStore";
-import { patchAffectsTextLayout, withTextLayoutPatch } from "@/lib/text/textLayout";
+import {
+  patchAffectsTextLayout,
+  textLayoutPatchForNode,
+  withTextLayoutPatch,
+} from "@/lib/text/textLayout";
 
 function textNode(): EditorNode {
   return {
@@ -35,5 +39,25 @@ describe("text layout patch helpers", () => {
     const node = textNode();
     const next = withTextLayoutPatch(node, { textColor: "#ff0000" });
     assert.deepEqual(next, { textColor: "#ff0000" });
+  });
+
+  it("switches auto-height to fixed when truncate is enabled", () => {
+    const node = textNode();
+    const next = withTextLayoutPatch(node, { textTruncate: "end" });
+    assert.equal(next.textTruncate, "end");
+    assert.equal(next.textResizeMode, "fixed");
+    assert.equal(next.autoResize, "fixed");
+  });
+
+  it("does not auto-grow height when truncate is enabled", () => {
+    const node = {
+      ...textNode(),
+      textTruncate: "end" as const,
+      textResizeMode: "fixed" as const,
+      height: 40,
+      content: "Line one\nLine two\nLine three",
+    };
+    const patch = textLayoutPatchForNode(node, node.content ?? "");
+    assert.equal(patch?.height, undefined);
   });
 });

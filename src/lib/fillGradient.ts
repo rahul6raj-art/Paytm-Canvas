@@ -1,9 +1,15 @@
 import { clamp01, fillCss, hexToRgb, normalizeHex } from "@/lib/color";
+import { gradientRasterDataUrl, interpolateGradientStopColor } from "@/lib/gradientRaster";
 import type { EditorNode } from "@/stores/useEditorStore";
 
 export type FillType = "solid" | "gradient";
 
 export type GradientKind = "linear" | "radial" | "angular" | "diamond";
+
+/** Angular and diamond gradients need CSS or raster rendering — native SVG defs are unreliable. */
+export function gradientKindUsesCssPaint(kind: GradientKind): boolean {
+  return kind === "angular" || kind === "diamond";
+}
 
 /** @deprecated v1 field — migrated to `kind` + `transform.rotation`. */
 export type LegacyLinearFillGradient = {
@@ -129,6 +135,54 @@ function stopCss(color: string, opacity: number): string {
 
 function stopsCssList(stops: GradientStop[], opacity: number): string {
   return stops.map((s) => `${stopCss(s.color, opacity)} ${s.position}%`).join(", ");
+}
+
+/**
+ * CSS conic angles: 0° = up (12 o'clock), increasing clockwise.
+ * Math/atan2: 0° = right (3 o'clock), increasing counter-clockwise.
+ */
+export function cssConicAngleFromAtan2Deg(atan2Deg: number): number {
+  return ((atan2Deg + 90) % 360 + 360) % 360;
+}
+
+export function atan2DegFromCssConicAngle(cssAngleDeg: number): number {
+  return cssAngleDeg - 90;
+}
+
+/** Map a local point to angular stop position (0–100) relative to transform.rotation. */
+export function angularStopPositionFromLocalPoint(
+  transform: GradientTransform,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): number {
+  const cx = transform.cx * width;
+  const cy = transform.cy * height;
+  const atan2Deg = (Math.atan2(y - cy, x - cx) * 180) / Math.PI;
+  const cssAngle = cssConicAngleFromAtan2Deg(atan2Deg);
+  const rel = ((cssAngle - transform.rotation + 360) % 360) / 360;
+  return Math.min(100, Math.max(0, rel * 100));
+}
+
+/** Place an angular stop handle on the gradient ring (local coordinates). */
+export function angularStopLocalPointFromPosition(
+  transform: GradientTransform,
+  position: number,
+  width: number,
+  height: number,
+): { x: number; y: number } {
+  const cx = transform.cx * width;
+  const cy = transform.cy * height;
+  const r = Math.min(transform.width * width, transform.height * height) / 2;
+  const cssAngleDeg = transform.rotation + (position / 100) * 360;
+  const mathRad = (atan2DegFromCssConicAngle(cssAngleDeg) * Math.PI) / 180;
+  return { x: cx + Math.cos(mathRad) * r, y: cy + Math.sin(mathRad) * r };
+}
+
+/** Canvas 2D conic start angle (0 = right, clockwise) from CSS `from` rotation. */
+export function canvasConicStartAngleRad(rotationDeg: number): number {
+  return (atan2DegFromCssConicAngle(rotationDeg) * Math.PI) / 180;
 }
 
 /** Linear endpoints in local shape coordinates. */
@@ -265,17 +319,18 @@ export function svgFillPaint(
       return `url(#${id})`;
     }
     case "angular": {
-      const t = g.transform;
-      const css = `conic-gradient(from ${t.rotation}deg at ${t.cx * 100}% ${t.cy * 100}%, ${stopsCssList(g.stops, opacity)})`;
-      const foId = `${id}-fo`;
-      opts.registerGradient(
-        foId,
-        `<pattern id="${id}" patternUnits="userSpaceOnUse" width="${w}" height="${h}"><foreignObject width="${w}" height="${h}"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${w}px;height:${h}px;background:${css};"></div></foreignObject></pattern>`,
-      );
+      const raster = gradientRasterDataUrl(g, w, h, opacity);
+      const markup = raster
+        ? buildRasterPatternMarkup(id, w, h, raster)
+        : buildAngularSvgPattern(id, g, w, h, opacity);
+      opts.registerGradient(id, markup);
       return `url(#${id})`;
     }
     case "diamond": {
-      const markup = buildDiamondSvgGradient(id, g, w, h, opacity);
+      const raster = gradientRasterDataUrl(g, w, h, opacity);
+      const markup = raster
+        ? buildRasterPatternMarkup(id, w, h, raster)
+        : buildDiamondCssPattern(id, g, w, h, opacity);
       opts.registerGradient(id, markup);
       return `url(#${id})`;
     }
@@ -291,31 +346,46 @@ export function svgFillPaint(
   }
 }
 
-/** Diamond gradient mesh (4-corner bilinear) as SVG pattern. */
-function buildDiamondSvgGradient(id: string, g: FillGradient, w: number, h: number, opacity: number): string {
+function escSvgAttr(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+}
+
+function buildRasterPatternMarkup(id: string, w: number, h: number, dataUrl: string): string {
+  return `<pattern id="${id}" patternUnits="userSpaceOnUse" width="${w}" height="${h}"><image href="${escSvgAttr(dataUrl)}" width="${w}" height="${h}" preserveAspectRatio="none"/></pattern>`;
+}
+
+/** Pure-SVG conic approximation using radial slices (SSR / stroke fallback). */
+function buildAngularSvgPattern(id: string, g: FillGradient, w: number, h: number, opacity: number): string {
   const t = g.transform;
   const cx = t.cx * w;
   const cy = t.cy * h;
-  const hw = (t.width * w) / 2;
-  const hh = (t.height * h) / 2;
-  const rad = (t.rotation * Math.PI) / 180;
-  const cos = Math.cos(rad);
-  const sin = Math.sin(rad);
-  const corner = (dx: number, dy: number) => ({
-    x: cx + dx * cos - dy * sin,
-    y: cy + dx * sin + dy * cos,
-  });
-  const top = corner(0, -hh);
-  const right = corner(hw, 0);
-  const bottom = corner(0, hh);
-  const left = corner(-hw, 0);
-  const colors = g.stops.map((s) => normalizeHex(s.color) ?? s.color);
-  const cTop = colors[0] ?? "#000";
-  const cRight = colors[Math.floor(colors.length / 3)] ?? colors[0] ?? "#888";
-  const cBottom = colors[Math.floor((2 * colors.length) / 3)] ?? colors[colors.length - 1] ?? "#ccc";
-  const cLeft = colors[colors.length - 1] ?? "#fff";
-  const meshId = `${id}-mesh`;
-  return `<filter id="${meshId}" x="0" y="0" width="100%" height="100%"><feFlood flood-color="${cTop}" flood-opacity="${opacity}" result="t"/><feFlood flood-color="${cRight}" flood-opacity="${opacity}" result="r"/><feFlood flood-color="${cBottom}" flood-opacity="${opacity}" result="b"/><feFlood flood-color="${cLeft}" flood-opacity="${opacity}" result="l"/></filter><linearGradient id="${id}-g" x1="${left.x}" y1="${left.y}" x2="${right.x}" y2="${right.y}" gradientUnits="userSpaceOnUse">${svgStopMarkup(g.stops, opacity)}</linearGradient><pattern id="${id}" patternUnits="userSpaceOnUse" width="${w}" height="${h}"><polygon points="${top.x},${top.y} ${right.x},${right.y} ${bottom.x},${bottom.y} ${left.x},${left.y}" fill="url(#${id}-g)" /></pattern>`;
+  const r = Math.hypot(w, h);
+  const slices = 120;
+  const paths: string[] = [];
+  for (let i = 0; i < slices; i++) {
+    const p0 = (i / slices) * 100;
+    const p1 = ((i + 1) / slices) * 100;
+    const mid = (p0 + p1) / 2;
+    const color = interpolateGradientStopColor(g.stops, mid, opacity);
+    const cssA0 = t.rotation + (i / slices) * 360;
+    const cssA1 = t.rotation + ((i + 1) / slices) * 360;
+    const a0 = (atan2DegFromCssConicAngle(cssA0) * Math.PI) / 180;
+    const a1 = (atan2DegFromCssConicAngle(cssA1) * Math.PI) / 180;
+    const x0 = cx + r * Math.cos(a0);
+    const y0 = cy + r * Math.sin(a0);
+    const x1 = cx + r * Math.cos(a1);
+    const y1 = cy + r * Math.sin(a1);
+    paths.push(
+      `<path d="M ${cx} ${cy} L ${x0} ${y0} L ${x1} ${y1} Z" fill="${escSvgAttr(color)}" />`,
+    );
+  }
+  return `<pattern id="${id}" patternUnits="userSpaceOnUse" width="${w}" height="${h}"><rect width="${w}" height="${h}" fill="transparent"/><g>${paths.join("")}</g></pattern>`;
+}
+
+/** CSS diamond fallback inside SVG pattern when raster is unavailable. */
+function buildDiamondCssPattern(id: string, g: FillGradient, w: number, h: number, opacity: number): string {
+  const css = diamondCssBackground(g, opacity);
+  return `<pattern id="${id}" patternUnits="userSpaceOnUse" width="${w}" height="${h}"><foreignObject width="${w}" height="${h}"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${w}px;height:${h}px;background:${escSvgAttr(css)};"></div></foreignObject></pattern>`;
 }
 
 /** World/local helpers for on-canvas gradient editor. */
@@ -342,11 +412,8 @@ export function gradientStopLocalPoint(
       const rx = (t.width * w) / 2;
       return { x: cx + Math.cos(angle) * rx * p, y: cy + Math.sin(angle) * rx * p };
     }
-    case "angular": {
-      const angle = ((t.rotation + p * 360) * Math.PI) / 180;
-      const r = Math.min(t.width * w, t.height * h) / 2;
-      return { x: cx + Math.cos(angle) * r, y: cy + Math.sin(angle) * r };
-    }
+    case "angular":
+      return angularStopLocalPointFromPosition(t, stop.position, w, h);
     case "diamond": {
       const hw = (t.width * w) / 2;
       const hh = (t.height * h) / 2;
@@ -384,15 +451,32 @@ export function gradientTransformHandleLocalPoints(
   const t = g.transform;
   const cx = t.cx * w;
   const cy = t.cy * h;
+  const hw = (t.width * w) / 2;
+  const hh = (t.height * h) / 2;
+  if (g.kind === "angular") {
+    const ringR = Math.min(hw * 2, hh * 2) / 2;
+    const startRad = (atan2DegFromCssConicAngle(t.rotation) * Math.PI) / 180;
+    const cos = Math.cos(startRad);
+    const sin = Math.sin(startRad);
+    return {
+      center: { x: cx, y: cy },
+      width: { x: cx + cos * ringR, y: cy + sin * ringR },
+      rotate: { x: cx + cos * (ringR + 16), y: cy + sin * (ringR + 16) },
+    };
+  }
   const rad = (t.rotation * Math.PI) / 180;
   const cos = Math.cos(rad);
   const sin = Math.sin(rad);
-  const hw = (t.width * w) / 2;
   return {
     center: { x: cx, y: cy },
     width: { x: cx + hw * cos, y: cy + hw * sin },
-    rotate: { x: cx, y: cy - (t.height * h) / 2 - 16 },
+    rotate: { x: cx, y: cy - hh - 16 },
   };
+}
+
+/** Angular gradient ring radius in local coordinates. */
+export function angularGradientRingRadius(transform: GradientTransform, width: number, height: number): number {
+  return Math.min(transform.width * width, transform.height * height) / 2;
 }
 
 export function positionFromLocalPoint(g: FillGradient, x: number, y: number, width: number, height: number): number {
@@ -406,12 +490,21 @@ export function positionFromLocalPoint(g: FillGradient, x: number, y: number, wi
     const t = ((x - x1) * dx + (y - y1) * dy) / len2;
     return Math.min(100, Math.max(0, t * 100));
   }
-  const t = g.transform;
-  const cx = t.cx * w;
-  const cy = t.cy * h;
-  const angle = (Math.atan2(y - cy, x - cx) * 180) / Math.PI;
-  const rel = ((angle - t.rotation + 360) % 360) / 360;
-  return Math.min(100, Math.max(0, rel * 100));
+  if (g.kind === "angular") {
+    return angularStopPositionFromLocalPoint(g.transform, x, y, w, h);
+  }
+  if (g.kind === "radial") {
+    const t = g.transform;
+    const cx = t.cx * w;
+    const cy = t.cy * h;
+    const angle = (Math.atan2(y - cy, x - cx) * 180) / Math.PI;
+    const rel = ((angle + 360) % 360) / 360;
+    return Math.min(100, Math.max(0, rel * 100));
+  }
+  if (g.kind === "diamond") {
+    return angularStopPositionFromLocalPoint(g.transform, x, y, w, h);
+  }
+  return 0;
 }
 
 /** Resolved gradient for editing (includes linked gradient styles). */

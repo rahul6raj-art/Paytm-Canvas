@@ -1,6 +1,7 @@
 import { canAddAutoLayoutToSelection } from "@/lib/autoLayoutSelection";
 import { canCreateComponentFromSelection, findInstanceRoot } from "@/lib/componentModel";
 import { topLevelSelectedIds } from "@/lib/editorGraph";
+import { canOutlineStroke } from "@/lib/outlineStroke";
 import { hasEditorClipboardContent } from "@/lib/editorClipboardAvailability";
 import type { EditorState, Tool } from "@/stores/useEditorStore";
 
@@ -429,6 +430,20 @@ export const ALL_COMMANDS: CommandDefinition[] = [
     shortcut: "⌘⇧[",
     enabled: (s) => inDesign(s) && s.selectedIds.length > 0,
     run: (s) => s.sendToBack(),
+  },
+  {
+    id: "outline-stroke",
+    title: "Outline stroke",
+    subtitle: "Convert stroke to filled vector path",
+    category: "Actions",
+    shortcut: "⌘⌥O",
+    keywords: ["vector", "stroke", "expand", "outline"],
+    enabled: (s) => {
+      if (!inDesign(s) || s.selectedIds.length !== 1) return false;
+      const n = s.nodes[s.selectedIds[0]!];
+      return canOutlineStroke(n);
+    },
+    run: (s) => s.outlineStrokeSelection(),
   },
   {
     id: "create-component",

@@ -14,13 +14,13 @@ export function TemplateCard({ title, description, accent, onUse }: TemplateCard
   return (
     <div
       className={cn(
-        "flex flex-col overflow-hidden rounded-xl border border-app-border/90 bg-app-card shadow-sm",
-        "transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md",
+        "flex flex-col overflow-hidden rounded-xl border border-app-border-subtle bg-app-card",
+        "transition-all hover:-translate-y-0.5 hover:border-app-border hover:shadow-md",
       )}
     >
       <button type="button" className="relative aspect-[5/3] w-full text-left" style={{ background: accent }} onClick={onUse}>
-        <span className="absolute inset-0 flex items-center justify-center bg-black/[0.08]">
-          <Sparkles className="h-9 w-9 text-app-bg drop-shadow" strokeWidth={1.5} />
+        <span className="absolute inset-0 flex items-center justify-center bg-black/[0.08] dark:bg-black/20">
+          <Sparkles className="h-9 w-9 text-white/90 drop-shadow" strokeWidth={1.5} />
         </span>
       </button>
       <div className="flex flex-1 flex-col gap-1 p-3">

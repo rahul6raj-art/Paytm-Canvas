@@ -2,7 +2,8 @@ import type { EditorNode } from "@/stores/useEditorStore";
 import { getNodeWorldInverseMatrixFromChildOrder } from "@/lib/editorGraph";
 import { applyMatrixToPoint } from "@/lib/transformMath";
 import { resolveTextTypo } from "@/lib/textTypography";
-import { layoutText, type TextLayout } from "@/lib/text/textMeasure";
+import { layoutDisplayText } from "@/lib/text/textAdvancedStyle";
+import type { TextLayout } from "@/lib/text/textMeasure";
 import {
   MIN_TEXT_BOX,
   normalizeTextResizeMode,
@@ -29,7 +30,7 @@ export function hitTestTextLocal(
   const mode = normalizeTextResizeMode(node.textResizeMode, node.autoResize);
   const typo = resolveTextTypo(node);
   const wrapWidth = wrapWidthForResizeMode(w, mode);
-  const layout = layoutText(node.content ?? "", wrapWidth, typo);
+  const { layout } = layoutDisplayText(node.content ?? "", wrapWidth, node as EditorNode);
   const innerH = textInnerHeight(h);
   const offsetY = verticalContentOffsetY(layout.height, innerH, node.verticalAlign);
   const contentTop = offsetY;

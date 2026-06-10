@@ -1,5 +1,11 @@
 import type { ResolvedTextTypo } from "@/lib/textTypography";
 import type { EditorNode } from "@/stores/useEditorStore";
+import {
+  DEFAULT_TEXT_ADVANCED_STYLE,
+  prepareTextForDisplay,
+  rawIndexToDisplayIndex,
+  type TextLayoutStyleOptions,
+} from "./textAdvancedStyle";
 import { TEXT_BOX_PAD_X, TEXT_BOX_PAD_Y, type TextAlign } from "./textNodeModel";
 import { verticalContentOffsetY } from "./textVerticalAlign";
 import {
@@ -7,6 +13,7 @@ import {
   getTextMeasureContext,
   layoutText,
   lineOffsetX,
+  lineTopY,
   measureStringWidth,
   type TextLayout,
 } from "./textMeasure";
@@ -28,6 +35,7 @@ export type TextCanvasRenderOptions = {
   /** Viewport zoom — bitmap is scaled by CSS, so bake zoom into backing-store resolution. */
   zoom?: number;
   dpr?: number;
+  style?: TextLayoutStyleOptions;
 };
 
 const MAX_TEXT_BITMAP_EDGE = 8192;
@@ -78,11 +86,16 @@ export function renderTextToCanvas(
     opts.wrapWidth === Number.POSITIVE_INFINITY
       ? Number.POSITIVE_INFINITY
       : Math.max(1, Math.min(opts.wrapWidth, innerW));
-  const layout = layoutText(opts.text, wrapWidth, opts.typo);
+  const style = opts.style ?? DEFAULT_TEXT_ADVANCED_STYLE;
+  const displayText = prepareTextForDisplay(opts.text, style);
+  let layout = layoutText(displayText, wrapWidth, opts.typo, style);
+  layout = applyTruncate(layout, opts.typo, style, innerH, innerW, wrapWidth);
   const blockOffsetY = verticalContentOffsetY(layout.height, innerH, opts.verticalAlign);
 
   if (opts.selection && opts.selection.anchor !== opts.selection.focus) {
     const { start, end } = normalizedRange(opts.selection.anchor, opts.selection.focus);
+    const displayStart = rawIndexToDisplayIndex(start, opts.text, style);
+    const displayEnd = rawIndexToDisplayIndex(end, opts.text, style);
     drawSelection(
       ctx,
       layout,
@@ -91,8 +104,8 @@ export function renderTextToCanvas(
       innerW,
       TEXT_BOX_PAD_X,
       TEXT_BOX_PAD_Y + blockOffsetY,
-      start,
-      end,
+      displayStart,
+      displayEnd,
     );
   }
 
@@ -105,16 +118,25 @@ export function renderTextToCanvas(
         fullLineText: line.text,
         letterSpacing: opts.typo.letterSpacing,
       }) + TEXT_BOX_PAD_X;
-    const y = i * layout.lineHeightPx + TEXT_BOX_PAD_Y + blockOffsetY;
+    const y = lineTopY(layout, i) + TEXT_BOX_PAD_Y + blockOffsetY;
     if (opts.textAlign === "justify" && !isLast) {
       drawJustifiedLine(ctx, line.text, x, y, innerW, opts.typo);
     } else {
-      drawLineWithSpacing(ctx, line.text, x, y, opts.typo);
+      drawLineWithSpacing(ctx, line.text, x, y, opts.typo, style.textCase === "small-caps");
     }
+    drawLineDecorations(
+      ctx,
+      line.text,
+      x,
+      y,
+      opts.typo,
+      style.textDecoration,
+    );
   }
 
   if (opts.caretVisible && opts.caretIndex != null) {
-    const caret = getCaretRect(opts.caretIndex, layout, opts.typo, innerW, opts.textAlign);
+    const displayCaret = rawIndexToDisplayIndex(opts.caretIndex, opts.text, style);
+    const caret = getCaretRect(displayCaret, layout, opts.typo, innerW, opts.textAlign);
     ctx.fillStyle = opts.typo.color;
     ctx.fillRect(
       caret.x + TEXT_BOX_PAD_X,
@@ -165,9 +187,15 @@ function drawLineWithSpacing(
   x: number,
   y: number,
   typo: ResolvedTextTypo,
+  smallCaps = false,
 ): void {
+  const prev = ctx.font;
+  if (smallCaps) {
+    ctx.font = buildFontString({ ...typo, fontSize: Math.max(1, typo.fontSize * 0.82) });
+  }
   if (!typo.letterSpacing) {
     ctx.fillText(text, x, y);
+    if (smallCaps) ctx.font = prev;
     return;
   }
   let cx = x;
@@ -175,6 +203,105 @@ function drawLineWithSpacing(
     ctx.fillText(ch, cx, y);
     cx += ctx.measureText(ch).width + typo.letterSpacing;
   }
+  if (smallCaps) ctx.font = prev;
+}
+
+function drawLineDecorations(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  typo: ResolvedTextTypo,
+  decoration: TextLayoutStyleOptions["textDecoration"],
+): void {
+  if (!text || decoration === "none") return;
+  const width = measureStringWidth(getTextMeasureContext(), text, typo.letterSpacing);
+  const color = ctx.fillStyle;
+  ctx.strokeStyle = typeof color === "string" ? color : "#111";
+  ctx.lineWidth = Math.max(1, typo.fontSize / 14);
+  if (decoration === "underline") {
+    const uy = y + typo.fontSize + 1;
+    ctx.beginPath();
+    ctx.moveTo(x, uy);
+    ctx.lineTo(x + width, uy);
+    ctx.stroke();
+  }
+  if (decoration === "strikethrough") {
+    const sy = y + typo.fontSize * 0.55;
+    ctx.beginPath();
+    ctx.moveTo(x, sy);
+    ctx.lineTo(x + width, sy);
+    ctx.stroke();
+  }
+}
+
+function maxLinesThatFit(layout: TextLayout, maxHeight: number): number {
+  let count = 0;
+  for (let i = 0; i < layout.lines.length; i++) {
+    const bottom = lineTopY(layout, i) + layout.lineHeightPx;
+    if (bottom > maxHeight + 0.01) break;
+    count = i + 1;
+  }
+  return Math.max(1, count);
+}
+
+function applyTruncate(
+  layout: TextLayout,
+  typo: ResolvedTextTypo,
+  style: TextLayoutStyleOptions,
+  maxHeight: number,
+  boxInnerWidth: number,
+  wrapWidth: number,
+): TextLayout {
+  if (style.textTruncate !== "end" || !Number.isFinite(maxHeight)) return layout;
+  const maxLines = maxLinesThatFit(layout, maxHeight);
+  const lineLimitWidth = Number.isFinite(wrapWidth)
+    ? Math.min(boxInnerWidth, wrapWidth)
+    : boxInnerWidth;
+
+  const needsLineClamp = layout.lines.length > maxLines;
+  const lastVisible = layout.lines[Math.min(maxLines, layout.lines.length) - 1];
+  const needsEllipsis =
+    needsLineClamp ||
+    (lastVisible != null &&
+      measureStringWidth(getTextMeasureContext(), lastVisible.text, typo.letterSpacing) >
+        lineLimitWidth + 0.01);
+
+  if (!needsLineClamp && !needsEllipsis) return layout;
+
+  const lines = layout.lines.slice(0, maxLines);
+  const last = lines[maxLines - 1]!;
+  let truncated = last.text;
+  const ellipsis = "…";
+  const ctx = getTextMeasureContext();
+  ctx.font = buildFontString(typo);
+  while (
+    truncated.length > 0 &&
+    measureStringWidth(ctx, truncated + ellipsis, typo.letterSpacing) > lineLimitWidth
+  ) {
+    truncated = truncated.slice(0, -1);
+  }
+  lines[maxLines - 1] = {
+    ...last,
+    text: truncated + ellipsis,
+    width: measureStringWidth(ctx, truncated + ellipsis, typo.letterSpacing),
+  };
+
+  let paragraphGaps = 0;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i]!.paragraphStart) paragraphGaps++;
+  }
+  const contentHeight =
+    lines.length * layout.lineHeightPx +
+    paragraphGaps * layout.paragraphSpacing -
+    layout.verticalTrimTop * 2;
+
+  return {
+    ...layout,
+    lines,
+    height: Math.max(layout.lineHeightPx, contentHeight),
+    width: Math.max(...lines.map((ln) => ln.width), 0),
+  };
 }
 
 function drawSelection(
@@ -205,7 +332,7 @@ function drawSelection(
       measureStringWidth(getTextMeasureContext(), before, typo.letterSpacing) +
       padX;
     const selW = measureStringWidth(getTextMeasureContext(), selected, typo.letterSpacing);
-    const y = i * layout.lineHeightPx + padY;
+    const y = lineTopY(layout, i) + padY;
     ctx.fillRect(x0, y, Math.max(1, selW), layout.lineHeightPx);
   }
 }

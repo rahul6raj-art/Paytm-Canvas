@@ -21,9 +21,12 @@ import {
   Unlink,
 } from "lucide-react";
 import { PropertiesSection } from "./PropertiesSection";
+import { FontSizeInput } from "./design-panel/FontSizeInput";
+import { TextStyleSection } from "./design-panel/TextStyleSection";
 import { PropertyNumberInput, PropertyTextInput } from "./PropertyInput";
 import { FontFamilyPicker } from "./FontFamilyPicker";
 import { ColorInput } from "./ColorInput";
+import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
 import {
   useEditorStore,
@@ -51,6 +54,13 @@ import {
   type FillGradient,
 } from "@/lib/fillGradient";
 import { inferAutoLayoutGap, type LayoutNode } from "@/lib/autoLayout";
+import {
+  LAYOUT_GAP_MAX,
+  sanitizeLayoutGap,
+  sanitizeLayoutGapForFrame,
+} from "@/lib/autoLayout/spacingPaddingDrag";
+import { computeMinLayoutGap } from "@/lib/layoutEngine/minLayoutGap";
+import type { LayoutEngineNode } from "@/lib/layoutEngine/types";
 import { maxStarCornerRadius, starGeometryPatch } from "@/lib/shapes/starGeometry";
 import {
   lineAngleDegrees,
@@ -58,6 +68,7 @@ import {
   lineLength,
 } from "@/lib/shapes/lineGeometry";
 import { textResizePatch, type TextResizeMode } from "@/lib/text/textNodeModel";
+import { DEFAULT_TEXT_FONT_SIZE, TEXT_FONT_WEIGHTS } from "@/lib/textTypography";
 import {
   arrowEndpointStylePatch,
   arrowHeadToStrokeEndpoint,
@@ -372,12 +383,369 @@ export function DesignInspector({ node }: { node: EditorNode }) {
         onResizeFrame={(width, height) => resizeFrameWithConstraints(id, { width, height })}
       />
 
+      {isText && (
+        <PropertiesSection title="Typography" defaultOpen>
+          {node.textStyleTokenId && designTokens[node.textStyleTokenId]?.type === "typography" ? (
+            <p className="mb-1.5 truncate text-[10px] text-app-muted">
+              Linked typography:{" "}
+              <span className="font-medium text-app-fg">{designTokens[node.textStyleTokenId]!.name}</span>
+            </p>
+          ) : null}
+          {node.fillTokenId && designTokens[node.fillTokenId]?.type === "color" ? (
+            <p className="mb-1.5 truncate text-[10px] text-app-muted">
+              Linked color style:{" "}
+              <span className="font-medium text-app-fg">{designTokens[node.fillTokenId]!.name}</span>
+            </p>
+          ) : null}
+          <div className="mb-1.5 flex flex-wrap gap-1">
+            <button
+              type="button"
+              disabled={locked}
+              onClick={() => createTypographyTokenFromSelection()}
+              className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-[10px] font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
+            >
+              Create typography style
+            </button>
+            <button
+              type="button"
+              disabled={locked}
+              onClick={() => createColorTokenFromSelection()}
+              className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-[10px] font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
+            >
+              Create color style
+            </button>
+            {node.textStyleTokenId ? (
+              <button
+                type="button"
+                disabled={locked}
+                onClick={() => detachTokenFromSelection("typography")}
+                className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-[10px] font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
+              >
+                Detach typography
+              </button>
+            ) : null}
+            {node.fillTokenId ? (
+              <button
+                type="button"
+                disabled={locked}
+                onClick={() => detachTokenFromSelection("color")}
+                className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-[10px] font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
+              >
+                Detach color style
+              </button>
+            ) : null}
+          </div>
+          <textarea
+            disabled={locked}
+            className={cn(
+              "min-h-[72px] w-full resize-y rounded border border-app-border bg-app-field p-1.5 text-[12px] leading-snug text-app-field-fg focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-45",
+              field,
+            )}
+            value={textContentDraft}
+            onChange={(e) => setTextContentDraft(e.target.value)}
+            onKeyDown={(e) => handlePanelFieldKeyDown(e)}
+            onBlur={() => {
+              const cur = useEditorStore.getState().nodes[id]?.content ?? "";
+              if (textContentDraft !== cur) style({ content: textContentDraft });
+            }}
+          />
+          <div className="mt-1.5">
+            <ColorInput
+              label="Text color"
+              libraryName={
+                node.fillTokenId && designTokens[node.fillTokenId]?.type === "color"
+                  ? designTokens[node.fillTokenId]!.name
+                  : undefined
+              }
+              libraryTokenId={
+                node.fillTokenId && designTokens[node.fillTokenId]?.type === "color"
+                  ? node.fillTokenId
+                  : undefined
+              }
+              hex={display.textColor ?? display.fill ?? "#111111"}
+              instanceKey={`${key}-tc`}
+              disabled={locked}
+              onCommitHex={(hex, opts) => {
+                useEditorStore.getState().setNodeTextColorHex(id, hex, opts);
+              }}
+            />
+          </div>
+          <div className="mt-1.5">
+            <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">Font</div>
+            <FontFamilyPicker
+              value={
+                display.fontFamily ?? "var(--font-inter), Inter, system-ui, sans-serif"
+              }
+              disabled={locked}
+              onChange={(v) => {
+                if (node.textStyleTokenId) {
+                  const t = designTokens[node.textStyleTokenId];
+                  if (t?.type === "typography" && isTypographyValue(t.value)) {
+                    updateDesignToken(node.textStyleTokenId, {
+                      value: { ...(t.value as TypographyTokenValue), fontFamily: v },
+                    });
+                    return;
+                  }
+                }
+                style({ fontFamily: v });
+              }}
+              className="w-full"
+              buttonClassName="w-full"
+            />
+          </div>
+          <div className="mt-1.5 grid grid-cols-2 gap-x-2 gap-y-1.5">
+            <FontSizeInput
+              value={display.fontSize ?? DEFAULT_TEXT_FONT_SIZE}
+              instanceKey={key}
+              disabled={locked}
+              onCommit={(v) => {
+                if (node.textStyleTokenId) {
+                  const t = designTokens[node.textStyleTokenId];
+                  if (t?.type === "typography" && isTypographyValue(t.value)) {
+                    updateDesignToken(node.textStyleTokenId, {
+                      value: { ...(t.value as TypographyTokenValue), fontSize: v },
+                    });
+                    return;
+                  }
+                }
+                style({ fontSize: v });
+              }}
+            />
+            <div>
+              <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">Weight</div>
+              <select
+                aria-label="Font weight"
+                disabled={locked}
+                className={cn(field, "w-full cursor-pointer")}
+                value={display.fontWeight ?? 500}
+                onChange={(e) => {
+                  const w = Number(e.target.value);
+                  if (node.textStyleTokenId) {
+                    const t = designTokens[node.textStyleTokenId];
+                    if (t?.type === "typography" && isTypographyValue(t.value)) {
+                      updateDesignToken(node.textStyleTokenId, {
+                        value: { ...(t.value as TypographyTokenValue), fontWeight: w },
+                      });
+                      return;
+                    }
+                  }
+                  style({ fontWeight: w });
+                }}
+              >
+                {!TEXT_FONT_WEIGHTS.some((opt) => opt.value === (display.fontWeight ?? 500)) ? (
+                  <option value={display.fontWeight ?? 500}>{display.fontWeight ?? 500}</option>
+                ) : null}
+                {TEXT_FONT_WEIGHTS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="mt-1.5 grid grid-cols-2 gap-x-2 gap-y-1.5">
+            <PropertyNumberInput commitOnInput={false}
+              label="Line height"
+              value={display.lineHeight ?? 1.25}
+              instanceKey={key}
+              disabled={locked}
+              min={0.5}
+              max={4}
+              decimals={2}
+              onCommit={(v) => {
+                if (node.textStyleTokenId) {
+                  const t = designTokens[node.textStyleTokenId];
+                  if (t?.type === "typography" && isTypographyValue(t.value)) {
+                    updateDesignToken(node.textStyleTokenId, {
+                      value: { ...(t.value as TypographyTokenValue), lineHeight: v },
+                    });
+                    return;
+                  }
+                }
+                style({ lineHeight: v });
+              }}
+            />
+            <PropertyNumberInput commitOnInput={false}
+              label="Letter px"
+              value={display.letterSpacing ?? 0}
+              instanceKey={key}
+              disabled={locked}
+              min={-20}
+              max={80}
+              decimals={1}
+              onCommit={(v) => {
+                if (node.textStyleTokenId) {
+                  const t = designTokens[node.textStyleTokenId];
+                  if (t?.type === "typography" && isTypographyValue(t.value)) {
+                    updateDesignToken(node.textStyleTokenId, {
+                      value: { ...(t.value as TypographyTokenValue), letterSpacing: v },
+                    });
+                    return;
+                  }
+                }
+                style({ letterSpacing: v });
+              }}
+            />
+          </div>
+          <div className="mt-1.5 border-t border-app-border pt-2">
+            <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">Resize</div>
+            <select
+              disabled={locked}
+              className={cn(field, "w-full cursor-pointer")}
+              value={node.textResizeMode ?? "auto-width"}
+              onChange={(e) => {
+                style(textResizePatch(e.target.value as TextResizeMode));
+              }}
+            >
+              <option value="auto-width">Auto width</option>
+              <option value="auto-height">Auto height</option>
+              <option value="fixed">Fixed size</option>
+            </select>
+          </div>
+          <div className="mt-1.5">
+            <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">Vertical</div>
+            <select
+              disabled={locked}
+              className={cn(field, "w-full cursor-pointer")}
+              value={node.verticalAlign ?? "top"}
+              onChange={(e) =>
+                style({
+                  verticalAlign: e.target.value as "top" | "middle" | "bottom",
+                })
+              }
+            >
+              <option value="top">Top</option>
+              <option value="middle">Middle</option>
+              <option value="bottom">Bottom</option>
+            </select>
+          </div>
+          <TextStyleSection
+            node={node}
+            instanceKey={key}
+            locked={locked}
+            onPatch={style}
+          />
+        </PropertiesSection>
+      )}
+
       {inAutoLayoutParent && layoutMode === "none" ? (
         <PropertiesSection title="Layout" defaultOpen>
           <p className="mb-2 text-[10px] leading-snug text-app-subtle">
             Sizing in parent auto-layout frame.
           </p>
           <LayoutSizingControls node={node} nodes={nodesAll} locked={locked} />
+          {(node.layoutSizingHorizontal === "fill" ||
+            node.layoutSizingVertical === "fill" ||
+            (node.layoutGrow != null && node.layoutGrow !== 1)) && (
+            <div className="mt-2">
+              <PropertyNumberInput
+                commitOnInput={false}
+                label="Grow weight"
+                value={node.layoutGrow ?? 1}
+                instanceKey={`${key}-grow`}
+                disabled={locked}
+                min={0}
+                max={24}
+                step={0.5}
+                onCommit={(v) => patch({ layoutGrow: Math.max(0, v), layoutDirty: true })}
+              />
+              <p className="mt-1 text-[10px] leading-snug text-app-subtle">
+                Fill children split space by grow weight (drag blue dividers on canvas).
+              </p>
+            </div>
+          )}
+          {parent?.id && parentAutoLayout ? (() => {
+            const frameId = parent.id;
+            const frame = nodesAll[frameId];
+            if (!frame) return null;
+            const frameMode = frame.layoutMode === "vertical" ? "vertical" : "horizontal";
+            const flowKids = (childOrder[frameId] ?? []).filter((cid) => {
+              const c = nodesAll[cid];
+              return c?.visible && !c.locked;
+            });
+            return (
+              <div className="mt-3 border-t border-app-border pt-2">
+                <div className="mb-0.5 flex items-center justify-between gap-1">
+                  <span className="text-[11px] font-medium text-app-subtle">Frame gap</span>
+                  <button
+                    type="button"
+                    disabled={locked || parent.locked}
+                    title="Use spacing inferred from child positions"
+                    onClick={() => {
+                      const inferred =
+                        flowKids.length >= 2
+                          ? inferAutoLayoutGap(
+                              nodesAll as Record<string, LayoutNode>,
+                              flowKids,
+                              frameMode,
+                            )
+                          : 0;
+                      if (frame.layoutGapAuto) {
+                        updateLayout(frameId, { layoutGapAuto: false, layoutGap: inferred });
+                      } else {
+                        updateLayout(frameId, { layoutGapAuto: true, layoutGap: inferred });
+                      }
+                    }}
+                    className={cn(
+                      "rounded border px-2 py-0.5 text-[10px] font-semibold transition-colors disabled:opacity-40",
+                      frame.layoutGapAuto
+                        ? "border-accent/40 bg-accent/15 text-accent"
+                        : "border-app-border text-app-muted hover:bg-app-hover",
+                    )}
+                  >
+                    Auto
+                  </button>
+                </div>
+                {frame.layoutGapAuto ? (
+                  <div className="flex h-6 items-center rounded border border-app-border bg-app-panel px-1.5 text-[12px] text-app-fg">
+                    Auto
+                    <span className="ml-auto text-[10px] tabular-nums text-app-subtle">
+                      {flowKids.length < 2
+                        ? "—"
+                        : `${inferAutoLayoutGap(
+                            nodesAll as Record<string, LayoutNode>,
+                            flowKids,
+                            frameMode,
+                          )}px`}
+                    </span>
+                  </div>
+                ) : (
+                  <PropertyNumberInput
+                    commitOnInput={false}
+                    label=""
+                    value={sanitizeLayoutGapForFrame(
+                      frameId,
+                      nodesAll,
+                      childOrder,
+                      frame.layoutGap,
+                    )}
+                    instanceKey={`${frameId}-parent-gap`}
+                    disabled={locked || parent.locked}
+                    min={computeMinLayoutGap(
+                      frameId,
+                      nodesAll as Record<string, LayoutEngineNode>,
+                      childOrder,
+                    )}
+                    max={LAYOUT_GAP_MAX}
+                    onCommit={(v) =>
+                      updateLayout(frameId, {
+                        layoutGap: sanitizeLayoutGapForFrame(
+                          frameId,
+                          nodesAll,
+                          childOrder,
+                          v,
+                        ),
+                        layoutGapAuto: false,
+                      })
+                    }
+                  />
+                )}
+                <p className="mt-1 text-[10px] leading-snug text-app-subtle">
+                  Drag the ↔ / ↕ handle between siblings on canvas to adjust spacing.
+                </p>
+              </div>
+            );
+          })() : null}
           <div className="mt-2 flex items-center justify-between gap-2">
             <span className="text-[11px] font-medium text-app-subtle">Absolute position</span>
             <button
@@ -623,13 +991,20 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                   <PropertyNumberInput
                     commitOnInput={false}
                     label=""
-                    value={node.layoutGap ?? 0}
+                    value={sanitizeLayoutGapForFrame(id, nodesAll, childOrder, node.layoutGap)}
                     instanceKey={`${key}-gap`}
                     disabled={locked}
-                    min={0}
-                    max={256}
+                    min={computeMinLayoutGap(
+                      id,
+                      nodesAll as Record<string, LayoutEngineNode>,
+                      childOrder,
+                    )}
+                    max={LAYOUT_GAP_MAX}
                     onCommit={(v) =>
-                      updateLayout(id, { layoutGap: Math.max(0, v), layoutGapAuto: false })
+                      updateLayout(id, {
+                        layoutGap: sanitizeLayoutGapForFrame(id, nodesAll, childOrder, v),
+                        layoutGapAuto: false,
+                      })
                     }
                   />
                 )}
@@ -1158,257 +1533,6 @@ export function DesignInspector({ node }: { node: EditorNode }) {
           </div>
         </PropertiesSection>
       ) : null}
-
-      {isText && (
-        <PropertiesSection title="Typography" defaultOpen>
-          {node.textStyleTokenId && designTokens[node.textStyleTokenId]?.type === "typography" ? (
-            <p className="mb-1.5 truncate text-[10px] text-app-muted">
-              Linked typography:{" "}
-              <span className="font-medium text-app-fg">{designTokens[node.textStyleTokenId]!.name}</span>
-            </p>
-          ) : null}
-          {node.fillTokenId && designTokens[node.fillTokenId]?.type === "color" ? (
-            <p className="mb-1.5 truncate text-[10px] text-app-muted">
-              Linked color style:{" "}
-              <span className="font-medium text-app-fg">{designTokens[node.fillTokenId]!.name}</span>
-            </p>
-          ) : null}
-          <div className="mb-1.5 flex flex-wrap gap-1">
-            <button
-              type="button"
-              disabled={locked}
-              onClick={() => createTypographyTokenFromSelection()}
-              className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-[10px] font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
-            >
-              Create typography style
-            </button>
-            <button
-              type="button"
-              disabled={locked}
-              onClick={() => createColorTokenFromSelection()}
-              className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-[10px] font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
-            >
-              Create color style
-            </button>
-            {node.textStyleTokenId ? (
-              <button
-                type="button"
-                disabled={locked}
-                onClick={() => detachTokenFromSelection("typography")}
-                className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-[10px] font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
-              >
-                Detach typography
-              </button>
-            ) : null}
-            {node.fillTokenId ? (
-              <button
-                type="button"
-                disabled={locked}
-                onClick={() => detachTokenFromSelection("color")}
-                className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-[10px] font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
-              >
-                Detach color style
-              </button>
-            ) : null}
-          </div>
-          <textarea
-            disabled={locked}
-            className={cn(
-              "min-h-[72px] w-full resize-y rounded border border-app-border bg-app-field p-1.5 text-[12px] leading-snug text-app-field-fg focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-45",
-              field,
-            )}
-            value={textContentDraft}
-            onChange={(e) => setTextContentDraft(e.target.value)}
-            onBlur={() => {
-              const cur = useEditorStore.getState().nodes[id]?.content ?? "";
-              if (textContentDraft !== cur) style({ content: textContentDraft });
-            }}
-          />
-          <div className="mt-1.5">
-            <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">Resize</div>
-            <select
-              disabled={locked}
-              className={cn(field, "w-full cursor-pointer")}
-              value={node.textResizeMode ?? "auto-width"}
-              onChange={(e) => {
-                style(textResizePatch(e.target.value as TextResizeMode));
-              }}
-            >
-              <option value="auto-width">Auto width</option>
-              <option value="auto-height">Auto height</option>
-              <option value="fixed">Fixed size</option>
-            </select>
-          </div>
-          <div className="mt-1.5 grid grid-cols-2 gap-1.5">
-            <div>
-              <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">Align</div>
-              <select
-                disabled={locked}
-                className={cn(field, "w-full cursor-pointer")}
-                value={node.textAlign ?? "left"}
-                onChange={(e) =>
-                  style({
-                    textAlign: e.target.value as "left" | "center" | "right" | "justify",
-                  })
-                }
-              >
-                <option value="left">Left</option>
-                <option value="center">Center</option>
-                <option value="right">Right</option>
-                <option value="justify">Justify</option>
-              </select>
-            </div>
-            <div>
-              <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">Vertical</div>
-              <select
-                disabled={locked}
-                className={cn(field, "w-full cursor-pointer")}
-                value={node.verticalAlign ?? "top"}
-                onChange={(e) =>
-                  style({
-                    verticalAlign: e.target.value as "top" | "middle" | "bottom",
-                  })
-                }
-              >
-                <option value="top">Top</option>
-                <option value="middle">Middle</option>
-                <option value="bottom">Bottom</option>
-              </select>
-            </div>
-          </div>
-          <div className="mt-1.5">
-            <ColorInput
-              label="Text color"
-              libraryName={
-                node.fillTokenId && designTokens[node.fillTokenId]?.type === "color"
-                  ? designTokens[node.fillTokenId]!.name
-                  : undefined
-              }
-              libraryTokenId={
-                node.fillTokenId && designTokens[node.fillTokenId]?.type === "color"
-                  ? node.fillTokenId
-                  : undefined
-              }
-              hex={display.textColor ?? display.fill ?? "#111111"}
-              instanceKey={`${key}-tc`}
-              disabled={locked}
-              onCommitHex={(hex, opts) => {
-                useEditorStore.getState().setNodeTextColorHex(id, hex, opts);
-              }}
-            />
-          </div>
-          <div className="mt-1.5">
-            <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">Font</div>
-            <FontFamilyPicker
-              value={
-                display.fontFamily ?? "var(--font-inter), Inter, system-ui, sans-serif"
-              }
-              disabled={locked}
-              onChange={(v) => {
-                if (node.textStyleTokenId) {
-                  const t = designTokens[node.textStyleTokenId];
-                  if (t?.type === "typography" && isTypographyValue(t.value)) {
-                    updateDesignToken(node.textStyleTokenId, {
-                      value: { ...(t.value as TypographyTokenValue), fontFamily: v },
-                    });
-                    return;
-                  }
-                }
-                style({ fontFamily: v });
-              }}
-              className="w-full"
-              buttonClassName="w-full"
-            />
-          </div>
-          <div className="mt-1.5 grid grid-cols-2 gap-x-2 gap-y-1.5">
-            <PropertyNumberInput commitOnInput={false}
-              label="Size"
-              value={display.fontSize ?? 13}
-              instanceKey={key}
-              disabled={locked}
-              min={1}
-              max={512}
-              onCommit={(v) => {
-                if (node.textStyleTokenId) {
-                  const t = designTokens[node.textStyleTokenId];
-                  if (t?.type === "typography" && isTypographyValue(t.value)) {
-                    updateDesignToken(node.textStyleTokenId, {
-                      value: { ...(t.value as TypographyTokenValue), fontSize: v },
-                    });
-                    return;
-                  }
-                }
-                style({ fontSize: v });
-              }}
-            />
-            <PropertyNumberInput commitOnInput={false}
-              label="Weight"
-              value={display.fontWeight ?? 500}
-              instanceKey={key}
-              disabled={locked}
-              min={100}
-              max={900}
-              onCommit={(v) => {
-                const w = Math.round(Math.min(900, Math.max(100, v)));
-                if (node.textStyleTokenId) {
-                  const t = designTokens[node.textStyleTokenId];
-                  if (t?.type === "typography" && isTypographyValue(t.value)) {
-                    updateDesignToken(node.textStyleTokenId, {
-                      value: { ...(t.value as TypographyTokenValue), fontWeight: w },
-                    });
-                    return;
-                  }
-                }
-                style({ fontWeight: w });
-              }}
-            />
-          </div>
-          <div className="mt-1.5 grid grid-cols-2 gap-x-2 gap-y-1.5">
-            <PropertyNumberInput commitOnInput={false}
-              label="Line height"
-              value={display.lineHeight ?? 1.25}
-              instanceKey={key}
-              disabled={locked}
-              min={0.5}
-              max={4}
-              decimals={2}
-              onCommit={(v) => {
-                if (node.textStyleTokenId) {
-                  const t = designTokens[node.textStyleTokenId];
-                  if (t?.type === "typography" && isTypographyValue(t.value)) {
-                    updateDesignToken(node.textStyleTokenId, {
-                      value: { ...(t.value as TypographyTokenValue), lineHeight: v },
-                    });
-                    return;
-                  }
-                }
-                style({ lineHeight: v });
-              }}
-            />
-            <PropertyNumberInput commitOnInput={false}
-              label="Letter px"
-              value={display.letterSpacing ?? 0}
-              instanceKey={key}
-              disabled={locked}
-              min={-20}
-              max={80}
-              decimals={1}
-              onCommit={(v) => {
-                if (node.textStyleTokenId) {
-                  const t = designTokens[node.textStyleTokenId];
-                  if (t?.type === "typography" && isTypographyValue(t.value)) {
-                    updateDesignToken(node.textStyleTokenId, {
-                      value: { ...(t.value as TypographyTokenValue), letterSpacing: v },
-                    });
-                    return;
-                  }
-                }
-                style({ letterSpacing: v });
-              }}
-            />
-          </div>
-        </PropertiesSection>
-      )}
 
       {node.isBooleanGroup ? (
         <PropertiesSection title="Boolean" defaultOpen>

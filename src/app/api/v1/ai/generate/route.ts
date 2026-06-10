@@ -1,6 +1,6 @@
-import { generateDesignFromPrompt } from "@/lib/aiMockGenerator";
-import { isOllamaModelId, isValidAIModelId, normalizeAIModelId } from "@/lib/aiModels";
-import { generateWithOllama } from "@/lib/ollamaGenerate";
+import type { AIStyleId } from "@/lib/aiMockGenerator";
+import { isValidAIModelId, normalizeAIModelId } from "@/lib/aiModels";
+import { runAIGenerate } from "@/lib/aiGenerateService";
 
 export async function POST(request: Request) {
   let body: unknown;
@@ -17,6 +17,7 @@ export async function POST(request: Request) {
     model?: string;
     contextPrompt?: string;
     contextAttachmentCount?: number;
+    contextImages?: { name?: string; mimeType?: string; dataUrl?: string }[];
   };
 
   const prompt = typeof payload.prompt === "string" ? payload.prompt : "";
@@ -26,8 +27,19 @@ export async function POST(request: Request) {
     typeof payload.contextPrompt === "string" ? payload.contextPrompt : undefined;
   const contextAttachmentCount =
     typeof payload.contextAttachmentCount === "number" ? payload.contextAttachmentCount : undefined;
+  const contextImages = Array.isArray(payload.contextImages)
+    ? payload.contextImages
+        .filter(
+          (img): img is { name: string; mimeType: string; dataUrl: string } =>
+            typeof img?.name === "string" &&
+            typeof img?.mimeType === "string" &&
+            typeof img?.dataUrl === "string" &&
+            img.dataUrl.startsWith("data:image/"),
+        )
+        .slice(0, 4)
+    : undefined;
 
-  if (!prompt.trim() && !preset && !contextPrompt?.trim()) {
+  if (!prompt.trim() && !preset && !contextPrompt?.trim() && !contextImages?.length) {
     return Response.json({ error: "Prompt, preset, or context is required." }, { status: 400 });
   }
 
@@ -36,29 +48,53 @@ export async function POST(request: Request) {
   }
 
   const styleIds = ["minimal", "bold", "fintech", "dark", "playful"] as const;
-  const style =
-    typeof payload.style === "string" && styleIds.includes(payload.style as (typeof styleIds)[number])
-      ? (payload.style as (typeof styleIds)[number])
+  const style: AIStyleId =
+    typeof payload.style === "string" && styleIds.includes(payload.style as AIStyleId)
+      ? (payload.style as AIStyleId)
       : "fintech";
 
-  // Ollama: call local runtime when selected (falls back to mock layout if unreachable).
-  if (isOllamaModelId(model)) {
-    await generateWithOllama({
-      modelId: model,
+  try {
+    const out = await runAIGenerate({
       prompt,
+      preset,
+      style,
+      model,
       contextPrompt,
+      contextAttachmentCount,
+      contextImages,
     });
+
+    if (!out.ok || !out.result) {
+      return Response.json(
+        {
+          ok: false,
+          model: out.model,
+          detectedIntent: out.detectedIntent,
+          error: out.error ?? "Generation failed — the model did not return a valid layout.",
+        },
+        { status: 422 },
+      );
+    }
+
+    return Response.json({
+      ok: true,
+      model: out.model,
+      source: out.source,
+      detectedIntent: out.detectedIntent,
+      warning: out.warning,
+      result: {
+        ...out.result,
+        preview: {
+          ...out.result.preview,
+          generationSource: out.source,
+          detectedIntent: out.detectedIntent,
+          warning: out.warning,
+        },
+      },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "AI generation failed.";
+    console.error("[api/v1/ai/generate]", err);
+    return Response.json({ error: message }, { status: 500 });
   }
-
-  // When OPENAI_API_KEY is configured, call the Responses API here with `model`.
-  // Until then, return the deterministic mock so the UI can exercise model selection.
-  const result = generateDesignFromPrompt(prompt, {
-    preset,
-    style,
-    model,
-    contextPrompt,
-    contextAttachmentCount,
-  });
-
-  return Response.json({ ok: true, model, result });
 }

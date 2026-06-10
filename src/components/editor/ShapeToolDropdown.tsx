@@ -17,6 +17,8 @@ import {
 import { cn } from "@/lib/utils";
 import { ToolButton } from "./ToolButton";
 import { useEditorStore, type Tool } from "@/stores/useEditorStore";
+import { clearPostCreationPointerSuppress } from "@/lib/canvasCreationGuard";
+import { activateCanvasForShortcuts } from "@/lib/editorKeyboardFocus";
 import {
   useAnchoredDropdownPosition,
   useDismissAnchoredDropdown,
@@ -94,8 +96,10 @@ export function ShapeToolDropdown() {
                   : Shapes;
 
   const pick = (t: Tool) => {
+    clearPostCreationPointerSuppress();
     setTool(t);
     setOpen(false);
+    requestAnimationFrame(() => activateCanvasForShortcuts());
   };
 
   const activateShape = () => {
@@ -127,6 +131,7 @@ export function ShapeToolDropdown() {
               "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11px] font-medium transition-colors",
               tool === id ? "bg-accent/20 text-white" : "text-app-fg hover:bg-app-hover",
             )}
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => pick(id)}
           >
             <Icon className="h-3.5 w-3.5 shrink-0 text-[#a3a3a3]" strokeWidth={1.75} />

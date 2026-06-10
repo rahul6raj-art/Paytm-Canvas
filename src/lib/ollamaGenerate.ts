@@ -2,33 +2,35 @@ import { ollamaBaseUrl, ollamaTagFromModelId } from "@/lib/aiModels";
 
 export type OllamaGenerateInput = {
   modelId: string;
-  prompt: string;
-  contextPrompt?: string;
+  systemPrompt: string;
+  userPrompt: string;
 };
 
-/** Call a local Ollama instance for design generation (returns null if unavailable). */
+/** Call a local Ollama chat endpoint for structured UI JSON (null if unavailable). */
 export async function generateWithOllama(input: OllamaGenerateInput): Promise<string | null> {
   const tag = ollamaTagFromModelId(input.modelId);
-  if (!tag) return null;
-
-  const userText = [input.prompt.trim(), input.contextPrompt?.trim()].filter(Boolean).join("\n\n");
-  if (!userText) return null;
+  if (!tag || !input.userPrompt.trim()) return null;
 
   const base = ollamaBaseUrl().replace(/\/$/, "");
   try {
-    const res = await fetch(`${base}/api/generate`, {
+    const res = await fetch(`${base}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: tag,
-        prompt: userText,
         stream: false,
+        format: "json",
+        messages: [
+          { role: "system", content: input.systemPrompt },
+          { role: "user", content: input.userPrompt },
+        ],
       }),
       signal: AbortSignal.timeout(120_000),
     });
     if (!res.ok) return null;
-    const data = (await res.json()) as { response?: string };
-    return typeof data.response === "string" ? data.response : null;
+    const data = (await res.json()) as { message?: { content?: string } };
+    const content = data.message?.content;
+    return typeof content === "string" ? content : null;
   } catch {
     return null;
   }

@@ -28,3 +28,13 @@ export { createTextNode, createPointTextAt, createTextBoxFromDrag } from "./text
 export { hitTestTextLocal, hitTestTextWorld } from "./textHitTest";
 export { enterTextEditMode, exitTextEditMode } from "./textEditMode";
 export { verticalContentOffsetY, normalizeVerticalAlign } from "./textVerticalAlign";
+export {
+  textAdvancedStyleFromNode,
+  prepareTextForDisplay,
+  type TextAdvancedStyle,
+  type TextDecorationMode,
+  type TextCaseMode,
+  type TextVerticalTrim,
+  type TextListStyle,
+  type TextTruncateMode,
+} from "./textAdvancedStyle";

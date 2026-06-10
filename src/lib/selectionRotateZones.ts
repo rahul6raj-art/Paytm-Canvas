@@ -46,16 +46,30 @@ export function pointerOnCornerHandleRotateHalf(
 }
 
 /** Screen distance from corner along outward diagonal to the rotate hit zone center. */
-export const CANVAS_ROTATE_ZONE_OFFSET_SCREEN_PX = 14;
+export const CANVAS_ROTATE_ZONE_OFFSET_SCREEN_PX = 16;
 
-/** Rotate hit target size in screen pixels. */
-export const CANVAS_ROTATE_HIT_SCREEN_PX = 28;
+/** Rotate hit target size in screen pixels (tight corner target). */
+export const CANVAS_ROTATE_HIT_SCREEN_PX = 14;
 
 /** Thickness of rotate hit bands just outside selection edges (screen px). */
-export const CANVAS_ROTATE_EDGE_BAND_THICKNESS_SCREEN_PX = 12;
+export const CANVAS_ROTATE_EDGE_BAND_THICKNESS_SCREEN_PX = 10;
 
 /** Length of rotate hit bands along each edge from a corner (screen px). */
-export const CANVAS_ROTATE_EDGE_BAND_LENGTH_SCREEN_PX = 52;
+export const CANVAS_ROTATE_EDGE_BAND_LENGTH_SCREEN_PX = 22;
+
+/** Screen-space vector from selection center toward a corner (for oriented hit tests). */
+export function outwardScreenFromCorner(
+  cornerX: number,
+  cornerY: number,
+  centerX: number,
+  centerY: number,
+  zoom: number,
+): { x: number; y: number } {
+  return {
+    x: (cornerX - centerX) * zoom,
+    y: (cornerY - centerY) * zoom,
+  };
+}
 
 import {
   CANVAS_ROTATE_CURSOR_FALLBACK,

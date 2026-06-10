@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Copy, Plus, Trash2 } from "lucide-react";
+import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/useEditorStore";
 
@@ -86,8 +87,10 @@ export function PagesPanel() {
                     onChange={(e) => setDraftName(e.target.value)}
                     onBlur={commitRename}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") commitRename();
-                      if (e.key === "Escape") setRenameId(null);
+                      handlePanelFieldKeyDown(e, {
+                        onEnter: () => commitRename(),
+                        onEscape: () => setRenameId(null),
+                      });
                     }}
                     onClick={(e) => e.stopPropagation()}
                     className="min-w-0 flex-1 rounded border border-[rgba(13,153,255,0.45)] bg-app-field px-1 py-0 text-ui-sm text-white outline-none"

@@ -1,5 +1,4 @@
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
-import { repairNodeHierarchyIfNeeded } from "@/lib/editorGraph";
 import { DEFAULT_CANVAS_BACKGROUND } from "@/lib/canvasVisual";
 import { DEFAULT_CANVAS_ZOOM } from "@/lib/canvasZoom";
 import type { EditorNode, LayoutGuide } from "@/stores/useEditorStore";
@@ -110,7 +109,7 @@ export function createEmptyPage(id: string, name: string): EditorPage {
     id,
     name,
     nodes: {},
-    childOrder: { [ROOT]: [] },
+    childOrder: { [EDITOR_ROOT_KEY]: [] },
     zoom: DEFAULT_CANVAS_ZOOM,
     pan: { x: 40, y: 24 },
     showGrid: false,
@@ -156,13 +155,22 @@ export type PageFromSnapshotOptions = {
   skipHierarchyRepair?: boolean;
 };
 
+function repairPageHierarchy(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): { nodes: Record<string, EditorNode>; childOrder: Record<string, string[]> } {
+  // Lazy load breaks editorPages ↔ editorGraph ↔ useEditorStore circular import at module init.
+  const { repairNodeHierarchyIfNeeded } = require("@/lib/editorGraph") as typeof import("@/lib/editorGraph");
+  return repairNodeHierarchyIfNeeded(nodes, childOrder);
+}
+
 export function pageFromSnapshot(
   snap: EditorPageSnapshot,
   opts?: PageFromSnapshotOptions,
 ): EditorPage {
   const repaired = opts?.skipHierarchyRepair
     ? { nodes: snap.nodes, childOrder: snap.childOrder }
-    : repairNodeHierarchyIfNeeded(snap.nodes, snap.childOrder);
+    : repairPageHierarchy(snap.nodes, snap.childOrder);
   return {
     id: snap.id,
     name: snap.name,

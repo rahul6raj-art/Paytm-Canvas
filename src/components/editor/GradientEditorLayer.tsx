@@ -4,6 +4,8 @@ import { useCallback, useRef, useState } from "react";
 import { mergeInstanceOverrides } from "@/lib/componentModel";
 import { resolveNodeWithDesignTokens } from "@/lib/designTokens";
 import {
+  angularGradientRingRadius,
+  cssConicAngleFromAtan2Deg,
   effectiveFillType,
   gradientStopLocalPoint,
   gradientTransformHandleLocalPoints,
@@ -170,21 +172,26 @@ export function GradientEditorLayer() {
         const dx = lx - st.g.transform.cx * st.w;
         const dy = ly - st.g.transform.cy * st.h;
         const dist = Math.hypot(dx, dy) * 2;
+        const extent = Math.min(2, Math.max(0.05, dist / st.w));
         commitGradient({
           ...st.g,
-          transform: { ...st.g.transform, width: Math.min(2, Math.max(0.05, dist / st.w)) },
+          transform:
+            st.g.kind === "angular"
+              ? { ...st.g.transform, width: extent, height: extent }
+              : { ...st.g.transform, width: extent },
         });
         return;
       }
       if (d.kind === "rotate") {
-        const angle =
+        const atan2Deg =
           (Math.atan2(ly - st.g.transform.cy * st.h, lx - st.g.transform.cx * st.w) * 180) /
           Math.PI;
+        const cssAngle = cssConicAngleFromAtan2Deg(atan2Deg);
         commitGradient({
           ...st.g,
           transform: {
             ...st.g.transform,
-            rotation: ((d.startRotation + angle - d.startAngle) % 360 + 360) % 360,
+            rotation: ((d.startRotation + cssAngle - d.startAngle) % 360 + 360) % 360,
           },
         });
       }
@@ -251,12 +258,12 @@ export function GradientEditorLayer() {
       const wpt = toWorldFn!(e.clientX, e.clientY);
       const lx = wpt.x - st.rect.x;
       const ly = wpt.y - st.rect.y;
-      const angle =
+      const atan2Deg =
         (Math.atan2(ly - st.g.transform.cy * st.h, lx - st.g.transform.cx * st.w) * 180) / Math.PI;
       dragRef.current = {
         kind: "rotate",
         pointerId: e.pointerId,
-        startAngle: angle,
+        startAngle: cssConicAngleFromAtan2Deg(atan2Deg),
         startRotation: st.g.transform.rotation,
       };
     } else {
@@ -277,6 +284,15 @@ export function GradientEditorLayer() {
           const a = toWorld(x1, y1);
           const b = toWorld(x2, y2);
           return { x1: a.x, y1: a.y, x2: b.x, y2: b.y };
+        })()
+      : null;
+
+  const angularRing =
+    g.kind === "angular"
+      ? (() => {
+          const r = angularGradientRingRadius(g.transform, w, h);
+          const c = toWorld(g.transform.cx * w, g.transform.cy * h);
+          return { cx: c.x, cy: c.y, r };
         })()
       : null;
 
@@ -306,12 +322,42 @@ export function GradientEditorLayer() {
           }}
         />
       ) : null}
+      {angularRing ? (
+        <circle
+          cx={angularRing.cx}
+          cy={angularRing.cy}
+          r={angularRing.r}
+          fill="none"
+          stroke="transparent"
+          strokeWidth={screenPxToWorld(14, zoom)}
+          className="pointer-events-auto cursor-crosshair"
+          onDoubleClick={(e) => {
+            if (e.button !== 0) return;
+            e.stopPropagation();
+            e.preventDefault();
+            const wpt = toWorldFn!(e.clientX, e.clientY);
+            addStopAtWorld(wpt.x, wpt.y);
+          }}
+        />
+      ) : null}
       {line ? (
         <line
           x1={line.x1}
           y1={line.y1}
           x2={line.x2}
           y2={line.y2}
+          stroke="#18a0fb"
+          strokeWidth={screenPxToWorld(1.5, zoom)}
+          strokeDasharray={`${screenPxToWorld(4, zoom)} ${screenPxToWorld(3, zoom)}`}
+          className="pointer-events-none"
+        />
+      ) : null}
+      {angularRing ? (
+        <circle
+          cx={angularRing.cx}
+          cy={angularRing.cy}
+          r={angularRing.r}
+          fill="none"
           stroke="#18a0fb"
           strokeWidth={screenPxToWorld(1.5, zoom)}
           strokeDasharray={`${screenPxToWorld(4, zoom)} ${screenPxToWorld(3, zoom)}`}

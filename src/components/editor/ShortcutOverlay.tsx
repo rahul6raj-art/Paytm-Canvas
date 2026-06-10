@@ -8,6 +8,7 @@ import {
   SHORTCUT_CANVAS,
   SHORTCUT_EDITING,
   SHORTCUT_OBJECT,
+  SHORTCUT_STROKE,
   SHORTCUT_TOOLS,
   SHORTCUT_VIEW,
   SHORTCUT_ZOOM,
@@ -102,6 +103,7 @@ export function ShortcutOverlay() {
           <div className="break-inside-avoid">
             <Section title="Zoom & frames" rows={SHORTCUT_ZOOM} />
             <Section title="View" rows={SHORTCUT_VIEW} />
+            <Section title="Stroke" rows={SHORTCUT_STROKE} />
             <Section title="Editing" rows={SHORTCUT_EDITING} />
             <Section title="Canvas" rows={SHORTCUT_CANVAS} />
           </div>

@@ -1,5 +1,10 @@
 import { canvasFontFamilyStack } from "@/lib/fonts/fontCatalog";
 import type { ResolvedTextTypo } from "@/lib/textTypography";
+import {
+  DEFAULT_TEXT_ADVANCED_STYLE,
+  type TextLayoutStyleOptions,
+  verticalTrimInsetPx,
+} from "./textAdvancedStyle";
 import type { TextAlign } from "./textNodeModel";
 
 /** One visual line after wrapping; `startIndex` is the offset in the full string. */
@@ -7,6 +12,8 @@ export type TextLine = {
   text: string;
   startIndex: number;
   width: number;
+  /** First line of a `\n`-separated paragraph. */
+  paragraphStart: boolean;
 };
 
 export type TextLayout = {
@@ -14,6 +21,8 @@ export type TextLayout = {
   width: number;
   height: number;
   lineHeightPx: number;
+  paragraphSpacing: number;
+  verticalTrimTop: number;
 };
 
 let measureCanvas: HTMLCanvasElement | null = null;
@@ -71,11 +80,11 @@ function wrapParagraph(
 
   if (maxWidth <= 0 || !Number.isFinite(maxWidth)) {
     const width = measureStringWidth(ctx, paragraph, typo.letterSpacing);
-    return [{ text: paragraph, startIndex, width }];
+    return [{ text: paragraph, startIndex, width, paragraphStart: true }];
   }
 
   if (!paragraph) {
-    return [{ text: "", startIndex, width: 0 }];
+    return [{ text: "", startIndex, width: 0, paragraphStart: true }];
   }
 
   const lines: TextLine[] = [];
@@ -87,6 +96,7 @@ function wrapParagraph(
       text: line,
       startIndex: startIndex + lineStart,
       width: measureStringWidth(ctx, line, typo.letterSpacing),
+      paragraphStart: lineStart === 0,
     });
     lineStart += line.length;
     line = "";
@@ -128,10 +138,13 @@ export function layoutText(
   text: string,
   maxWidth: number,
   typo: ResolvedTextTypo,
+  style: TextLayoutStyleOptions = DEFAULT_TEXT_ADVANCED_STYLE,
 ): TextLayout {
   const ctx = getTextMeasureContext();
   configureMeasureCtx(ctx, typo);
   const lineHeightPx = typo.fontSize * typo.lineHeight;
+  const paragraphSpacing = Math.max(0, style.paragraphSpacing ?? 0);
+  const verticalTrimTop = verticalTrimInsetPx(typo.fontSize, style.verticalTrim);
 
   const paragraphs = text.split("\n");
   const lines: TextLine[] = [];
@@ -140,23 +153,44 @@ export function layoutText(
   for (let p = 0; p < paragraphs.length; p++) {
     const para = paragraphs[p] ?? "";
     const wrapped = wrapParagraph(para, index, maxWidth, typo);
+    if (wrapped.length > 0) wrapped[0]!.paragraphStart = true;
     lines.push(...wrapped);
     index += para.length + (p < paragraphs.length - 1 ? 1 : 0);
   }
 
   if (lines.length === 0) {
-    lines.push({ text: "", startIndex: 0, width: 0 });
+    lines.push({ text: "", startIndex: 0, width: 0, paragraphStart: true });
   }
 
   let width = 0;
   for (const ln of lines) width = Math.max(width, ln.width);
 
+  let paragraphGaps = 0;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i]!.paragraphStart) paragraphGaps++;
+  }
+
+  const contentHeight =
+    lines.length * lineHeightPx + paragraphGaps * paragraphSpacing - verticalTrimTop * 2;
+
   return {
     lines,
     width,
-    height: Math.max(lineHeightPx, lines.length * lineHeightPx),
+    height: Math.max(lineHeightPx, contentHeight),
     lineHeightPx,
+    paragraphSpacing,
+    verticalTrimTop,
   };
+}
+
+/** Y offset for a line index including paragraph spacing and vertical trim. */
+export function lineTopY(layout: TextLayout, lineIndex: number): number {
+  let y = layout.verticalTrimTop;
+  for (let i = 1; i <= lineIndex; i++) {
+    y += layout.lineHeightPx;
+    if (layout.lines[i]?.paragraphStart) y += layout.paragraphSpacing;
+  }
+  return y;
 }
 
 /** Extra space distributed between words for justified lines. */
@@ -220,7 +254,7 @@ export function getCaretRect(
         measureStringWidth(ctx, before, typo.letterSpacing);
       return {
         x: caretX,
-        y: i * layout.lineHeightPx,
+        y: lineTopY(layout, i),
         height: layout.lineHeightPx,
       };
     }

@@ -6,6 +6,7 @@ import { Eye, EyeOff, Minus, Plus, SlidersHorizontal } from "lucide-react";
 import { PropertiesSection } from "../PropertiesSection";
 import { OpacityPercentInput } from "../PropertyInput";
 import { normalizeHex, parseHexInputLive } from "@/lib/color";
+import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
 import { useEditorStore } from "@/stores/useEditorStore";
 import {
   anchoredMenuStyle,
@@ -294,19 +295,19 @@ export function StrokeSection({
               onChange={(e) => handleHexChange(e.target.value)}
               onBlur={finishHexEdit}
               onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  finishHexEdit();
-                  (e.target as HTMLInputElement).blur();
-                }
-                if (e.key === "Escape") {
-                  e.preventDefault();
-                  dirtyHexLiveRef.current = false;
-                  setHexDraft(safeHex.replace("#", "").toUpperCase());
-                  lastAppliedHexRef.current = safeHex;
-                  setHexFocused(false);
-                  (e.target as HTMLInputElement).blur();
-                }
+                handlePanelFieldKeyDown(e, {
+                  onEnter: () => {
+                    finishHexEdit();
+                    e.currentTarget.blur();
+                  },
+                  onEscape: () => {
+                    dirtyHexLiveRef.current = false;
+                    setHexDraft(safeHex.replace("#", "").toUpperCase());
+                    lastAppliedHexRef.current = safeHex;
+                    setHexFocused(false);
+                    e.currentTarget.blur();
+                  },
+                });
               }}
             />
           </div>
@@ -421,19 +422,13 @@ export function StrokeSection({
                     else setWeightDraft(String(strokeWidth));
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      (e.target as HTMLInputElement).blur();
-                      return;
-                    }
-                    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-                      e.preventDefault();
-                      let step = 1;
-                      if (e.shiftKey) step *= 10;
-                      if (e.altKey) step /= 10;
-                      const dir = e.key === "ArrowUp" ? 1 : -1;
-                      commitWeight(parseWeightDraft() + step * dir);
-                    }
+                    handlePanelFieldKeyDown(e, {
+                      onEnter: () => e.currentTarget.blur(),
+                      onArrowNudge: (dir, shift, alt) => {
+                        const step = keyboardNudgeStep(1, 0, shift, alt) * dir;
+                        commitWeight(parseWeightDraft() + step);
+                      },
+                    });
                   }}
                 />
               </div>

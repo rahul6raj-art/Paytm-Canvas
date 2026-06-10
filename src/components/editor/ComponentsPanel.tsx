@@ -11,6 +11,7 @@ import {
   listComponentMasters,
   type ComponentLibraryGroup,
 } from "@/lib/componentModel";
+import { trySelectAllPanelField } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
 
 function ComponentPreview({ width, height }: { width: number; height: number }) {
@@ -180,6 +181,7 @@ export function ComponentsPanel() {
   };
 
   const onSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (trySelectAllPanelField(e)) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
       moveActive(1);

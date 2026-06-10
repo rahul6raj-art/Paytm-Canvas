@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { cancelCanvasMarqueeSession } from "@/lib/canvasMarqueeSession";
 import { useCanvasChromeForeground } from "@/hooks/useCanvasChromeForeground";
 import type { CanvasChromeForeground } from "@/lib/canvasForeground";
 import { prepareAltDragDuplicate } from "@/lib/canvasAltDrag";
@@ -11,7 +12,7 @@ import {
 } from "@/lib/canvasInteractionGuards";
 import { CANVAS_VISUAL, screenPxToWorld } from "@/lib/canvasVisual";
 import { getRenderedWorldTopLeft } from "@/lib/editorGraph";
-import { applyMoveToolPointerSelection } from "@/lib/containerSelection";
+import { applyMoveToolPointerSelection, isAdditiveSelectionClick } from "@/lib/containerSelection";
 import { releaseFieldFocusForCanvas } from "@/lib/editorKeyboardFocus";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/useEditorStore";
@@ -20,6 +21,15 @@ import { useCanvasToWorld } from "./CanvasToWorldContext";
 type RootFrameLabelsProps = {
   rootIds: string[];
 };
+
+/** Every visible frame gets a canvas title (root + nested auto-layout frames, etc.). */
+function frameLabelIds(
+  nodes: Record<string, { id: string; type: string; visible: boolean }>,
+): string[] {
+  return Object.values(nodes)
+    .filter((n) => n.type === "frame" && n.visible)
+    .map((n) => n.id);
+}
 
 export function RootFrameLabels({ rootIds }: RootFrameLabelsProps) {
   const nodes = useEditorStore((s) => s.nodes);
@@ -33,10 +43,17 @@ export function RootFrameLabels({ rootIds }: RootFrameLabelsProps) {
 
   const labelOffset = screenPxToWorld(18, zoom);
   const labelFontSize = screenPxToWorld(11, zoom);
+  const labelIds = useMemo(() => frameLabelIds(nodes), [nodes]);
+  const orderedLabelIds = useMemo(() => {
+    const rootSet = new Set(rootIds);
+    const roots = rootIds.filter((id) => nodes[id]?.type === "frame" && nodes[id]?.visible);
+    const nested = labelIds.filter((id) => !rootSet.has(id));
+    return [...roots, ...nested];
+  }, [rootIds, labelIds, nodes]);
 
   return (
     <>
-      {rootIds.map((rid) => {
+      {orderedLabelIds.map((rid) => {
         const node = nodes[rid];
         if (!node || node.type !== "frame" || !node.visible) return null;
 
@@ -110,28 +127,33 @@ function FrameLabel({
   const onLabelPointerDown = useCallback(
     (e: React.PointerEvent<HTMLSpanElement>) => {
       if (renaming || !node?.visible) return;
+      e.preventDefault();
       e.stopPropagation();
+      cancelCanvasMarqueeSession();
       if (e.button === 0) releaseFieldFocusForCanvas();
 
       if (editorMode === "inspect") {
         if (tool === "comment" || tool === "pen" || tool === "pencil" || e.button === 1) return;
-        select(frameId, e.shiftKey);
+        select(frameId, isAdditiveSelectionClick(e));
         return;
       }
 
       if (locked) {
-        if (isCanvasSelectTool()) select(frameId, e.shiftKey);
+        if (isCanvasSelectTool()) select(frameId, isAdditiveSelectionClick(e));
         return;
       }
 
       if (tool === "comment" || tool === "pen" || tool === "pencil" || e.button === 1) return;
 
       if (tool !== "move" && tool !== "frame") {
-        select(frameId, e.shiftKey);
+        select(frameId, isAdditiveSelectionClick(e));
         return;
       }
 
-      applyMoveToolPointerSelection(frameId, selectedIds, e.shiftKey, select);
+      const additive = isAdditiveSelectionClick(e);
+      applyMoveToolPointerSelection(frameId, selectedIds, additive, select);
+
+      if (additive) return;
 
       if (!clientToWorld) return;
 

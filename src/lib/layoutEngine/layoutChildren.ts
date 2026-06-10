@@ -7,6 +7,8 @@ import {
   type LayoutEngineNode,
   type LayoutMode,
   type PrimaryAxisAlign,
+  flowGapForSizing,
+  flowGapSpan,
 } from "./types";
 import type { MeasuredChild as MC } from "./measure";
 
@@ -31,7 +33,8 @@ export function buildFlowLines(
       {
         childIds,
         measures,
-        mainTotal: measures.reduce((s, m) => s + m.main, 0) + gap * Math.max(0, measures.length - 1),
+        mainTotal:
+          measures.reduce((s, m) => s + m.main, 0) + flowGapForSizing(gap, measures.length),
         crossMax: measures.length ? Math.max(...measures.map((m) => m.cross)) : 0,
       },
     ];
@@ -164,7 +167,7 @@ export function layoutChildren(input: LayoutChildrenInput): Record<string, Layou
       ? resolveFillSizesByGrow(
           innerMain,
           fixedMain,
-          gap * Math.max(0, childIds.length - 1),
+          flowGapForSizing(gap, childIds.length),
           fillEntries,
         )
       : {};
@@ -172,7 +175,7 @@ export function layoutChildren(input: LayoutChildrenInput): Record<string, Layou
   // Cross-axis: stack lines (wrap) with gap between lines
   const lineCrossSizes = lines.map((l) => l.crossMax);
   const lineCrossTotal =
-    lineCrossSizes.reduce((a, b) => a + b, 0) + gap * Math.max(0, lines.length - 1);
+    lineCrossSizes.reduce((a, b) => a + b, 0) + flowGapSpan(gap, lines.length);
   const crossExtra = innerCross - lineCrossTotal;
   let lineCrossCursor = 0;
   if (cross === "center") lineCrossCursor = crossExtra / 2;

@@ -6,13 +6,22 @@ import type { EditorNode } from "@/stores/useEditorStore";
 export { TEXT_FONT_FAMILIES } from "@/lib/fonts/fontCatalog";
 
 export const TEXT_FONT_WEIGHTS = [
+  { label: "Thin", value: 100 },
+  { label: "Extra Light", value: 200 },
+  { label: "Light", value: 300 },
   { label: "Regular", value: 400 },
   { label: "Medium", value: 500 },
   { label: "Semibold", value: 600 },
   { label: "Bold", value: 700 },
+  { label: "Extra Bold", value: 800 },
+  { label: "Black", value: 900 },
 ] as const;
 
 export const TEXT_FONT_SIZES = [10, 11, 12, 13, 14, 16, 18, 20, 24, 32, 48, 64, 96] as const;
+
+export const DEFAULT_TEXT_FONT_FAMILY =
+  "var(--font-inter), Inter, system-ui, sans-serif";
+export const DEFAULT_TEXT_FONT_SIZE = 14;
 
 export type ResolvedTextTypo = {
   color: string;
@@ -29,8 +38,8 @@ export function resolveTextTypo(node: Pick<
 >): ResolvedTextTypo {
   return {
     color: node.textColor ?? node.fill ?? "#111111",
-    fontFamily: node.fontFamily ?? "var(--font-inter), Inter, system-ui, sans-serif",
-    fontSize: node.fontSize ?? 13,
+    fontFamily: node.fontFamily ?? DEFAULT_TEXT_FONT_FAMILY,
+    fontSize: node.fontSize ?? DEFAULT_TEXT_FONT_SIZE,
     fontWeight: node.fontWeight ?? 500,
     lineHeight: node.lineHeight ?? 1.25,
     letterSpacing: node.letterSpacing ?? 0,

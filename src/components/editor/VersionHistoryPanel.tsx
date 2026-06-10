@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { History, Loader2, X } from "lucide-react";
 import { useEditorStore } from "@/stores/useEditorStore";
+import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
@@ -78,6 +79,7 @@ export function VersionHistoryPanel() {
           <input
             value={nameDraft}
             onChange={(e) => setNameDraft(e.target.value)}
+            onKeyDown={(e) => handlePanelFieldKeyDown(e)}
             placeholder="e.g. Before layout refactor"
             className="mb-2 h-9 w-full rounded-md border border-app-border bg-app-toolbar-well px-2.5 text-[12px] text-app-fg outline-none placeholder:text-app-subtle focus:border-[#0d99ff]/50"
           />

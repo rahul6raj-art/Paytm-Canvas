@@ -1,13 +1,16 @@
 import { ROOT, useEditorStore, type EditorNode } from "@/stores/useEditorStore";
+import { canSwapAutoLayoutSiblings } from "@/lib/autoLayoutArrowReorder";
 import { idsToDetachForAutoLayoutDrag } from "@/lib/autoLayoutDrag";
 import {
   computeAutoLayoutInsertIndicator,
   editorNodesToLayoutMap,
+  flowInsertIndexFromPointer,
+  flowInsertIndexToChildOrderIndex,
   getAutoLayoutReorderContext,
-  pointerInsideAutoLayoutContent,
-  reorderChildByPointer,
+  resolveAutoLayoutDropTarget,
   type AutoLayoutReorderContext,
 } from "@/lib/autoLayoutReorder";
+import { isAutoLayoutHandleDragActive } from "@/lib/autoLayout/spacingPaddingDrag";
 import { screenDeltaToWorld } from "@/lib/canvasCoordinates";
 import {
   computeDragSmartGuides,
@@ -99,6 +102,9 @@ export function beginCanvasNodeDrag(opts: {
   clientToWorld: ClientToWorldFn;
   captureTarget: Element;
 }): boolean {
+  if (useEditorStore.getState().transformInteractionMode !== "none") return false;
+  if (isAutoLayoutHandleDragActive()) return false;
+
   const s1 = useEditorStore.getState();
   const dragTargets = s1.selectedIds.filter((sid) => {
     const n = s1.nodes[sid];
@@ -114,22 +120,28 @@ export function beginCanvasNodeDrag(opts: {
   const movingIds =
     swapPartnerId && dragTargets.includes(opts.nodeId) ? [opts.nodeId] : dragTargets;
 
-  const alContext = swapPartnerId
-    ? null
-    : getAutoLayoutReorderContext(movingIds, s1.nodes, s1.nodes);
+  const dragNode = s1.nodes[opts.nodeId];
+  const dragContainerUnit =
+    dragNode?.type === "frame" || dragNode?.type === "group";
+  const alContext =
+    swapPartnerId || dragContainerUnit
+      ? null
+      : getAutoLayoutReorderContext([opts.nodeId], s1.nodes, s1.nodes);
+
+  const dragMovingIds = alContext ? [opts.nodeId] : movingIds;
 
   if (!alContext) {
-    detachAutoLayoutChildrenForDrag(movingIds, s1.nodes);
+    detachAutoLayoutChildrenForDrag(dragMovingIds, s1.nodes);
   }
 
   const st = useEditorStore.getState();
   const startWorld = captureSwapWorldOrigins(
-    swapPartnerId ? [primaryId, swapPartnerId] : movingIds,
+    swapPartnerId ? [primaryId, swapPartnerId] : dragMovingIds,
     st.nodes,
     st.childOrder,
   );
   const startBounds: Record<string, WorldRect> = {};
-  for (const sid of movingIds) {
+  for (const sid of dragMovingIds) {
     startBounds[sid] = getRenderedWorldBounds(sid, st.nodes, st.childOrder);
   }
   if (swapPartnerId) {
@@ -140,8 +152,8 @@ export function beginCanvasNodeDrag(opts: {
     pointerId: opts.pointerId,
     sx: opts.clientX,
     sy: opts.clientY,
-    primaryId,
-    movingIds,
+    primaryId: alContext ? opts.nodeId : primaryId,
+    movingIds: dragMovingIds,
     startWorld,
     startBounds,
     swapPartnerId,
@@ -168,14 +180,17 @@ export function beginCanvasNodeDrag(opts: {
     const world = opts.clientToWorld(clientX, clientY);
 
     if (d.mode === "al-reorder" && d.alContext) {
-      const inside = pointerInsideAutoLayoutContent(
-        d.alContext.parentId,
-        world.x,
-        world.y,
-        state.nodes,
-        state.childOrder,
-      );
-      if (!inside) {
+      const parent = state.nodes[d.alContext.parentId];
+      const parentBounds = parent
+        ? getRenderedWorldBounds(d.alContext.parentId, state.nodes, state.childOrder)
+        : null;
+      const insideParent =
+        parentBounds &&
+        world.x >= parentBounds.x &&
+        world.x <= parentBounds.x + parentBounds.width &&
+        world.y >= parentBounds.y &&
+        world.y <= parentBounds.y + parentBounds.height;
+      if (!insideParent) {
         convertAlReorderToFreeDrag(d);
       } else {
         const local = worldPointToParentLocalFromChildOrder(
@@ -186,12 +201,21 @@ export function beginCanvasNodeDrag(opts: {
           state.childOrder,
         );
         const layoutMap = editorNodesToLayoutMap(state.nodes);
-        const idx = reorderChildByPointer(
-          d.alContext,
+        const flowInsert = flowInsertIndexFromPointer(
+          d.alContext.parentId,
           layoutMap,
           state.childOrder,
           local.x,
           local.y,
+          d.alContext.draggedId,
+        );
+        const idx = flowInsertIndexToChildOrderIndex(
+          d.alContext.parentId,
+          flowInsert,
+          layoutMap,
+          state.childOrder,
+          d.alContext.mode,
+          d.alContext.draggedId,
         );
         if (idx !== d.lastAlInsert) {
           d.lastAlInsert = idx;
@@ -199,7 +223,7 @@ export function beginCanvasNodeDrag(opts: {
         }
         const indicator = computeAutoLayoutInsertIndicator(
           d.alContext.parentId,
-          idx,
+          flowInsert,
           d.alContext.draggedId,
           state.nodes,
           state.childOrder,
@@ -240,6 +264,31 @@ export function beginCanvasNodeDrag(opts: {
       }
     }
 
+    if (!swapTarget) {
+      const alDrop = resolveAutoLayoutDropTarget(
+        world.x,
+        world.y,
+        state.nodes,
+        state.childOrder,
+        d.primaryId,
+        d.primaryId,
+      );
+      if (alDrop) {
+        const indicator = computeAutoLayoutInsertIndicator(
+          alDrop.parentId,
+          alDrop.flowInsertIndex,
+          d.primaryId,
+          state.nodes,
+          state.childOrder,
+        );
+        state.setAutoLayoutReorderIndicator(indicator);
+      } else {
+        state.setAutoLayoutReorderIndicator(null);
+      }
+    } else {
+      state.setAutoLayoutReorderIndicator(null);
+    }
+
     const snap =
       swapTarget != null
         ? { guides: [] as typeof state.guides, measurements: [], dx: 0, dy: 0 }
@@ -253,6 +302,8 @@ export function beginCanvasNodeDrag(opts: {
 
     const fdx2 = fdx + snap.dx;
     const fdy2 = fdy + snap.dy;
+
+    if (Math.abs(fdx2) < 1e-9 && Math.abs(fdy2) < 1e-9) return;
 
     for (const sid of d.movingIds) {
       const sw = d.startWorld[sid]!;
@@ -311,6 +362,10 @@ export function beginCanvasNodeDrag(opts: {
       st.childOrder,
     );
     if (swapDropId && d.startWorld[d.primaryId] && d.startWorld[swapDropId]) {
+      if (canSwapAutoLayoutSiblings(d.primaryId, swapDropId, st.nodes)) {
+        st.swapAutoLayoutSiblings(d.primaryId, swapDropId, { skipHistory: true });
+        return;
+      }
       const swapped = swapNodeWorldPositions(
         d.primaryId,
         swapDropId,
@@ -328,6 +383,34 @@ export function beginCanvasNodeDrag(opts: {
         { skipHistory: true },
       );
       return;
+    }
+
+    const alDrop = resolveAutoLayoutDropTarget(
+      world.x,
+      world.y,
+      st.nodes,
+      st.childOrder,
+      d.primaryId,
+      d.primaryId,
+    );
+    if (alDrop) {
+      const idsToMove = d.movingIds.filter((id) => {
+        const n = st.nodes[id];
+        return (
+          n &&
+          !n.locked &&
+          id !== alDrop.parentId &&
+          !isAncestorOf(st.nodes, id, alDrop.parentId)
+        );
+      });
+      if (idsToMove.length > 0) {
+        let insertAt = alDrop.insertIndex;
+        for (const id of idsToMove) {
+          st.moveNodeToParent(id, alDrop.parentId, insertAt);
+          insertAt += 1;
+        }
+        return;
+      }
     }
 
     const frameHit = pickDeepestFrameAtWorldPoint(world.x, world.y, st.nodes, st.childOrder, {

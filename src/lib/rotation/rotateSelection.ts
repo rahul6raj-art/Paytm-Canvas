@@ -28,6 +28,8 @@ export type SingleRotateSession = {
   startRotation: number;
   startAngle: number;
   centerWorld: { x: number; y: number };
+  /** Frozen at drag start — rotation must not change size or position. */
+  startGeom: { x: number; y: number; width: number; height: number };
 };
 
 export type MultiRotateSession = {
@@ -65,6 +67,7 @@ export function createSingleRotateSession(
       pointerWorld.x - centerWorld.x,
     ),
     centerWorld,
+    startGeom: { x: node.x, y: node.y, width: node.width, height: node.height },
   };
 }
 
@@ -124,17 +127,13 @@ export function applySingleRotate(
   const delta = rotationDeltaDegrees(pointerWorld, session.centerWorld, session.startAngle);
   let next = normalizeRotationDegrees(session.startRotation + delta);
   next = snapRotationDegrees(next, shiftKey);
-  const n = nodes[session.id];
-  if (!n) return { id: session.id, rotation: next, x: 0, y: 0 };
-  const xy = worldCenterToNodeXYFromChildOrder(
-    session.id,
-    nodes,
-    childOrder,
-    session.centerWorld,
-    next,
-    { x: n.x, y: n.y },
-  );
-  return { id: session.id, rotation: next, x: xy.x, y: xy.y };
+  const { startGeom } = session;
+  return {
+    id: session.id,
+    rotation: next,
+    x: startGeom.x,
+    y: startGeom.y,
+  };
 }
 
 export function applyMultiRotatePatches(

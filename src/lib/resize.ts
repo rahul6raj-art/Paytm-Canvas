@@ -3,6 +3,9 @@ export const RESIZE_MIN_DIMENSION = 8;
 
 export type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
+/** Mid-edge handles used for resize (corners are rotate-only in the selection UI). */
+export const EDGE_RESIZE_HANDLES: ResizeHandle[] = ["n", "e", "s", "w"];
+
 export interface Bounds {
   x: number;
   y: number;

@@ -1,6 +1,6 @@
 export function FileCardSkeleton() {
   return (
-    <div className="flex flex-col overflow-hidden rounded-xl border border-app-border/90 bg-app-card shadow-sm">
+    <div className="flex flex-col overflow-hidden rounded-xl border border-app-border-subtle bg-app-card">
       <div className="aspect-[16/10] w-full animate-pulse bg-gradient-to-br from-slate-200 via-slate-100 to-slate-200" />
       <div className="space-y-2.5 p-3">
         <div className="h-4 w-3/4 animate-pulse rounded bg-slate-200" />

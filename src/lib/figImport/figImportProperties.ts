@@ -5,7 +5,12 @@ import {
   type FigPaint,
 } from "openfig-core";
 import type { InstanceOverridePatch } from "@/lib/componentModel";
-import { DEFAULT_GRADIENT_TRANSFORM, newGradientStopId, type FillGradient } from "@/lib/fillGradient";
+import {
+  DEFAULT_GRADIENT_TRANSFORM,
+  newGradientStopId,
+  type FillGradient,
+  type GradientKind,
+} from "@/lib/fillGradient";
 import { newNodeEffectId, type NodeEffect } from "@/lib/nodeEffects";
 import { figmaBlendModeToLayer } from "@/lib/layerBlendMode";
 import type { EditorNode, ImageFitMode, StrokePosition } from "@/stores/useEditorStore";
@@ -123,10 +128,19 @@ export function gradientFillFromPaints(
     rotation = geom.angle;
   }
 
+  const kind: GradientKind =
+    g.type === "radial"
+      ? "radial"
+      : g.type === "angular"
+        ? "angular"
+        : g.type === "diamond"
+          ? "diamond"
+          : "linear";
+
   return {
     fillType: "gradient",
     fillGradient: {
-      kind: g.type === "radial" ? "radial" : "linear",
+      kind,
       transform: { ...DEFAULT_GRADIENT_TRANSFORM, rotation },
       stops,
     },

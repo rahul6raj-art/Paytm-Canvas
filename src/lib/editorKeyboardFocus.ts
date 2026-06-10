@@ -34,6 +34,15 @@ export function isEditableFieldElement(el: EventTarget | null): boolean {
   return false;
 }
 
+/** Event target or focused field — keydown target can differ from activeElement in some trees. */
+export function resolveKeyboardFieldTarget(target: EventTarget | null): EventTarget | null {
+  if (isEditableFieldElement(target)) return target;
+  if (typeof document !== "undefined" && isEditableFieldElement(document.activeElement)) {
+    return document.activeElement;
+  }
+  return null;
+}
+
 export function isMultilineEditableElement(el: EventTarget | null): boolean {
   if (elementTagName(el) === "TEXTAREA") return true;
   if (typeof HTMLElement !== "undefined" && el instanceof HTMLElement && el.isContentEditable) {
@@ -92,8 +101,8 @@ export function shouldBlockDeleteSelectionShortcut(
   target: EventTarget | null,
 ): boolean {
   if (!isDeleteShortcutEvent(e)) return false;
-  const el = target ?? (typeof document !== "undefined" ? document.activeElement : null);
-  return isEditableFieldElement(el) && !isMultilineEditableElement(el);
+  const el = resolveKeyboardFieldTarget(target);
+  return Boolean(el) && !isMultilineEditableElement(el);
 }
 
 /** Let inputs/textareas handle clipboard & undo/redo (code panel import, inspector fields). */
@@ -101,7 +110,7 @@ export function shouldAllowNativeFieldClipboard(
   e: KeyboardEvent,
   target: EventTarget | null,
 ): boolean {
-  if (!isEditableFieldElement(target)) return false;
+  if (!resolveKeyboardFieldTarget(target)) return false;
   if (!(e.metaKey || e.ctrlKey)) return false;
   return (
     e.code === "KeyV" ||
@@ -124,7 +133,9 @@ export function shouldYieldShortcutsToTyping(e: KeyboardEvent, target: EventTarg
     if (e.key === "Escape") return false;
     return true;
   }
-  if (!isEditableFieldElement(target)) return false;
+  const field = resolveKeyboardFieldTarget(target);
+  if (!field) return false;
+  if (shouldAllowNativeFieldClipboard(e, target)) return true;
   if (e.metaKey || e.ctrlKey) return false;
   if (e.key === "Escape") return false;
   if (shouldBlockDeleteSelectionShortcut(e, target)) return true;

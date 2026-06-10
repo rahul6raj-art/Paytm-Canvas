@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 const BACKGROUND_PRESETS = [
   DEFAULT_CANVAS_BACKGROUND,
   CANVAS_WORKSPACE_DARK,
+  "#e8eaed",
   "#ebebeb",
   "#f5f5f5",
   "#ffffff",

@@ -11,6 +11,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, RefreshCw } from "lucide-react";
+import { trySelectAllPanelField } from "@/lib/panelFieldKeyboard";
 import {
   ensureFontFamilyLoaded,
   fontFamilyLabel,
@@ -111,6 +112,7 @@ export function FontFamilyPicker({
   }, []);
 
   const onMenuKeyDown = (e: KeyboardEvent) => {
+    if (trySelectAllPanelField(e)) return;
     if (e.key === "Escape") {
       e.preventDefault();
       close();

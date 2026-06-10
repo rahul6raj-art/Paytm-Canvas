@@ -22,4 +22,15 @@ describe("smoothPointer", () => {
     sched.flush();
     assert.deepEqual(calls, [7]);
   });
+
+  it("flush runs when payload is null (side-effect schedulers)", () => {
+    let runs = 0;
+    const sched = createRafPointerScheduler<null>(() => {
+      runs += 1;
+    });
+    sched.schedule(null);
+    assert.equal(runs, 0);
+    sched.flush();
+    assert.equal(runs, 1);
+  });
 });

@@ -1,0 +1,322 @@
+"use client";
+
+import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { applyMatrixToPoint } from "@/lib/transformMath";
+import { getNodeWorldMatrixFromChildOrder } from "@/lib/editorGraph";
+import {
+  getAutoLayoutInteractionHandles,
+  beginSpacingDrag,
+  beginPaddingDrag,
+  beginFillDividerDrag,
+  subscribeAutoLayoutDragPreview,
+  getAutoLayoutDragPreview,
+} from "@/lib/autoLayout";
+import {
+  AUTO_LAYOUT_SPACING_LINE_SCREEN_PX,
+  AUTO_LAYOUT_SPACING_TICK_SCREEN_PX,
+  CANVAS_HANDLE_SCREEN_PX,
+  CANVAS_VISUAL,
+  screenPxToWorld,
+} from "@/lib/canvasVisual";
+import { clientToWorldFromDocument } from "@/lib/canvasCoordinates";
+import { useEditorStore } from "@/stores/useEditorStore";
+import { useCanvasToWorld } from "./CanvasToWorldContext";
+import { useAutoLayoutHandlesGate } from "./useAutoLayoutHandlesGate";
+import { CanvasEditValueBadge } from "./CanvasEditValueBadge";
+
+function localToWorld(
+  parentId: string,
+  local: { x: number; y: number },
+  nodes: ReturnType<typeof useEditorStore.getState>["nodes"],
+  childOrder: ReturnType<typeof useEditorStore.getState>["childOrder"],
+): { x: number; y: number } {
+  const matrix = getNodeWorldMatrixFromChildOrder(parentId, nodes, childOrder);
+  if (matrix) return applyMatrixToPoint(matrix, local);
+  const parent = nodes[parentId];
+  return { x: (parent?.x ?? 0) + local.x, y: (parent?.y ?? 0) + local.y };
+}
+
+const GAP_COLOR = "#ff24ff";
+const PAD_COLOR = "#0d99ff";
+
+/** Figma-style spacing, padding, and fill divider handles on auto-layout frames. */
+export function AutoLayoutHandlesOverlay() {
+  const { show, id } = useAutoLayoutHandlesGate();
+  const nodes = useEditorStore((s) => s.nodes);
+  const childOrder = useEditorStore((s) => s.childOrder);
+  const zoom = useEditorStore((s) => s.zoom);
+  const pan = useEditorStore((s) => s.pan);
+  const clientToWorld = useCanvasToWorld();
+
+  const preview = useSyncExternalStore(
+    subscribeAutoLayoutDragPreview,
+    getAutoLayoutDragPreview,
+    () => null,
+  );
+
+  const handles = useMemo(() => {
+    if (!show || !id) return null;
+    return getAutoLayoutInteractionHandles(id, nodes, childOrder);
+  }, [show, id, nodes, childOrder]);
+
+  const handlePx = screenPxToWorld(CANVAS_HANDLE_SCREEN_PX, zoom);
+  const hitPx = screenPxToWorld(14, zoom);
+  const lineW = screenPxToWorld(AUTO_LAYOUT_SPACING_LINE_SCREEN_PX, zoom);
+  const spacingTickHalf = screenPxToWorld(AUTO_LAYOUT_SPACING_TICK_SCREEN_PX, zoom);
+
+  const toWorld = useCallback(
+    (local: { x: number; y: number }) => {
+      if (!id) return local;
+      return localToWorld(id, local, nodes, childOrder);
+    },
+    [id, nodes, childOrder],
+  );
+
+  const resolveClientToWorld = useCallback(
+    (clientX: number, clientY: number) =>
+      clientToWorld ?? clientToWorldFromDocument(clientX, clientY, { pan, zoom }),
+    [clientToWorld, pan, zoom],
+  );
+
+  const onSpacingDown = useCallback(
+    (gapIndex: number) => (e: React.PointerEvent) => {
+      if (!id || e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      beginSpacingDrag({
+        nodeId: id,
+        gapIndex,
+        pointerId: e.pointerId,
+        clientX: e.clientX,
+        clientY: e.clientY,
+        clientToWorld: resolveClientToWorld,
+        captureTarget: e.currentTarget,
+      });
+    },
+    [id, resolveClientToWorld],
+  );
+
+  const onPaddingDown = useCallback(
+    (side: "top" | "right" | "bottom" | "left") => (e: React.PointerEvent) => {
+      if (!id || e.button !== 0) return;
+      e.stopPropagation();
+      beginPaddingDrag({
+        nodeId: id,
+        side,
+        pointerId: e.pointerId,
+        clientX: e.clientX,
+        clientY: e.clientY,
+        clientToWorld: resolveClientToWorld,
+        captureTarget: e.currentTarget,
+      });
+    },
+    [id, resolveClientToWorld],
+  );
+
+  const onFillDividerDown = useCallback(
+    (leftChildId: string, rightChildId: string) => (e: React.PointerEvent) => {
+      if (!id || e.button !== 0) return;
+      e.stopPropagation();
+      beginFillDividerDrag({
+        nodeId: id,
+        leftChildId,
+        rightChildId,
+        pointerId: e.pointerId,
+        clientX: e.clientX,
+        clientY: e.clientY,
+        clientToWorld: resolveClientToWorld,
+        captureTarget: e.currentTarget,
+      });
+    },
+    [id, resolveClientToWorld],
+  );
+
+  const spacingBadge = useMemo(() => {
+    if (!preview || preview.nodeId !== id || preview.kind !== "spacing" || !handles) return null;
+    const gapIndex = preview.gapIndex ?? 0;
+    const handle = handles.spacing.find((h) => h.index === gapIndex) ?? handles.spacing[0];
+    if (!handle) return null;
+    const world = toWorld({ x: handle.localX, y: handle.localY });
+    return { x: world.x, y: world.y, label: preview.label };
+  }, [preview, id, handles, toWorld]);
+
+  const otherBadge = useMemo(() => {
+    if (!preview || preview.nodeId !== id || preview.kind === "spacing") return null;
+    if (preview.badgeX == null || preview.badgeY == null) return null;
+    const world = toWorld({ x: preview.badgeX, y: preview.badgeY });
+    return { x: world.x, y: world.y, label: preview.label };
+  }, [preview, id, toWorld]);
+
+  if (!show || !id || !handles) return null;
+
+  const parent = nodes[id];
+  if (!parent) return null;
+
+  const pad = {
+    top: parent.paddingTop ?? 0,
+    right: parent.paddingRight ?? 0,
+    bottom: parent.paddingBottom ?? 0,
+    left: parent.paddingLeft ?? 0,
+  };
+
+  const innerW = Math.max(0, parent.width - pad.left - pad.right);
+  const innerH = Math.max(0, parent.height - pad.top - pad.bottom);
+
+  const padGuides = [
+    { x1: pad.left, y1: pad.top, x2: pad.left + innerW, y2: pad.top, color: PAD_COLOR },
+    { x1: pad.left + innerW, y1: pad.top, x2: pad.left + innerW, y2: pad.top + innerH, color: PAD_COLOR },
+    { x1: pad.left, y1: pad.top + innerH, x2: pad.left + innerW, y2: pad.top + innerH, color: PAD_COLOR },
+    { x1: pad.left, y1: pad.top, x2: pad.left, y2: pad.top + innerH, color: PAD_COLOR },
+  ].map((g) => {
+    const a = toWorld({ x: g.x1, y: g.y1 });
+    const b = toWorld({ x: g.x2, y: g.y2 });
+    return { ...g, x1: a.x, y1: a.y, x2: b.x, y2: b.y };
+  });
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[46] overflow-visible" aria-hidden>
+      <svg className="absolute inset-0 h-full w-full overflow-visible">
+        {padGuides.map((g, i) => (
+          <line
+            key={`pad-${i}`}
+            x1={g.x1}
+            y1={g.y1}
+            x2={g.x2}
+            y2={g.y2}
+            stroke={g.color}
+            strokeWidth={lineW}
+            strokeDasharray={`${lineW * 3} ${lineW * 2}`}
+            opacity={0.85}
+          />
+        ))}
+        {handles.spacing.map((h) => {
+          const a =
+            handles.mode === "horizontal"
+              ? toWorld({ x: h.localX, y: h.localY - spacingTickHalf })
+              : toWorld({ x: h.localX - spacingTickHalf, y: h.localY });
+          const b =
+            handles.mode === "horizontal"
+              ? toWorld({ x: h.localX, y: h.localY + spacingTickHalf })
+              : toWorld({ x: h.localX + spacingTickHalf, y: h.localY });
+          return (
+            <line
+              key={`gap-${h.index}`}
+              x1={a.x}
+              y1={a.y}
+              x2={b.x}
+              y2={b.y}
+              stroke={GAP_COLOR}
+              strokeWidth={lineW}
+              vectorEffect="non-scaling-stroke"
+            />
+          );
+        })}
+      </svg>
+
+      {handles.spacing.map((h) => {
+        const isHorizontal = handles.mode === "horizontal";
+        const lineA = isHorizontal
+          ? toWorld({ x: h.localX, y: h.localY - spacingTickHalf })
+          : toWorld({ x: h.localX - spacingTickHalf, y: h.localY });
+        const lineB = isHorizontal
+          ? toWorld({ x: h.localX, y: h.localY + spacingTickHalf })
+          : toWorld({ x: h.localX + spacingTickHalf, y: h.localY });
+        const minHit = screenPxToWorld(24, zoom);
+        const x0 = Math.min(lineA.x, lineB.x);
+        const x1 = Math.max(lineA.x, lineB.x);
+        const y0 = Math.min(lineA.y, lineB.y);
+        const y1 = Math.max(lineA.y, lineB.y);
+        const hitW = Math.max(x1 - x0, minHit);
+        const hitH = Math.max(y1 - y0, minHit);
+        const arrowPx = screenPxToWorld(12, zoom);
+        return (
+          <button
+            key={`gap-hit-${h.index}`}
+            type="button"
+            data-autolayout-spacing-handle={id}
+            aria-label="Adjust item spacing"
+            className="pointer-events-auto absolute touch-none flex items-center justify-center border-0 bg-[rgba(255,36,255,0.14)] p-0"
+            style={{
+              left: (x0 + x1) / 2 - hitW / 2,
+              top: (y0 + y1) / 2 - hitH / 2,
+              width: hitW,
+              height: hitH,
+              cursor: isHorizontal ? "ew-resize" : "ns-resize",
+            }}
+            onPointerDown={onSpacingDown(h.index)}
+          >
+            <span
+              className="pointer-events-none select-none font-bold leading-none drop-shadow-sm"
+              style={{ color: GAP_COLOR, fontSize: arrowPx }}
+              aria-hidden
+            >
+              {isHorizontal ? "↔" : "↕"}
+            </span>
+          </button>
+        );
+      })}
+
+      {handles.padding.map((h) => {
+        const w = toWorld({ x: h.localX, y: h.localY });
+        const cursor =
+          h.side === "top" || h.side === "bottom" ? "ns-resize" : "ew-resize";
+        return (
+          <button
+            key={`pad-${h.side}`}
+            type="button"
+            data-autolayout-padding-handle={id}
+            aria-label={`Adjust ${h.side} padding`}
+            className="pointer-events-auto absolute rounded-sm border border-white shadow-sm"
+            style={{
+              left: w.x - handlePx / 2,
+              top: w.y - handlePx / 2,
+              width: handlePx,
+              height: handlePx,
+              background: PAD_COLOR,
+              cursor,
+            }}
+            onPointerDown={onPaddingDown(h.side)}
+          />
+        );
+      })}
+
+      {handles.fillDividers.map((h) => {
+        const w = toWorld({ x: h.localX, y: h.localY });
+        return (
+          <button
+            key={`fill-${h.index}`}
+            type="button"
+            aria-label="Adjust fill distribution"
+            className="pointer-events-auto absolute rounded-full border-2 border-white"
+            style={{
+              left: w.x - hitPx / 2,
+              top: w.y - hitPx / 2,
+              width: hitPx,
+              height: hitPx,
+              background: CANVAS_VISUAL.selection,
+              cursor: handles.mode === "horizontal" ? "ew-resize" : "ns-resize",
+            }}
+            onPointerDown={onFillDividerDown(h.leftChildId, h.rightChildId)}
+          />
+        );
+      })}
+
+      {spacingBadge ? (
+        <CanvasEditValueBadge
+          x={spacingBadge.x}
+          y={spacingBadge.y}
+          zoom={zoom}
+          placement="center"
+          background={GAP_COLOR}
+        >
+          {spacingBadge.label}
+        </CanvasEditValueBadge>
+      ) : null}
+      {otherBadge ? (
+        <CanvasEditValueBadge x={otherBadge.x} y={otherBadge.y} zoom={zoom}>
+          {otherBadge.label}
+        </CanvasEditValueBadge>
+      ) : null}
+    </div>
+  );
+}

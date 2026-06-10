@@ -595,9 +595,9 @@ export function DashboardShell() {
               <button
                 type="button"
                 onClick={() => openAIModal("dashboard")}
-                className="inline-flex items-center gap-2 rounded-lg border border-violet-200 bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2 text-[13px] font-semibold text-app-bg shadow-sm transition-opacity hover:opacity-95"
+                className="inline-flex items-center gap-2 rounded-lg border border-violet-400/40 bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2 text-[13px] font-semibold text-white shadow-sm transition-opacity hover:opacity-95"
               >
-                <Sparkles className="h-4 w-4" strokeWidth={2} />
+                <Sparkles className="h-4 w-4 text-white" strokeWidth={2} />
                 Generate with AI
               </button>
               <button

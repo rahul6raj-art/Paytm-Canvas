@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlignStartHorizontal, ChevronDown } from "lucide-react";
+import { AlignLeft, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { alignableSelectionIds } from "@/lib/alignSelection";
 import { useEditorStore } from "@/stores/useEditorStore";
@@ -63,7 +63,7 @@ export function AlignToolbarDropdown() {
                 : "border-app-border-subtle bg-app-toolbar-well text-app-subtle hover:border-white/10 hover:text-app-muted",
           )}
         >
-          <AlignStartHorizontal className="h-3.5 w-3.5" strokeWidth={1.75} />
+          <AlignLeft className="h-3.5 w-3.5" strokeWidth={1.75} />
           <ChevronDown className="h-3 w-3 opacity-70" strokeWidth={2} />
         </button>
       </div>

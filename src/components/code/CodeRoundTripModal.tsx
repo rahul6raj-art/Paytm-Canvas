@@ -211,10 +211,6 @@ export function CodeRoundTripModal() {
             </span>
             <div>
               <h2 className="text-[17px] font-semibold text-white">Design ↔ Code</h2>
-              <p className="mt-0.5 max-w-lg text-[12px] leading-relaxed text-app-muted">
-                MagicPath-style: capture a live React preview into editable layers, edit on canvas,
-                export React with 1:1 mapping.
-              </p>
             </div>
           </div>
           <button
@@ -336,12 +332,6 @@ export function CodeRoundTripModal() {
 
               {importMethod === "live" ? (
                 <>
-                  <div className="rounded-lg border border-sky-500/25 bg-sky-500/10 px-3 py-2.5 text-[11px] leading-relaxed text-sky-100/90">
-                    <strong className="font-semibold">Recommended (like MagicPath Web Capture).</strong>{" "}
-                    Run your app or Storybook locally, then capture the rendered DOM with real CSS —
-                    not a static parse. Paste the same <code className="text-sky-200/80">.tsx</code>{" "}
-                    below (optional) to map custom components back on export.
-                  </div>
                   <ol className="list-decimal space-y-1 pl-5 text-[11px] text-app-muted">
                     <li>Start dev server or Storybook (e.g. port 6006).</li>
                     <li>Open the screen URL in a browser to confirm it renders.</li>

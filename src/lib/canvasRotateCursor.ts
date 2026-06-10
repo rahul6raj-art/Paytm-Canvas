@@ -6,6 +6,11 @@ export const CANVAS_ROTATE_CURSOR_FALLBACK = "grab";
 const ROTATE_CURSOR_HOTSPOT = 12;
 const ROTATE_CURSOR_SIZE = 24;
 
+/** Quarter-arc radius in the 24×24 glyph (center 12,12). */
+const ARC_RADIUS = 7.07;
+const ARC_START = { x: 7, y: 17 };
+const ARC_END = { x: 17, y: 7 };
+
 /** Base glyph angle (deg) before adding selection rotation. */
 const CORNER_CURSOR_BASE_DEG: Record<"nw" | "ne" | "se" | "sw", number> = {
   nw: 135,
@@ -18,15 +23,35 @@ const TOP_ROTATE_CURSOR_BASE_DEG = 90;
 
 const cursorCssCache = new Map<number, string>();
 
+function arrowHeadPath(tipX: number, tipY: number, dirDeg: number): string {
+  const rad = (dirDeg * Math.PI) / 180;
+  const len = 3.6;
+  const halfW = 2.15;
+  const backRad = rad + Math.PI;
+  const bx = tipX + len * Math.cos(backRad);
+  const by = tipY + len * Math.sin(backRad);
+  const lx = bx + halfW * Math.cos(backRad + Math.PI / 2);
+  const ly = by + halfW * Math.sin(backRad + Math.PI / 2);
+  const rx = bx + halfW * Math.cos(backRad - Math.PI / 2);
+  const ry = by + halfW * Math.sin(backRad - Math.PI / 2);
+  const f = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
+  return `M ${f(tipX)} ${f(tipY)} L ${f(lx)} ${f(ly)} L ${f(rx)} ${f(ry)} Z`;
+}
+
+/** Figma-style bidirectional quarter-arc rotate glyph (white outline, dark fill). */
 function rotateCursorSvg(angleDeg: number): string {
   const r = Math.round(angleDeg * 10) / 10;
+  const arc = `M ${ARC_START.x} ${ARC_START.y} A ${ARC_RADIUS} ${ARC_RADIUS} 0 0 1 ${ARC_END.x} ${ARC_END.y}`;
+  const startArrow = arrowHeadPath(ARC_START.x, ARC_START.y, 225);
+  const endArrow = arrowHeadPath(ARC_END.x, ARC_END.y, 315);
+
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${ROTATE_CURSOR_SIZE}" height="${ROTATE_CURSOR_SIZE}" viewBox="0 0 24 24">` +
     `<g transform="translate(12,12) rotate(${r}) translate(-12,-12)">` +
-    `<path d="M6.5 16.5 A9 9 0 0 1 16.5 6.5" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round"/>` +
-    `<path d="M6.5 16.5 A9 9 0 0 1 16.5 6.5" fill="none" stroke="#111" stroke-width="1.75" stroke-linecap="round"/>` +
-    `<path d="M6.2 16.8 L4.1 14.4 L7.4 14.6 Z" fill="#111" stroke="#fff" stroke-width="0.8" stroke-linejoin="round"/>` +
-    `<path d="M16.8 6.2 L19.1 8.5 L15.6 8.3 Z" fill="#111" stroke="#fff" stroke-width="0.8" stroke-linejoin="round"/>` +
+    `<path d="${arc}" fill="none" stroke="#ffffff" stroke-width="2.8" stroke-linecap="round"/>` +
+    `<path d="${arc}" fill="none" stroke="#111111" stroke-width="1.35" stroke-linecap="round"/>` +
+    `<path d="${startArrow}" fill="#111111" stroke="#ffffff" stroke-width="0.9" stroke-linejoin="round"/>` +
+    `<path d="${endArrow}" fill="#111111" stroke="#ffffff" stroke-width="0.9" stroke-linejoin="round"/>` +
     `</g></svg>`
   );
 }
@@ -51,7 +76,7 @@ export function rotateCursorCssForAngle(angleDeg: number): string {
 
   const dataUrl = rotateCursorDataUrl(angleDeg);
   const css = dataUrl
-    ? `url(${dataUrl}) ${ROTATE_CURSOR_HOTSPOT} ${ROTATE_CURSOR_HOTSPOT}, ${CANVAS_ROTATE_CURSOR_FALLBACK}`
+    ? `url("${dataUrl}") ${ROTATE_CURSOR_HOTSPOT} ${ROTATE_CURSOR_HOTSPOT}, ${CANVAS_ROTATE_CURSOR_FALLBACK}`
     : CANVAS_ROTATE_CURSOR_FALLBACK;
   cursorCssCache.set(key, css);
   return css;
@@ -85,7 +110,7 @@ export function canvasViewportRotateCursorCss(
 
 export function isRotateCursorActive(input: {
   transformInteractionMode: "none" | "resize" | "rotate";
-  rotateHandleHoverCount: number;
+  rotateHandleHovered: boolean;
 }): boolean {
-  return input.transformInteractionMode === "rotate" || input.rotateHandleHoverCount > 0;
+  return input.transformInteractionMode === "rotate" || input.rotateHandleHovered;
 }

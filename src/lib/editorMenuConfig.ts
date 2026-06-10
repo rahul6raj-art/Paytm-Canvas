@@ -143,6 +143,8 @@ export const EDITOR_MENUS: EditorMenuDef[] = [
       cmd("create-component"),
       cmd("detach-instance"),
       div(),
+      cmd("outline-stroke"),
+      div(),
       cmd("bring-forward"),
       cmd("send-backward"),
       cmd("bring-to-front"),

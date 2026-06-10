@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown } from "lucide-react";
 import { normalizeHex, parseHexInputLive } from "@/lib/color";
+import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/useEditorStore";
 import {
@@ -196,19 +197,19 @@ export function ColorInput({
             onChange={(e) => handleTextChange(e.target.value)}
             onBlur={finishEditing}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                finishEditing();
-                (e.target as HTMLInputElement).blur();
-              }
-              if (e.key === "Escape") {
-                e.preventDefault();
-                dirtyLiveRef.current = false;
-                setText(safe);
-                lastAppliedRef.current = safe;
-                setFocused(false);
-                (e.target as HTMLInputElement).blur();
-              }
+              handlePanelFieldKeyDown(e, {
+                onEnter: () => {
+                  finishEditing();
+                  e.currentTarget.blur();
+                },
+                onEscape: () => {
+                  dirtyLiveRef.current = false;
+                  setText(safe);
+                  lastAppliedRef.current = safe;
+                  setFocused(false);
+                  e.currentTarget.blur();
+                },
+              });
             }}
           />
         </div>

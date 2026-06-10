@@ -86,7 +86,7 @@ export function DashboardSidebar({
               >
                 <span>{sectionLabels[w.section]}</span>
                 {w.id === activeWorkspace.id ? (
-                  <span className="text-[10px] font-medium text-slate-300">Active</span>
+                  <span className="text-[10px] font-medium opacity-70">Active</span>
                 ) : null}
               </button>
             </li>

@@ -1,4 +1,5 @@
 import { fillCss, normalizeHex } from "@/lib/color";
+import { fillPaintCss } from "@/lib/fillGradient";
 import {
   legacyEffectShadowAppend,
   resolveEffectBoxShadow,
@@ -57,16 +58,20 @@ export function nodeToReactStyle(
   if (blend.isolation) style.isolation = blend.isolation;
 
   if (node.type === "text") {
+    const fontSize = resolved.fontSize ?? 14;
+    const lhFactor = resolved.lineHeight ?? 1.25;
     style.color = resolved.textColor ?? resolved.fill ?? "#111111";
     style.fontFamily = resolved.fontFamily ?? "Inter, system-ui, sans-serif";
-    style.fontSize = resolved.fontSize ?? 13;
+    style.fontSize = fontSize;
     style.fontWeight = resolved.fontWeight ?? 500;
-    style.lineHeight = resolved.lineHeight ?? 1.25;
+    // Pixel line-height matches canvas text layout and prevents bleed into adjacent layers.
+    style.lineHeight = `${Math.round(fontSize * lhFactor * 100) / 100}px`;
     if (resolved.letterSpacing) style.letterSpacing = resolved.letterSpacing;
     style.whiteSpace = "pre-wrap";
     style.margin = 0;
     style.padding = "2px 4px";
-    style.overflow = "visible";
+    style.overflow = "hidden";
+    style.display = "block";
     return style;
   }
 
@@ -79,7 +84,7 @@ export function nodeToReactStyle(
   const compositeGroup = isBooleanGroup(node) || isMaskGroup(node);
 
   if (!compositeGroup) {
-    const bg = fillCss(resolved.fill, resolved.fillOpacity, resolved.fillEnabled);
+    const bg = fillPaintCss(resolved);
     if (bg !== "transparent") style.background = bg;
   }
 

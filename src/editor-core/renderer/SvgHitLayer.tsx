@@ -22,6 +22,7 @@ import { useCanvasInteraction } from "@/components/editor/CanvasInteractionConte
 import { maskGroupChildHitOrder } from "@/lib/booleanGeometry";
 import {
   applyMoveToolPointerSelection,
+  isAdditiveSelectionClick,
   drillTargetForDoubleClick,
   selectionTargetForClick,
   shouldCollapseContainerHits,
@@ -177,9 +178,9 @@ function HitSubtree({
   onLeave: (nodeId: string) => void;
 }) {
   const node = nodes[nodeId];
+  const objectEditModeNodeId = useEditorStore((s) => s.objectEditModeNodeId);
   if (!node?.visible) return null;
   const kids = childOrder[nodeId] ?? [];
-  const objectEditModeNodeId = useEditorStore((s) => s.objectEditModeNodeId);
   const collapseChildren = shouldCollapseContainerHits(
     nodeId,
     nodes,
@@ -248,10 +249,7 @@ export function SvgHitLayer({
   const tool = useEditorStore((s) => s.tool);
   const editorMode = useEditorStore((s) => s.editorMode);
   const isPlacingComment = useEditorStore((s) => s.isPlacingComment);
-
-  if (isCanvasBgCreationTool(tool, editorMode, { isPlacingComment })) {
-    return null;
-  }
+  const hideForCreationTool = isCanvasBgCreationTool(tool, editorMode, { isPlacingComment });
 
   const toWorld = useCanvasToWorld();
   const { spaceDown, panning: canvasPanning } = useCanvasInteraction();
@@ -364,13 +362,13 @@ export function SvgHitLayer({
       if (editorMode === "inspect") {
         e.stopPropagation();
         if (tool === "comment" || tool === "pen" || tool === "pencil" || e.button === 1) return;
-        select(targetId, e.shiftKey);
+        select(targetId, isAdditiveSelectionClick(e));
         return;
       }
 
       if (node.locked) {
         e.stopPropagation();
-        if (isCanvasSelectTool()) select(targetId, e.shiftKey);
+        if (isCanvasSelectTool()) select(targetId, isAdditiveSelectionClick(e));
         return;
       }
 
@@ -379,11 +377,14 @@ export function SvgHitLayer({
       if (tool === "comment" || tool === "pen" || tool === "pencil" || e.button === 1) return;
 
       if (tool !== "move" && tool !== "frame") {
-        select(targetId, e.shiftKey);
+        select(targetId, isAdditiveSelectionClick(e));
         return;
       }
 
-      applyMoveToolPointerSelection(targetId, st.selectedIds, e.shiftKey, select);
+      const additive = isAdditiveSelectionClick(e);
+      applyMoveToolPointerSelection(targetId, st.selectedIds, additive, select);
+
+      if (additive) return;
 
       if (e.button !== 0) return;
       if (!canCanvasObjectDrag()) return;
@@ -391,7 +392,7 @@ export function SvgHitLayer({
       if (e.altKey && !prepareAltDragDuplicate(targetId)) return;
 
       beginCanvasNodeDrag({
-        nodeId: targetId,
+        nodeId,
         pointerId: e.pointerId,
         clientX: e.clientX,
         clientY: e.clientY,
@@ -401,6 +402,8 @@ export function SvgHitLayer({
     },
     [clientToWorld, spaceDown, canvasPanning],
   );
+
+  if (hideForCreationTool) return null;
 
   return (
     <svg

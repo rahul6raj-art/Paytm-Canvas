@@ -14,6 +14,7 @@ import {
   getBooleanEligibleSelection,
   isMaskGroup,
 } from "@/lib/booleanGeometry";
+import { canOutlineStroke } from "@/lib/outlineStroke";
 
 type Item =
   | { type: "item"; id: string; label: string; hint?: string; disabled?: boolean; onSelect: () => void }
@@ -51,6 +52,7 @@ export function EditorContextMenu() {
   const createBooleanGroup = useEditorStore((s) => s.createBooleanGroup);
   const updateBooleanOperation = useEditorStore((s) => s.updateBooleanOperation);
   const flattenSelection = useEditorStore((s) => s.flattenSelection);
+  const outlineStrokeSelection = useEditorStore((s) => s.outlineStrokeSelection);
   const enterObjectEditMode = useEditorStore((s) => s.enterObjectEditMode);
   const useSelectionAsMask = useEditorStore((s) => s.useSelectionAsMask);
   const releaseMask = useEditorStore((s) => s.releaseMask);
@@ -116,6 +118,23 @@ export function EditorContextMenu() {
           { type: "item" as const, id: "bool-e", label: "Exclude", hint: "⌘⌥E", onSelect: () => createBooleanGroup("exclude") },
           { type: "item" as const, id: "bool-mask", label: "Use as mask", hint: "⌘⌥M", onSelect: () => useSelectionAsMask() },
         ] satisfies Item[])
+      : [];
+
+    const canOutline =
+      editorMode === "design" &&
+      selectedIds.length === 1 &&
+      canOutlineStroke(node);
+
+    const outlineItems: Item[] = canOutline
+      ? [
+          {
+            type: "item",
+            id: "outline-stroke",
+            label: "Outline stroke",
+            hint: "⌘⌥O",
+            onSelect: () => outlineStrokeSelection(),
+          },
+        ]
       : [];
 
     const boolGroupItems: Item[] = isBoolGroup
@@ -313,7 +332,10 @@ export function EditorContextMenu() {
       ...boolItems,
       ...boolGroupItems,
       ...maskItems,
-      ...(boolItems.length || boolGroupItems.length || maskItems.length ? [{ type: "sep" as const }] : []),
+      ...outlineItems,
+      ...(boolItems.length || boolGroupItems.length || maskItems.length || outlineItems.length
+        ? [{ type: "sep" as const }]
+        : []),
       {
         type: "item",
         id: "lock",

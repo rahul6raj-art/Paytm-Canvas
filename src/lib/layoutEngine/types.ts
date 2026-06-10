@@ -102,6 +102,17 @@ export function clampDimension(value: number, min?: number, max?: number): numbe
   return v;
 }
 
+/** Total gap span between `itemCount` flow children (positioning — may be negative). */
+export function flowGapSpan(gap: number, itemCount: number): number {
+  const gaps = Math.max(0, itemCount - 1);
+  return gap * gaps;
+}
+
+/** Gap span for hug / content / fill sizing — negative gap must not shrink children or frames. */
+export function flowGapForSizing(gap: number, itemCount: number): number {
+  return Math.max(0, gap) * Math.max(0, itemCount - 1);
+}
+
 export function paddingBox(n: LayoutEngineNode) {
   return {
     top: n.paddingTop ?? LAYOUT_DEFAULTS.paddingTop,

@@ -33,8 +33,8 @@ import { ToolButton } from "./ToolButton";
 import { ShapeToolDropdown } from "./ShapeToolDropdown";
 import { FrameToolDropdown } from "./FrameToolDropdown";
 import { AlignToolbarDropdown } from "./AlignToolbarDropdown";
+import { StrokeWidthToolbar } from "./StrokeWidthToolbar";
 import { BooleanToolbarDropdown } from "./BooleanToolbarDropdown";
-import { TextTypographyBar } from "./TextTypographyBar";
 import { DocumentTitleField } from "./DocumentTitleField";
 import { AvatarStack } from "./AvatarStack";
 import { Button } from "@/components/ui/button";
@@ -539,8 +539,6 @@ export function TopToolbar() {
       </div>
       </div>
 
-      {editorMode === "design" ? <TextTypographyBar /> : null}
-
       <div className="flex h-9 min-w-0 items-center justify-center gap-2 border-t border-app-border-subtle px-2">
         <div
           className="flex shrink-0 items-center gap-px rounded-lg border border-app-border-subtle bg-app-toolbar-well p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
@@ -580,6 +578,7 @@ export function TopToolbar() {
           ))}
           <FrameToolDropdown />
           <ShapeToolDropdown />
+          <StrokeWidthToolbar />
           <AlignToolbarDropdown />
           <BooleanToolbarDropdown />
           <ToolButton

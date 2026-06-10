@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   isToolShortcutEvent,
+  resolveKeyboardFieldTarget,
   shouldAllowNativeFieldClipboard,
   shouldBlockDeleteSelectionShortcut,
   shouldYieldShortcutsToTyping,
@@ -114,5 +115,43 @@ describe("editorKeyboardFocus shortcuts", () => {
     } as KeyboardEvent;
     assert.equal(shouldAllowNativeFieldClipboard(e, fakeTextarea()), true);
     assert.equal(shouldAllowNativeFieldClipboard(e, null), false);
+  });
+
+  it("yields Cmd+A and arrow keys when activeElement is an inspector input", () => {
+    if (typeof document === "undefined") return;
+
+    const input = document.createElement("input");
+    const prevActive = document.activeElement;
+    document.body.appendChild(input);
+
+    try {
+      input.focus();
+      assert.equal(resolveKeyboardFieldTarget(null), input);
+
+      const selectAll = {
+        key: "a",
+        code: "KeyA",
+        metaKey: true,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+      } as KeyboardEvent;
+      assert.equal(shouldYieldShortcutsToTyping(selectAll, null), true);
+      assert.equal(shouldAllowNativeFieldClipboard(selectAll, null), true);
+
+      const arrowDown = {
+        key: "ArrowDown",
+        code: "ArrowDown",
+        metaKey: false,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+      } as KeyboardEvent;
+      assert.equal(shouldYieldShortcutsToTyping(arrowDown, null), true);
+    } finally {
+      if (prevActive instanceof HTMLElement) prevActive.focus();
+      else input.blur();
+      input.remove();
+    }
   });
 });

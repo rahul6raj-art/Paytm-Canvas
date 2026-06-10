@@ -21,7 +21,8 @@ export type RafPointerScheduler<T> = {
 
 /** At most one `flushFn` per animation frame; keeps the latest payload. */
 export function createRafPointerScheduler<T>(flushFn: (payload: T) => void): RafPointerScheduler<T> {
-  let pending: T | null = null;
+  let pending: T | undefined;
+  let hasPending = false;
   let rafId = 0;
 
   const flush = () => {
@@ -33,15 +34,17 @@ export function createRafPointerScheduler<T>(flushFn: (payload: T) => void): Raf
       }
       rafId = 0;
     }
-    if (pending === null) return;
-    const p = pending;
-    pending = null;
+    if (!hasPending) return;
+    hasPending = false;
+    const p = pending as T;
+    pending = undefined;
     flushFn(p);
   };
 
   return {
     schedule(payload: T) {
       pending = payload;
+      hasPending = true;
       if (rafId) return;
       rafId = scheduleFrame(() => {
         rafId = 0;
@@ -58,7 +61,8 @@ export function createRafPointerScheduler<T>(flushFn: (payload: T) => void): Raf
         }
       }
       rafId = 0;
-      pending = null;
+      hasPending = false;
+      pending = undefined;
     },
   };
 }

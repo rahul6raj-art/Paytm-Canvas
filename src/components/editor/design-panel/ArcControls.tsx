@@ -7,6 +7,7 @@ import {
   sweepPercentToDeg,
 } from "@/lib/shapes/ellipseArc";
 import { appFieldClass } from "@/lib/appFieldStyles";
+import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
 import type { EditorNode, NodeStylePatch } from "@/stores/useEditorStore";
 
@@ -74,16 +75,13 @@ function ArcSegmentInput({
         onChange={(e) => onChange(e.target.value)}
         onBlur={onCommit}
         onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            onCommit();
-            (e.target as HTMLInputElement).blur();
-            return;
-          }
-          if ((e.key === "ArrowUp" || e.key === "ArrowDown") && onNudge) {
-            e.preventDefault();
-            onNudge(e.key === "ArrowUp" ? 1 : -1, e.shiftKey, e.altKey);
-          }
+          handlePanelFieldKeyDown(e, {
+            onEnter: () => {
+              onCommit();
+              e.currentTarget.blur();
+            },
+            onArrowNudge: onNudge,
+          });
         }}
       />
     </div>

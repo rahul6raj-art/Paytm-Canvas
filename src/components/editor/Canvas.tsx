@@ -12,6 +12,8 @@ import { AltMeasureLayer } from "./AltMeasureLayer";
 import { DragSnapOverlay } from "./DragSnapOverlay";
 import { SwapDragOverlay } from "./SwapDragOverlay";
 import { AutoLayoutReorderOverlay } from "./AutoLayoutReorderOverlay";
+import { AutoLayoutHandlesOverlay } from "./AutoLayoutHandlesOverlay";
+import { AutoLayoutHoverOverlay } from "./AutoLayoutHoverOverlay";
 import { pickLayoutGuideAt } from "@/lib/layoutGuidePick";
 import { LayoutGuidesOverlay } from "./LayoutGuidesOverlay";
 import { InspectMeasurementsLayer } from "./InspectMeasurementsLayer";
@@ -44,6 +46,7 @@ import {
 } from "@/lib/canvasInteractionGuards";
 import { boundsFromDrag, lineGeometryFromDrag, toolToShapeType, type ShapeType } from "@/lib/shapes";
 import { getRenderedWorldTopLeft } from "@/lib/editorGraph";
+import { pathToSvgD } from "@/lib/pathGeometry";
 
 const PEN_CURVE_DRAG_THRESHOLD = 4;
 import { wheelZoomFactor, zoomAtScreenPoint } from "@/lib/canvasZoom";
@@ -158,6 +161,57 @@ function PenStrokePreview({
           fill="none"
           stroke="#22c55e"
           strokeWidth={2}
+          vectorEffect="non-scaling-stroke"
+        />
+      ) : null}
+    </svg>
+  );
+}
+
+function PencilStrokePreview({
+  drawId,
+  nodes,
+  childOrder,
+}: {
+  drawId: string;
+  nodes: Record<string, EditorNode>;
+  childOrder: Record<string, string[]>;
+}) {
+  const n = nodes[drawId];
+  const pts = n?.pathPoints ?? [];
+  if (!n || pts.length === 0) return null;
+  const origin = getRenderedWorldTopLeft(drawId, nodes, childOrder);
+  const worldPts = pts.map((p) => ({
+    ...p,
+    x: origin.x + p.x,
+    y: origin.y + p.y,
+  }));
+  const d = pathToSvgD(worldPts, false);
+  const sw = n.strokeWidth ?? 2;
+  const stroke = n.strokeColor ?? CANVAS_VISUAL.selection;
+  const first = worldPts[0];
+  return (
+    <svg
+      className="pointer-events-none absolute inset-0 z-[46] h-full w-full overflow-visible"
+      aria-hidden
+    >
+      {d && pts.length >= 2 ? (
+        <path
+          d={d}
+          fill="none"
+          stroke={stroke}
+          strokeWidth={sw}
+          strokeLinecap={n.strokeLinecap ?? "round"}
+          strokeLinejoin={n.strokeLinejoin ?? "round"}
+          vectorEffect="non-scaling-stroke"
+        />
+      ) : null}
+      {pts.length === 1 && first ? (
+        <circle
+          cx={first.x}
+          cy={first.y}
+          r={Math.max(1, sw / 2)}
+          fill={stroke}
           vectorEffect="non-scaling-stroke"
         />
       ) : null}
@@ -300,7 +354,7 @@ export function Canvas() {
   const canvasBgRef = useRef<HTMLDivElement>(null);
   const zoom = useEditorStore((s) => s.zoom);
   const transformInteractionMode = useEditorStore((s) => s.transformInteractionMode);
-  const rotateHandleHoverCount = useEditorStore((s) => s.rotateHandleHoverCount);
+  const rotateHandleHovered = useEditorStore((s) => s.rotateHandleHovered);
   const rotateHandleHoverHandle = useEditorStore((s) => s.rotateHandleHoverHandle);
   const pan = useEditorStore((s) => s.pan);
   const setPan = useEditorStore((s) => s.setPan);
@@ -342,6 +396,7 @@ export function Canvas() {
   const isPlacingComment = useEditorStore((s) => s.isPlacingComment);
   const addComment = useEditorStore((s) => s.addComment);
   const penDrawingNodeId = useEditorStore((s) => s.penDrawingNodeId);
+  const pencilDrawingNodeId = useEditorStore((s) => s.pencilDrawingNodeId);
   const nodes = useEditorStore((s) => s.nodes);
 
   const [penHoverWorld, setPenHoverWorld] = useState<{ x: number; y: number } | null>(null);
@@ -422,6 +477,8 @@ export function Canvas() {
       registerMarqueeAbortHandler(null);
       frameSessionCleanupRef.current?.();
       shapeSessionCleanupRef.current?.();
+      pencilSessionCleanupRef.current?.();
+      penSessionCleanupRef.current?.();
     };
   }, []);
 
@@ -439,6 +496,16 @@ export function Canvas() {
       penPlacementRef.current = null;
       setPenPlacement(null);
     }
+  }, [tool]);
+
+  useEffect(() => {
+    if (tool !== "pencil") {
+      pencilSessionCleanupRef.current?.();
+      return;
+    }
+    frameSessionCleanupRef.current?.();
+    shapeSessionCleanupRef.current?.();
+    textSessionCleanupRef.current?.();
   }, [tool]);
 
   useEffect(() => {
@@ -559,7 +626,8 @@ export function Canvas() {
   }, []);
 
   const onBgPointerDown = (e: React.PointerEvent) => {
-    if (shouldSuppressCanvasPointer()) {
+    const liveTool = useEditorStore.getState().tool;
+    if (shouldSuppressCanvasPointer() && liveTool !== "pencil") {
       e.preventDefault();
       e.stopPropagation();
       return;
@@ -807,7 +875,9 @@ export function Canvas() {
         creationBranch = "pencil";
         pencilSessionCleanupRef.current?.();
         const w0 = toWorld(e.clientX, e.clientY);
-        st.startPencilStroke(w0);
+        useEditorStore.getState().startPencilStroke(w0);
+        if (!useEditorStore.getState().pencilDrawingNodeId) return;
+        useEditorStore.getState().extendPencilStrokeCoalesced([w0]);
 
         const target = pointerCaptureTarget();
         const capId = e.pointerId;
@@ -834,11 +904,13 @@ export function Canvas() {
           } catch {
             /* ignore */
           }
+          const live = useEditorStore.getState();
           if (!commit) {
-            st.cancelPencilStroke();
+            live.cancelPencilStroke();
             return;
           }
-          st.finishPencilStroke();
+          live.finishPencilStroke();
+          suppressPostCreationPointer();
         };
 
         pencilSessionCleanupRef.current = () => finish(false);
@@ -847,7 +919,7 @@ export function Canvas() {
         const pencilScheduler = createRafPointerScheduler<null>(() => {
           if (pencilBatch.length === 0) return;
           const pts = pencilBatch.splice(0, pencilBatch.length);
-          st.extendPencilStrokeCoalesced(pts);
+          useEditorStore.getState().extendPencilStrokeCoalesced(pts);
         });
         const onMove = (ev: PointerEvent) => {
           if (ev.pointerId !== capId) return;
@@ -1069,7 +1141,8 @@ export function Canvas() {
   };
 
   const onViewportPointerDownCapture = (e: React.PointerEvent) => {
-    if (shouldSuppressCanvasPointer()) {
+    const liveTool = useEditorStore.getState().tool;
+    if (shouldSuppressCanvasPointer() && liveTool !== "pencil") {
       e.preventDefault();
       e.stopPropagation();
       return;
@@ -1125,6 +1198,9 @@ export function Canvas() {
       const domHitId =
         tgt?.closest?.("[data-node-id]")?.getAttribute("data-node-id") ??
         tgt?.closest?.("[data-canvas-node]")?.getAttribute("data-canvas-node") ??
+        tgt?.closest?.("[data-frame-label]")?.getAttribute("data-frame-label") ??
+        tgt?.closest?.("[data-autolayout-spacing-handle]")?.getAttribute("data-autolayout-spacing-handle") ??
+        tgt?.closest?.("[data-autolayout-padding-handle]")?.getAttribute("data-autolayout-padding-handle") ??
         null;
       if (!hitId && !domHitId) {
         const captureEl = viewportRef.current ?? (e.currentTarget as HTMLElement);
@@ -1181,7 +1257,7 @@ export function Canvas() {
 
   const rotateCursorActive = isRotateCursorActive({
     transformInteractionMode,
-    rotateHandleHoverCount,
+    rotateHandleHovered,
   });
 
   const selectionRotationDeg =
@@ -1375,6 +1451,13 @@ export function Canvas() {
               childOrder={childOrder}
             />
           ) : null}
+          {editorMode === "design" && tool === "pencil" && pencilDrawingNodeId ? (
+            <PencilStrokePreview
+              drawId={pencilDrawingNodeId}
+              nodes={nodes}
+              childOrder={childOrder}
+            />
+          ) : null}
           {editorMode === "design" ? <CommentPinLayer /> : null}
           {frameDraft ? (
             <div
@@ -1410,6 +1493,8 @@ export function Canvas() {
           <DragSnapOverlay />
           <SwapDragOverlay />
           <AutoLayoutReorderOverlay />
+          <AutoLayoutHoverOverlay />
+          <AutoLayoutHandlesOverlay />
           <AltMeasureLayer />
           <ComponentPlacementPreview />
           <GradientEditorLayer />

@@ -4,27 +4,28 @@ import {
   AlignCenterHorizontal,
   AlignCenterVertical,
   AlignEndHorizontal,
-  AlignEndVertical,
   AlignHorizontalDistributeCenter,
+  AlignLeft,
+  AlignRight,
   AlignStartHorizontal,
-  AlignStartVertical,
   AlignVerticalDistributeCenter,
 } from "lucide-react";
 import { useEditorStore, type AlignDirection } from "@/stores/useEditorStore";
 import { alignableSelectionIds } from "@/lib/alignSelection";
 import { cn } from "@/lib/utils";
 
+/** Lucide flex icons use web axis names — map to Figma-style edge/center align. */
 const ALIGN_BUTTONS: {
   direction: AlignDirection;
   label: string;
-  Icon: typeof AlignStartHorizontal;
+  Icon: typeof AlignLeft;
 }[] = [
-  { direction: "left", label: "Align left edges", Icon: AlignStartHorizontal },
-  { direction: "center-h", label: "Align horizontal centers", Icon: AlignCenterHorizontal },
-  { direction: "right", label: "Align right edges", Icon: AlignEndHorizontal },
-  { direction: "top", label: "Align top edges", Icon: AlignStartVertical },
-  { direction: "center-v", label: "Align vertical centers", Icon: AlignCenterVertical },
-  { direction: "bottom", label: "Align bottom edges", Icon: AlignEndVertical },
+  { direction: "left", label: "Align left edges", Icon: AlignLeft },
+  { direction: "center-h", label: "Align horizontal centers", Icon: AlignCenterVertical },
+  { direction: "right", label: "Align right edges", Icon: AlignRight },
+  { direction: "top", label: "Align top edges", Icon: AlignStartHorizontal },
+  { direction: "center-v", label: "Align vertical centers", Icon: AlignCenterHorizontal },
+  { direction: "bottom", label: "Align bottom edges", Icon: AlignEndHorizontal },
 ];
 
 type AlignControlsProps = {

@@ -1,6 +1,7 @@
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import type { EditorPersistSlice } from "@/lib/documentPersistence";
 import { wrapPersistSliceWithPages } from "@/lib/documentPersistence";
+import type { AIContextImagePayload } from "@/lib/aiContextImages";
 import { DEFAULT_AI_MODEL_ID, getAIModelById } from "@/lib/aiModels";
 import type { EditorNode } from "@/stores/useEditorStore";
 
@@ -18,6 +19,12 @@ export interface AIGenerateOptions {
   contextPrompt?: string;
   /** Number of ready context attachments (for preview). */
   contextAttachmentCount?: number;
+  /** Force a template flow (skips routing that reads design.md). */
+  forcedFlow?: AIRoutedFlow;
+  /** Human-readable detected screen intent for preview. */
+  detectedIntent?: string;
+  /** Base64 reference images for OpenAI vision. */
+  contextImages?: AIContextImagePayload[];
 }
 
 export interface AIGeneratePreview {
@@ -28,6 +35,11 @@ export interface AIGeneratePreview {
   modelId?: string;
   modelLabel?: string;
   contextAttachmentCount?: number;
+  /** Whether layout came from an LLM, rich engine, or local template fallback. */
+  generationSource?: "llm" | "mock" | "rich";
+  /** Screen type detected from prompt + Screen preset. */
+  detectedIntent?: string;
+  warning?: string;
 }
 
 export type AIRoutedFlow = "auth" | "dashboard" | "checkout" | "landing" | "profile" | "mobile";
@@ -58,7 +70,7 @@ interface Palette {
   border: string;
 }
 
-function getPalette(style: AIStyleId): Palette {
+export function getPalette(style: AIStyleId): Palette {
   switch (style) {
     case "bold":
       return {
@@ -500,10 +512,9 @@ function effectivePrompt(prompt: string, options: AIGenerateOptions): string {
 }
 
 export function generateDesignFromPrompt(prompt: string, options: AIGenerateOptions): AIGenerateResult {
-  const merged = effectivePrompt(prompt, options);
-  const flow = routeFlowFromPrompt(merged, options.preset);
+  const flow = options.forcedFlow ?? routeFlowFromPrompt(prompt, options.preset);
   const palette = getPalette(options.style);
-  const name = titleFromPrompt(merged, flow);
+  const name = titleFromPrompt(prompt.trim() || options.contextPrompt || "Screen", flow);
   const modelId = options.model ?? DEFAULT_AI_MODEL_ID;
   let result: AIGenerateResult;
   switch (flow) {
@@ -528,22 +539,25 @@ export function generateDesignFromPrompt(prompt: string, options: AIGenerateOpti
       break;
   }
   const withModel = withModelPreview(result, modelId);
-  if (options.contextAttachmentCount && options.contextAttachmentCount > 0) {
-    return {
-      ...withModel,
-      preview: {
-        ...withModel.preview,
-        contextAttachmentCount: options.contextAttachmentCount,
-      },
-    };
-  }
-  return withModel;
+  const preview: AIGeneratePreview = {
+    ...withModel.preview,
+    ...(options.contextAttachmentCount
+      ? { contextAttachmentCount: options.contextAttachmentCount }
+      : {}),
+    ...(options.detectedIntent ? { detectedIntent: options.detectedIntent } : {}),
+  };
+  return { ...withModel, preview };
 }
+
+export type AIGenerateAsyncMeta = {
+  source: "llm";
+  warning?: string;
+};
 
 export async function generateDesignFromPromptAsync(
   prompt: string,
   options: AIGenerateOptions,
-): Promise<AIGenerateResult> {
+): Promise<AIGenerateResult & { meta?: AIGenerateAsyncMeta }> {
   const model = options.model ?? DEFAULT_AI_MODEL_ID;
   try {
     const res = await fetch("/api/v1/ai/generate", {
@@ -556,14 +570,43 @@ export async function generateDesignFromPromptAsync(
         model,
         contextPrompt: options.contextPrompt,
         contextAttachmentCount: options.contextAttachmentCount,
+        contextImages: options.contextImages,
       }),
     });
-    if (res.ok) {
-      const data = (await res.json()) as { result?: AIGenerateResult };
-      if (data.result?.slice && data.result.preview) return data.result;
+    const raw = await res.text();
+    let data: {
+      result?: AIGenerateResult;
+      source?: "llm" | "mock" | "rich";
+      detectedIntent?: string;
+      warning?: string;
+      error?: string;
+    };
+    try {
+      data = JSON.parse(raw) as typeof data;
+    } catch {
+      /* fall through to local mock */
+      data = {};
     }
-  } catch {
-    /* fall through to local mock */
+    if (res.ok && data.result?.slice && data.result.preview) {
+      return {
+        ...data.result,
+        preview: {
+          ...data.result.preview,
+          generationSource: data.source ?? "llm",
+          detectedIntent: data.detectedIntent ?? data.result.preview.detectedIntent,
+          warning: data.warning,
+        },
+        meta: { source: data.source ?? "llm", warning: data.warning },
+      };
+    }
+    const message =
+      data.error ??
+      (res.ok ? "Generation failed — no layout returned." : `AI server error (${res.status}).`);
+    throw new Error(message);
+  } catch (err) {
+    if (err instanceof Error) {
+      throw err;
+    }
+    throw new Error("Could not reach the AI server.");
   }
-  return generateDesignFromPrompt(prompt, { ...options, model });
 }

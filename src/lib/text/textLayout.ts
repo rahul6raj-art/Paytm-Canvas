@@ -10,6 +10,12 @@ import {
 import { layoutText } from "./textMeasure";
 import type { EditorNode } from "@/stores/useEditorStore";
 import { resolveTextTypo } from "@/lib/textTypography";
+import {
+  DEFAULT_TEXT_ADVANCED_STYLE,
+  prepareTextForDisplay,
+  textAdvancedStyleFromNode,
+  type TextAdvancedStyle,
+} from "./textAdvancedStyle";
 
 /** Recompute width/height from content according to resize mode. */
 export function computeTextBoxSize(
@@ -18,12 +24,14 @@ export function computeTextBoxSize(
   mode: TextResizeMode,
   currentWidth: number,
   currentHeight: number,
+  style: TextAdvancedStyle = DEFAULT_TEXT_ADVANCED_STYLE,
 ): { width: number; height: number } {
   const wrapWidth = wrapWidthForResizeMode(
     Math.max(MIN_TEXT_BOX, currentWidth),
     mode,
   );
-  const layout = layoutText(text, wrapWidth, typo);
+  const displayText = prepareTextForDisplay(text, style);
+  const layout = layoutText(displayText, wrapWidth, typo, style);
 
   if (mode === "auto-width") {
     return {
@@ -51,8 +59,18 @@ export function textLayoutPatchForNode(
   if (node.type !== "text") return null;
   const typo = resolveTextTypo(node);
   const mode = node.textResizeMode ?? "auto-width";
+  const style = textAdvancedStyleFromNode(node);
+  if (style.textTruncate === "end") {
+    if (mode === "fixed") return null;
+    if (mode === "auto-width") {
+      const size = computeTextBoxSize(text, typo, mode, node.width, node.height, style);
+      if (size.width === node.width) return null;
+      return { width: size.width };
+    }
+    return null;
+  }
   if (mode === "fixed") return null;
-  const size = computeTextBoxSize(text, typo, mode, node.width, node.height);
+  const size = computeTextBoxSize(text, typo, mode, node.width, node.height, style);
   if (size.width === node.width && size.height === node.height) return null;
   return { width: size.width, height: size.height };
 }
@@ -66,6 +84,11 @@ export const TEXT_LAYOUT_AFFECTING_KEYS = new Set<keyof EditorNode>([
   "lineHeight",
   "letterSpacing",
   "textResizeMode",
+  "textCase",
+  "listStyle",
+  "paragraphSpacing",
+  "verticalTrim",
+  "textTruncate",
   "width",
 ]);
 
@@ -84,6 +107,12 @@ export function withTextLayoutPatch(
   let next = patch;
   if (patch.textResizeMode != null) {
     next = { ...next, ...textResizePatch(patch.textResizeMode) };
+  }
+  if (patch.textTruncate === "end") {
+    const mode = next.textResizeMode ?? node.textResizeMode ?? "auto-width";
+    if (mode !== "fixed") {
+      next = { ...next, ...textResizePatch("fixed") };
+    }
   }
   if (!patchAffectsTextLayout(next)) return next;
   const merged = { ...node, ...next };

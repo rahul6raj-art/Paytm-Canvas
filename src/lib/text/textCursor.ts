@@ -8,9 +8,19 @@ import {
 } from "./textNodeModel";
 import type { EditorNode } from "@/stores/useEditorStore";
 import {
+  DEFAULT_TEXT_ADVANCED_STYLE,
+  textAdvancedStyleFromNode,
+  displayIndexToRawIndex,
+  layoutDisplayText,
+  prepareTextForDisplay,
+  rawIndexToDisplayIndex,
+  type TextAdvancedStyle,
+} from "./textAdvancedStyle";
+import {
   getTextMeasureContext,
   layoutText,
   lineOffsetX,
+  lineTopY,
   measureStringWidth,
   buildFontString,
   type TextLayout,
@@ -42,18 +52,26 @@ export function getCursorPositionFromPoint(
   const typo = textTypoFromModel(model);
   const wrapWidth = wrapWidthForResizeMode(model.width, model.textResizeMode);
   const innerW = model.width - TEXT_BOX_PAD_X * 2;
-  const layout = layoutText(model.text, wrapWidth, typo);
+  const editorNode = "content" in textNode ? (textNode as EditorNode) : null;
+  const style: TextAdvancedStyle = editorNode
+    ? textAdvancedStyleFromNode(editorNode)
+    : DEFAULT_TEXT_ADVANCED_STYLE;
+  const displayText = prepareTextForDisplay(model.text, style);
+  const layout = editorNode
+    ? layoutDisplayText(model.text, wrapWidth, editorNode).layout
+    : layoutText(displayText, wrapWidth, typo, style);
   const innerH = model.height - TEXT_BOX_PAD_Y * 2;
   const blockY = verticalContentOffsetY(layout.height, innerH, model.verticalAlign);
-  return cursorIndexFromPoint(
+  const displayIndex = cursorIndexFromPoint(
     x - TEXT_BOX_PAD_X,
     y - TEXT_BOX_PAD_Y - blockY,
     layout,
     typo,
     innerW,
     model.textAlign,
-    model.text.length,
+    displayText.length,
   );
+  return displayIndexToRawIndex(displayIndex, model.text, style);
 }
 
 export function cursorIndexFromPoint(
@@ -67,10 +85,7 @@ export function cursorIndexFromPoint(
 ): number {
   if (layout.lines.length === 0) return 0;
 
-  const lineIdx = Math.max(
-    0,
-    Math.min(layout.lines.length - 1, Math.floor(localY / layout.lineHeightPx)),
-  );
+  const lineIdx = lineIndexFromLocalY(localY, layout);
   const line = layout.lines[lineIdx]!;
   const relX = localX - lineOffsetX(line.width, boxWidth, align);
 
@@ -97,6 +112,15 @@ export function cursorIndexFromPoint(
   return Math.max(0, Math.min(bestIndex, textLength));
 }
 
+function lineIndexFromLocalY(localY: number, layout: TextLayout): number {
+  for (let i = 0; i < layout.lines.length; i++) {
+    const top = lineTopY(layout, i);
+    const bottom = top + layout.lineHeightPx;
+    if (localY < bottom || i === layout.lines.length - 1) return i;
+  }
+  return Math.max(0, layout.lines.length - 1);
+}
+
 /** Move caret with arrow keys through wrapped lines. */
 export function moveCaretWithArrow(
   key: "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown",
@@ -106,14 +130,18 @@ export function moveCaretWithArrow(
   typo: ResolvedTextTypo,
   boxWidth: number,
   align: TextAlign,
+  style?: import("./textAdvancedStyle").TextAdvancedStyle,
 ): number {
   if (key === "ArrowLeft") return Math.max(0, index - 1);
   if (key === "ArrowRight") return Math.min(text.length, index + 1);
 
-  const caret = getCaretRectForIndex(index, layout, typo, boxWidth, align);
+  const displayIndex = style ? rawIndexToDisplayIndex(index, text, style) : index;
+  const displayLength = style ? prepareTextForDisplay(text, style).length : text.length;
+  const caret = getCaretRectForIndex(displayIndex, layout, typo, boxWidth, align);
   const targetY =
     key === "ArrowUp" ? caret.y - layout.lineHeightPx * 0.5 : caret.y + layout.lineHeightPx * 1.5;
-  return cursorIndexFromPoint(caret.x, targetY, layout, typo, boxWidth, align, text.length);
+  const nextDisplay = cursorIndexFromPoint(caret.x, targetY, layout, typo, boxWidth, align, displayLength);
+  return style ? displayIndexToRawIndex(nextDisplay, text, style) : nextDisplay;
 }
 
 function getCaretRectForIndex(
@@ -134,7 +162,7 @@ function getCaretRectForIndex(
       const x =
         lineOffsetX(line.width, boxWidth, align) +
         measureStringWidth(ctx, line.text.slice(0, local), typo.letterSpacing);
-      return { x, y: i * layout.lineHeightPx + layout.lineHeightPx * 0.5 };
+      return { x, y: lineTopY(layout, i) + layout.lineHeightPx * 0.5 };
     }
   }
   return { x: 0, y: 0 };

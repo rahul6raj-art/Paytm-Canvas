@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Copy, Plus, Trash2 } from "lucide-react";
+import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/useEditorStore";
 
@@ -104,8 +105,10 @@ export function PageTabsBar() {
                   onChange={(e) => setDraftName(e.target.value)}
                   onBlur={commitRename}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") commitRename();
-                    if (e.key === "Escape") setRenameId(null);
+                    handlePanelFieldKeyDown(e, {
+                      onEnter: () => commitRename(),
+                      onEscape: () => setRenameId(null),
+                    });
                   }}
                   className="h-full w-[min(140px,28vw)] min-w-[72px] border-0 bg-app-field px-2.5 text-[11px] font-medium text-white outline-none ring-1 ring-inset ring-accent"
                 />

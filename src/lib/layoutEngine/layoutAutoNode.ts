@@ -1,7 +1,11 @@
-import { measureNode, resolveContentSize, resolveHugSize, type MeasureContext } from "./measure";
+import {
+  measureNode,
+  resolveFlowLayoutExtent,
+  resolveHugSize,
+  type MeasureContext,
+} from "./measure";
 import { layoutChildren } from "./layoutChildren";
 import { resolveLayoutGap } from "./inferGap";
-import { sortIdsForAutoLayoutFlow } from "./flowOrder";
 import {
   isAutoLayoutContainer,
   isFlowChild,
@@ -65,11 +69,8 @@ export function layoutAutoNode(
     }
   }
 
-  const kids = sortIdsForAutoLayoutFlow(
-    flowChildIds(parentId, working, childOrder),
-    working,
-    mode,
-  );
+  // Child list order is authoritative for flow (reorder updates canvas via relayout).
+  const kids = flowChildIds(parentId, working, childOrder);
   if (kids.length === 0) {
     return { children: {}, parent: { layoutDirty: false } };
   }
@@ -87,7 +88,6 @@ export function layoutAutoNode(
     ? buildLineCountEstimate(mode, measures, gap, parent.width - p.left - p.right, parent.height - p.top - p.bottom)
     : 1;
 
-  const contentSize = resolveContentSize(parent, measures, mode, gap, lineCount);
   const hugSize = resolveHugSize(parent, measures, mode, gap, lineCount);
   const parentW =
     parentPrimaryAxisHug(parent) || parentCounterAxisHug(parent) ? hugSize.width : parent.width;
@@ -129,16 +129,30 @@ export function layoutAutoNode(
     }
   }
 
+  const extent = resolveFlowLayoutExtent(parent, kids, children);
+
   const parentPatch: LayoutAutoNodeResult["parent"] = {
-    computedWidth: contentSize.width,
-    computedHeight: contentSize.height,
+    computedWidth: extent.width,
+    computedHeight: extent.height,
     layoutDirty: false,
   };
   if (parentPrimaryAxisHug(parent)) {
-    if (Math.abs(hugSize.width - parent.width) > 0.01) parentPatch.width = hugSize.width;
+    const target =
+      mode === "horizontal" ? extent.width : extent.height;
+    const current = mode === "horizontal" ? parent.width : parent.height;
+    if (Math.abs(target - current) > 0.01) {
+      if (mode === "horizontal") parentPatch.width = extent.width;
+      else parentPatch.height = extent.height;
+    }
   }
   if (parentCounterAxisHug(parent)) {
-    if (Math.abs(hugSize.height - parent.height) > 0.01) parentPatch.height = hugSize.height;
+    const target =
+      mode === "horizontal" ? extent.height : extent.width;
+    const current = mode === "horizontal" ? parent.height : parent.width;
+    if (Math.abs(target - current) > 0.01) {
+      if (mode === "horizontal") parentPatch.height = extent.height;
+      else parentPatch.width = extent.width;
+    }
   }
 
   return { children, parent: parentPatch };

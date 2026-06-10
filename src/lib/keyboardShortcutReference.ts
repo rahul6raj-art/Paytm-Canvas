@@ -57,6 +57,13 @@ export const SHORTCUT_VIEW: ShortcutRow[] = [
   { keys: "⌘⇧?", label: "Keyboard shortcuts list" },
 ];
 
+export const SHORTCUT_STROKE: ShortcutRow[] = [
+  { keys: "[", label: "Decrease stroke weight" },
+  { keys: "]", label: "Increase stroke weight" },
+  { keys: "⇧[", label: "Decrease stroke weight by 10" },
+  { keys: "⇧]", label: "Increase stroke weight by 10" },
+];
+
 export const SHORTCUT_EDITING: ShortcutRow[] = [
   { keys: "⌘Z", label: "Undo" },
   { keys: "⌘⇧Z", label: "Redo" },

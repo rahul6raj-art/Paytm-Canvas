@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { Library, Palette, Ruler, Sparkles, Type, Wand2 } from "lucide-react";
+import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
 import { useEditorStore } from "@/stores/useEditorStore";
 import {
   effectValueToCssShadow,
@@ -258,6 +259,7 @@ export function StylesPanel() {
             <input
               value={colorName}
               onChange={(e) => setColorName(e.target.value)}
+              onKeyDown={(e) => handlePanelFieldKeyDown(e)}
               className="mt-0.5 w-full rounded border border-app-border bg-app-surface px-1.5 py-1 text-[12px] text-app-fg"
             />
           </label>
@@ -307,6 +309,7 @@ export function StylesPanel() {
             <input
               value={spaceName}
               onChange={(e) => setSpaceName(e.target.value)}
+              onKeyDown={(e) => handlePanelFieldKeyDown(e)}
               className="mt-0.5 w-full rounded border border-app-border bg-app-surface px-1.5 py-1 text-[12px] text-app-fg"
             />
           </label>
@@ -317,6 +320,16 @@ export function StylesPanel() {
               min={0}
               value={spaceVal}
               onChange={(e) => setSpaceVal(e.target.value)}
+              onKeyDown={(e) => {
+                handlePanelFieldKeyDown(e, {
+                  onArrowNudge: (dir, shift, alt) => {
+                    const step = keyboardNudgeStep(1, 0, shift, alt) * dir;
+                    const n = Number(spaceVal);
+                    const base = Number.isFinite(n) ? n : 0;
+                    setSpaceVal(String(Math.max(0, Math.round(base + step))));
+                  },
+                });
+              }}
               className="mt-0.5 w-full rounded border border-app-border bg-app-surface px-1.5 py-1 text-[12px] text-app-fg"
             />
           </label>

@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { Check, SlidersHorizontal } from "lucide-react";
+import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
 import type { StrokeSidesCustom, StrokeSidesMode } from "@/lib/strokeAlign";
 import {
@@ -137,11 +138,18 @@ function CustomSideField({
         onBlur={() => commit(draft)}
         onKeyDown={(e) => {
           e.stopPropagation();
-          if (e.key === "Enter") {
-            e.preventDefault();
-            commit(draft);
-            (e.target as HTMLInputElement).blur();
-          }
+          handlePanelFieldKeyDown(e, {
+            onEnter: () => {
+              commit(draft);
+              e.currentTarget.blur();
+            },
+            onArrowNudge: (dir, shift, alt) => {
+              const step = keyboardNudgeStep(1, 0, shift, alt) * dir;
+              const n = Number(draft.trim());
+              const base = Number.isFinite(n) ? n : value;
+              commit(String(Math.max(0, base + step)));
+            },
+          });
         }}
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}

@@ -4,6 +4,7 @@
 
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import { topLevelSelectedIds } from "@/lib/editorGraph";
+import { nextNumberedLayerName } from "@/lib/layerNaming";
 import { worldRect } from "@/lib/tree";
 import {
   applyDeepAutoLayout,
@@ -199,7 +200,7 @@ function wrapInAutoLayoutFrame(
     id: fid,
     parentId,
     type: "frame",
-    name: topIds.length === 1 ? nextNodes[topIds[0]!]!.name || "Frame" : "Auto layout",
+    name: nextNumberedLayerName(nextNodes, "Frame"),
     x: fx,
     y: fy,
     width: fw,

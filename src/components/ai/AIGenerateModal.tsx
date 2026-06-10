@@ -1,37 +1,57 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import {
-  ArrowUp,
-  ChevronDown,
-  LayoutGrid,
-  Loader2,
-  Palette,
-  Wrench,
-  X,
-  Zap,
-} from "lucide-react";
+import { ArrowUp, Code2, Figma, LayoutGrid, Loader2, Wrench, X, Zap } from "lucide-react";
 import { AIContextAttachments } from "@/components/ai/AIContextAttachments";
+import {
+  AIStyleGuideSelect,
+  designMdContextAttachments,
+  effectiveStyleFromTheme,
+  type StyleGuideMode,
+  type StyleGuideTheme,
+} from "@/components/ai/AIStyleGuideSelect";
+import { AIModalFrame } from "@/components/ai/AIModalFrame";
+import { FloatingPillSelect } from "@/components/ai/FloatingPillSelect";
+import { extractContextImagesForApi } from "@/lib/aiContextImages";
 import {
   buildContextPrompt,
   readyAttachmentCount,
   revokeAllAttachmentPreviews,
   type AIContextAttachment,
 } from "@/lib/aiGenerateContext";
+import {
+  loadStoredDesignMdUploads,
+  loadStoredSelectedDesignMdId,
+  normalizeStoredSelection,
+  saveStoredDesignMdUploads,
+  saveStoredSelectedDesignMdId,
+} from "@/lib/aiDesignMdStorage";
+import {
+  builtinSlugFromId,
+  isBuiltinDesignMdId,
+  loadBuiltinDesignMdAttachment,
+} from "@/lib/builtinDesignMd";
 import { useEditorStore } from "@/stores/useEditorStore";
 import {
   generateDesignFromPromptAsync,
-  type AIStyleId,
   type AIGeneratePreview,
   type AIGenerateResult,
 } from "@/lib/aiMockGenerator";
 import {
+  type AIModelSelectGroup,
   aiModelSelectGroups,
   getAIModelById,
   getStoredAIModelId,
+  isOllamaModelId,
   setStoredAIModelId,
 } from "@/lib/aiModels";
+import {
+  anchoredMenuStyle,
+  useAnchoredDropdownPosition,
+  useDismissAnchoredDropdown,
+} from "@/components/editor/useAnchoredDropdown";
 import { cn } from "@/lib/utils";
 
 const PRESETS = [
@@ -44,15 +64,19 @@ const PRESETS = [
   "Design system",
 ] as const;
 
-const STYLES: { id: AIStyleId; label: string }[] = [
-  { id: "minimal", label: "Minimal" },
-  { id: "bold", label: "Bold" },
-  { id: "fintech", label: "Fintech" },
-  { id: "dark", label: "Dark" },
-  { id: "playful", label: "Playful" },
-];
+const LOADING_STEPS = [
+  "Calling model…",
+  "Parsing layout JSON…",
+  "Building canvas…",
+] as const;
+/** Above modal overlay (220) and import overlays (230). */
+const AI_FLOATING_MENU_Z = "z-[500]";
 
-const LOADING_STEPS = ["Generating layout…", "Creating components…", "Applying styles…"] as const;
+type ModelsApiResponse = {
+  groups?: AIModelSelectGroup[];
+  ollama?: { reachable: boolean; availability?: Record<string, boolean> };
+  openai?: { configured: boolean };
+};
 
 export function AIGenerateModal() {
   const router = useRouter();
@@ -60,18 +84,38 @@ export function AIGenerateModal() {
   const source = useEditorStore((s) => s.aiModalSource);
   const closeAIModal = useEditorStore((s) => s.closeAIModal);
   const applyGeneratedDesign = useEditorStore((s) => s.applyGeneratedDesign);
+  const openImportFigmaModal = useEditorStore((s) => s.openImportFigmaModal);
+  const openCodeRoundTrip = useEditorStore((s) => s.openCodeRoundTrip);
 
   const [prompt, setPrompt] = useState("");
   const [preset, setPreset] = useState<string | undefined>(undefined);
-  const [style, setStyle] = useState<AIStyleId>("fintech");
+  const [styleGuideMode, setStyleGuideMode] = useState<StyleGuideMode>("design-md");
+  const [styleGuideTheme, setStyleGuideTheme] = useState<StyleGuideTheme>("auto");
+  const [designMdRefs, setDesignMdRefs] = useState<AIContextAttachment[]>(() => loadStoredDesignMdUploads());
+  const [selectedDesignMdId, setSelectedDesignMdId] = useState<string | null>(() => {
+    const uploads = loadStoredDesignMdUploads();
+    return normalizeStoredSelection(loadStoredSelectedDesignMdId(), uploads);
+  });
+  const [builtinDesignMd, setBuiltinDesignMd] = useState<AIContextAttachment | null>(null);
   const [modelId, setModelId] = useState(() => getStoredAIModelId());
   const [loading, setLoading] = useState(false);
   const [loadStep, setLoadStep] = useState(0);
   const [result, setResult] = useState<AIGenerateResult | null>(null);
   const [attachments, setAttachments] = useState<AIContextAttachment[]>([]);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [toolsMounted, setToolsMounted] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [modelsMeta, setModelsMeta] = useState<ModelsApiResponse | null>(null);
   const timersRef = useRef<number[]>([]);
-  const toolsRef = useRef<HTMLDivElement>(null);
+  const toolsButtonRef = useRef<HTMLButtonElement>(null);
+  const toolsMenuRef = useRef<HTMLDivElement>(null);
+
+  const toolsMenuPosition = useAnchoredDropdownPosition(toolsButtonRef, toolsOpen, 6, {
+    viewportClamp: true,
+    maxHeight: 320,
+    width: 224,
+  });
+  useDismissAnchoredDropdown(toolsOpen, () => setToolsOpen(false), toolsButtonRef, toolsMenuRef);
 
   const clearTimers = useCallback(() => {
     timersRef.current.forEach((id) => window.clearTimeout(id));
@@ -82,11 +126,15 @@ export function AIGenerateModal() {
     if (!open) {
       setPrompt("");
       setPreset(undefined);
-      setStyle("fintech");
+      setStyleGuideMode("design-md");
+      setStyleGuideTheme("auto");
+      setBuiltinDesignMd(null);
       setModelId(getStoredAIModelId());
       setLoading(false);
       setLoadStep(0);
       setResult(null);
+      setGenerateError(null);
+      setModelsMeta(null);
       setToolsOpen(false);
       setAttachments((prev) => {
         revokeAllAttachmentPreviews(prev);
@@ -99,62 +147,162 @@ export function AIGenerateModal() {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        clearTimers();
-        closeAIModal();
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      if (toolsOpen) {
+        setToolsOpen(false);
+        return;
       }
+      clearTimers();
+      closeAIModal();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, clearTimers, closeAIModal]);
+  }, [open, toolsOpen, clearTimers, closeAIModal]);
+
+  useEffect(() => setToolsMounted(true), []);
+
+  const handleDesignMdRefsChange = useCallback((next: AIContextAttachment[]) => {
+    setDesignMdRefs(next);
+    saveStoredDesignMdUploads(next);
+  }, []);
+
+  const handleSelectedDesignMdIdChange = useCallback((id: string | null) => {
+    setSelectedDesignMdId(id);
+    saveStoredSelectedDesignMdId(id);
+  }, []);
 
   useEffect(() => {
-    if (!toolsOpen) return;
-    const onDoc = (e: MouseEvent) => {
-      if (toolsRef.current && !toolsRef.current.contains(e.target as Node)) {
-        setToolsOpen(false);
+    if (!open) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/v1/ai/models");
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as ModelsApiResponse;
+        if (!cancelled) setModelsMeta(data);
+      } catch {
+        /* keep static registry */
       }
+    })();
+    return () => {
+      cancelled = true;
     };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [toolsOpen]);
+  }, [open]);
 
   const selectedModel = getAIModelById(modelId);
-  const modelGroups = aiModelSelectGroups();
 
-  const contextPrompt = buildContextPrompt(attachments);
-  const contextCount = readyAttachmentCount(attachments);
+  const modelOptionGroups = useMemo(() => {
+    const groups = modelsMeta?.groups?.length ? modelsMeta.groups : aiModelSelectGroups();
+    const ollamaReachable = modelsMeta?.ollama?.reachable ?? false;
+    const availability = modelsMeta?.ollama?.availability ?? {};
+    const openaiConfigured = modelsMeta?.openai?.configured ?? false;
+
+    return groups.map((g) => ({
+      label: g.label,
+      options: g.models.map((m) => {
+        let hint: string | undefined = m.description;
+        let disabled = false;
+        if (isOllamaModelId(m.id)) {
+          if (!ollamaReachable) {
+            hint = "Start Ollama (localhost:11434)";
+            disabled = false;
+          } else if (availability[m.id] === false) {
+            hint = `Run: ollama pull ${m.ollamaTag ?? m.label}`;
+          }
+        } else if (!openaiConfigured) {
+          hint = "Set OPENAI_API_KEY in .env.local";
+        }
+        return {
+          value: m.id,
+          label: m.label,
+          hint,
+          disabled,
+        };
+      }),
+    }));
+  }, [modelsMeta]);
+
+  useEffect(() => {
+    if (!open || !isBuiltinDesignMdId(selectedDesignMdId)) {
+      setBuiltinDesignMd(null);
+      return;
+    }
+
+    const slug = builtinSlugFromId(selectedDesignMdId);
+    let cancelled = false;
+    setBuiltinDesignMd({
+      id: selectedDesignMdId,
+      kind: "design-md",
+      name: `${slug} DESIGN.md`,
+      size: 0,
+      status: "loading",
+    });
+
+    void loadBuiltinDesignMdAttachment(slug).then((attachment) => {
+      if (!cancelled) setBuiltinDesignMd(attachment);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, selectedDesignMdId]);
+
+  const designMdContext = designMdContextAttachments(designMdRefs, selectedDesignMdId, builtinDesignMd);
+  const allContextAttachments = useMemo(
+    () => [...attachments, ...designMdContext],
+    [attachments, designMdContext],
+  );
+  const contextPrompt = buildContextPrompt(allContextAttachments);
+  const contextCount = readyAttachmentCount(allContextAttachments);
+  const effectiveStyle = effectiveStyleFromTheme(styleGuideTheme);
   const canGenerate = Boolean(prompt.trim() || preset || contextPrompt);
 
   const runGenerate = useCallback(() => {
     if (!canGenerate || loading) return;
     setResult(null);
+    setGenerateError(null);
     setLoading(true);
     setLoadStep(0);
     clearTimers();
-    const total = 800 + Math.floor(Math.random() * 400);
-    const stepMs = total / LOADING_STEPS.length;
-    LOADING_STEPS.forEach((_, i) => {
-      const id = window.setTimeout(() => setLoadStep(i), Math.floor(i * stepMs));
-      timersRef.current.push(id);
-    });
-    const doneId = window.setTimeout(() => {
-      void (async () => {
+
+    const stepTimers = LOADING_STEPS.map((_, i) =>
+      window.setTimeout(() => setLoadStep(i), i * 1200),
+    );
+    timersRef.current.push(...stepTimers);
+
+    void (async () => {
+      try {
+        const contextImages = await extractContextImagesForApi(allContextAttachments);
         const gen = await generateDesignFromPromptAsync(prompt, {
           preset,
-          style,
+          style: effectiveStyle,
           model: modelId,
           contextPrompt: contextPrompt || undefined,
           contextAttachmentCount: contextCount || undefined,
+          contextImages: contextImages.length ? contextImages : undefined,
         });
         setResult(gen);
+      } catch (err) {
+        setGenerateError(err instanceof Error ? err.message : "Generation failed.");
+      } finally {
+        clearTimers();
         setLoading(false);
         setLoadStep(0);
-      })();
-    }, total);
-    timersRef.current.push(doneId);
-  }, [canGenerate, loading, prompt, preset, style, modelId, contextPrompt, contextCount, clearTimers]);
+      }
+    })();
+  }, [
+    canGenerate,
+    loading,
+    prompt,
+    preset,
+    effectiveStyle,
+    modelId,
+    contextPrompt,
+    contextCount,
+    allContextAttachments,
+    clearTimers,
+  ]);
 
   const onClose = () => {
     clearTimers();
@@ -185,9 +333,85 @@ export function AIGenerateModal() {
 
   if (!open) return null;
 
+  const toolsMenu =
+    toolsOpen && toolsMounted
+      ? createPortal(
+          <div
+            ref={toolsMenuRef}
+            role="menu"
+            aria-label="Tools"
+            className={cn(
+              "fixed w-56 overflow-y-auto overscroll-contain rounded-xl border border-app-border bg-app-panel py-1 shadow-2xl",
+              AI_FLOATING_MENU_Z,
+            )}
+            style={{ ...anchoredMenuStyle(toolsMenuPosition), zIndex: 500 }}
+          >
+            <p className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-app-subtle">
+              Prompt
+            </p>
+            <button
+              type="button"
+              role="menuitem"
+              className="block w-full px-3 py-2 text-left text-[12px] text-app-fg hover:bg-app-hover"
+              onClick={() => {
+                setPrompt(
+                  "A fintech dashboard with balance card, spending chart, and recent transactions",
+                );
+                setToolsOpen(false);
+              }}
+            >
+              Example prompt
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!prompt.trim()}
+              className="block w-full px-3 py-2 text-left text-[12px] text-app-fg hover:bg-app-hover disabled:opacity-40"
+              onClick={() => {
+                setPrompt("");
+                setToolsOpen(false);
+              }}
+            >
+              Clear prompt
+            </button>
+            <div className="my-1 border-t border-app-border-subtle" role="separator" />
+            <p className="px-3 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wide text-app-subtle">
+              Import
+            </p>
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-app-fg hover:bg-app-hover"
+              onClick={() => {
+                setToolsOpen(false);
+                openImportFigmaModal();
+              }}
+            >
+              <Figma className="h-3.5 w-3.5 shrink-0 text-app-muted" strokeWidth={1.75} />
+              Import from Figma
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-app-fg hover:bg-app-hover"
+              onClick={() => {
+                setToolsOpen(false);
+                openCodeRoundTrip("import");
+              }}
+            >
+              <Code2 className="h-3.5 w-3.5 shrink-0 text-app-muted" strokeWidth={1.75} />
+              Code to Canvas
+            </button>
+          </div>,
+          document.body,
+        )
+      : null;
+
   return (
-    <div
-      className="fixed inset-0 z-[220] flex items-center justify-center bg-black/55 px-4 py-10 backdrop-blur-[2px]"
+    <>
+      {toolsMenu}
+      <div
+      className="fixed inset-0 z-[220] flex items-start justify-center overflow-y-auto bg-black/55 px-4 pb-10 pt-[10vh] backdrop-blur-[2px] sm:pt-[12vh]"
       role="dialog"
       aria-modal="true"
       aria-label="Generate with AI"
@@ -200,7 +424,7 @@ export function AIGenerateModal() {
         onMouseDown={(e) => e.stopPropagation()}
       >
         {!result ? (
-          <div className="relative overflow-hidden rounded-2xl border border-app-border bg-app-panel text-app-fg shadow-2xl shadow-app-panel">
+          <AIModalFrame>
             <button
               type="button"
               onClick={onClose}
@@ -228,61 +452,39 @@ export function AIGenerateModal() {
             <AIContextAttachments
               variant="minimal"
               minimalPart="chips"
+              floatingMenuZClass={AI_FLOATING_MENU_Z}
               attachments={attachments}
               disabled={loading}
               onChange={setAttachments}
             />
 
-            <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-1">
-              <div className="flex items-center gap-2">
+            <div className="relative z-0 flex items-center justify-between gap-3 overflow-visible px-4 pb-3 pt-1">
+              <div className="flex items-center gap-2 overflow-visible">
                 <AIContextAttachments
                   variant="minimal"
                   minimalPart="button"
+                  floatingMenuZClass={AI_FLOATING_MENU_Z}
                   attachments={attachments}
                   disabled={loading}
                   onChange={setAttachments}
                 />
 
-                <div ref={toolsRef} className="relative">
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => setToolsOpen((v) => !v)}
-                    className={cn(
-                      "inline-flex h-8 items-center gap-1.5 rounded-full border border-app-border bg-app-panel px-3 text-[12px] font-medium text-app-muted transition-colors",
-                      "hover:bg-app-hover hover:text-app-fg",
-                      toolsOpen && "border-accent/40 bg-app-hover text-app-fg",
-                    )}
-                  >
-                    <Wrench className="h-3.5 w-3.5" strokeWidth={2} />
-                    Tools
-                  </button>
-                  {toolsOpen ? (
-                    <div className="absolute left-0 top-full z-10 mt-2 w-48 rounded-xl border border-app-border bg-app-panel py-1 shadow-2xl">
-                      <button
-                        type="button"
-                        className="block w-full px-3 py-2 text-left text-[12px] text-app-fg hover:bg-app-hover"
-                        onClick={() => {
-                          setPrompt("A fintech dashboard with balance card, spending chart, and recent transactions");
-                          setToolsOpen(false);
-                        }}
-                      >
-                        Example prompt
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!prompt.trim()}
-                        className="block w-full px-3 py-2 text-left text-[12px] text-app-fg hover:bg-app-hover disabled:opacity-40"
-                        onClick={() => {
-                          setPrompt("");
-                          setToolsOpen(false);
-                        }}
-                      >
-                        Clear prompt
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
+                <button
+                  ref={toolsButtonRef}
+                  type="button"
+                  disabled={loading}
+                  aria-haspopup="menu"
+                  aria-expanded={toolsOpen}
+                  onClick={() => setToolsOpen((v) => !v)}
+                  className={cn(
+                    "inline-flex h-8 items-center gap-1.5 rounded-full border border-app-border bg-app-panel px-3 text-[12px] font-medium text-app-muted transition-colors",
+                    "hover:bg-app-hover hover:text-app-fg",
+                    toolsOpen && "border-accent/40 bg-app-hover text-app-fg",
+                  )}
+                >
+                  <Wrench className="h-3.5 w-3.5" strokeWidth={2} />
+                  Tools
+                </button>
               </div>
 
               <button
@@ -306,42 +508,43 @@ export function AIGenerateModal() {
               </button>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 border-t border-app-border-subtle bg-app-toolbar-well px-3 py-2.5">
-              <PillSelect
+            <div className="flex w-full flex-wrap items-center gap-2 border-t border-app-border-subtle bg-app-toolbar-well px-3 py-2.5">
+              <FloatingPillSelect
                 icon={Zap}
                 label="Screen"
                 value={preset ?? ""}
                 disabled={loading}
+                menuZClass={AI_FLOATING_MENU_Z}
                 onChange={(v) => setPreset(v || undefined)}
                 options={[
                   { value: "", label: "Any screen" },
                   ...PRESETS.map((p) => ({ value: p, label: p })),
                 ]}
               />
-              <PillSelect
+              <AIStyleGuideSelect
+                disabled={loading}
+                menuZClass={AI_FLOATING_MENU_Z}
+                mode={styleGuideMode}
+                onModeChange={setStyleGuideMode}
+                designMdRefs={designMdRefs}
+                onDesignMdRefsChange={handleDesignMdRefsChange}
+                selectedDesignMdId={selectedDesignMdId}
+                onSelectedDesignMdIdChange={handleSelectedDesignMdIdChange}
+                theme={styleGuideTheme}
+                onThemeChange={setStyleGuideTheme}
+              />
+              <FloatingPillSelect
                 icon={LayoutGrid}
                 label="Model"
                 value={modelId}
                 disabled={loading}
+                menuZClass={AI_FLOATING_MENU_Z}
+                className="ml-auto"
                 onChange={(v) => {
                   setModelId(v);
                   setStoredAIModelId(v);
                 }}
-                optionGroups={modelGroups.map((g) => ({
-                  label: g.label,
-                  options: g.models.map((m) => ({
-                    value: m.id,
-                    label: `${m.label}${m.recommended ? " · rec" : ""}`,
-                  })),
-                }))}
-              />
-              <PillSelect
-                icon={Palette}
-                label="Style"
-                value={style}
-                disabled={loading}
-                onChange={(v) => setStyle(v as AIStyleId)}
-                options={STYLES.map((s) => ({ value: s.id, label: s.label }))}
+                optionGroups={modelOptionGroups}
               />
             </div>
 
@@ -350,9 +553,19 @@ export function AIGenerateModal() {
                 {LOADING_STEPS[loadStep] ?? LOADING_STEPS[0]} · {selectedModel?.label ?? modelId}
               </p>
             ) : null}
-          </div>
+            {styleGuideMode === "design-md" && contextCount === 0 && !loading ? (
+              <p className="border-t border-amber-500/30 bg-amber-500/10 px-4 py-2 text-center text-[11px] text-amber-100">
+                Add or select a Design.md file in Style Guide so generation uses your brand tokens and typography.
+              </p>
+            ) : null}
+            {generateError ? (
+              <p className="border-t border-rose-500/30 bg-rose-500/10 px-4 py-2 text-center text-[11px] text-rose-200">
+                {generateError}
+              </p>
+            ) : null}
+          </AIModalFrame>
         ) : (
-          <div className="relative overflow-hidden rounded-2xl border border-app-border bg-app-panel text-app-fg shadow-2xl shadow-app-panel">
+          <AIModalFrame>
             <button
               type="button"
               onClick={onClose}
@@ -399,72 +612,11 @@ export function AIGenerateModal() {
                 ← Edit prompt
               </button>
             </div>
-          </div>
+          </AIModalFrame>
         )}
       </div>
     </div>
-  );
-}
-
-function PillSelect({
-  icon: Icon,
-  label,
-  value,
-  onChange,
-  disabled,
-  options,
-  optionGroups,
-}: {
-  icon: typeof Zap;
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  disabled?: boolean;
-  options?: { value: string; label: string }[];
-  optionGroups?: { label: string; options: { value: string; label: string }[] }[];
-}) {
-  const display =
-    options?.find((o) => o.value === value)?.label ??
-    optionGroups?.flatMap((g) => g.options).find((o) => o.value === value)?.label ??
-    label;
-
-  return (
-    <label
-      className={cn(
-        "relative inline-flex min-w-0 cursor-pointer items-center gap-1.5 rounded-full border border-app-border bg-app-panel py-1 pl-2.5 pr-1.5 text-[12px] font-medium text-app-fg shadow-sm",
-        disabled && "cursor-not-allowed opacity-50",
-      )}
-    >
-      <Icon className="h-3.5 w-3.5 shrink-0 text-app-muted" strokeWidth={2} />
-      <span className="max-w-[100px] truncate">{display === label ? label : display}</span>
-      <ChevronDown className="h-3 w-3 shrink-0 text-app-subtle" strokeWidth={2.5} />
-      <select
-        disabled={disabled}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        aria-label={label}
-        className="absolute inset-0 cursor-pointer opacity-0"
-      >
-        {options
-          ? options.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))
-          : null}
-        {optionGroups
-          ? optionGroups.map((g) => (
-              <optgroup key={g.label} label={g.label}>
-                {g.options.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </optgroup>
-            ))
-          : null}
-      </select>
-    </label>
+    </>
   );
 }
 
@@ -473,12 +625,21 @@ function PreviewPanel({ preview }: { preview: AIGeneratePreview }) {
     <div className="rounded-xl border border-app-border bg-app-inset p-4">
       <p className="text-[14px] font-semibold text-app-fg">{preview.fileName}</p>
       <p className="mt-1 text-[12px] text-app-muted">{preview.flowLabel}</p>
+      {preview.detectedIntent ? (
+        <p className="mt-1 text-[11px] text-violet-300">Detected: {preview.detectedIntent}</p>
+      ) : null}
       {preview.modelLabel ? (
         <p className="mt-1 text-[11px] text-app-subtle">
           {preview.modelLabel}
+          {preview.generationSource === "llm" ? " · from your prompt" : ""}
           {preview.contextAttachmentCount
             ? ` · ${preview.contextAttachmentCount} attachment${preview.contextAttachmentCount === 1 ? "" : "s"}`
             : ""}
+        </p>
+      ) : null}
+      {preview.warning ? (
+        <p className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-snug text-amber-100/90">
+          {preview.warning}
         </p>
       ) : null}
       <div className="mt-3 flex flex-wrap items-center gap-3">

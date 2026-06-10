@@ -1,16 +1,19 @@
 import type { EditorNode } from "@/stores/useEditorStore";
 import type { AlignDirection } from "@/stores/useEditorStore";
-import { topLevelSelectedIds } from "@/lib/editorGraph";
-import { findInstanceRoot } from "@/lib/componentModel";
 import {
-  getNodeTransformedWorldBounds,
-  getNodeWorldOrigin,
-  worldOriginToNodeXY,
-  type RectBounds,
-} from "@/lib/transformMath";
+  buildParentMapFromChildOrder,
+  getRenderedWorldBounds,
+  getRenderedWorldTopLeft,
+  topLevelSelectedIds,
+  worldOriginToNodeXYFromChildOrder,
+} from "@/lib/editorGraph";
+import { findInstanceRoot } from "@/lib/componentModel";
+import { lineEndpointsPatchFromLayout } from "@/lib/shapes/lineGeometry";
+import type { RectBounds } from "@/lib/transformMath";
 
 function moveNodeByWorldDelta(
   nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
   nodeId: string,
   dx: number,
   dy: number,
@@ -18,12 +21,16 @@ function moveNodeByWorldDelta(
   if (dx === 0 && dy === 0) return nodes;
   const n = nodes[nodeId];
   if (!n) return nodes;
-  const origin = getNodeWorldOrigin(nodeId, nodes);
-  const xy = worldOriginToNodeXY(nodeId, nodes, {
+  const origin = getRenderedWorldTopLeft(nodeId, nodes, childOrder);
+  const xy = worldOriginToNodeXYFromChildOrder(nodeId, nodes, childOrder, {
     x: origin.x + dx,
     y: origin.y + dy,
   });
-  return { ...nodes, [nodeId]: { ...n, x: xy.x, y: xy.y } };
+  let next: EditorNode = { ...n, x: xy.x, y: xy.y };
+  if (next.type === "line" || next.type === "arrow") {
+    next = { ...next, ...lineEndpointsPatchFromLayout(next) };
+  }
+  return { ...nodes, [nodeId]: next };
 }
 
 function unionBounds(bounds: RectBounds[]): RectBounds | null {
@@ -55,16 +62,17 @@ export function alignableSelectionIds(
 /** When every selected layer shares an auto-layout parent, disable layout so manual x/y sticks. */
 export function suspendAutoLayoutForManualPosition(
   nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
   nodeIds: string[],
 ): Record<string, EditorNode> {
   if (nodeIds.length === 0) return nodes;
-  const parentIds = new Set<string>();
+  const parentOf = buildParentMapFromChildOrder(childOrder);
+  const parentIds = new Set<string | null>();
   for (const id of nodeIds) {
-    const p = nodes[id]?.parentId;
-    if (!p) return nodes;
-    parentIds.add(p);
+    if (!parentOf.has(id)) return nodes;
+    parentIds.add(parentOf.get(id) ?? null);
   }
-  if (parentIds.size !== 1) return nodes;
+  if (parentIds.has(null) || parentIds.size !== 1) return nodes;
   const parentId = [...parentIds][0]!;
   const parent = nodes[parentId];
   if (!parent || (parent.layoutMode ?? "none") === "none") return nodes;
@@ -98,13 +106,14 @@ export function syncInstancePositionOverrides(
 
 function alignNodeToSelectionBounds(
   nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
   nodeId: string,
   ref: RectBounds,
   direction: AlignDirection,
 ): Record<string, EditorNode> {
   let next = nodes;
   for (let iter = 0; iter < 12; iter++) {
-    const b = getNodeTransformedWorldBounds(nodeId, next);
+    const b = getRenderedWorldBounds(nodeId, next, childOrder);
     let dx = 0;
     let dy = 0;
     switch (direction) {
@@ -130,14 +139,15 @@ function alignNodeToSelectionBounds(
         break;
     }
     if (Math.abs(dx) < 1e-3 && Math.abs(dy) < 1e-3) break;
-    next = moveNodeByWorldDelta(next, nodeId, dx, dy);
+    next = moveNodeByWorldDelta(next, childOrder, nodeId, dx, dy);
   }
   return next;
 }
 
-/** Align layers to the union of their visual bounds in world space. */
+/** Align layers to the union of their visual bounds in world space (matches selection box). */
 export function applyAlignToNodes(
   nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
   nodeIds: string[],
   direction: AlignDirection,
 ): Record<string, EditorNode> {
@@ -145,14 +155,14 @@ export function applyAlignToNodes(
 
   const items = nodeIds.map((id) => ({
     id,
-    b: getNodeTransformedWorldBounds(id, nodes),
+    b: getRenderedWorldBounds(id, nodes, childOrder),
   }));
   const ref = unionBounds(items.map(({ b }) => b));
   if (!ref) return nodes;
 
   let next = { ...nodes };
   for (const { id } of items) {
-    next = alignNodeToSelectionBounds(next, id, ref, direction);
+    next = alignNodeToSelectionBounds(next, childOrder, id, ref, direction);
   }
   return next;
 }
@@ -160,6 +170,7 @@ export function applyAlignToNodes(
 /** Distribute layer spacing using visual bounds (world space). */
 export function applyDistributeToNodes(
   nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
   nodeIds: string[],
   axis: "horizontal" | "vertical",
 ): Record<string, EditorNode> {
@@ -168,7 +179,7 @@ export function applyDistributeToNodes(
   let next = { ...nodes };
   const items = nodeIds.map((id) => ({
     id,
-    b: getNodeTransformedWorldBounds(id, next),
+    b: getRenderedWorldBounds(id, next, childOrder),
   }));
 
   if (axis === "horizontal") {
@@ -181,9 +192,9 @@ export function applyDistributeToNodes(
     const gap = (span - sumW) / (n - 1);
     let cur = left0;
     for (const { id } of sorted) {
-      const b = getNodeTransformedWorldBounds(id, next);
-      next = moveNodeByWorldDelta(next, id, cur - b.x, 0);
-      const b2 = getNodeTransformedWorldBounds(id, next);
+      const b = getRenderedWorldBounds(id, next, childOrder);
+      next = moveNodeByWorldDelta(next, childOrder, id, cur - b.x, 0);
+      const b2 = getRenderedWorldBounds(id, next, childOrder);
       cur = b2.x + b2.width + gap;
     }
   } else {
@@ -196,9 +207,9 @@ export function applyDistributeToNodes(
     const gap = (span - sumH) / (n - 1);
     let cur = top0;
     for (const { id } of sorted) {
-      const b = getNodeTransformedWorldBounds(id, next);
-      next = moveNodeByWorldDelta(next, id, 0, cur - b.y);
-      const b2 = getNodeTransformedWorldBounds(id, next);
+      const b = getRenderedWorldBounds(id, next, childOrder);
+      next = moveNodeByWorldDelta(next, childOrder, id, 0, cur - b.y);
+      const b2 = getRenderedWorldBounds(id, next, childOrder);
       cur = b2.y + b2.height + gap;
     }
   }
@@ -209,12 +220,14 @@ export function applyDistributeToNodes(
 /** Parents to relayout after manual position — skip auto-layout frames (they would undo align). */
 export function relayoutParentKeysAfterManualPosition(
   nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
   nodeIds: string[],
   parentListKey: (parentId: string | null) => string,
 ): Set<string> {
+  const parentOf = buildParentMapFromChildOrder(childOrder);
   const keys = new Set<string>();
   for (const id of nodeIds) {
-    const parentId = nodes[id]?.parentId ?? null;
+    const parentId = parentOf.get(id) ?? null;
     if (!parentId) continue;
     const parent = nodes[parentId];
     if (parent && (parent.layoutMode ?? "none") !== "none") continue;
@@ -226,12 +239,13 @@ export function relayoutParentKeysAfterManualPosition(
 /** Full align pipeline: suspend conflicting auto-layout, align, sync instance overrides. */
 export function alignNodesInDocument(
   nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
   nodeIds: string[],
   direction: AlignDirection,
 ): Record<string, EditorNode> {
   if (nodeIds.length < 2) return nodes;
-  let next = suspendAutoLayoutForManualPosition(nodes, nodeIds);
-  next = applyAlignToNodes(next, nodeIds, direction);
+  let next = suspendAutoLayoutForManualPosition(nodes, childOrder, nodeIds);
+  next = applyAlignToNodes(next, childOrder, nodeIds, direction);
   next = syncInstancePositionOverrides(next, nodeIds);
   return next;
 }
@@ -239,12 +253,13 @@ export function alignNodesInDocument(
 /** Full distribute pipeline. */
 export function distributeNodesInDocument(
   nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
   nodeIds: string[],
   axis: "horizontal" | "vertical",
 ): Record<string, EditorNode> {
   if (nodeIds.length < 3) return nodes;
-  let next = suspendAutoLayoutForManualPosition(nodes, nodeIds);
-  next = applyDistributeToNodes(next, nodeIds, axis);
+  let next = suspendAutoLayoutForManualPosition(nodes, childOrder, nodeIds);
+  next = applyDistributeToNodes(next, childOrder, nodeIds, axis);
   next = syncInstancePositionOverrides(next, nodeIds);
   return next;
 }

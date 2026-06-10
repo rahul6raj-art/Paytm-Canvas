@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { isAdditiveSelectionClick } from "@/lib/containerSelection";
 import {
   Boxes,
   ChevronDown,
@@ -24,20 +25,35 @@ import {
   Unlock,
   Layers2,
 } from "lucide-react";
+import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
 import { ROOT, useEditorStore, type EditorNode } from "@/stores/useEditorStore";
 import { findInstanceRoot } from "@/lib/componentModel";
 import { isAncestorOf } from "@/lib/editorGraph";
 import { BOOLEAN_OPERATION_LABELS, isMaskGroup } from "@/lib/booleanGeometry";
 import { didPointerExitElement } from "@/lib/domPointer";
+import { isAutoLayoutContainerNode } from "@/lib/autoLayoutArrowReorder";
+import { AutoLayoutFrameLayerIcon } from "@/components/editor/AutoLayoutFrameLayerIcon";
 
 function KindIcon({ node }: { node: EditorNode }) {
   const c = "h-3.5 w-3.5 shrink-0 text-app-subtle";
   if (node.isBooleanGroup) return <Combine className={c} strokeWidth={1.75} />;
   if (isMaskGroup(node)) return <Layers2 className={c} strokeWidth={1.75} />;
   if (node.isMask) return <Circle className={c} strokeWidth={1.75} strokeDasharray="3 2" />;
-  if (node.type === "frame") return <Frame className={c} strokeWidth={1.75} />;
-  if (node.type === "group") return <Group className={c} strokeWidth={1.75} />;
+  if (node.type === "frame") {
+    if (isAutoLayoutContainerNode(node)) {
+      const mode = node.layoutMode === "vertical" ? "vertical" : "horizontal";
+      return <AutoLayoutFrameLayerIcon mode={mode} className={c} />;
+    }
+    return <Frame className={c} strokeWidth={1.75} />;
+  }
+  if (node.type === "group") {
+    if (isAutoLayoutContainerNode(node)) {
+      const mode = node.layoutMode === "vertical" ? "vertical" : "horizontal";
+      return <AutoLayoutFrameLayerIcon mode={mode} className={c} />;
+    }
+    return <Group className={c} strokeWidth={1.75} />;
+  }
   if (node.type === "text") return <Type className={c} strokeWidth={1.75} />;
   if (node.type === "image") return <ImageIcon className={c} strokeWidth={1.75} />;
   if (node.type === "ellipse") return <Circle className={c} strokeWidth={1.75} />;
@@ -66,6 +82,7 @@ function Tree({
   indicator,
   setIndicator,
   onDragStartRow,
+  panelHovered,
 }: {
   parentId: string;
   depth: number;
@@ -73,6 +90,7 @@ function Tree({
   indicator: DropInd;
   setIndicator: (v: DropInd) => void;
   onDragStartRow: (e: React.DragEvent, payloadId: string) => void;
+  panelHovered: boolean;
 }) {
   const childOrder = useEditorStore((s) => s.childOrder);
   const nodes = useEditorStore((s) => s.nodes);
@@ -99,6 +117,7 @@ function Tree({
             setIndicator={setIndicator}
             onDragStartRow={onDragStartRow}
             showChildren={showChildren}
+            panelHovered={panelHovered}
           />
         );
       })}
@@ -116,6 +135,7 @@ function LayerRow({
   setIndicator,
   onDragStartRow,
   showChildren,
+  panelHovered,
 }: {
   node: EditorNode;
   depth: number;
@@ -126,6 +146,7 @@ function LayerRow({
   setIndicator: (v: DropInd) => void;
   onDragStartRow: (e: React.DragEvent, payloadId: string) => void;
   showChildren: boolean;
+  panelHovered: boolean;
 }) {
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const select = useEditorStore((s) => s.select);
@@ -246,7 +267,14 @@ function LayerRow({
         {hasKids ? (
           <button
             type="button"
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-subtle transition-colors hover:bg-app-hover hover:text-app-fg"
+            className={cn(
+              "flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-subtle transition-opacity hover:bg-app-hover hover:text-app-fg",
+              panelHovered
+                ? active
+                  ? "opacity-100"
+                  : "opacity-0 group-hover:opacity-100"
+                : "pointer-events-none opacity-0",
+            )}
             onClick={(e) => {
               e.stopPropagation();
               toggleExpanded(node.id);
@@ -264,7 +292,7 @@ function LayerRow({
         <button
           type="button"
           className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
-          onClick={(e) => select(node.id, e.shiftKey)}
+          onClick={(e) => select(node.id, isAdditiveSelectionClick(e))}
         >
           <KindIcon node={node} />
           {remotePeers.length > 0 ? (
@@ -298,16 +326,14 @@ function LayerRow({
               autoFocus
               onChange={(e) => setDraftName(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  commitRename();
-                }
-                if (e.key === "Escape") {
-                  e.preventDefault();
-                  skipBlurCommit.current = true;
-                  setDraftName(node.name);
-                  setLayerRenameId(null);
-                }
+                handlePanelFieldKeyDown(e, {
+                  onEnter: () => commitRename(),
+                  onEscape: () => {
+                    skipBlurCommit.current = true;
+                    setDraftName(node.name);
+                    setLayerRenameId(null);
+                  },
+                });
               }}
               onBlur={() => {
                 if (skipBlurCommit.current) {
@@ -384,6 +410,7 @@ function LayerRow({
           indicator={indicator}
           setIndicator={setIndicator}
           onDragStartRow={onDragStartRow}
+          panelHovered={panelHovered}
         />
       ) : null}
     </div>
@@ -395,6 +422,7 @@ export function LayersPanel() {
   const [dragId, setDragId] = useState<string | null>(null);
   const [indicator, setIndicator] = useState<DropInd>(null);
   const [lineTop, setLineTop] = useState<number | null>(null);
+  const [panelHovered, setPanelHovered] = useState(false);
   const figImportBusy = useEditorStore((s) => s.figImportInProgress);
   const figImportStatus = useEditorStore((s) => s.figImportStatus);
   const childOrder = useEditorStore((s) => s.childOrder);
@@ -502,7 +530,11 @@ export function LayersPanel() {
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div
+      className="flex min-h-0 flex-1 flex-col"
+      onPointerEnter={() => setPanelHovered(true)}
+      onPointerLeave={() => setPanelHovered(false)}
+    >
       <div className="flex h-7 shrink-0 items-center gap-1.5 border-b border-app-border px-2 text-[11px] font-semibold uppercase tracking-wide text-app-subtle">
         <Layers className="h-3.5 w-3.5 text-app-subtle" strokeWidth={2} />
         Layers
@@ -534,6 +566,7 @@ export function LayersPanel() {
             indicator={indicator}
             setIndicator={setIndicator}
             onDragStartRow={onDragStartRow}
+            panelHovered={panelHovered}
           />
         )}
         {!figImportBusy && (childOrder[ROOT] ?? []).length === 0 ? (

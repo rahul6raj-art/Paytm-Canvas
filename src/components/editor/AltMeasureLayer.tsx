@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { CANVAS_VISUAL } from "@/lib/canvasVisual";
+import { CANVAS_VISUAL, screenPxToWorld } from "@/lib/canvasVisual";
 import { computeAltMeasureOverlay, selectionUnionBounds } from "@/lib/altMeasurements";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { useCanvasInteraction } from "./CanvasInteractionContext";
@@ -10,17 +10,33 @@ const LINE = CANVAS_VISUAL.guide;
 const LABEL_BG = "rgba(15, 23, 42, 0.92)";
 const LABEL_FG = "#fff7ed";
 
-function MeasureLabel({ x, y, text }: { x: number; y: number; text: string }) {
+function MeasureLabel({
+  x,
+  y,
+  text,
+  zoom,
+}: {
+  x: number;
+  y: number;
+  text: string;
+  zoom: number;
+}) {
+  const font = screenPxToWorld(10, zoom);
+  const padX = screenPxToWorld(6, zoom);
+  const padY = screenPxToWorld(4, zoom);
+  const border = screenPxToWorld(1, zoom);
   return (
     <div
-      className="pointer-events-none absolute z-[2] whitespace-nowrap rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold leading-none shadow-sm"
+      className="pointer-events-none absolute z-[2] whitespace-nowrap rounded font-mono font-semibold leading-none shadow-sm"
       style={{
         left: x,
         top: y,
         transform: "translate(-50%, -50%)",
         background: LABEL_BG,
         color: LABEL_FG,
-        border: `1px solid ${LINE}`,
+        border: `${border}px solid ${LINE}`,
+        fontSize: `${font}px`,
+        padding: `${padY}px ${padX}px`,
       }}
     >
       {text}
@@ -35,6 +51,7 @@ export function AltMeasureLayer() {
   const nodes = useEditorStore((s) => s.nodes);
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const hoveredCanvasId = useEditorStore((s) => s.hoveredCanvasId);
+  const zoom = useEditorStore((s) => s.zoom);
   const { optionDown, optionOverSelection, optionPointerHoverId } = useCanvasInteraction();
 
   const effectiveHoverId = optionPointerHoverId ?? hoveredCanvasId;
@@ -76,11 +93,17 @@ export function AltMeasureLayer() {
           borderColor: LINE,
         }}
       />
-      <MeasureLabel x={targetBounds.x + 4} y={targetBounds.y - 18} text={targetLabel} />
+      <MeasureLabel
+        x={targetBounds.x + 4}
+        y={targetBounds.y - 18}
+        text={targetLabel}
+        zoom={zoom}
+      />
       <MeasureLabel
         x={sourceBounds.x + sourceBounds.width / 2}
         y={sourceBounds.y + sourceBounds.height + 16}
         text={`${Math.round(sourceBounds.width)} × ${Math.round(sourceBounds.height)}`}
+        zoom={zoom}
       />
 
       <svg
@@ -104,7 +127,13 @@ export function AltMeasureLayer() {
       </svg>
 
       {lines.map((d) => (
-        <MeasureLabel key={`lb-${d.key}`} x={d.labelX} y={d.labelY} text={`${d.distance}`} />
+        <MeasureLabel
+          key={`lb-${d.key}`}
+          x={d.labelX}
+          y={d.labelY}
+          text={`${d.distance}`}
+          zoom={zoom}
+        />
       ))}
     </div>
   );

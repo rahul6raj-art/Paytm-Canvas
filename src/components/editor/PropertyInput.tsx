@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { appFieldClass } from "@/lib/appFieldStyles";
+import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
 
 const baseField = appFieldClass;
@@ -28,23 +29,6 @@ function parseDraftNumber(raw: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function keyboardStep(
-  baseStep: number,
-  decimals: number,
-  shift: boolean,
-  alt: boolean,
-): number {
-  let step = baseStep;
-  if (shift) step *= 10;
-  if (alt) step /= 10;
-  if (decimals > 0) {
-    const minStep = 10 ** -decimals;
-    step = Math.max(minStep, step);
-    return Number(step.toFixed(decimals));
-  }
-  return step;
-}
-
 function clampAndRound(n: number, min: number | undefined, max: number | undefined, decimals: number): number {
   let v = n;
   if (min !== undefined) v = Math.max(min, v);
@@ -64,8 +48,10 @@ export function PropertyNumberInput({
   decimals = 0,
   step: stepProp,
 }: PropertyNumberInputProps) {
-  const format = (n: number) =>
-    decimals > 0 ? String(Number(n.toFixed(decimals))) : String(Math.round(n));
+  const format = (n: number) => {
+    if (!Number.isFinite(n)) return "0";
+    return decimals > 0 ? String(Number(n.toFixed(decimals))) : String(Math.round(n));
+  };
 
   const baseStep = stepProp ?? (decimals > 0 ? 10 ** -decimals : 1);
 
@@ -94,7 +80,7 @@ export function PropertyNumberInput({
   };
 
   const nudge = (direction: 1 | -1, shift: boolean, alt: boolean) => {
-    const delta = keyboardStep(baseStep, decimals, shift, alt) * direction;
+    const delta = keyboardNudgeStep(baseStep, decimals, shift, alt) * direction;
     const current = parseDraftNumber(text, value);
     commitValue(current + delta);
   };
@@ -119,16 +105,13 @@ export function PropertyNumberInput({
         }}
         onBlur={onBlur}
         onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            if (!apply(text)) setText(format(value));
-            (e.target as HTMLInputElement).blur();
-            return;
-          }
-          if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-            e.preventDefault();
-            nudge(e.key === "ArrowUp" ? 1 : -1, e.shiftKey, e.altKey);
-          }
+          handlePanelFieldKeyDown(e, {
+            onEnter: () => {
+              if (!apply(text)) setText(format(value));
+              e.currentTarget.blur();
+            },
+            onArrowNudge: nudge,
+          });
         }}
       />
     </div>
@@ -176,7 +159,7 @@ export function OpacityPercentInput({
   };
 
   const nudge = (direction: 1 | -1, shift: boolean, alt: boolean) => {
-    const step = keyboardStep(1, 0, shift, alt);
+    const step = keyboardNudgeStep(1, 0, shift, alt);
     const current = parseInt(text.replace(/%/g, ""), 10);
     const base = Number.isFinite(current) ? current : percent;
     commitPercent(base + step * direction);
@@ -205,16 +188,13 @@ export function OpacityPercentInput({
         if (!applyDraft(text)) setText(String(percent));
       }}
       onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          if (!applyDraft(text)) setText(String(percent));
-          (e.target as HTMLInputElement).blur();
-          return;
-        }
-        if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-          e.preventDefault();
-          nudge(e.key === "ArrowUp" ? 1 : -1, e.shiftKey, e.altKey);
-        }
+        handlePanelFieldKeyDown(e, {
+          onEnter: () => {
+            if (!applyDraft(text)) setText(String(percent));
+            e.currentTarget.blur();
+          },
+          onArrowNudge: nudge,
+        });
       }}
     />
   );
@@ -261,11 +241,12 @@ export function PropertyTextInput({
         onChange={(e) => setText(e.target.value)}
         onBlur={flush}
         onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            flush();
-            (e.target as HTMLInputElement).blur();
-          }
+          handlePanelFieldKeyDown(e, {
+            onEnter: () => {
+              flush();
+              e.currentTarget.blur();
+            },
+          });
         }}
       />
     </div>

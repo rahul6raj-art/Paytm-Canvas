@@ -1,3 +1,4 @@
+import { canSwapAutoLayoutSiblings } from "@/lib/autoLayoutArrowReorder";
 import type { EditorNode } from "@/stores/useEditorStore";
 import {
   getRenderedWorldBounds,
@@ -33,6 +34,7 @@ export function canSwapNodes(
   if (!a || !b || !a.visible || !b.visible || a.locked || b.locked) return false;
   if (a.parentId !== b.parentId) return false;
   if (isAncestorOf(nodes, idA, idB) || isAncestorOf(nodes, idB, idA)) return false;
+  if (canSwapAutoLayoutSiblings(idA, idB, nodes)) return true;
   return parentAllowsSwap(a.parentId, nodes);
 }
 

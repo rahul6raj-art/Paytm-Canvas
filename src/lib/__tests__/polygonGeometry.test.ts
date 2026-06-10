@@ -38,6 +38,17 @@ describe("polygonGeometry", () => {
     assert.ok(round.endsWith(" Z"));
   });
 
+  it("triangle corner radius rounds inward toward center", () => {
+    const d = polygonPathD(100, 100, 3, 10);
+    const top = polygonVertices(3, 100, 100)[0]!;
+    const arcMatch = /A\s+[\d.]+\s+[\d.]+\s+0\s+0\s+1\s+([\d.]+)\s+([\d.]+)/.exec(d);
+    assert.ok(arcMatch, "expected inward fillet arc on triangle");
+    const endX = Number(arcMatch[1]);
+    const endY = Number(arcMatch[2]);
+    assert.ok(endX > top.x, "first arc should move down-right from the top spike");
+    assert.ok(endY > top.y, "fillet should stay inside the shape, not above the tip");
+  });
+
   it("corner radius is clamped to feasible max", () => {
     const max = maxPolygonCornerRadius(3, 100, 100);
     assert.ok(max > 0);

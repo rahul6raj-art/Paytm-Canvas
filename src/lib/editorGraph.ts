@@ -1,10 +1,12 @@
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
+import { nextDuplicatedLayerName } from "@/lib/layerNaming";
 import {
   applyMatrixToPoint,
   finiteCoord,
   finiteDimension,
   getNodeLocalMatrix,
   getNodeWorldOrigin,
+  hasRotation,
   invertMatrix,
   multiplyMatrix,
   type Matrix2D,
@@ -429,6 +431,24 @@ export function getNodeWorldInverseMatrixFromChildOrder(
   return invertMatrix(wm);
 }
 
+/** World point → node's local geometry coordinates (childOrder render tree). */
+export function worldToNodeLocalFromChildOrder(
+  worldX: number,
+  worldY: number,
+  nodeId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): { x: number; y: number } {
+  const inv = getNodeWorldInverseMatrixFromChildOrder(nodeId, nodes, childOrder);
+  if (!inv) {
+    const n = nodes[nodeId];
+    if (!n) return { x: worldX, y: worldY };
+    const origin = getRenderedWorldTopLeft(nodeId, nodes, childOrder);
+    return { x: worldX - origin.x, y: worldY - origin.y };
+  }
+  return applyMatrixToPoint(inv, { x: worldX, y: worldY });
+}
+
 /** World point → parent-local using the same tree as DomSceneRenderer. */
 export function worldPointToParentLocalFromChildOrder(
   worldX: number,
@@ -680,56 +700,64 @@ export function worldOriginToNodeXYFromChildOrder(
 ): { x: number; y: number } {
   const n = nodes[nodeId];
   if (!n) return desiredWorldOrigin;
+
   const parentOf = buildParentMapFromChildOrder(childOrder);
   const parentId = parentOf.get(nodeId) ?? null;
-  if (!parentId) {
-    return { x: desiredWorldOrigin.x, y: desiredWorldOrigin.y };
+  const inParent = parentId
+    ? worldPointToParentLocalFromChildOrder(
+        desiredWorldOrigin.x,
+        desiredWorldOrigin.y,
+        parentId,
+        nodes,
+        childOrder,
+      )
+    : desiredWorldOrigin;
+
+  if (!hasRotation(n.rotation)) {
+    return { x: inParent.x, y: inParent.y };
   }
-  return worldPointToParentLocalFromChildOrder(
-    desiredWorldOrigin.x,
-    desiredWorldOrigin.y,
-    parentId,
-    nodes,
-    childOrder,
-  );
+
+  let x = n.x;
+  let y = n.y;
+  for (let i = 0; i < 8; i++) {
+    const got = applyMatrixToPoint(getNodeLocalMatrix({ ...n, x, y }), { x: 0, y: 0 });
+    const errX = inParent.x - got.x;
+    const errY = inParent.y - got.y;
+    if (Math.abs(errX) < 1e-4 && Math.abs(errY) < 1e-4) break;
+    x += errX;
+    y += errY;
+  }
+  return { x, y };
 }
 
-/** Set node x/y so its world center matches a point at the given rotation (iterative). */
+/**
+ * Set node x/y so its world center matches a point.
+ * Rotation is around the box center, so parent-local center is always (x + w/2, y + h/2).
+ */
 export function worldCenterToNodeXYFromChildOrder(
   nodeId: string,
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
   desiredWorldCenter: { x: number; y: number },
-  rotation: number,
-  initialGuess?: { x: number; y: number },
+  _rotation?: number,
+  _initialGuess?: { x: number; y: number },
 ): { x: number; y: number } {
   const n = nodes[nodeId];
   if (!n) return { x: 0, y: 0 };
   const w = Math.max(1, n.width);
   const h = Math.max(1, n.height);
-  let x = initialGuess?.x ?? n.x;
-  let y = initialGuess?.y ?? n.y;
-
-  for (let i = 0; i < 16; i++) {
-    const trial = { ...nodes, [nodeId]: { ...n, x, y, rotation } };
-    const wm = getNodeWorldMatrixFromChildOrder(nodeId, trial, childOrder);
-    if (!wm) return { x, y };
-    const got = applyMatrixToPoint(wm, { x: w / 2, y: h / 2 });
-    const errX = desiredWorldCenter.x - got.x;
-    const errY = desiredWorldCenter.y - got.y;
-    if (Math.abs(errX) < 0.01 && Math.abs(errY) < 0.01) break;
-    const curOrigin = applyMatrixToPoint(wm, { x: 0, y: 0 });
-    const desiredOrigin = { x: curOrigin.x + errX, y: curOrigin.y + errY };
-    const xy = worldOriginToNodeXYFromChildOrder(
-      nodeId,
-      trial,
-      childOrder,
-      desiredOrigin,
-    );
-    x = xy.x;
-    y = xy.y;
-  }
-  return { x, y };
+  const parentOf = buildParentMapFromChildOrder(childOrder);
+  const parentId = parentOf.get(nodeId) ?? null;
+  const inParent = parentId
+    ? worldPointToParentLocalFromChildOrder(
+        desiredWorldCenter.x,
+        desiredWorldCenter.y,
+        parentId,
+        nodes,
+        childOrder,
+      )
+    : desiredWorldCenter;
+  return { x: inParent.x - w / 2, y: inParent.y - h / 2 };
 }
 
 function rectOverlapArea(
@@ -959,11 +987,12 @@ export function nextCopyName(nodes: Record<string, { name: string }>, base: stri
 }
 
 /** Duplicate root label: "Copy", "Copy 2", … (unique in the document). */
-export function nextDuplicateName(nodes: Record<string, { name: string }>): string {
-  if (!nodesHasName(nodes, "Copy")) return "Copy";
-  let i = 2;
-  while (nodesHasName(nodes, `Copy ${i}`)) i++;
-  return `Copy ${i}`;
+/** @deprecated Use `nextDuplicatedLayerName` with the source layer name. */
+export function nextDuplicateName(
+  nodes: Record<string, { name: string }>,
+  sourceName = "Layer",
+): string {
+  return nextDuplicatedLayerName(nodes, sourceName);
 }
 
 function nodesHasName(nodes: Record<string, { name: string }>, name: string): boolean {

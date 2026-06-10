@@ -11,4 +11,9 @@ export {
   applyLayoutResult,
 } from "./layoutAutoNode";
 export { markLayoutDirty, relayoutDirtyTree, collectDirtyAutoLayoutRoots } from "./dirty";
-export { inferAutoLayoutGap, resolveLayoutGap } from "./inferGap";
+export {
+  freezeAutoLayoutGapBeforeChildInsert,
+  inferAutoLayoutGap,
+  resolveLayoutGap,
+} from "./inferGap";
+export { computeMinLayoutGap } from "./minLayoutGap";

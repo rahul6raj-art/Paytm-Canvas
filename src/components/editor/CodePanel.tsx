@@ -5,6 +5,7 @@ import { Copy, Check, Upload, RefreshCw, ArrowDownToLine, ArrowUpFromLine } from
 import { useEditorStore } from "@/stores/useEditorStore";
 import { exportSelectionCode } from "@/lib/codeExport";
 import { importCodeSource } from "@/lib/codeImport";
+import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
 
 async function copyToClipboard(text: string): Promise<boolean> {
@@ -259,6 +260,7 @@ export function CodePanel() {
                 setImportSource(e.target.value);
                 setImportError(null);
               }}
+              onKeyDown={(e) => handlePanelFieldKeyDown(e)}
               onPaste={() => setImportError(null)}
               placeholder={
                 codePanelFormat === "html"

@@ -6,7 +6,7 @@ import { mergeInstanceOverrides } from "@/lib/componentModel";
 import { resolveNodeWithDesignTokens } from "@/lib/designTokens";
 import { getCursorPositionFromPoint, moveCaretWithArrow } from "@/lib/text/textCursor";
 import { textLayoutPatchForNode } from "@/lib/text/textLayout";
-import { layoutText } from "@/lib/text/textMeasure";
+import { layoutDisplayText, textAdvancedStyleFromNode } from "@/lib/text/textAdvancedStyle";
 import {
   textInnerWidth,
   toTextNodeModel,
@@ -199,7 +199,8 @@ export function TextEditPortal({ nodeId }: TextEditPortalProps) {
             const typo = textTypoFromModel(model);
             const wrapWidth = wrapWidthForResizeMode(model.width, model.textResizeMode);
             const innerW = textInnerWidth(model.width);
-            const layout = layoutText(text, wrapWidth, typo);
+            const style = textAdvancedStyleFromNode(node);
+            const { layout } = layoutDisplayText(text, wrapWidth, node);
             const next = moveCaretWithArrow(
               ev.key,
               focus,
@@ -208,6 +209,7 @@ export function TextEditPortal({ nodeId }: TextEditPortalProps) {
               typo,
               innerW,
               model.textAlign,
+              style,
             );
             const start = ev.shiftKey ? anchor : next;
             setTextEditSelection(start, next);

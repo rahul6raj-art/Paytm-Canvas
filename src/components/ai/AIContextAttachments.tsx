@@ -20,7 +20,9 @@ import {
   useAnchoredDropdownPosition,
   useDismissAnchoredDropdown,
 } from "@/components/editor/useAnchoredDropdown";
+import { AIContextAttachmentLightbox } from "@/components/ai/AIContextAttachmentLightbox";
 import {
+  AI_ATTACH_CONTEXT_KINDS,
   AI_CONTEXT_KINDS,
   attachmentFromFile,
   attachmentFromFolder,
@@ -50,6 +52,8 @@ type Props = {
   variant?: "full" | "minimal";
   /** When `minimal`, render only the attach button, chips, or both. */
   minimalPart?: "all" | "button" | "chips";
+  /** z-index class for portaled attach menu (e.g. above modals). */
+  floatingMenuZClass?: string;
 };
 
 export function AIContextAttachments({
@@ -59,6 +63,7 @@ export function AIContextAttachments({
   className,
   variant = "full",
   minimalPart = "all",
+  floatingMenuZClass = "z-[250]",
 }: Props) {
   const fileRefs = useRef<Partial<Record<AIContextKind, HTMLInputElement | null>>>({});
   const anchorRef = useRef<HTMLButtonElement>(null);
@@ -66,6 +71,7 @@ export function AIContextAttachments({
   const [reading, setReading] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [lightboxAttachment, setLightboxAttachment] = useState<AIContextAttachment | null>(null);
 
   const position = useAnchoredDropdownPosition(anchorRef, menuOpen, 6, {
     viewportClamp: true,
@@ -86,13 +92,13 @@ export function AIContextAttachments({
   );
 
   const onPickFiles = useCallback(
-    async (kind: AIContextKind, files: FileList | null) => {
-      if (!files?.length || disabled || reading) return;
+    async (kind: AIContextKind, picked: File[]) => {
+      if (!picked.length || disabled || reading) return;
       const room = MAX_CONTEXT_ATTACHMENTS - attachments.length;
       if (room <= 0) return;
       setReading(true);
       try {
-        const slice = Array.from(files).slice(0, room);
+        const slice = picked.slice(0, room);
         const processed = await Promise.all(slice.map((file) => attachmentFromFile(file, kind)));
         onChange([...attachments, ...processed]);
       } finally {
@@ -103,12 +109,12 @@ export function AIContextAttachments({
   );
 
   const onPickFolder = useCallback(
-    async (files: FileList | null) => {
-      if (!files?.length || disabled || reading) return;
+    async (picked: File[]) => {
+      if (!picked.length || disabled || reading) return;
       if (attachments.length >= MAX_CONTEXT_ATTACHMENTS) return;
       setReading(true);
       try {
-        const processed = await attachmentFromFolder(files);
+        const processed = await attachmentFromFolder(picked);
         onChange([...attachments, processed]);
       } finally {
         setReading(false);
@@ -117,12 +123,25 @@ export function AIContextAttachments({
     [attachments, disabled, onChange, reading],
   );
 
+  const handleFileInputChange = useCallback(
+    (kind: AIContextKind, directory: boolean | undefined, input: HTMLInputElement) => {
+      const picked = input.files ? Array.from(input.files) : [];
+      input.value = "";
+      if (!picked.length) return;
+      if (directory) void onPickFolder(picked);
+      else void onPickFiles(kind, picked);
+    },
+    [onPickFiles, onPickFolder],
+  );
+
   const atLimit = attachments.length >= MAX_CONTEXT_ATTACHMENTS;
   const busy = disabled || reading;
 
   const pickKind = (kind: AIContextKind) => {
     setMenuOpen(false);
-    fileRefs.current[kind]?.click();
+    requestAnimationFrame(() => {
+      fileRefs.current[kind]?.click();
+    });
   };
 
   const menuSurface = "border-app-border bg-app-panel text-app-fg shadow-2xl";
@@ -137,12 +156,13 @@ export function AIContextAttachments({
         role="menu"
         aria-label="Attach context"
         className={cn(
-          "fixed z-[250] w-[240px] overflow-y-auto overscroll-contain rounded-xl border py-1",
+          "fixed w-[240px] overflow-y-auto overscroll-contain rounded-xl border py-1",
+          floatingMenuZClass,
           menuSurface,
         )}
-        style={anchoredMenuStyle(position)}
+        style={{ ...anchoredMenuStyle(position), zIndex: 500 }}
       >
-        {AI_CONTEXT_KINDS.map((meta) => {
+        {AI_ATTACH_CONTEXT_KINDS.map((meta) => {
           const Icon = KIND_ICONS[meta.kind];
           return (
             <button
@@ -216,42 +236,92 @@ export function AIContextAttachments({
       </button>
     );
 
-  const chipRow =
+  const previewRow =
     attachments.length > 0 ? (
       <div
         className={cn(
-          "flex flex-wrap gap-1.5",
+          "flex flex-wrap gap-2",
           variant === "minimal" ? "px-4 pb-2" : "mt-1",
         )}
       >
         {attachments.map((a) => {
+          const Icon = KIND_ICONS[a.kind];
           const kindLabel = AI_CONTEXT_KINDS.find((k) => k.kind === a.kind)?.label ?? a.kind;
+          const hasThumb = Boolean(a.previewUrl) && (a.kind === "image" || a.kind === "video");
+          const canPreview = a.status === "ready";
+
           return (
-            <span
-              key={a.id}
-              className={cn(
-                "inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]",
-                "border-app-border bg-app-hover text-app-fg",
-              )}
-              title={a.name}
-            >
-              <span className="truncate">{a.name}</span>
-              <span className="opacity-50">·</span>
-              <span className="shrink-0 opacity-70">{kindLabel}</span>
+            <div key={a.id} className="group relative flex w-[72px] flex-col gap-1">
+              <button
+                type="button"
+                disabled={!canPreview}
+                title={canPreview ? `Preview ${a.name}` : a.error ?? a.name}
+                aria-label={canPreview ? `Preview ${a.name}` : a.name}
+                onClick={() => canPreview && setLightboxAttachment(a)}
+                className={cn(
+                  "relative h-[72px] w-[72px] overflow-hidden rounded-xl border border-app-border bg-app-inset transition-colors",
+                  canPreview && "cursor-zoom-in hover:border-accent/40 hover:ring-2 hover:ring-accent/20",
+                  !canPreview && "cursor-default opacity-70",
+                  a.status === "error" && "border-rose-500/40",
+                )}
+              >
+                {a.status === "loading" ? (
+                  <span className="flex h-full w-full items-center justify-center text-app-muted">
+                    <Loader2 className="h-5 w-5 animate-spin" strokeWidth={2} />
+                  </span>
+                ) : hasThumb ? (
+                  a.kind === "video" ? (
+                    <>
+                      <video
+                        src={a.previewUrl}
+                        muted
+                        playsInline
+                        preload="metadata"
+                        className="h-full w-full object-cover"
+                      />
+                      <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/25">
+                        <Video className="h-5 w-5 text-white/90" strokeWidth={2} />
+                      </span>
+                    </>
+                  ) : (
+                    <img src={a.previewUrl} alt="" className="h-full w-full object-cover" />
+                  )
+                ) : (
+                  <span className="flex h-full w-full flex-col items-center justify-center gap-1 px-1 text-app-muted">
+                    <Icon className="h-5 w-5 shrink-0" strokeWidth={1.75} />
+                    <span className="line-clamp-2 text-center text-[9px] leading-tight text-app-subtle">
+                      {kindLabel}
+                    </span>
+                  </span>
+                )}
+              </button>
+
+              <p className="truncate text-center text-[10px] text-app-muted" title={a.name}>
+                {a.name}
+              </p>
+
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => removeAttachment(a.id)}
-                className="shrink-0 rounded-full p-0.5 opacity-60 hover:opacity-100 disabled:opacity-30"
+                className={cn(
+                  "absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full border border-app-border bg-app-panel text-app-muted shadow-sm transition-opacity",
+                  "opacity-90 hover:bg-app-hover hover:text-app-fg disabled:opacity-30 sm:opacity-0 sm:group-hover:opacity-100",
+                  "focus-visible:opacity-100",
+                )}
                 aria-label={`Remove ${a.name}`}
               >
-                <X className="h-3 w-3" strokeWidth={2} />
+                <X className="h-3 w-3" strokeWidth={2.5} />
               </button>
-            </span>
+            </div>
           );
         })}
       </div>
     ) : null;
+
+  const lightbox = (
+    <AIContextAttachmentLightbox attachment={lightboxAttachment} onClose={() => setLightboxAttachment(null)} />
+  );
 
   if (variant === "minimal") {
     const showButton = minimalPart === "all" || minimalPart === "button";
@@ -261,7 +331,7 @@ export function AIContextAttachments({
         {showButton ? attachButton : null}
         {showButton && mounted && attachMenu ? createPortal(attachMenu, document.body) : null}
         {showButton
-          ? AI_CONTEXT_KINDS.map((meta) => (
+          ? AI_ATTACH_CONTEXT_KINDS.map((meta) => (
               <input
                 key={meta.kind}
                 ref={(el) => {
@@ -274,16 +344,12 @@ export function AIContextAttachments({
                 accept={meta.accept || undefined}
                 multiple={!meta.directory}
                 {...(meta.directory ? { webkitdirectory: "", directory: "" } : {})}
-                onChange={(e) => {
-                  const files = e.target.files;
-                  e.target.value = "";
-                  if (meta.directory) void onPickFolder(files);
-                  else void onPickFiles(meta.kind, files);
-                }}
+                onChange={(e) => handleFileInputChange(meta.kind, meta.directory, e.currentTarget)}
               />
             ))
           : null}
-        {showChips ? chipRow : null}
+        {showChips ? previewRow : null}
+        {lightbox}
       </>
     );
   }
@@ -303,7 +369,7 @@ export function AIContextAttachments({
       </div>
       {attachButton}
       {mounted && attachMenu ? createPortal(attachMenu, document.body) : null}
-      {AI_CONTEXT_KINDS.map((meta) => (
+      {AI_ATTACH_CONTEXT_KINDS.map((meta) => (
         <input
           key={meta.kind}
           ref={(el) => {
@@ -316,15 +382,11 @@ export function AIContextAttachments({
           accept={meta.accept || undefined}
           multiple={!meta.directory}
           {...(meta.directory ? { webkitdirectory: "", directory: "" } : {})}
-          onChange={(e) => {
-            const files = e.target.files;
-            e.target.value = "";
-            if (meta.directory) void onPickFolder(files);
-            else void onPickFiles(meta.kind, files);
-          }}
+          onChange={(e) => handleFileInputChange(meta.kind, meta.directory, e.currentTarget)}
         />
       ))}
-      {chipRow}
+      {previewRow}
+      {lightbox}
     </div>
   );
 }

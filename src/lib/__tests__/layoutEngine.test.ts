@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  freezeAutoLayoutGapBeforeChildInsert,
   layoutAutoNode,
   layoutAutoNodeDeep,
   markLayoutDirty,
@@ -34,6 +35,31 @@ function frame(
 function rootFrame(id: string, extra: Partial<LayoutEngineNode> = {}): LayoutEngineNode {
   return frame(id, 0, 0, 400, 300, { parentId: null, ...extra });
 }
+
+describe("layoutEngine — child list order", () => {
+  it("relayouts flow children to match childOrder, not stale x positions", () => {
+    const nodes: Record<string, LayoutEngineNode> = {
+      row: rootFrame("row", {
+        layoutMode: "horizontal",
+        layoutGap: 10,
+        paddingLeft: 0,
+        paddingRight: 0,
+        paddingTop: 0,
+        paddingBottom: 0,
+        layoutSizingHorizontal: "fixed",
+        layoutSizingVertical: "fixed",
+        width: 200,
+        height: 60,
+      }),
+      a: frame("a", 0, 0, 40, 40, { parentId: "row" }),
+      b: frame("b", 50, 0, 40, 40, { parentId: "row" }),
+    };
+    const childOrder = { row: ["b", "a"] };
+    const out = layoutAutoNode("row", nodes, childOrder);
+    assert.equal(out.children.b?.x, 0);
+    assert.equal(out.children.a?.x, 50);
+  });
+});
 
 describe("layoutEngine — horizontal button (icon + label)", () => {
   it("lays out icon and label in a hug horizontal row", () => {
@@ -116,6 +142,33 @@ describe("layoutEngine — nested auto layout", () => {
 });
 
 describe("layoutEngine — auto gap", () => {
+  it("freezeAutoLayoutGapBeforeChildInsert preserves inferred gap before child insert", () => {
+    const nodes: Record<string, LayoutEngineNode> = {
+      parent: rootFrame("parent", {
+        layoutMode: "horizontal",
+        layoutGap: 99,
+        layoutGapAuto: true,
+        layoutSizingHorizontal: "fixed",
+        layoutSizingVertical: "fixed",
+        width: 200,
+        height: 80,
+      }),
+      a: frame("a", 0, 0, 40, 40, { parentId: "parent" }),
+      b: frame("b", 0, 0, 40, 40, { parentId: "parent", x: 52, y: 0 }),
+      c: frame("c", 0, 0, 30, 30, { parentId: null }),
+    };
+    const childOrder = { parent: ["a", "b"] };
+    const patch = freezeAutoLayoutGapBeforeChildInsert(
+      nodes.parent,
+      nodes,
+      childOrder,
+      "c",
+    );
+    assert.ok(patch);
+    assert.equal(patch!.layoutGapAuto, false);
+    assert.equal(patch!.layoutGap, 12);
+  });
+
   it("uses inferred spacing when layoutGapAuto is true", () => {
     const nodes: Record<string, LayoutEngineNode> = {
       parent: rootFrame("parent", {

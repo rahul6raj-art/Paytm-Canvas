@@ -48,6 +48,12 @@ import {
   applyWrapSelectionInFrame,
   canAddAutoLayoutToSelection,
 } from "@/lib/autoLayoutSelection";
+import { freezeAutoLayoutGapBeforeChildInsert } from "@/lib/layoutEngine/inferGap";
+import {
+  computeAutoLayoutArrowReorderIndex,
+  getAutoLayoutArrowReorderContext,
+  swapAutoLayoutSiblingOrder,
+} from "@/lib/autoLayoutArrowReorder";
 import {
   computeResizedBounds,
   isProportionalResize,
@@ -72,6 +78,11 @@ import {
   relayoutParentKeysAfterManualPosition,
 } from "@/lib/alignSelection";
 import {
+  clampStrokeWidth,
+  DEFAULT_PENCIL_STROKE_WIDTH,
+  nodeSupportsStrokeWidth,
+} from "@/lib/strokeAdjust";
+import {
   clonedNodePosition,
   parentUsesAutoLayout,
   collectSubtreeIds,
@@ -82,7 +93,6 @@ import {
   syncParentIdsFromChildOrder,
   worldPointToParentLocalFromChildOrder,
   isAncestorOf,
-  nextDuplicateName,
   nextFrameName,
   repairNodeHierarchy,
   repairNodeHierarchyIfNeeded,
@@ -154,8 +164,18 @@ import {
 } from "@/lib/text/textLayout";
 import { createPointTextAt, createTextBoxFromDrag } from "@/lib/text/textCreation";
 import { EMPTY_TEXT_PLACEHOLDER_WIDTH, MIN_TEXT_BOX, textResizePatch } from "@/lib/text/textNodeModel";
-import { resolveTextTypo } from "@/lib/textTypography";
+import {
+  DEFAULT_TEXT_FONT_FAMILY,
+  DEFAULT_TEXT_FONT_SIZE,
+  resolveTextTypo,
+} from "@/lib/textTypography";
 import { createShapeNode } from "@/lib/shapes/shapeCreation";
+import {
+  duplicatedTextLayerName,
+  layerNameFromTextContent,
+  nextDuplicatedLayerName,
+  nextNumberedLayerName,
+} from "@/lib/layerNaming";
 import {
   lineEndpointsPatchFromLayout,
   linePatchFromEndpoints,
@@ -180,6 +200,11 @@ import {
   topmostAmongSiblings,
   type BooleanOperation,
 } from "@/lib/booleanGeometry";
+import {
+  booleanGroupChildrenToRemove,
+  canOutlineStroke,
+  convertStrokeToVector,
+} from "@/lib/outlineStroke";
 import { expandBooleanFillStylePatches } from "@/lib/booleanGroupFill";
 import { getResizeAnchorLocal, solveNodeXYForAnchorWorld } from "@/lib/resizeTransform";
 import {
@@ -433,6 +458,18 @@ export interface EditorNode {
   lineY2?: number;
   /** Horizontal alignment */
   textAlign?: "left" | "center" | "right" | "justify";
+  /** Underline / strikethrough (visual only; content unchanged). */
+  textDecoration?: import("@/lib/text/textAdvancedStyle").TextDecorationMode;
+  /** Text transform for display (content in store stays raw). */
+  textCase?: import("@/lib/text/textAdvancedStyle").TextCaseMode;
+  /** Trim ascender/descender padding from line boxes. */
+  verticalTrim?: import("@/lib/text/textAdvancedStyle").TextVerticalTrim;
+  /** Bulleted or numbered list prefixes per paragraph. */
+  listStyle?: import("@/lib/text/textAdvancedStyle").TextListStyle;
+  /** Extra space between paragraphs (px). */
+  paragraphSpacing?: number;
+  /** Truncate overflowing lines with ellipsis (fixed-height boxes). */
+  textTruncate?: import("@/lib/text/textAdvancedStyle").TextTruncateMode;
   /** Vertical alignment within the text box */
   verticalAlign?: "top" | "middle" | "bottom";
   /** Figma-style auto-resize label (kept in sync with textResizeMode) */
@@ -532,6 +569,8 @@ export interface EditorNode {
   isImportReference?: boolean;
   /** SVG path `d` for flattened boolean result */
   flattenedPathData?: string;
+  /** Fill rule for compound paths (outline stroke rings, booleans). */
+  pathFillRule?: "nonzero" | "evenodd";
 
   /** Design ↔ Code: original JSX tag (e.g. div, Header) for 1:1 React export */
   codeJsxTag?: string;
@@ -589,6 +628,12 @@ export type NodeStylePatch = Partial<
     | "lineHeight"
     | "letterSpacing"
     | "textAlign"
+    | "textDecoration"
+    | "textCase"
+    | "verticalTrim"
+    | "listStyle"
+    | "paragraphSpacing"
+    | "textTruncate"
     | "verticalAlign"
     | "autoResize"
     | "textResizeMode"
@@ -675,6 +720,8 @@ export interface EditorState {
   penDrawingNodeId: string | null;
   /** In-progress freehand (pencil) path node id, or null. */
   pencilDrawingNodeId: string | null;
+  /** Brush size for the next freehand stroke (and toolbar preset). */
+  pencilStrokeWidth: number;
   /** Point-edit mode for a finished path (Backspace deletes selected anchor). */
   pathEditModeNodeId: string | null;
   /** Parametric shape edit (corner radius, arc, line endpoints, polygon sides, etc.). */
@@ -683,8 +730,8 @@ export interface EditorState {
   transformInteractionMode: "none" | "resize" | "rotate";
   /** True while dragging selected object(s) on canvas. */
   isMovingSelection: boolean;
-  /** Pointer over rotate-from-corner hit targets (nested enter/leave safe). */
-  rotateHandleHoverCount: number;
+  /** Pointer over a rotate-from-corner hit target. */
+  rotateHandleHovered: boolean;
   /** Corner/edge under the pointer for rotate cursor orientation. */
   rotateHandleHoverHandle: import("@/lib/resize").ResizeHandle | "top" | null;
   /** Edit children inside a boolean group (Figma-style). */
@@ -796,6 +843,7 @@ export interface EditorState {
   createBooleanGroup: (operation: BooleanOperation) => void;
   updateBooleanOperation: (groupId: string, operation: BooleanOperation) => void;
   flattenSelection: () => void;
+  outlineStrokeSelection: () => void;
   enterObjectEditMode: (nodeId: string) => void;
   exitObjectEditMode: () => void;
   useSelectionAsMask: () => void;
@@ -862,6 +910,13 @@ export interface EditorState {
   sendToBack: () => void;
   /** Nudge selected layers by delta in parent-local px (design mode). */
   nudgeSelection: (dx: number, dy: number) => void;
+  setPencilStrokeWidth: (width: number) => void;
+  setSelectionStrokeWidth: (width: number) => void;
+  nudgeSelectionStrokeWidth: (delta: number) => void;
+  /** Reorder a flow child along the auto-layout primary axis (arrow keys). */
+  reorderAutoLayoutChildByArrow: (arrowCode: string) => boolean;
+  /** Swap two flow siblings inside the same auto-layout parent. */
+  swapAutoLayoutSiblings: (idA: string, idB: string, opts?: { skipHistory?: boolean }) => void;
   groupSelection: () => void;
   ungroupSelection: () => void;
   /** Figma ⇧A — wrap selection in auto-layout frame or enable on container. */
@@ -1272,6 +1327,15 @@ function applyMoveNodeToParent(
     } else {
       next.x = origin.x;
       next.y = origin.y;
+    }
+  }
+
+  if (newParentNodeId) {
+    const parentNode = nodes[newParentNodeId];
+    const pMode = parentNode?.layoutMode ?? "none";
+    if (pMode === "horizontal" || pMode === "vertical") {
+      next.layoutPositioning = "auto";
+      next.layoutDirty = true;
     }
   }
 
@@ -1746,7 +1810,10 @@ function cloneTopLevelSelectionState(
   for (const rootId of tops) {
     const rootOld = s.nodes[rootId];
     if (!rootOld) continue;
-    const nameForRoot = nextDuplicateName(nodes);
+    const nameForRoot =
+      rootOld.type === "text"
+        ? duplicatedTextLayerName(rootOld.content)
+        : nextDuplicatedLayerName(nodes, rootOld.name);
     const idMap = new Map<string, string>();
     const renderParent = parentOf.get(rootId) ?? null;
     const inAutoLayout = parentUsesAutoLayout(renderParent, s.nodes);
@@ -1770,7 +1837,12 @@ function cloneTopLevelSelectionState(
         ...old,
         id: newId,
         parentId: newParent,
-        name: oldId === rootId ? nameForRoot : old.name,
+        name:
+          old.type === "text"
+            ? duplicatedTextLayerName(old.content)
+            : oldId === rootId
+              ? nameForRoot
+              : old.name,
         x: pos.x,
         y: pos.y,
       };
@@ -2040,8 +2112,8 @@ function textStyleFromSelection(
     const n = s.nodes[id];
     if (n?.type === "text") {
       return {
-        fontFamily: n.fontFamily ?? "Inter, system-ui, sans-serif",
-        fontSize: n.fontSize ?? 13,
+        fontFamily: n.fontFamily ?? DEFAULT_TEXT_FONT_FAMILY,
+        fontSize: n.fontSize ?? DEFAULT_TEXT_FONT_SIZE,
         fontWeight: n.fontWeight ?? 500,
         lineHeight: n.lineHeight ?? 1.25,
         letterSpacing: n.letterSpacing ?? 0,
@@ -2052,8 +2124,8 @@ function textStyleFromSelection(
   }
   const { defaultText } = canvasChromeForeground(s.canvasBackgroundColor);
   return {
-    fontFamily: "Inter, system-ui, sans-serif",
-    fontSize: 13,
+    fontFamily: DEFAULT_TEXT_FONT_FAMILY,
+    fontSize: DEFAULT_TEXT_FONT_SIZE,
     fontWeight: 500,
     lineHeight: 1.25,
     letterSpacing: 0,
@@ -2112,7 +2184,7 @@ function editorStateAfterDocumentImport(
     shapeEditModeNodeId: null,
     transformInteractionMode: "none",
     isMovingSelection: false,
-    rotateHandleHoverCount: 0,
+    rotateHandleHovered: false,
     rotateHandleHoverHandle: null,
     objectEditModeNodeId: null,
     selectedPathPointId: null,
@@ -2170,7 +2242,7 @@ function editorPartialFromPaytmCraftDocument(doc: PaytmCraftDocument, s: EditorS
     shapeEditModeNodeId: null,
     transformInteractionMode: "none",
     isMovingSelection: false,
-    rotateHandleHoverCount: 0,
+    rotateHandleHovered: false,
     rotateHandleHoverHandle: null,
     objectEditModeNodeId: null,
     selectedPathPointId: null,
@@ -2321,11 +2393,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
   isPlacingComment: false,
   penDrawingNodeId: null,
   pencilDrawingNodeId: null,
+  pencilStrokeWidth: 2,
   pathEditModeNodeId: null,
   shapeEditModeNodeId: null,
   transformInteractionMode: "none",
   isMovingSelection: false,
-  rotateHandleHoverCount: 0,
+  rotateHandleHovered: false,
   rotateHandleHoverHandle: null,
   objectEditModeNodeId: null,
   selectedPathPointId: null,
@@ -2477,6 +2550,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
       importWebModalOpen: false,
       importFigmaModalOpen: true,
       codeRoundTripOpen: false,
+      aiModalOpen: false,
+      aiModalSource: null,
     })),
   closeImportFigmaModal: () => set({ importFigmaModalOpen: false }),
   openCodeRoundTrip: (tab = "export") =>
@@ -2892,8 +2967,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
     if (before.tool === "pen" && tool !== "pen" && before.penDrawingNodeId) {
       get().cancelPath();
     }
-    if (before.tool === "pencil" && tool !== "pencil" && before.pencilDrawingNodeId) {
+    if (before.pencilDrawingNodeId && tool !== "pencil") {
       get().cancelPencilStroke();
+    }
+    if (tool === "pencil") {
+      clearPostCreationPointerSuppress();
     }
     const enteringCreation =
       before.editorMode === "design" &&
@@ -2908,7 +2986,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
           placingComponentMasterId: null,
           isPlacingComment: true,
           activeCommentId: null,
-          rotateHandleHoverCount: 0,
+          rotateHandleHovered: false,
           rotateHandleHoverHandle: null,
           ...(enteringCreation ? { shapeEditModeNodeId: null, pathEditModeNodeId: null } : {}),
         };
@@ -2918,7 +2996,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         placingComponentMasterId: tool === "move" ? s.placingComponentMasterId : null,
         isPlacingComment: false,
         activeCommentId: null,
-        rotateHandleHoverCount: 0,
+        rotateHandleHovered: false,
         rotateHandleHoverHandle: null,
         ...(enteringCreation ? { shapeEditModeNodeId: null, pathEditModeNodeId: null } : {}),
       };
@@ -3214,6 +3292,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
     set((s) => {
       const n = s.nodes[id];
       if (!n || n.locked) return s;
+      const patchForApply =
+        s.transformInteractionMode === "rotate" && patch.rotation != null
+          ? { rotation: patch.rotation }
+          : patch;
       const instRoot = findInstanceRoot(s.nodes, id);
       let nodes = { ...s.nodes };
       const stylePart: Partial<EditorNode> = {};
@@ -3224,7 +3306,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
           ? mergeInstanceOverrides(n, s.nodes)
           : n;
       const layoutAwarePatch =
-        n.type === "text" ? withTextLayoutPatch(layoutBase, patch) : patch;
+        n.type === "text" ? withTextLayoutPatch(layoutBase, patchForApply) : patchForApply;
 
       if (instRoot && instRoot !== id) {
         for (const k of Object.keys(layoutAwarePatch)) {
@@ -3355,7 +3437,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
         const n = nodes[id];
         const patch = patches[id];
         if (!n || !patch || n.locked) continue;
-        const layoutAwarePatch = n.type === "text" ? withTextLayoutPatch(n, patch) : patch;
+        const patchForApply =
+          s.transformInteractionMode === "rotate" && patch.rotation != null
+            ? { rotation: patch.rotation }
+            : patch;
+        const layoutAwarePatch = n.type === "text" ? withTextLayoutPatch(n, patchForApply) : patchForApply;
         nodes[id] = { ...n, ...layoutAwarePatch };
         changed = true;
         const keys = Object.keys(layoutAwarePatch);
@@ -3433,8 +3519,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const mergedPatch = touchesStroke
         ? { ...patch, ...mergeStrokeIntoNode(layoutBase, patch) }
         : patch;
-      const finalPatch =
+      let finalPatch =
         n.type === "text" ? withTextLayoutPatch(layoutBase, mergedPatch) : mergedPatch;
+      if (n.type === "text" && "content" in mergedPatch) {
+        finalPatch = {
+          ...finalPatch,
+          name: layerNameFromTextContent(
+            (mergedPatch as { content?: string }).content ?? n.content,
+          ),
+        };
+      }
 
       let nodes: Record<string, EditorNode>;
       if (instRoot && instRoot !== id) {
@@ -3637,7 +3731,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         id,
         parentId: null,
         type: "rectangle",
-        name: "Rectangle",
+        name: nextNumberedLayerName(s.nodes, "Rectangle"),
         x: 120,
         y: 120,
         width: 160,
@@ -3680,7 +3774,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         id,
         parentId: null,
         type: "text",
-        name: "Text",
+        name: layerNameFromTextContent(content),
         x: 120,
         y: 200,
         width: tw,
@@ -3714,7 +3808,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         id,
         parentId: null,
         type: "rectangle",
-        name: "Rectangle",
+        name: nextNumberedLayerName(s.nodes, "Rectangle"),
         x,
         y,
         width: w,
@@ -3766,6 +3860,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         ...base,
         id,
         parentId: null,
+        name: layerNameFromTextContent(base.content),
         ...textResizePatch("auto-width"),
       };
       const inserted = insertNodeWithFrameParenting(
@@ -3800,6 +3895,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         ...base,
         id,
         parentId: null,
+        name: layerNameFromTextContent(base.content),
         ...textResizePatch(base.textResizeMode ?? "auto-height"),
       };
       const inserted = insertNodeWithFrameParenting(
@@ -4043,7 +4139,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         type: "typography",
         value: {
           fontFamily: picked!.fontFamily ?? "Inter, system-ui, sans-serif",
-          fontSize: picked!.fontSize ?? 13,
+          fontSize: picked!.fontSize ?? DEFAULT_TEXT_FONT_SIZE,
           fontWeight: picked!.fontWeight ?? 500,
           lineHeight: picked!.lineHeight ?? 1.25,
           letterSpacing: picked!.letterSpacing ?? 0,
@@ -4408,7 +4504,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         id,
         parentId: null,
         type: "ellipse",
-        name: "Ellipse",
+        name: nextNumberedLayerName(s.nodes, "Ellipse"),
         x,
         y,
         width: w,
@@ -4450,7 +4546,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         id,
         parentId: null,
         type: "line",
-        name: "Line",
+        name: nextNumberedLayerName(s.nodes, "Line"),
         x,
         y,
         width: w,
@@ -4498,7 +4594,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         id,
         parentId: null,
         type: "path",
-        name: "Triangle",
+        name: nextNumberedLayerName(s.nodes, "Triangle"),
         x,
         y,
         width: w,
@@ -4538,7 +4634,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     set((s) => {
       const draft = createShapeNode(shapeType, start, end, modifiers, style);
       const id = `${draft.type}-${Date.now()}`;
-      const node: EditorNode = { ...draft, id };
+      const name = nextNumberedLayerName(s.nodes, draft.name);
+      const node: EditorNode = { ...draft, id, name };
       const bounds = { x: node.x, y: node.y, width: node.width, height: node.height };
       const inserted = insertNodeWithFrameParenting(
         node,
@@ -4720,6 +4817,55 @@ export const useEditorStore = create<EditorState>((set, get) => {
     });
   },
 
+  outlineStrokeSelection: () => {
+    const s0 = get();
+    if (s0.editorMode !== "design" || s0.selectedIds.length !== 1) {
+      window.alert("Select one shape with a visible stroke to outline.");
+      return;
+    }
+    const id = s0.selectedIds[0]!;
+    const node = s0.nodes[id];
+    if (!node) return;
+    if (!canOutlineStroke(node)) {
+      window.alert("Select a layer with a visible stroke to outline.");
+      return;
+    }
+    const ctx = { childOrder: s0.childOrder, nodes: s0.nodes };
+    const converted = convertStrokeToVector(node, ctx);
+    if (!converted) {
+      window.alert("Could not outline this stroke.");
+      return;
+    }
+    const removeKids = booleanGroupChildrenToRemove(node, ctx);
+    get().pushHistory();
+    set((s) => {
+      const current = s.nodes[id];
+      if (!current) return s;
+      const next = { ...converted, id, name: current.name, parentId: current.parentId };
+      const nodes = { ...s.nodes, [id]: next };
+      const childOrder = { ...s.childOrder };
+      for (const cid of removeKids) {
+        delete nodes[cid];
+        delete childOrder[cid];
+      }
+      if (removeKids.length > 0) {
+        delete childOrder[id];
+      }
+      const parentRef = current.parentId;
+      const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
+      return {
+        nodes: nodes2,
+        childOrder,
+        pathEditModeNodeId: id,
+        shapeEditModeNodeId: null,
+        objectEditModeNodeId: null,
+        selectedPathPointId: null,
+        selectedIds: [id],
+        tool: "move",
+      };
+    });
+  },
+
   enterObjectEditMode: (nodeId) => {
     const s = get();
     const n = s.nodes[nodeId];
@@ -4895,8 +5041,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
     set((s) => {
       const tops = alignableSelectionIds(s.selectedIds, s.nodes);
       if (tops.length < 2) return s;
-      let nodes = alignNodesInDocument(s.nodes, tops, direction);
-      const relayoutKeys = relayoutParentKeysAfterManualPosition(nodes, tops, parentListKey);
+      let nodes = alignNodesInDocument(s.nodes, s.childOrder, tops, direction);
+      const relayoutKeys = relayoutParentKeysAfterManualPosition(
+        nodes,
+        s.childOrder,
+        tops,
+        parentListKey,
+      );
       nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, relayoutKeys);
       return { nodes };
     });
@@ -4910,8 +5061,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
     set((s) => {
       const tops = alignableSelectionIds(s.selectedIds, s.nodes);
       if (tops.length < 3) return s;
-      let nodes = distributeNodesInDocument(s.nodes, tops, axis);
-      const relayoutKeys = relayoutParentKeysAfterManualPosition(nodes, tops, parentListKey);
+      let nodes = distributeNodesInDocument(s.nodes, s.childOrder, tops, axis);
+      const relayoutKeys = relayoutParentKeysAfterManualPosition(
+        nodes,
+        s.childOrder,
+        tops,
+        parentListKey,
+      );
       nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, relayoutKeys);
       return { nodes };
     });
@@ -5026,7 +5182,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
       for (const rootId of payload.rootIds) {
         const rootOld = payload.nodes[rootId];
         if (!rootOld) continue;
-        const rootLabel = newRoots.length === 0 ? nextDuplicateName(nodes) : rootOld.name;
+        const rootLabel =
+          rootOld.type === "text"
+            ? duplicatedTextLayerName(rootOld.content)
+            : nextDuplicatedLayerName(nodes, rootOld.name);
 
         const cloneRecursive = (oldId: string, newParent: string | null, treeRootOldId: string): string => {
           const old = payload.nodes[oldId];
@@ -5045,7 +5204,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
             ...JSON.parse(JSON.stringify(old)) as EditorNode,
             id: newId,
             parentId: newParent,
-            name: oldId === rootId ? rootLabel : old.name,
+            name:
+              old.type === "text"
+                ? duplicatedTextLayerName(old.content)
+                : oldId === rootId
+                  ? rootLabel
+                  : old.name,
             x: pos.x,
             y: pos.y,
           };
@@ -5365,6 +5529,105 @@ export const useEditorStore = create<EditorState>((set, get) => {
     });
   },
 
+  setPencilStrokeWidth: (width) => {
+    set({ pencilStrokeWidth: clampStrokeWidth(width) });
+  },
+
+  setSelectionStrokeWidth: (width) => {
+    const s0 = get();
+    if (s0.editorMode !== "design") return;
+    const next = clampStrokeWidth(width);
+    const tops = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
+      const n = s0.nodes[id];
+      return n && !n.locked && n.visible && nodeSupportsStrokeWidth(n);
+    });
+    if (tops.length === 0) return;
+    get().pushHistory();
+    set((s) => {
+      let nodes = { ...s.nodes };
+      for (const id of tops) {
+        const n = nodes[id];
+        if (!n || n.locked || !nodeSupportsStrokeWidth(n)) continue;
+        nodes[id] = {
+          ...n,
+          strokeWidth: next,
+          strokeEnabled: next > 0 ? true : n.strokeEnabled,
+        };
+      }
+      return { nodes, pencilStrokeWidth: next };
+    });
+  },
+
+  nudgeSelectionStrokeWidth: (delta) => {
+    if (delta === 0) return;
+    const s0 = get();
+    if (s0.editorMode !== "design") return;
+    const tops = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
+      const n = s0.nodes[id];
+      return n && !n.locked && n.visible && nodeSupportsStrokeWidth(n);
+    });
+    if (tops.length === 0) {
+      const next = clampStrokeWidth(s0.pencilStrokeWidth + delta);
+      if (next === s0.pencilStrokeWidth) return;
+      set({ pencilStrokeWidth: next });
+      return;
+    }
+    get().pushHistory();
+    set((s) => {
+      let nodes = { ...s.nodes };
+      let preset = s.pencilStrokeWidth;
+      for (const id of tops) {
+        const n = nodes[id];
+        if (!n || n.locked || !nodeSupportsStrokeWidth(n)) continue;
+        const next = clampStrokeWidth((n.strokeWidth ?? 0) + delta);
+        preset = next;
+        nodes[id] = {
+          ...n,
+          strokeWidth: next,
+          strokeEnabled: next > 0 ? true : n.strokeEnabled,
+        };
+      }
+      return { nodes, pencilStrokeWidth: preset };
+    });
+  },
+
+  reorderAutoLayoutChildByArrow: (arrowCode) => {
+    const s0 = get();
+    if (s0.editorMode !== "design") return false;
+    const tops = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
+      const n = s0.nodes[id];
+      return n && !n.locked && n.visible;
+    });
+    const ctx = getAutoLayoutArrowReorderContext(tops, s0.nodes, s0.childOrder);
+    if (!ctx) return false;
+    const targetIndex = computeAutoLayoutArrowReorderIndex(
+      ctx,
+      arrowCode,
+      s0.nodes,
+      s0.childOrder,
+    );
+    if (targetIndex == null) return false;
+    get().pushHistory();
+    get().reorderNode(ctx.childId, ctx.parentId, targetIndex);
+    return true;
+  },
+
+  swapAutoLayoutSiblings: (idA, idB, opts) => {
+    const s0 = get();
+    if (s0.editorMode !== "design") return;
+    const a = s0.nodes[idA];
+    const b = s0.nodes[idB];
+    if (!a?.parentId || a.parentId !== b?.parentId) return;
+    const parentId = a.parentId;
+    if (!opts?.skipHistory) get().pushHistory();
+    set((s) => {
+      const nextOrder = swapAutoLayoutSiblingOrder(parentId, idA, idB, s.childOrder);
+      if (!nextOrder) return s;
+      let nodes = relayoutParentsWithAutoLayout(s.nodes, nextOrder, [parentId]);
+      return { nodes, childOrder: nextOrder };
+    });
+  },
+
   groupSelection: () => {
     const s0 = get();
     const tops0 = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
@@ -5588,7 +5851,28 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (!n || n.locked) return s;
       const newKey = newParentId === ROOT ? ROOT : newParentId;
       const oldKey = parentListKey(n.parentId);
-      const res = applyMoveNodeToParent(s, id, newKey, index);
+
+      let stateForMove = s;
+      if (newKey !== ROOT) {
+        const parent = s.nodes[newKey];
+        const gapPatch = freezeAutoLayoutGapBeforeChildInsert(
+          parent,
+          s.nodes,
+          s.childOrder,
+          id,
+        );
+        if (gapPatch && parent) {
+          stateForMove = {
+            ...s,
+            nodes: {
+              ...s.nodes,
+              [newKey]: { ...parent, ...gapPatch, layoutDirty: true },
+            },
+          };
+        }
+      }
+
+      const res = applyMoveNodeToParent(stateForMove, id, newKey, index);
       if (!res) return s;
       let { nodes, childOrder } = res;
       const refresh = new Set<string>();
@@ -6003,7 +6287,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const height = finiteDimension(next.height, RESIZE_MIN_DIMENSION);
 
       if (opts?.fixedWorld && rotated) {
-        const anchorLocal = getResizeAnchorLocal(handle, width, height);
+        const centerScale = modifiers.shiftKey && modifiers.altKey;
+        const anchorLocal = centerScale
+          ? { x: width / 2, y: height / 2 }
+          : getResizeAnchorLocal(handle, width, height);
         const solved = solveNodeXYForAnchorWorld(
           n,
           s.nodes,
@@ -6507,7 +6794,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         id,
         parentId: null,
         type: "path",
-        name: "Vector",
+        name: nextNumberedLayerName(s.nodes, "Vector"),
         x: 0,
         y: 0,
         width: 1,
@@ -6691,17 +6978,20 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   startPencilStroke: (worldPoint) => {
     const s0 = get();
-    if (s0.editorMode !== "design" || s0.tool !== "pencil" || s0.pencilDrawingNodeId) return;
+    if (s0.editorMode !== "design" || s0.tool !== "pencil") return;
+    if (s0.pencilDrawingNodeId) get().cancelPencilStroke();
     get().pushHistory();
     set((s) => {
-      if (s.editorMode !== "design" || s.tool !== "pencil" || s.pencilDrawingNodeId) return s;
+      if (s.editorMode !== "design" || s.tool !== "pencil") return s;
       const id = `path-${Date.now()}`;
+      const { defaultText } = canvasChromeForeground(s.canvasBackgroundColor);
+      const strokeWidth = clampStrokeWidth(s.pencilStrokeWidth || DEFAULT_PENCIL_STROKE_WIDTH);
       const pt0: PathPoint = { id: newPathPointId(), x: 0, y: 0 };
       let node: EditorNode = {
         id,
         parentId: null,
         type: "path",
-        name: "Freehand",
+        name: nextNumberedLayerName(s.nodes, "Freehand"),
         x: 0,
         y: 0,
         width: 1,
@@ -6715,11 +7005,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
         fillEnabled: false,
         fillOpacity: 1,
         fill: "transparent",
-        strokeColor: "#0f172a",
-        strokeWidth: 2,
+        strokeColor: defaultText,
+        strokeEnabled: true,
+        strokeWidth,
         strokeLinecap: "round",
         strokeLinejoin: "round",
         strokePosition: "center",
+        strokeWidthProfile: "uniform",
       };
       node = normalizePathNode(node);
       const inserted = insertNodeWithFrameParenting(
@@ -6760,7 +7052,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
       for (const worldPoint of worldPoints) {
         const lx = worldPoint.x - nOrigin.x;
         const ly = worldPoint.y - nOrigin.y;
-        if (!shouldSampleFreehandPoint(last.x, last.y, lx, ly, s.zoom)) continue;
+        const firstSample = pts.length === 1;
+        if (
+          !firstSample &&
+          !shouldSampleFreehandPoint(last.x, last.y, lx, ly, s.zoom)
+        ) {
+          continue;
+        }
         const id = newPathPointId();
         pts = [...pts, { id, x: lx, y: ly }];
         last = pts[pts.length - 1]!;
@@ -6769,10 +7067,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (!changed) return s;
       let next: EditorNode = { ...n, pathPoints: pts };
       next = normalizePathNode(next);
-      let nodes = { ...s.nodes, [drawId]: next };
-      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
-      const repaired = repairNodeHierarchy(nodes, s.childOrder);
-      return { nodes: repaired.nodes, childOrder: repaired.childOrder };
+      return { ...s, nodes: { ...s.nodes, [drawId]: next } };
     });
   },
 
@@ -6789,24 +7084,38 @@ export const useEditorStore = create<EditorState>((set, get) => {
     set((s) => {
       const n = s.nodes[id];
       if (!n || n.type !== "path" || !n.pathPoints) {
-        return { ...s, pencilDrawingNodeId: null, tool: "move" as Tool };
+        return { ...s, pencilDrawingNodeId: null };
       }
-      const simplified = simplifyPolyline(
-        n.pathPoints.map((p) => ({ x: p.x, y: p.y })),
+      const raw = n.pathPoints;
+      let simplified = simplifyPolyline(
+        raw.map((p) => ({ x: p.x, y: p.y })),
         epsilon,
       );
+      if (simplified.length < 2 && raw.length >= 2) {
+        simplified = [
+          { x: raw[0]!.x, y: raw[0]!.y },
+          { x: raw[raw.length - 1]!.x, y: raw[raw.length - 1]!.y },
+        ];
+      }
       if (simplified.length < 2) {
-        const parentRef = n.parentId;
-        const { nodes, childOrder } = removeNodeAndDescendants(s, id);
-        const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
-        return {
-          ...s,
-          nodes: nodes2,
-          childOrder,
-          pencilDrawingNodeId: null,
-          tool: "move" as Tool,
-          selectedIds: [],
-        };
+        if (raw.length >= 1) {
+          const p = raw[0]!;
+          simplified = [
+            { x: p.x, y: p.y },
+            { x: p.x + 0.5, y: p.y + 0.5 },
+          ];
+        } else {
+          const parentRef = n.parentId;
+          const { nodes, childOrder } = removeNodeAndDescendants(s, id);
+          const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
+          return {
+            ...s,
+            nodes: nodes2,
+            childOrder,
+            pencilDrawingNodeId: null,
+            selectedIds: [],
+          };
+        }
       }
       const pts: PathPoint[] = simplified.map((p) => ({
         id: newPathPointId(),
@@ -6823,20 +7132,21 @@ export const useEditorStore = create<EditorState>((set, get) => {
         nodes: repaired.nodes,
         childOrder: repaired.childOrder,
         pencilDrawingNodeId: null,
-        tool: "move" as Tool,
+        tool: "move",
         selectedIds: [id],
         pathEditModeNodeId: null,
         objectEditModeNodeId: null,
         selectedPathPointId: null,
       };
     });
+    get().setTool("move");
   },
 
   cancelPencilStroke: () => {
     const id = get().pencilDrawingNodeId;
     if (!id) return;
     set((s) => {
-      if (!s.nodes[id]) return { ...s, pencilDrawingNodeId: null, tool: "move" as Tool };
+      if (!s.nodes[id]) return { ...s, pencilDrawingNodeId: null };
       const parentRef = s.nodes[id]?.parentId;
       const { nodes, childOrder } = removeNodeAndDescendants(s, id);
       const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
@@ -6845,7 +7155,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
         nodes: nodes2,
         childOrder,
         pencilDrawingNodeId: null,
-        tool: "move" as Tool,
         selectedIds: [],
       };
     });
@@ -6992,15 +7301,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
   setIsMovingSelection: (active) => set({ isMovingSelection: active }),
 
   setRotateHandleHovered: (hovered, handle) =>
-    set((s) => {
-      const rotateHandleHoverCount = Math.max(
-        0,
-        s.rotateHandleHoverCount + (hovered ? 1 : -1),
-      );
-      let rotateHandleHoverHandle = s.rotateHandleHoverHandle;
-      if (hovered && handle) rotateHandleHoverHandle = handle;
-      else if (!hovered && rotateHandleHoverCount === 0) rotateHandleHoverHandle = null;
-      return { rotateHandleHoverCount, rotateHandleHoverHandle };
+    set({
+      rotateHandleHovered: hovered,
+      rotateHandleHoverHandle: hovered ? (handle ?? null) : null,
     }),
 
   enterVectorEditMode: (nodeId) => {

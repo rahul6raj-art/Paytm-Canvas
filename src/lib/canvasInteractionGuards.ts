@@ -9,7 +9,10 @@ export function isCanvasChromeTarget(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
   if (!el?.closest) return false;
   return Boolean(
-    el.closest("[data-grid-toggle]") ||
+    el.closest("[data-frame-label]") ||
+      el.closest("[data-autolayout-spacing-handle]") ||
+      el.closest("[data-autolayout-padding-handle]") ||
+      el.closest("[data-grid-toggle]") ||
       el.closest("[data-rulers-toggle]") ||
       el.closest("[data-ruler-zone]") ||
       el.closest("[data-canvas-rulers]") ||
@@ -101,6 +104,7 @@ export function canCanvasObjectInteract(opts: {
 
 export function canCanvasObjectDrag(): boolean {
   const st = useEditorStore.getState();
+  if (st.transformInteractionMode !== "none") return false;
   if (st.editorMode === "inspect") return false;
   if (st.tool !== "move" && st.tool !== "frame") return false;
   if (st.editingTextId) return false;

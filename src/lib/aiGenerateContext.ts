@@ -74,9 +74,13 @@ export const AI_CONTEXT_KINDS: AIContextKindMeta[] = [
   },
 ];
 
+/** Kinds shown in the + attach menu (Design.md lives in Style Guide). */
+export const AI_ATTACH_CONTEXT_KINDS = AI_CONTEXT_KINDS.filter((k) => k.kind !== "design-md");
+
 export const MAX_CONTEXT_ATTACHMENTS = 12;
-export const MAX_CONTEXT_CHARS = 14_000;
+export const MAX_CONTEXT_CHARS = 28_000;
 const MAX_TEXT_PER_FILE = 4_000;
+const MAX_DESIGN_MD_CHARS = 18_000;
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 const MAX_FILE_BYTES = 12 * 1024 * 1024;
 
@@ -124,11 +128,99 @@ function summarizeProjectJson(text: string): string {
   }
 }
 
+const DESIGN_MD_TYPO_ROLES = [
+  "body-regular",
+  "body-medium",
+  "section-header-default",
+  "title3-bold",
+  "title1-bold",
+  "subtext-regular",
+  "display3-bold",
+  "button-large",
+  "caption-regular",
+] as const;
+
+function summarizeDesignMdTypography(typoBlock: string): string {
+  const chunks: string[] = [];
+  for (const role of DESIGN_MD_TYPO_ROLES) {
+    const chunk = typoBlock.match(new RegExp(`  ${role}:[\\s\\S]*?(?=\\n  [a-z0-9-]+:|$)`))?.[0]?.trim();
+    if (chunk) chunks.push(chunk);
+  }
+  if (chunks.length > 0) return chunks.join("\n");
+  return typoBlock
+    .split("\n")
+    .filter((l) => /fontSize:|fontWeight:|fontFamily:|lineHeight:/.test(l))
+    .slice(0, 32)
+    .join("\n");
+}
+
+/** Colors, typography, spacing only — avoids steering the model toward a home screen layout. */
+export function summarizeDesignMdTokensOnly(text: string, fileName: string): string {
+  const titleMatch = text.match(/^#\s+(.+)$/m) ?? text.match(/name:\s*(.+)/m);
+  const title = titleMatch?.[1]?.trim() ?? fileName;
+  const colorsBlock = text.match(/colors:\n([\s\S]*?)(?:\n\w|\ntypography:|\n#|$)/)?.[1]?.trim();
+  const typoBlock = text.match(/typography:\n([\s\S]*?)(?:\n(?:spacing|rounded|#)|$)/)?.[1];
+  const typoSummary = typoBlock ? summarizeDesignMdTypography(typoBlock.trim()) : "";
+  const spacingBlock = text.match(/spacing:\n([\s\S]*?)(?:\n\w+:|$)/)?.[1]?.trim();
+  const roundedBlock = text.match(/rounded:\n([\s\S]*?)(?:\n\w+:|$)/)?.[1]?.trim();
+
+  const parts = [
+    `Design tokens from "${title}" (colors/typography/spacing ONLY — do not infer screen type or home layout from this file):`,
+    colorsBlock ? `colors:\n${colorsBlock}` : "",
+    typoSummary ? `typography:\n${typoSummary}` : "",
+    spacingBlock ? `spacing:\n${spacingBlock}` : "",
+    roundedBlock ? `rounded:\n${roundedBlock}` : "",
+  ].filter(Boolean);
+
+  return parts.join("\n\n");
+}
+
+function summarizeDesignMd(text: string, fileName: string): string {
+  const titleMatch = text.match(/^#\s+(.+)$/m) ?? text.match(/name:\s*(.+)/m);
+  const title = titleMatch?.[1]?.trim() ?? fileName;
+  const colorsBlock = text.match(/colors:\n([\s\S]*?)(?:\n\w|\ntypography:|\n#|$)/)?.[1]?.trim();
+  const typoBlock = text.match(/typography:\n([\s\S]*?)(?:\n\w+:|$)/)?.[1];
+  const typoSummary = typoBlock ? summarizeDesignMdTypography(typoBlock) : "";
+
+  const withoutFrontmatter = text.replace(/^---[\s\S]*?---\n?/, "");
+  const bodyBudget = Math.max(
+    4000,
+    MAX_DESIGN_MD_CHARS - (colorsBlock?.length ?? 0) - typoSummary.length - 200,
+  );
+
+  const parts = [
+    `Design spec "${title}":`,
+    colorsBlock ? `colors:\n${colorsBlock}` : "",
+    typoSummary ? `typography:\n${typoSummary}` : "",
+    truncate(withoutFrontmatter, bodyBudget),
+  ].filter(Boolean);
+
+  return parts.join("\n\n");
+}
+
 function summarizeMarkdown(text: string, kind: AIContextKind, fileName: string): string {
+  if (kind === "design-md") return summarizeDesignMd(text, fileName);
   const heading = kind === "skills" ? "Agent skill" : "Design spec";
   const titleMatch = text.match(/^#\s+(.+)$/m);
   const title = titleMatch?.[1]?.trim() ?? fileName;
   return `${heading} "${title}":\n${truncate(text, MAX_TEXT_PER_FILE)}`;
+}
+
+/** Ready attachment from in-memory DESIGN.md text (built-in catalog or pasted content). */
+export function attachmentFromDesignMdText(
+  id: string,
+  name: string,
+  text: string,
+  size = text.length,
+): AIContextAttachment {
+  return {
+    id,
+    kind: "design-md",
+    name,
+    size,
+    status: "ready",
+    summary: summarizeMarkdown(text, "design-md", name),
+  };
 }
 
 function summarizeDocText(text: string, fileName: string): string {
@@ -218,9 +310,11 @@ export async function attachmentFromFile(
     }
 
     if (kind === "video") {
+      const previewUrl = URL.createObjectURL(file);
       return {
         ...base,
         status: "ready",
+        previewUrl,
         summary: `Video "${file.name}" (${file.type || "video"}, ${Math.round(file.size / 1024)}KB). Use motion and pacing as visual reference.`,
       };
     }
@@ -289,6 +383,51 @@ export async function attachmentFromFolder(files: FileList | File[]): Promise<AI
       error: err instanceof Error ? err.message : "Could not read folder",
     };
   }
+}
+
+function parseContextBlocks(contextPrompt: string): { header: string; body: string }[] {
+  const blocks: { header: string; body: string }[] = [];
+  for (const raw of contextPrompt.split(/\n\n(?=\[)/)) {
+    const trimmed = raw.trim();
+    if (!trimmed.startsWith("[")) continue;
+    const close = trimmed.indexOf("]");
+    if (close <= 1) continue;
+    const header = trimmed.slice(1, close).trim();
+    const body = trimmed.slice(close + 1).replace(/^\n/, "").trim();
+    blocks.push({ header, body });
+  }
+  return blocks;
+}
+
+/** Strip design.md layout narrative — tokens only so prompts (not specs) define the screen. */
+export function filterContextPromptForIntent(contextPrompt: string, _intent?: string): string {
+  if (!contextPrompt.trim()) return contextPrompt;
+
+  const parsed = parseContextBlocks(contextPrompt);
+  if (parsed.length === 0) {
+    if (contextPrompt.includes("colors:")) {
+      return summarizeDesignMdTokensOnly(contextPrompt, "design.md");
+    }
+    return contextPrompt;
+  }
+
+  const blocks = parsed.map(({ header, body }) => {
+    const isDesignMd = /design\s*\.md/i.test(header);
+
+    if (isDesignMd && body.includes("colors:")) {
+      const fileName = header.replace(/^[^:]+:\s*/, "").trim();
+      return `[${header}]\n${summarizeDesignMdTokensOnly(body, fileName)}`;
+    }
+
+    if (/^image:/i.test(header)) {
+      const fileName = header.replace(/^[^:]+:\s*/, "").trim();
+      return `[${header}]\nReference screenshot "${fileName}". Replicate this screen layout, hierarchy, and copy on the canvas — match it 1:1. Use design.md for colors/fonts only.`;
+    }
+
+    return `[${header}]\n${body}`;
+  });
+
+  return blocks.join("\n\n");
 }
 
 export function buildContextPrompt(attachments: AIContextAttachment[]): string {

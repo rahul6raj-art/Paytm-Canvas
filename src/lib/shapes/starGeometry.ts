@@ -224,20 +224,20 @@ export function roundedPolygonPathD(vertices: Point2[], radius: number): string 
     const curr = vertices[i]!;
     const next = vertices[(i + 1) % n]!;
 
-    const v0x = prev.x - curr.x;
-    const v0y = prev.y - curr.y;
-    const v1x = next.x - curr.x;
-    const v1y = next.y - curr.y;
-    const len0 = Math.hypot(v0x, v0y);
-    const len1 = Math.hypot(v1x, v1y);
+    const inX = curr.x - prev.x;
+    const inY = curr.y - prev.y;
+    const outX = next.x - curr.x;
+    const outY = next.y - curr.y;
+    const len0 = Math.hypot(inX, inY);
+    const len1 = Math.hypot(outX, outY);
     if (len0 < 1e-6 || len1 < 1e-6) continue;
 
-    const n0x = v0x / len0;
-    const n0y = v0y / len0;
-    const n1x = v1x / len1;
-    const n1y = v1y / len1;
+    const inNx = inX / len0;
+    const inNy = inY / len0;
+    const outNx = outX / len1;
+    const outNy = outY / len1;
 
-    const dot = Math.max(-1, Math.min(1, n0x * n1x + n0y * n1y));
+    const dot = Math.max(-1, Math.min(1, inNx * outNx + inNy * outNy));
     const angle = Math.acos(dot);
     const half = angle / 2;
     if (half < 1e-6) continue;
@@ -247,11 +247,11 @@ export function roundedPolygonPathD(vertices: Point2[], radius: number): string 
     const trim = Math.min(useR / Math.tan(half), len0 / 2, len1 / 2);
     const arcR = trim * Math.tan(half);
 
-    const pStart = { x: curr.x + n0x * trim, y: curr.y + n0y * trim };
-    const pEnd = { x: curr.x + n1x * trim, y: curr.y + n1y * trim };
+    const pStart = { x: curr.x - inNx * trim, y: curr.y - inNy * trim };
+    const pEnd = { x: curr.x + outNx * trim, y: curr.y + outNy * trim };
 
-    const cross = n0x * n1y - n0y * n1x;
-    const sweep = cross < 0 ? 0 : 1;
+    const cross = inNx * outNy - inNy * outNx;
+    const sweep = cross > 0 ? 1 : 0;
     const largeArc = angle > Math.PI ? 1 : 0;
 
     if (!d) d = `M ${pStart.x} ${pStart.y}`;

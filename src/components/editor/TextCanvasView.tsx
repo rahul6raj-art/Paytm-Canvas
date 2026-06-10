@@ -9,6 +9,7 @@ import {
 } from "@/lib/text/textNodeModel";
 import { ensureFontFamilyLoaded } from "@/lib/fonts";
 import { textLayoutPatchForNode } from "@/lib/text/textLayout";
+import { textAdvancedStyleFromNode } from "@/lib/text/textAdvancedStyle";
 import { renderTextToCanvas } from "@/lib/text/textCanvasRender";
 import { getCursorPositionFromPoint } from "@/lib/text/textCursor";
 import {
@@ -68,6 +69,7 @@ export function TextCanvasView({
         selection: isEditing ? selection : null,
         caretIndex: isEditing ? caretIndex : null,
         caretVisible: isEditing && caretVisible,
+        style: textAdvancedStyleFromNode(node),
       });
       const fresh = useEditorStore.getState().nodes[node.id];
       if (fresh?.type === "text") {

@@ -1,4 +1,5 @@
 import { isAncestorOf } from "@/lib/editorGraph";
+import { isAutoLayoutContainerNode } from "@/lib/autoLayoutArrowReorder";
 import type { EditorNode } from "@/stores/useEditorStore";
 
 export function hasVisibleChildren(
@@ -35,6 +36,7 @@ export function shouldCollapseContainerHits(
   if (objectEditModeNodeId && isAncestorOf(nodes, nodeId, objectEditModeNodeId)) {
     return false;
   }
+  if (isAutoLayoutContainerNode(node)) return false;
   if (node.isBooleanGroup && !node.maskId) return true;
   return node.type === "group" || node.type === "frame";
 }
@@ -57,7 +59,10 @@ export function selectionTargetForClick(
   const parent = nodes[parentId];
   if (!parent?.visible || parent.locked) return hitId;
   if (!hasVisibleChildren(parentId, nodes, childOrder)) return hitId;
-  if (parent.type === "group" || parent.type === "frame") return parentId;
+  if (parent.type === "group" || parent.type === "frame") {
+    if (isAutoLayoutContainerNode(parent)) return hitId;
+    return parentId;
+  }
   return hitId;
 }
 
@@ -91,6 +96,15 @@ export function drillTargetForDoubleClick(
   }
 
   return null;
+}
+
+/** Shift/Cmd/Ctrl+click adds to selection — must not start a drag on pointer down. */
+export function isAdditiveSelectionClick(e: {
+  shiftKey: boolean;
+  metaKey?: boolean;
+  ctrlKey?: boolean;
+}): boolean {
+  return e.shiftKey || Boolean(e.metaKey) || Boolean(e.ctrlKey);
 }
 
 /** Preserve multi-selection when dragging an already-selected layer (Figma-style). */
