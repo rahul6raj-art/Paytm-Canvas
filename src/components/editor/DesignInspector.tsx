@@ -364,7 +364,15 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               className="h-3.5 w-3.5 rounded border-white/20 bg-app-panel accent-[#0d99ff]"
               checked={node.clipChildren === true}
               disabled={locked}
-              onChange={(e) => patch({ clipChildren: e.target.checked })}
+              onChange={(e) => {
+                const enabled = e.target.checked;
+                const next: Partial<EditorNode> = { clipChildren: enabled };
+                if (enabled && layoutMode !== "none") {
+                  next.layoutSizingHorizontal = "fixed";
+                  next.layoutSizingVertical = "fixed";
+                }
+                patch(next);
+              }}
             />
             <span className="text-[11px] text-app-fg">Clip content</span>
           </label>

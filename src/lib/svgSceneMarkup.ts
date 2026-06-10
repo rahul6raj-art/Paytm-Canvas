@@ -131,7 +131,12 @@ function renderNode(nodeId: string, ctx: BuildCtx): string {
       { ...resolved, fill: resolved.fill ?? "transparent", strokeColor: stroke, strokeWidth: 1 },
       { ...shapeOpts, strokeOverride: stroke, strokeWidthOverride: 1 },
     );
-    return wrapOpacity(`${shell}${renderChildren(nodeId, ctx)}`);
+    const clip = shouldClipChildren(node);
+    if (!clip) return wrapOpacity(`${shell}${renderChildren(nodeId, ctx)}`);
+    const clipId = `pc-clip-${svgSafeId(nodeId)}`;
+    registerClipRect(ctx.defs, clipId, w, h, node);
+    const children = renderChildren(nodeId, ctx);
+    return wrapOpacity(`${shell}<g clip-path="url(#${clipId})">${children}</g>`);
   }
 
   if (node.type === "frame") {

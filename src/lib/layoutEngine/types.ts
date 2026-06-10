@@ -51,6 +51,9 @@ export interface LayoutEngineNode {
   constraintsHorizontal?: "left" | "right" | "left-right" | "center" | "scale";
   constraintsVertical?: "top" | "bottom" | "top-bottom" | "center" | "scale";
 
+  /** When true, auto-layout hug axes must not expand the container (content overflows for clip). */
+  clipChildren?: boolean;
+
   /** Text hug measurement */
   content?: string;
   fontFamily?: string;

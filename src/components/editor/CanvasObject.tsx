@@ -52,7 +52,7 @@ import {
 import { TextCanvasView } from "./TextCanvasView";
 import { ShapeVectorView } from "./ShapeVectorView";
 import { BooleanGroupView, MaskGroupView } from "./BooleanGroupView";
-import { shouldClipChildren } from "@/lib/clipChildren";
+import { shouldClipChildren, clipContentContainerStyle } from "@/lib/clipChildren";
 import { cssRotationStyle } from "@/lib/transformMath";
 import { shouldSuppressCanvasPointer } from "@/lib/canvasCreationGuard";
 import { didPointerExitElement } from "@/lib/domPointer";
@@ -478,7 +478,7 @@ export function CanvasObject({ id }: { id: string }) {
         <div className="relative h-full w-full" style={{ overflow: "visible" }}>
           <div
             className="absolute inset-0"
-            style={{ overflow: clipGroup ? "hidden" : "visible" }}
+            style={clipGroup ? clipContentContainerStyle(node) : { overflow: "visible" }}
           >
             {childrenTree}
           </div>
@@ -498,10 +498,11 @@ export function CanvasObject({ id }: { id: string }) {
         <ShapeVectorView node={node} nodeId={id} />
         <div
           className="absolute inset-0"
-          style={{
-            borderRadius: cornerRadiusCss,
-            overflow: clipFrame ? "hidden" : "visible",
-          }}
+          style={
+            clipFrame
+              ? clipContentContainerStyle(node, cornerRadiusCss)
+              : { overflow: "visible", borderRadius: cornerRadiusCss }
+          }
         >
           {childrenTree}
         </div>

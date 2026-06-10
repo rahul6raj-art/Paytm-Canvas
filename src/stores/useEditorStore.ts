@@ -2018,6 +2018,7 @@ function toLayoutNode(n: EditorNode): LayoutNode {
     computedWidth: n.computedWidth,
     computedHeight: n.computedHeight,
     layoutDirty: n.layoutDirty,
+    clipChildren: n.clipChildren,
     content: n.content,
     fontFamily: n.fontFamily,
     fontSize: n.fontSize,
