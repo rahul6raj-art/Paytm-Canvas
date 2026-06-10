@@ -123,20 +123,24 @@ export function strokeSpecCanvasDash(spec: StrokeSpec): number[] {
 /** Sync nested stroke + legacy flat fields from a partial patch. */
 export function mergeStrokeIntoNode(
   node: StrokeSpecNode,
-  patch: Partial<StrokeSpec> & {
-    strokeColor?: string;
-    strokeType?: EditorNode["strokeType"];
-    strokeGradient?: EditorNode["strokeGradient"];
-    strokeWidth?: number;
-    strokeOpacity?: number;
-    strokeEnabled?: boolean;
-    strokePosition?: StrokePosition;
-    strokeStyle?: EditorNode["strokeStyle"];
-    strokeDashLength?: number;
-    strokeDashGap?: number;
-    strokeLinecap?: StrokeLinecap;
-    strokeLinejoin?: StrokeLinejoin;
-  },
+  patch: Partial<
+    Pick<
+      EditorNode,
+      | "stroke"
+      | "strokeColor"
+      | "strokeType"
+      | "strokeGradient"
+      | "strokeWidth"
+      | "strokeOpacity"
+      | "strokeEnabled"
+      | "strokePosition"
+      | "strokeStyle"
+      | "strokeDashLength"
+      | "strokeDashGap"
+      | "strokeLinecap"
+      | "strokeLinejoin"
+    >
+  >,
 ): Partial<EditorNode> {
   const base = resolveStrokeSpec(node);
   let next: StrokeSpec = { ...base };

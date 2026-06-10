@@ -128,14 +128,13 @@ export function gradientFillFromPaints(
     rotation = geom.angle;
   }
 
+  const gradientType = g.type as GradientKind;
   const kind: GradientKind =
-    g.type === "radial"
-      ? "radial"
-      : g.type === "angular"
-        ? "angular"
-        : g.type === "diamond"
-          ? "diamond"
-          : "linear";
+    gradientType === "radial" ||
+    gradientType === "angular" ||
+    gradientType === "diamond"
+      ? gradientType
+      : "linear";
 
   return {
     fillType: "gradient",

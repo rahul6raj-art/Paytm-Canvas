@@ -189,7 +189,7 @@ export function StrokedClosedPath({
   }
 
   if (pos === "center") {
-    return <path d={strokePathD} fill={fill} {...strokeOnly} />;
+    return <path d={strokePathD} {...strokeOnly} fill={fill} />;
   }
 
   const strokeEl = <path d={strokePathD} {...strokeOnly} />;

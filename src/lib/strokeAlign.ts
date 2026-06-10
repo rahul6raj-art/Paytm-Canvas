@@ -208,6 +208,11 @@ export function strokeUsesAxisAlignedRects(
     | "strokeSidesCustom"
     | "strokePosition"
     | "strokeStyle"
+    | "strokeType"
+    | "strokeGradient"
+    | "strokeColor"
+    | "strokeOpacity"
+    | "strokeEnabled"
     | "cornerRadius"
     | "cornerRadii"
   >,

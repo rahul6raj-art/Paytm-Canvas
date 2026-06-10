@@ -67,7 +67,7 @@ export function prepareDocumentForEditorImport(doc: PaytmCraftDocument): PaytmCr
 export function editorPatchFromFigmaImport(
   doc: PaytmCraftDocument,
   revision: number,
-): EditorPersistSlice {
+): EditorPersistSlice & { documentHydrationRevision: number } {
   const patch = documentToEditorPatch(doc, { skipHierarchyRepair: true });
   const roots = patch.childOrder[EDITOR_ROOT_KEY] ?? [];
   return {

@@ -205,7 +205,7 @@ function PathEditOverlay({ nodeId }: { nodeId: string }) {
       pointerId: e.pointerId,
       clientX: e.clientX,
       clientY: e.clientY,
-      clientToWorld: (cx, cy) => clientToWorldFromDocument(cx, cy, zoom),
+      clientToWorld,
       captureTarget: e.currentTarget as HTMLElement,
     });
   };

@@ -9,7 +9,7 @@ export type PanelFieldKeyDownOptions = {
 
 /** ⌘A / Ctrl+A — select all text; returns true when handled. */
 export function trySelectAllPanelField(
-  e: ReactKeyboardEvent<HTMLInputElement | HTMLTextAreaElement> | KeyboardEvent,
+  e: ReactKeyboardEvent | KeyboardEvent,
 ): boolean {
   if (!(e.metaKey || e.ctrlKey) || e.code !== "KeyA") return false;
   const el = e.target;

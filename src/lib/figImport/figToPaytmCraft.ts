@@ -20,10 +20,10 @@ import type {
   ConstraintHorizontal,
   ConstraintVertical,
   EditorNode,
-  LayoutPositioning,
   LayoutSizingMode,
   NodeKind,
 } from "@/stores/useEditorStore";
+import type { LayoutPositioning } from "@/lib/layoutEngine/types";
 import {
   resetImportYieldTick,
   yieldImportTick,
@@ -296,7 +296,8 @@ function dominantTextFillFromRuns(
   node: FigNode,
   variableColors: Map<string, FigColor>,
 ): { fill?: string; fillOpacity?: number } {
-  const charIds = node.textData?.characterStyleIDs as number[] | undefined;
+  const charIds = (node.textData as { characterStyleIDs?: number[] } | undefined)
+    ?.characterStyleIDs;
   const table = figStyleOverrideTable(node);
   if (!charIds?.length || !table.length) return {};
 
@@ -334,7 +335,8 @@ function textFieldsFromFigNode(
   let fontSize = styled.fontSize;
   let fontWeight = figFontWeight(fontName?.style);
 
-  const charIds = styled.textData?.characterStyleIDs as number[] | undefined;
+  const charIds = (styled.textData as { characterStyleIDs?: number[] } | undefined)
+    ?.characterStyleIDs;
   const table = figStyleOverrideTable(styled);
   if (charIds?.length && table.length) {
     const dominantId = charIds.find((id) => id !== 0) ?? 0;
@@ -1389,6 +1391,12 @@ async function buildPaytmCraftFromFig(
     const rootIds = first.childOrder[ROOT] ?? [];
     const fitRootIds = pickViewportRootIds(first.nodes, rootIds);
     const viewport = viewportForRootNodes(first.nodes, rootIds, 1200, 800, { fit: "primary" });
+    const firstCanvas = first.canvas ?? {
+      zoom: DEFAULT_CANVAS_ZOOM,
+      panX: 40,
+      panY: 24,
+      showGrid: false,
+    };
 
     const document: PaytmCraftDocument = {
       version: 1,
@@ -1402,20 +1410,28 @@ async function buildPaytmCraftFromFig(
       designTokens,
       selectedIds: fitRootIds.slice(0, 1),
       canvas: {
-        ...first.canvas,
-        zoom: viewport?.zoom ?? first.canvas.zoom,
-        panX: viewport?.pan.x ?? first.canvas.panX,
-        panY: viewport?.pan.y ?? first.canvas.panY,
+        ...firstCanvas,
+        zoom: viewport?.zoom ?? firstCanvas.zoom,
+        panX: viewport?.pan.x ?? firstCanvas.panX,
+        panY: viewport?.pan.y ?? firstCanvas.panY,
+        showGrid: firstCanvas.showGrid ?? false,
       },
     };
 
     if (viewport) {
       for (const page of pages) {
+        const pageCanvas = page.canvas ?? {
+          zoom: DEFAULT_CANVAS_ZOOM,
+          panX: 40,
+          panY: 24,
+          showGrid: false,
+        };
         page.canvas = {
-          ...page.canvas,
+          ...pageCanvas,
           zoom: viewport.zoom,
           panX: viewport.pan.x,
           panY: viewport.pan.y,
+          showGrid: pageCanvas.showGrid ?? false,
         };
       }
     }
@@ -1517,6 +1533,12 @@ function buildPaytmCraftFromFigSync(fig: FigDocument, fileName: string): FigImpo
     const rootIds = first.childOrder[ROOT] ?? [];
     const fitRootIds = pickViewportRootIds(first.nodes, rootIds);
     const viewport = viewportForRootNodes(first.nodes, rootIds, 1200, 800, { fit: "primary" });
+    const firstCanvas = first.canvas ?? {
+      zoom: DEFAULT_CANVAS_ZOOM,
+      panX: 40,
+      panY: 24,
+      showGrid: false,
+    };
 
     const document: PaytmCraftDocument = {
       version: 1,
@@ -1530,20 +1552,28 @@ function buildPaytmCraftFromFigSync(fig: FigDocument, fileName: string): FigImpo
       designTokens,
       selectedIds: fitRootIds.slice(0, 1),
       canvas: {
-        ...first.canvas,
-        zoom: viewport?.zoom ?? first.canvas.zoom,
-        panX: viewport?.pan.x ?? first.canvas.panX,
-        panY: viewport?.pan.y ?? first.canvas.panY,
+        ...firstCanvas,
+        zoom: viewport?.zoom ?? firstCanvas.zoom,
+        panX: viewport?.pan.x ?? firstCanvas.panX,
+        panY: viewport?.pan.y ?? firstCanvas.panY,
+        showGrid: firstCanvas.showGrid ?? false,
       },
     };
 
     if (viewport) {
       for (const page of pages) {
+        const pageCanvas = page.canvas ?? {
+          zoom: DEFAULT_CANVAS_ZOOM,
+          panX: 40,
+          panY: 24,
+          showGrid: false,
+        };
         page.canvas = {
-          ...page.canvas,
+          ...pageCanvas,
           zoom: viewport.zoom,
           panX: viewport.pan.x,
           panY: viewport.pan.y,
+          showGrid: pageCanvas.showGrid ?? false,
         };
       }
     }

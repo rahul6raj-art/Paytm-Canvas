@@ -14,7 +14,7 @@ import {
 } from "@/lib/tree";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import { clampCanvasZoom, DEFAULT_CANVAS_ZOOM, viewportForRootNodes } from "@/lib/canvasZoom";
-import { waitForNextPaint } from "@/lib/figImport/figImportRuntime";
+import { deferFigImportSave, waitForNextPaint } from "@/lib/figImport/figImportRuntime";
 import { fitCanvasToImportedDocument } from "@/lib/viewportZoom";
 import { normalizeHex } from "@/lib/color";
 import type { StrokeSpec } from "@/lib/strokeSpec";
@@ -2701,6 +2701,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
       rectangle: "Card",
       ellipse: "Badge",
       line: "Divider",
+      arrow: "Arrow",
+      polygon: "Polygon",
       path: "Vector",
       text: "Label",
       image: "Image",
@@ -3519,7 +3521,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const mergedPatch = touchesStroke
         ? { ...patch, ...mergeStrokeIntoNode(layoutBase, patch) }
         : patch;
-      let finalPatch =
+      let finalPatch: Partial<EditorNode> =
         n.type === "text" ? withTextLayoutPatch(layoutBase, mergedPatch) : mergedPatch;
       if (n.type === "text" && "content" in mergedPatch) {
         finalPatch = {

@@ -203,7 +203,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
   }, [node.content, id]);
 
   const patch = (p: Partial<EditorNode>) => updateNode(id, p);
-  const style = (p: NodeStylePatch) => updateNodeStyle(id, p);
+  const style = (p: NodeStylePatch, opts?: { skipHistory?: boolean }) => updateNodeStyle(id, p, opts);
 
   const fillOpacity = display.fillOpacity ?? 1;
   const fillEnabled = node.fillEnabled !== false;

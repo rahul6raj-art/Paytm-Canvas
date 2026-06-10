@@ -74,7 +74,9 @@ export function AutoLayoutHandlesOverlay() {
 
   const resolveClientToWorld = useCallback(
     (clientX: number, clientY: number) =>
-      clientToWorld ?? clientToWorldFromDocument(clientX, clientY, { pan, zoom }),
+      clientToWorld
+        ? clientToWorld(clientX, clientY)
+        : clientToWorldFromDocument(clientX, clientY, { pan, zoom }),
     [clientToWorld, pan, zoom],
   );
 

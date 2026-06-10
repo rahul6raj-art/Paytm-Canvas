@@ -550,7 +550,7 @@ export function generateDesignFromPrompt(prompt: string, options: AIGenerateOpti
 }
 
 export type AIGenerateAsyncMeta = {
-  source: "llm";
+  source: "llm" | "mock" | "rich";
   warning?: string;
 };
 

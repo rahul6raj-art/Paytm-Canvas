@@ -1,4 +1,4 @@
-import { roundedRectPolygonPoints, type CornerRadii } from "@/lib/cornerRadius";
+import { roundedRectPathD, roundedRectPolygonPoints, type CornerRadii } from "@/lib/cornerRadius";
 import type { StrokeLinejoin } from "@/lib/stroke";
 import type { StrokeAlign } from "@/lib/strokeSpec";
 

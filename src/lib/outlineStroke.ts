@@ -24,7 +24,7 @@ import {
 import { isStarNode, starPathDForNode } from "@/lib/shapes/starGeometry";
 import { prepareTextForDisplay, textAdvancedStyleFromNode } from "@/lib/text/textAdvancedStyle";
 import { layoutText, lineTopY } from "@/lib/text/textMeasure";
-import { TEXT_BOX_PAD_X, textInnerWidth } from "@/lib/text/textNodeModel";
+import { TEXT_BOX_PAD_X, TEXT_BOX_PAD_Y, textInnerWidth } from "@/lib/text/textNodeModel";
 import { resolveTextTypo } from "@/lib/textTypography";
 import {
   newPathPointId,
