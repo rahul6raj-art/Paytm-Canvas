@@ -143,6 +143,7 @@ describe("spacing gap relayout", () => {
         layoutSizingVertical: "fixed",
         width: 200,
         height: 80,
+        clipChildren: false,
         primaryAxisAlign: "start",
       }),
       a: { ...rect("a", 12), x: 12, y: 12, width: 40, height: 40 },

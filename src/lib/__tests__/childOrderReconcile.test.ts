@@ -147,7 +147,7 @@ describe("childOrderReconcile", () => {
     assert.equal(parentUsesAutoLayout(null, nodes), false);
   });
 
-  it("clonedNodePosition offsets only the tree root in world space", () => {
+  it("clonedNodePosition offsets only the tree root upward in world space", () => {
     const nodes = {
       f1: frame("f1", 80, 80),
       r1: rect("r1", "f1", 0, 0),
@@ -157,7 +157,7 @@ describe("childOrderReconcile", () => {
       f1: ["r1"],
     };
     const rootPos = clonedNodePosition("f1", true, 24, nodes, childOrder, null, nodes.f1!);
-    assert.deepEqual(rootPos, { x: 104, y: 104 });
+    assert.deepEqual(rootPos, { x: 80, y: 56 });
     const childPos = clonedNodePosition("r1", false, 24, nodes, childOrder, "f1", nodes.r1!);
     assert.deepEqual(childPos, { x: 0, y: 0 });
     assert.deepEqual(getRenderedWorldTopLeft("r1", nodes, childOrder), { x: 80, y: 80 });

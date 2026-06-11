@@ -6,7 +6,6 @@ import {
 } from "./measure";
 import { layoutChildren } from "./layoutChildren";
 import { resolveLayoutGap } from "./inferGap";
-import { shouldClipChildren } from "@/lib/clipChildren";
 import {
   isAutoLayoutContainer,
   isFlowChild,
@@ -138,8 +137,7 @@ export function layoutAutoNode(
     computedHeight: extent.height,
     layoutDirty: false,
   };
-  const clipContent = shouldClipChildren(parent);
-  if (parentPrimaryAxisHug(parent) && !clipContent) {
+  if (parentPrimaryAxisHug(parent)) {
     const target =
       mode === "horizontal" ? extent.width : extent.height;
     const current = mode === "horizontal" ? parent.width : parent.height;
@@ -148,7 +146,7 @@ export function layoutAutoNode(
       else parentPatch.height = extent.height;
     }
   }
-  if (parentCounterAxisHug(parent) && !clipContent) {
+  if (parentCounterAxisHug(parent)) {
     const target =
       mode === "horizontal" ? extent.height : extent.width;
     const current = mode === "horizontal" ? parent.height : parent.width;

@@ -16,6 +16,7 @@ import {
   collectNodeEffects,
   createSvgFilterRegistry,
   escXml,
+  registerClipRect,
   resolveImageDataUrl,
   resolveNodeForMarkup,
   svgImageMarkup,
@@ -25,6 +26,7 @@ import {
   svgSafeId,
   svgTextMarkup,
 } from "@/lib/svgMarkupCore";
+import { shouldClipChildren, clipExportCssProperties } from "@/lib/clipChildren";
 import {
   buildBooleanRenderForGroup,
   buildMaskClipPathDForGroup,
@@ -269,6 +271,12 @@ export function nodeToCss(node: EditorNode, designTokens?: Record<string, Design
     lines.push(`align-items: ${ai};`);
   }
 
+  if (node.type === "frame" || node.type === "group") {
+    for (const [key, value] of Object.entries(clipExportCssProperties(node))) {
+      lines.push(`${key}: ${value};`);
+    }
+  }
+
   const op = resolved.opacity ?? 1;
   if (op < 0.999) lines.push(`opacity: ${Math.round(op * 1000) / 1000};`);
 
@@ -434,12 +442,21 @@ export function nodeToSvgGroupMarkup(
       }
       inner = md ? `<g clip-path="url(#${clipId})">${clipped}</g>` : clipped;
     } else {
-      if (!node.isBooleanGroup) inner = svgRectLike(resolved, shapeOpts);
+      const shell = !node.isBooleanGroup ? svgRectLike(resolved, shapeOpts) : "";
+      let childrenMarkup = "";
       for (const cid of kids) {
         const c = nodes[cid];
         if (!c?.visible) continue;
         const childMarkup = nodeToSvgGroupMarkup(c, nodes, childOrder, assets, designTokens);
-        inner += `<g transform="${composeSvgTransform(c)}">${childMarkup}</g>`;
+        childrenMarkup += `<g transform="${composeSvgTransform(c)}">${childMarkup}</g>`;
+      }
+      const clip = shouldClipChildren(node);
+      if (clip) {
+        const clipId = `pc-clip-inspect-${svgSafeId(node.id)}`;
+        registerClipRect(clipDefs, clipId, node.width, node.height, node);
+        inner = `${shell}<g clip-path="url(#${clipId})">${childrenMarkup}</g>`;
+      } else {
+        inner = `${shell}${childrenMarkup}`;
       }
     }
   } else if (node.type === "image") {

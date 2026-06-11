@@ -133,6 +133,7 @@ describe("auto layout", () => {
         paddingBottom: 8,
         layoutSizingHorizontal: "fixed",
         layoutSizingVertical: "fixed",
+        clipChildren: false,
       },
       a: frame("a", 0, 0, 30, 20, { parentId: "parent" }),
       b: frame("b", 0, 0, 30, 20, { parentId: "parent" }),

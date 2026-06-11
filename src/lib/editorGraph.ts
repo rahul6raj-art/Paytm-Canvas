@@ -651,7 +651,7 @@ export function parentUsesAutoLayout(
   return mode === "horizontal" || mode === "vertical";
 }
 
-/** Clone positioning: only offset the duplicated tree root in world space; keep child locals. */
+/** Clone positioning: offset duplicated tree root upward in world space; keep child locals. */
 export function clonedNodePosition(
   oldId: string,
   isTreeRoot: boolean,
@@ -665,8 +665,8 @@ export function clonedNodePosition(
     return { x: oldNode.x, y: oldNode.y };
   }
   const topLeft = getRenderedWorldTopLeft(oldId, nodes, childOrder);
-  const wx = topLeft.x + offset;
-  const wy = topLeft.y + offset;
+  const wx = topLeft.x;
+  const wy = topLeft.y - offset;
   if (!newParentId) {
     return { x: wx, y: wy };
   }

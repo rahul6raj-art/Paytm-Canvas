@@ -1951,6 +1951,7 @@ const LAYOUT_FIELD_KEYS = new Set<string>([
   "minHeight",
   "maxWidth",
   "maxHeight",
+  "clipChildren",
 ]);
 const GEOM_KEYS = new Set<string>(["x", "y", "width", "height", "lineX1", "lineY1", "lineX2", "lineY2"]);
 const INSTANCE_STYLE_KEYS = new Set<string>([
@@ -5211,8 +5212,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
           idMap.set(oldId, newId);
           const isTreeRoot = oldId === treeRootOldId;
           const worldR = worldRect(oldId, payload.nodes);
-          const wx = worldR.x + (isTreeRoot ? OFFSET : 0);
-          const wy = worldR.y + (isTreeRoot ? OFFSET : 0);
+          const wx = worldR.x;
+          const wy = worldR.y + (isTreeRoot ? -OFFSET : 0);
           const pos = isTreeRoot
             ? worldPointToParentLocal(wx, wy, newParent, s.nodes)
             : { x: old.x, y: old.y };

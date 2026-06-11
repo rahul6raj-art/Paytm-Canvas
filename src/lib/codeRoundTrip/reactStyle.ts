@@ -7,7 +7,7 @@ import {
   type DesignToken,
 } from "@/lib/designTokens";
 import { buildNodeEffectRenderStyle } from "@/lib/nodeEffects";
-import { shouldClipChildren } from "@/lib/clipChildren";
+import { shouldClipChildren, clipExportCssProperties } from "@/lib/clipChildren";
 import { cornerRadiiMax, cornerRadiiToCss, getNodeCornerRadii } from "@/lib/cornerRadius";
 import { layerBlendCanvasStyle } from "@/lib/layerBlendMode";
 import { ellipseArcExportStyle } from "@/lib/shapes/ellipseArcExport";
@@ -140,6 +140,7 @@ export function nodeToReactStyle(
       style.top = Math.round(node.y * 100) / 100;
     }
     style.overflow = shouldClipChildren(node) ? "hidden" : "visible";
+    Object.assign(style, clipExportCssProperties(node));
     const nodes = codeOpts?.nodes;
     const childOrder = codeOpts?.childOrder;
     if (nodes && childOrder) {

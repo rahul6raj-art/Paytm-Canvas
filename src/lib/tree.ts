@@ -10,6 +10,7 @@ import {
   repairNodeHierarchy,
   worldPointToParentLocalFromChildOrder,
 } from "@/lib/editorGraph";
+import { isWorldPointVisibleThroughClipAncestors } from "@/lib/clipChildren";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import {
   applyMatrixToPoint,
@@ -264,6 +265,7 @@ export function pickDeepestFrameOrGroupAtWorldPoint(
 
   function dfs(nid: string): string | null {
     if (!inRect(nid) || skip(nid)) return null;
+    if (!isWorldPointVisibleThroughClipAncestors(worldX, worldY, nid, nodes, childOrder)) return null;
     const n = nodes[nid];
     const rawKids = childOrder[nid] ?? [];
     const kids =
@@ -316,6 +318,9 @@ export function pickDeepestNodeAtWorldPoint(
     const n = nodes[nid];
     if (!n?.visible) return null;
     if (!pointInNodeRenderedWorldBounds(worldX, worldY, nid, nodes, childOrder, opts?.zoom ?? 1)) {
+      return null;
+    }
+    if (!isWorldPointVisibleThroughClipAncestors(worldX, worldY, nid, nodes, childOrder)) {
       return null;
     }
     const kids = maskGroupChildHitOrder(n, childOrder[nid] ?? []);

@@ -27,6 +27,7 @@ import { PropertyNumberInput, PropertyTextInput } from "./PropertyInput";
 import { FontFamilyPicker } from "./FontFamilyPicker";
 import { ColorInput } from "./ColorInput";
 import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
+import { shouldClipChildren } from "@/lib/clipChildren";
 import { cn } from "@/lib/utils";
 import {
   useEditorStore,
@@ -347,38 +348,6 @@ export function DesignInspector({ node }: { node: EditorNode }) {
           </button>
           <p className="mt-1 text-[10px] leading-relaxed text-app-subtle">
             Turn this selection into a reusable component. It appears in the Comp panel for drag-and-drop.
-          </p>
-        </PropertiesSection>
-      ) : null}
-
-      {node.type === "frame" ? (
-        <PropertiesSection title="Frame" defaultOpen>
-          <label
-            className={cn(
-              "flex cursor-pointer items-center gap-2 rounded py-0.5",
-              locked && "cursor-not-allowed opacity-40",
-            )}
-          >
-            <input
-              type="checkbox"
-              className="h-3.5 w-3.5 rounded border-white/20 bg-app-panel accent-[#0d99ff]"
-              checked={node.clipChildren === true}
-              disabled={locked}
-              onChange={(e) => {
-                const enabled = e.target.checked;
-                const next: Partial<EditorNode> = { clipChildren: enabled };
-                if (enabled && layoutMode !== "none") {
-                  next.layoutSizingHorizontal = "fixed";
-                  next.layoutSizingVertical = "fixed";
-                }
-                patch(next);
-              }}
-            />
-            <span className="text-[11px] text-app-fg">Clip content</span>
-          </label>
-          <p className="mt-1 text-[10px] leading-snug text-app-subtle">
-            When enabled, layers outside the frame bounds are hidden. Resize the frame (Fixed
-            width/height) to clip auto-layout overflow.
           </p>
         </PropertiesSection>
       ) : null}
@@ -1223,6 +1192,37 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                 </div>
               </div>
             </>
+          ) : null}
+          {isContainer && !node.isBooleanGroup && !node.maskId && (node.type === "frame" || node.type === "group") ? (
+            <div className="mt-2 border-t border-app-border pt-2">
+              <label
+                className={cn(
+                  "flex cursor-pointer items-center gap-2 rounded py-0.5",
+                  locked && "cursor-not-allowed opacity-40",
+                )}
+              >
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 rounded border-white/20 bg-app-panel accent-[#0d99ff]"
+                  checked={shouldClipChildren(node)}
+                  disabled={locked}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    const next: Partial<EditorNode> = { clipChildren: enabled };
+                    if (enabled && layoutMode !== "none") {
+                      next.layoutSizingHorizontal = "fixed";
+                      next.layoutSizingVertical = "fixed";
+                    }
+                    patch(next);
+                  }}
+                />
+                <span className="text-[11px] text-app-fg">Clip content</span>
+              </label>
+              <p className="mt-1 text-[10px] leading-snug text-app-subtle">
+                Hide layers outside the {node.type === "group" ? "group" : "frame"} bounds. With auto layout,
+                use Fixed width/height to clip overflow.
+              </p>
+            </div>
           ) : null}
         </PropertiesSection>
       )}
