@@ -4,19 +4,20 @@ import { buildParentMapFromChildOrder, getNodeWorldInverseMatrixFromChildOrder }
 import { applyMatrixToPoint } from "@/lib/transformMath";
 import { clampCornerRadii, cornerRadiiToCss, getNodeCornerRadii } from "@/lib/cornerRadius";
 
+export type ClipChildrenNode = {
+  type: string;
+  clipChildren?: boolean;
+};
+
 /** Figma: frames clip by default; groups clip only when explicitly enabled. */
-export function shouldClipChildren(
-  node: Pick<EditorNode, "type" | "clipChildren">,
-): boolean {
+export function shouldClipChildren(node: ClipChildrenNode): boolean {
   if (node.type === "frame") return node.clipChildren !== false;
   if (node.type === "group") return node.clipChildren === true;
   return false;
 }
 
 /** UI / export: same semantics as canvas clipping. */
-export function isClipContentEnabled(
-  node: Pick<EditorNode, "type" | "clipChildren">,
-): boolean {
+export function isClipContentEnabled(node: ClipChildrenNode): boolean {
   return shouldClipChildren(node);
 }
 
@@ -35,7 +36,7 @@ function clipRoundCss(
 
 /** Canvas child layer clip — overflow + inset clip-path (works with rounded frames). */
 export function clipContentContainerStyle(
-  node: Pick<EditorNode, "type" | "clipChildren" | "cornerRadius" | "cornerRadii" | "width" | "height">,
+  node: ClipChildrenNode & Pick<EditorNode, "cornerRadius" | "cornerRadii" | "width" | "height">,
   borderRadiusCss?: string | number,
 ): CSSProperties {
   const round = clipRoundCss(node, borderRadiusCss);
@@ -49,7 +50,7 @@ export function clipContentContainerStyle(
 
 /** CSS / inspect export — inner clip on frame shell (Figma “Clip content”). */
 export function clipExportCssProperties(
-  node: Pick<EditorNode, "type" | "clipChildren" | "cornerRadius" | "cornerRadii" | "width" | "height">,
+  node: ClipChildrenNode & Pick<EditorNode, "cornerRadius" | "cornerRadii" | "width" | "height">,
 ): Record<string, string> {
   if (!shouldClipChildren(node)) return {};
   const round = clipRoundCss(node);
@@ -63,7 +64,7 @@ export function clipExportCssProperties(
 export function isLocalPointInsideClipBounds(
   localX: number,
   localY: number,
-  node: Pick<EditorNode, "type" | "clipChildren" | "width" | "height">,
+  node: ClipChildrenNode & Pick<EditorNode, "width" | "height">,
 ): boolean {
   if (!shouldClipChildren(node)) return true;
   const w = Math.max(1, node.width);
@@ -82,7 +83,7 @@ export function isWorldPointVisibleThroughClipAncestors(
   const parentOf = buildParentMapFromChildOrder(childOrder);
   let cur: string | null = nodeId;
   while (cur) {
-    const parentId = parentOf.get(cur) ?? null;
+    const parentId: string | null = parentOf.get(cur) ?? null;
     if (!parentId) break;
     const parent = nodes[parentId];
     if (parent && shouldClipChildren(parent)) {
