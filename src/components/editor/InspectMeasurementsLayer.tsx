@@ -1,9 +1,12 @@
 "use client";
 
 import { useMemo } from "react";
-import { useEditorStore } from "@/stores/useEditorStore";
-import { getNodeTransformedWorldBounds } from "@/lib/transformMath";
+import { worldPointToOverlay, worldRectToOverlay } from "@/lib/canvasOverlaySpace";
+import { CANVAS_GUIDE_LINE_SCREEN_PX } from "@/lib/canvasVisual";
 import { nearestAncestorFrameId } from "@/lib/inspectExport";
+import { getNodeTransformedWorldBounds } from "@/lib/transformMath";
+import { useEditorStore } from "@/stores/useEditorStore";
+import { useCanvasOverlaySpace } from "./useCanvasOverlaySpace";
 
 const LINE = "rgba(251, 113, 133, 0.95)";
 const LABEL_BG = "rgba(15, 23, 42, 0.92)";
@@ -12,7 +15,7 @@ const LABEL_FG = "#fce7f3";
 function DimLabel({ x, y, text }: { x: number; y: number; text: string }) {
   return (
     <div
-      className="pointer-events-none absolute z-[1] whitespace-nowrap rounded px-1 py-0.5 font-mono text-[10px] font-medium leading-none shadow-sm"
+      className="pointer-events-none absolute z-[1] whitespace-nowrap rounded px-1 py-0.5 font-mono text-ui font-medium leading-none shadow-sm"
       style={{
         left: x,
         top: y,
@@ -31,6 +34,7 @@ export function InspectMeasurementsLayer() {
   const nodes = useEditorStore((s) => s.nodes);
   const hoveredCanvasId = useEditorStore((s) => s.hoveredCanvasId);
   const selectedIds = useEditorStore((s) => s.selectedIds);
+  const overlay = useCanvasOverlaySpace();
 
   const geo = useMemo(() => {
     if (editorMode !== "inspect") return null;
@@ -117,50 +121,62 @@ export function InspectMeasurementsLayer() {
   if (!geo) return null;
 
   const { hwr, swr, hoverId, dims, singleSel } = geo;
+  const linePx = CANVAS_GUIDE_LINE_SCREEN_PX;
+  const hoverScreen = hwr ? worldRectToOverlay(hwr, overlay) : null;
+  const selScreen = swr ? worldRectToOverlay(swr, overlay) : null;
 
   return (
     <div className="pointer-events-none absolute inset-0 z-[29] overflow-visible">
-      {hwr && hoverId && (!swr || hoverId !== singleSel) && (
+      {hoverScreen && hoverId && (!swr || hoverId !== singleSel) && (
         <>
           <div
             className="absolute rounded-[1px] border border-dashed border-pink-400/90 shadow-[0_0_0_1px_rgba(15,23,42,0.2)]"
             style={{
-              left: hwr.x,
-              top: hwr.y,
-              width: hwr.width,
-              height: hwr.height,
+              left: hoverScreen.x,
+              top: hoverScreen.y,
+              width: hoverScreen.width,
+              height: hoverScreen.height,
             }}
           />
-          <DimLabel x={hwr.x} y={hwr.y - 18} text={`${Math.round(hwr.width)} × ${Math.round(hwr.height)}`} />
+          <DimLabel
+            x={hoverScreen.x}
+            y={hoverScreen.y - 18}
+            text={`${Math.round(hwr!.width)} × ${Math.round(hwr!.height)}`}
+          />
         </>
       )}
 
-      {swr && (
-        <svg
-          className="absolute left-0 top-0 overflow-visible"
-          width={6000}
-          height={6000}
-          viewBox="0 0 6000 6000"
-          aria-hidden
-        >
-          {dims.map((d) => (
-            <g key={d.key}>
-              <line x1={d.x1} y1={d.y1} x2={d.x2} y2={d.y2} stroke={LINE} strokeWidth={1} />
-            </g>
-          ))}
+      {selScreen && (
+        <svg className="absolute inset-0 h-full w-full overflow-visible" aria-hidden>
+          {dims.map((d) => {
+            const a = worldPointToOverlay(d.x1, d.y1, overlay);
+            const b = worldPointToOverlay(d.x2, d.y2, overlay);
+            return (
+              <line
+                key={d.key}
+                x1={a.x}
+                y1={a.y}
+                x2={b.x}
+                y2={b.y}
+                stroke={LINE}
+                strokeWidth={linePx}
+              />
+            );
+          })}
         </svg>
       )}
 
-      {swr &&
-        dims.map((d) => (
-          <DimLabel key={`lb-${d.key}`} x={d.mx} y={d.my} text={d.t} />
-        ))}
+      {selScreen &&
+        dims.map((d) => {
+          const label = worldPointToOverlay(d.mx, d.my, overlay);
+          return <DimLabel key={`lb-${d.key}`} x={label.x} y={label.y} text={d.t} />;
+        })}
 
-      {swr ? (
+      {selScreen ? (
         <DimLabel
-          x={swr.x}
-          y={swr.y - 18}
-          text={`${Math.round(swr.width)} × ${Math.round(swr.height)}`}
+          x={selScreen.x}
+          y={selScreen.y - 18}
+          text={`${Math.round(swr!.width)} × ${Math.round(swr!.height)}`}
         />
       ) : null}
     </div>

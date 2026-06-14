@@ -111,8 +111,8 @@ export function ShareModal() {
               <Share2 className="h-5 w-5" strokeWidth={1.75} />
             </span>
             <div className="min-w-0">
-              <h2 className="truncate text-[16px] font-semibold text-white">Share</h2>
-              <p className="text-[12px] text-app-muted">Local preview — no backend or network.</p>
+              <h2 className="truncate text-base font-semibold text-white">Share</h2>
+              <p className="text-ui text-app-muted">Local preview — no backend or network.</p>
             </div>
           </div>
           <button
@@ -127,16 +127,16 @@ export function ShareModal() {
 
         <div className="space-y-5 px-5 py-4">
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-app-subtle">File</p>
-            <p className="mt-1 truncate text-[14px] font-medium text-white">{fileName}</p>
-            <p className="mt-0.5 text-[12px] text-app-muted">
+            <p className="section-heading">File</p>
+            <p className="mt-1 truncate text-sm font-medium text-white">{fileName}</p>
+            <p className="mt-0.5 text-ui text-app-muted">
               Workspace: <span className="text-app-fg">{workspace.name}</span>
             </p>
           </div>
 
           <div className="flex flex-col gap-2 rounded-xl border border-app-border bg-app-toolbar-well p-3">
             <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-[12px] font-medium text-app-fg">
+              <div className="flex items-center gap-2 text-ui font-medium text-app-fg">
                 <Link2 className="h-3.5 w-3.5 text-app-subtle" strokeWidth={2} />
                 Anyone with the link
               </div>
@@ -160,7 +160,7 @@ export function ShareModal() {
                 />
               </button>
             </div>
-            <p className="text-[11px] leading-snug text-app-subtle">
+            <p className="text-ui leading-snug text-app-subtle">
               {anyoneWithLink
                 ? "Mock: link access would be on (stored only in this dialog for the session)."
                 : "Mock: restricted to people listed below."}
@@ -168,7 +168,7 @@ export function ShareModal() {
             <Button
               variant="toolbar"
               type="button"
-              className="h-8 justify-center gap-2 border border-app-border bg-app-hover text-[12px] text-white hover:bg-white/[0.1]"
+              className="h-8 justify-center gap-2 border border-app-border bg-app-hover text-ui text-white hover:bg-white/[0.1]"
               onClick={onCopyLink}
             >
               {copied ? <Check className="h-3.5 w-3.5 text-emerald-300" strokeWidth={2} /> : <Copy className="h-3.5 w-3.5" strokeWidth={2} />}
@@ -177,20 +177,20 @@ export function ShareModal() {
           </div>
 
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-app-subtle">People with access</p>
+            <p className="section-heading">People with access</p>
             <ul className="mt-2 divide-y divide-white/[0.06] rounded-xl border border-app-border bg-app-toolbar-well">
               {people.map((p) => (
                 <li key={p.email} className="flex items-center justify-between gap-2 px-3 py-2.5">
                   <div className="flex min-w-0 items-center gap-2">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-app-border bg-app-hover text-[11px] font-bold text-white">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-app-border bg-app-hover text-ui font-bold text-white">
                       {p.initials}
                     </span>
                     <div className="min-w-0">
-                      <p className="truncate text-[13px] font-medium text-white">{p.name}</p>
-                      <p className="truncate text-[11px] text-app-subtle">{p.email}</p>
+                      <p className="truncate text-ui-sm font-medium text-white">{p.name}</p>
+                      <p className="truncate text-ui text-app-subtle">{p.email}</p>
                     </div>
                   </div>
-                  <span className="shrink-0 rounded-md border border-app-border bg-app-hover px-2 py-0.5 text-[10px] font-semibold text-app-muted">
+                  <span className="shrink-0 rounded-md border border-app-border bg-app-hover px-2 py-0.5 text-ui font-semibold text-app-muted">
                     {p.access}
                   </span>
                 </li>
@@ -199,18 +199,18 @@ export function ShareModal() {
           </div>
 
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-app-subtle">Invite</p>
+            <p className="section-heading">Invite</p>
             <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
               <Input
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
                 placeholder="Email address"
-                className="h-9 flex-1 border-app-border bg-black/35 text-[13px] text-white placeholder:text-app-subtle"
+                className="h-9 flex-1 border-app-border bg-black/35 text-ui-sm text-white placeholder:text-app-subtle"
               />
               <select
                 value={invitePermission}
                 onChange={(e) => setInvitePermission(e.target.value === "edit" ? "edit" : "view")}
-                className="h-9 shrink-0 rounded-md border border-app-border bg-black/40 px-2 text-[12px] text-app-fg outline-none ring-sky-500/30 focus:ring-2"
+                className="h-9 shrink-0 rounded-md border border-app-border bg-black/40 px-2 text-ui text-app-fg outline-none ring-sky-500/30 focus:ring-2"
               >
                 <option value="view">Can view</option>
                 <option value="edit">Can edit</option>
@@ -219,7 +219,7 @@ export function ShareModal() {
             <Button
               variant="primary"
               type="button"
-              className="mt-2 h-8 w-full text-[12px] sm:w-auto"
+              className="mt-2 h-8 w-full text-ui sm:w-auto"
               onClick={onSendInvite}
             >
               Send invite (mock)

@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { validateImportWebUrl, sanitizeImportText } from "../urlValidation";
 import { filterDomSnapshotTree, isVisibleSnapshotNode } from "../domFilter";
-import { domSnapshotToScene } from "../domToCanvasConverter";
+import { domSnapshotToScene } from "../pipeline";
 import { detectSections } from "../sectionDetector";
 import type { DomSnapshotNode } from "../types";
 

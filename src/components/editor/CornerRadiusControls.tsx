@@ -1,50 +1,178 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Link2, Unlink } from "lucide-react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { PropertyNumberInput } from "./PropertyInput";
 import {
-  getNodeCornerRadii,
-  hasIndependentCornerRadii,
-  type CornerRadii,
-} from "@/lib/cornerRadius";
+  getShapeVertexCornerRadii,
+  hasIndependentVertexCornerRadii,
+} from "@/lib/shapes/parametricCornerRadii";
+import { isPerCornerRadiusMode } from "@/lib/cornerRadius";
+import { appFieldRadius, inspectorControlHeightClass } from "@/lib/appFieldStyles";
+import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
+import { useInspectorValueScrub } from "@/lib/useInspectorValueScrub";
+import {
+  CornerRadiusIcon,
+  SingleCornerIcon,
+} from "./design-panel/InspectorSettingIcons";
+import {
+  inspectorFieldIconSlotClass,
+} from "@/lib/inspectorIconStyles";
 import type { EditorNode, NodeStylePatch } from "@/stores/useEditorStore";
 import { cn } from "@/lib/utils";
 
-type CornerIndex = 0 | 1 | 2 | 3;
+type CornerIndex = number;
 
 const CORNER_LABELS = ["TL", "TR", "BR", "BL"] as const;
+
+/** Figma 2×2 order: TL TR / BL BR */
+const APPEARANCE_CORNER_ORDER: readonly CornerIndex[] = [0, 1, 3, 2];
+
+const fieldShell = cn(
+  "flex min-w-0 items-center overflow-hidden border border-app-border bg-app-field",
+  inspectorControlHeightClass,
+  appFieldRadius,
+  "shadow-[inset_0_1px_0_0_hsl(var(--app-inset-highlight)/var(--app-inset-highlight-opacity))]",
+);
+
+function CompactRadiusInput({
+  value,
+  disabled,
+  locked,
+  ariaLabel,
+  icon,
+  instanceKey,
+  onCommit,
+}: {
+  value: number;
+  disabled?: boolean;
+  locked?: boolean;
+  ariaLabel: string;
+  icon: ReactNode;
+  instanceKey: string;
+  onCommit: (v: number) => void;
+}) {
+  const [text, setText] = useState(() => String(Math.round(value)));
+  const [focused, setFocused] = useState(false);
+
+  const commit = (n: number) => {
+    const v = Math.max(0, Math.round(n));
+    onCommit(v);
+    setText(String(v));
+  };
+
+  const scrub = useInspectorValueScrub({
+    disabled: disabled || locked,
+    value: Math.round(value),
+    min: 0,
+    max: 999,
+    onChange: commit,
+  });
+  const { scrubbing, scrubActiveRef, bindScrubInput } = scrub;
+
+  useEffect(() => {
+    if (!focused && !scrubbing && !scrubActiveRef.current) {
+      setText(String(Math.round(value)));
+    }
+  }, [value, instanceKey, focused, scrubbing, scrubActiveRef]);
+
+  const applyDraft = (raw: string) => {
+    const trimmed = raw.trim();
+    if (trimmed === "" || trimmed === "-" || trimmed === ".") return false;
+    const n = Number(trimmed);
+    if (!Number.isFinite(n)) return false;
+    commit(n);
+    return true;
+  };
+
+  return (
+    <div className={cn(fieldShell, (disabled || locked) && "opacity-45")}>
+      <span className={inspectorFieldIconSlotClass}>{icon}</span>
+      <input
+        type="text"
+        inputMode="numeric"
+        disabled={disabled || locked}
+        aria-label={ariaLabel}
+        {...bindScrubInput(
+          "min-w-0 flex-1 border-0 bg-transparent px-1.5 py-0 text-ui tabular-nums text-app-field-fg focus-visible:outline-none disabled:cursor-not-allowed",
+          focused,
+        )}
+        value={text}
+        onFocus={() => {
+          setFocused(true);
+          setText(String(Math.round(value)));
+        }}
+        onChange={(e) => {
+          const next = e.target.value.replace(/[^\d.-]/g, "");
+          setText(next);
+          const n = Number(next);
+          if (next !== "" && Number.isFinite(n)) commit(n);
+        }}
+        onBlur={() => {
+          if (scrubActiveRef.current) return;
+          setFocused(false);
+          if (!applyDraft(text)) setText(String(Math.round(value)));
+        }}
+        onKeyDown={(e) => {
+          handlePanelFieldKeyDown(e, {
+            onEnter: () => {
+              if (!applyDraft(text)) setText(String(Math.round(value)));
+              e.currentTarget.blur();
+            },
+            onArrowNudge: (dir, shift, alt) => {
+              const step = keyboardNudgeStep(1, 0, shift, alt) * dir;
+              const current = Number(text);
+              const base = Number.isFinite(current) ? current : value;
+              commit(base + step);
+            },
+          });
+        }}
+      />
+    </div>
+  );
+}
 
 export function CornerRadiusControls({
   node,
   instanceKey,
   locked,
   focusedCornerIndex = null,
+  focusedCornerLabel,
+  cornerLabels = CORNER_LABELS,
+  variant = "default",
+  opacitySlot,
   onStyle,
 }: {
   node: EditorNode;
   instanceKey: string;
   locked: boolean;
-  /** When set (e.g. from a selected vector corner), edit that corner's radius. */
   focusedCornerIndex?: CornerIndex | null;
+  focusedCornerLabel?: string;
+  cornerLabels?: readonly string[];
+  variant?: "default" | "compact" | "appearance";
+  /** Shown beside corner radius on the top row (appearance layout). */
+  opacitySlot?: ReactNode;
   onStyle: (patch: NodeStylePatch) => void;
 }) {
-  const radii = getNodeCornerRadii(node);
+  const radii = getShapeVertexCornerRadii(node);
+  const radiiMixed = hasIndependentVertexCornerRadii(radii);
   const [independent, setIndependent] = useState(
-    () => hasIndependentCornerRadii(node) || focusedCornerIndex != null,
+    () => isPerCornerRadiusMode(node) || focusedCornerIndex != null,
   );
+  const uniformValue = radii[0] ?? 0;
+  const [uniformText, setUniformText] = useState(() => String(Math.round(uniformValue)));
+  const [uniformFocused, setUniformFocused] = useState(false);
 
   useEffect(() => {
     if (focusedCornerIndex != null) {
       setIndependent(true);
       return;
     }
-    setIndependent(hasIndependentCornerRadii(node));
-  }, [node.id, node.cornerRadius, node.cornerRadii, focusedCornerIndex]);
+    setIndependent(isPerCornerRadiusMode(node));
+  }, [node.id, node.cornerRadius, node.cornerRadii, node.pathPoints, focusedCornerIndex]);
 
   const applyRadii = useCallback(
-    (next: CornerRadii) => {
-      const allSame = next[0] === next[1] && next[1] === next[2] && next[2] === next[3];
+    (next: number[]) => {
+      const allSame = next.length > 0 && next.every((r) => r === next[0]);
       if (allSame) {
         onStyle({
           cornerRadius: next[0],
@@ -61,14 +189,20 @@ export function CornerRadiusControls({
   );
 
   const setCorner = (index: CornerIndex, value: number) => {
-    const next = [...radii] as CornerRadii;
+    const next = [...radii];
     next[index] = Math.max(0, value);
     applyRadii(next);
   };
 
   const setUniform = (value: number) => {
-    const v = Math.max(0, value);
-    onStyle({ cornerRadius: v, cornerRadii: undefined });
+    const v = Math.max(0, Math.round(value));
+    if (independent) {
+      const count = radii.length || 4;
+      applyRadii(Array.from({ length: count }, () => v));
+    } else {
+      onStyle({ cornerRadius: v, cornerRadii: undefined });
+    }
+    setUniformText(String(v));
   };
 
   const toggleIndependent = () => {
@@ -77,26 +211,182 @@ export function CornerRadiusControls({
       setUniform(radii[0] ?? 0);
     } else {
       setIndependent(true);
-      applyRadii(radii);
+      onStyle({
+        cornerRadius: undefined,
+        cornerRadii: [...radii],
+      });
     }
   };
+
+  const applyUniformDraft = (raw: string) => {
+    const trimmed = raw.trim();
+    if (trimmed === "" || trimmed === "-" || trimmed === ".") return false;
+    const n = Number(trimmed);
+    if (!Number.isFinite(n)) return false;
+    setUniform(n);
+    return true;
+  };
+
+  const uniformScrub = useInspectorValueScrub({
+    disabled: locked,
+    value: Math.round(uniformValue),
+    min: 0,
+    max: 999,
+    onChange: setUniform,
+  });
+  const { scrubbing: uniformScrubbing, scrubActiveRef: uniformScrubActiveRef, bindScrubInput: bindUniformScrub } = uniformScrub;
+
+  const showMixedUniform =
+    radiiMixed && !uniformFocused && !uniformScrubbing && !uniformScrubActiveRef.current;
+
+  useEffect(() => {
+    if (!uniformFocused && !uniformScrubbing && !uniformScrubActiveRef.current && !radiiMixed) {
+      setUniformText(String(Math.round(uniformValue)));
+    }
+  }, [uniformValue, instanceKey, uniformFocused, uniformScrubbing, uniformScrubActiveRef, radiiMixed]);
+
+  const uniformField = (
+    <div className={cn(fieldShell, "min-w-0 flex-1", locked && "opacity-45")}>
+      <span className={inspectorFieldIconSlotClass}>
+        <CornerRadiusIcon />
+      </span>
+      <input
+        type="text"
+        inputMode="numeric"
+        disabled={locked}
+        aria-label="Corner radius"
+        {...bindUniformScrub(
+          cn(
+            "min-w-0 flex-1 border-0 bg-transparent px-1.5 py-0 text-ui tabular-nums text-app-field-fg focus-visible:outline-none disabled:cursor-not-allowed",
+            showMixedUniform && "text-app-muted",
+          ),
+          uniformFocused,
+        )}
+        value={showMixedUniform ? "Mixed" : uniformText}
+        onFocus={() => {
+          setUniformFocused(true);
+          if (radiiMixed) setUniformText(String(Math.round(uniformValue)));
+        }}
+        onChange={(e) => {
+          if (showMixedUniform) return;
+          const next = e.target.value.replace(/[^\d.-]/g, "");
+          setUniformText(next);
+          const n = Number(next);
+          if (next !== "" && Number.isFinite(n)) setUniform(n);
+        }}
+        onBlur={() => {
+          if (uniformScrubActiveRef.current) return;
+          setUniformFocused(false);
+          if (showMixedUniform) return;
+          if (!applyUniformDraft(uniformText)) setUniformText(String(Math.round(uniformValue)));
+        }}
+        onKeyDown={(e) => {
+          handlePanelFieldKeyDown(e, {
+            onEnter: () => {
+              if (!applyUniformDraft(uniformText)) setUniformText(String(Math.round(uniformValue)));
+              e.currentTarget.blur();
+            },
+            onArrowNudge: (dir, shift, alt) => {
+              const step = keyboardNudgeStep(1, 0, shift, alt) * dir;
+              const current = Number(uniformText);
+              const base = Number.isFinite(current) ? current : uniformValue;
+              setUniform(base + step);
+            },
+          });
+        }}
+      />
+    </div>
+  );
+
+  const toggleButton = (
+    <button
+      type="button"
+      title={independent ? "Use single radius for all corners" : "Set corners independently"}
+      disabled={locked}
+      onClick={toggleIndependent}
+      className={cn(
+        "flex h-7 w-7 shrink-0 items-center justify-center rounded border border-app-border text-app-muted transition-colors",
+        locked ? "opacity-40" : "hover:bg-app-hover hover:text-app-fg",
+        independent && "border-accent/50 text-accent",
+      )}
+    >
+      <CornerRadiusIcon />
+    </button>
+  );
+
+  if (variant === "appearance") {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-start gap-3">
+          {opacitySlot}
+          <div className="min-w-0 flex-1">
+            <div className="inspector-field-label mb-0.5">Corner radius</div>
+            <div className="flex items-center gap-2">
+              {uniformField}
+              {toggleButton}
+            </div>
+          </div>
+        </div>
+        {independent && focusedCornerIndex == null ? (
+          <div className="grid grid-cols-2 gap-2">
+            {APPEARANCE_CORNER_ORDER.map((cornerIndex) => (
+              <CompactRadiusInput
+                key={cornerLabels[cornerIndex] ?? cornerIndex}
+                value={radii[cornerIndex] ?? 0}
+                locked={locked}
+                ariaLabel={`${cornerLabels[cornerIndex] ?? cornerIndex} corner radius`}
+                icon={<SingleCornerIcon corner={cornerIndex} />}
+                instanceKey={`${instanceKey}-cr-${cornerLabels[cornerIndex] ?? cornerIndex}`}
+                onCommit={(v) => setCorner(cornerIndex, v)}
+              />
+            ))}
+          </div>
+        ) : null}
+        {independent && focusedCornerIndex != null ? (
+          <CompactRadiusInput
+            value={radii[focusedCornerIndex] ?? 0}
+            locked={locked}
+            ariaLabel={`${focusedCornerLabel ?? cornerLabels[focusedCornerIndex]} corner radius`}
+            icon={<SingleCornerIcon corner={focusedCornerIndex} />}
+            instanceKey={`${instanceKey}-cr-focus`}
+            onCommit={(v) => setCorner(focusedCornerIndex, v)}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
+  if (variant === "compact") {
+    return (
+      <div className="min-w-0 flex-1">
+        <div className="inspector-field-label mb-0.5">Corner radius</div>
+        <div className="flex items-center gap-1">
+          {uniformField}
+          {toggleButton}
+        </div>
+        {independent && focusedCornerIndex == null ? (
+          <div className="mt-1 grid grid-cols-2 gap-1">
+            {APPEARANCE_CORNER_ORDER.map((cornerIndex) => (
+              <CompactRadiusInput
+                key={cornerLabels[cornerIndex] ?? cornerIndex}
+                value={radii[cornerIndex] ?? 0}
+                locked={locked}
+                ariaLabel={`${cornerLabels[cornerIndex] ?? cornerIndex} corner radius`}
+                icon={<SingleCornerIcon corner={cornerIndex} />}
+                instanceKey={`${instanceKey}-cr-${cornerLabels[cornerIndex] ?? cornerIndex}`}
+                onCommit={(v) => setCorner(cornerIndex, v)}
+              />
+            ))}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-2">
       <div className="flex items-end gap-1">
-        <button
-          type="button"
-          title={independent ? "Use single radius for all corners" : "Set corners independently"}
-          disabled={locked}
-          onClick={toggleIndependent}
-          className={cn(
-            "mb-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded border border-app-border text-[#a3a3a3] transition-colors",
-            locked ? "opacity-40" : "hover:bg-white/10 hover:text-app-fg",
-            independent && "border-accent/50 text-accent",
-          )}
-        >
-          {independent ? <Unlink className="h-3.5 w-3.5" /> : <Link2 className="h-3.5 w-3.5" />}
-        </button>
+        {toggleButton}
         {!independent ? (
           <div className="min-w-0 flex-1">
             <PropertyNumberInput
@@ -117,7 +407,7 @@ export function CornerRadiusControls({
         focusedCornerIndex != null ? (
           <PropertyNumberInput
             commitOnInput={false}
-            label={`${CORNER_LABELS[focusedCornerIndex]} radius`}
+            label={`${focusedCornerLabel ?? cornerLabels[focusedCornerIndex]} radius`}
             value={radii[focusedCornerIndex] ?? 0}
             instanceKey={`${instanceKey}-cr-focus`}
             disabled={locked}
@@ -127,7 +417,7 @@ export function CornerRadiusControls({
           />
         ) : (
           <div className="grid grid-cols-2 gap-x-2 gap-y-1">
-            {CORNER_LABELS.map((label, i) => (
+            {cornerLabels.map((label, i) => (
               <PropertyNumberInput
                 key={label}
                 commitOnInput={false}

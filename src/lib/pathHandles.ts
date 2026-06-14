@@ -30,7 +30,10 @@ export function applyHandleMirroring(
 
   const mLen = len(moved);
   if (mirroring === "angle-length") {
-    const mirrored = { x: -moved.x, y: -moved.y };
+    const mirrored = {
+      x: moved.x === 0 ? 0 : -moved.x,
+      y: moved.y === 0 ? 0 : -moved.y,
+    };
     return which === "in"
       ? { handleIn: moved, handleOut: mirrored }
       : { handleOut: moved, handleIn: mirrored };

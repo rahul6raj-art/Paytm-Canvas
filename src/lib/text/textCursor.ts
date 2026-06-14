@@ -4,72 +4,71 @@ import {
   TEXT_BOX_PAD_X,
   TEXT_BOX_PAD_Y,
   toTextNodeModel,
-  wrapWidthForResizeMode,
+  type TextAlign,
 } from "./textNodeModel";
 import type { EditorNode } from "@/stores/useEditorStore";
 import {
   DEFAULT_TEXT_ADVANCED_STYLE,
-  textAdvancedStyleFromNode,
   displayIndexToRawIndex,
-  layoutDisplayText,
   prepareTextForDisplay,
   rawIndexToDisplayIndex,
+  textAdvancedStyleFromNode,
   type TextAdvancedStyle,
 } from "./textAdvancedStyle";
+import { textLayoutForEditorNode } from "./canonicalTextLayout";
 import {
+  buildFontString,
+  getCaretRect,
   getTextMeasureContext,
   layoutText,
   lineOffsetX,
   lineTopY,
   measureStringWidth,
-  buildFontString,
   type TextLayout,
 } from "./textMeasure";
-import type { TextAlign } from "./textNodeModel";
-import { textTypoFromModel } from "./textNodeModel";
-import { verticalContentOffsetY } from "./textVerticalAlign";
+import { textTypoFromModel, wrapWidthForResizeMode } from "./textNodeModel";
 
 /**
  * Convert a canvas-local point (inside the text box) to the nearest character index.
- *
- * Algorithm:
- * 1. Pick the line from Y using lineHeightPx.
- * 2. Subtract alignment offset to get X relative to line start.
- * 3. Walk characters with measureText, return the index with minimum distance.
  */
 export function getCursorPositionFromPoint(
   x: number,
   y: number,
   textNode: TextNodeModel | EditorNode,
 ): number {
-  const model =
-    "text" in textNode && textNode.type === "text" && "textAlign" in textNode
-      ? (textNode as TextNodeModel)
-      : toTextNodeModel(textNode as EditorNode, false);
+  const editorNode =
+    "content" in textNode && (textNode as EditorNode).type === "text"
+      ? (textNode as EditorNode)
+      : null;
+  const model = editorNode
+    ? toTextNodeModel(editorNode, false)
+    : (textNode as TextNodeModel);
 
   if (!model) return 0;
 
-  const typo = textTypoFromModel(model);
-  const wrapWidth = wrapWidthForResizeMode(model.width, model.textResizeMode);
-  const innerW = model.width - TEXT_BOX_PAD_X * 2;
-  const editorNode = "content" in textNode ? (textNode as EditorNode) : null;
-  const style: TextAdvancedStyle = editorNode
-    ? textAdvancedStyleFromNode(editorNode)
-    : DEFAULT_TEXT_ADVANCED_STYLE;
+  const style = editorNode ? textAdvancedStyleFromNode(editorNode) : DEFAULT_TEXT_ADVANCED_STYLE;
+  const prepared = editorNode ? textLayoutForEditorNode(editorNode) : null;
+  const typo = prepared?.typo ?? textTypoFromModel(model);
   const displayText = prepareTextForDisplay(model.text, style);
-  const layout = editorNode
-    ? layoutDisplayText(model.text, wrapWidth, editorNode).layout
-    : layoutText(displayText, wrapWidth, typo, style);
-  const innerH = model.height - TEXT_BOX_PAD_Y * 2;
-  const blockY = verticalContentOffsetY(layout.height, innerH, model.verticalAlign);
+  const layout =
+    prepared?.layout ??
+    layoutText(
+      displayText,
+      wrapWidthForResizeMode(model.width, model.textResizeMode),
+      typo,
+      style,
+    );
+
+  const innerW = prepared?.innerW ?? model.width - TEXT_BOX_PAD_X * 2;
   const displayIndex = cursorIndexFromPoint(
-    x - TEXT_BOX_PAD_X,
-    y - TEXT_BOX_PAD_Y - blockY,
+    x,
+    y,
     layout,
     typo,
     innerW,
     model.textAlign,
     displayText.length,
+    prepared?.canonical.lines,
   );
   return displayIndexToRawIndex(displayIndex, model.text, style);
 }
@@ -82,12 +81,33 @@ export function cursorIndexFromPoint(
   boxWidth: number,
   align: TextAlign,
   textLength: number,
+  canonicalLines?: Array<{ y: number; x: number; text: string; startIndex: number }>,
 ): number {
   if (layout.lines.length === 0) return 0;
 
-  const lineIdx = lineIndexFromLocalY(localY, layout);
+  const lineIdx = lineIndexFromLocalY(localY, layout, canonicalLines);
   const line = layout.lines[lineIdx]!;
-  const relX = localX - lineOffsetX(line.width, boxWidth, align);
+  const canonicalLine = canonicalLines?.[lineIdx];
+  const lineX = canonicalLine?.x ?? lineOffsetX(line.width, boxWidth, align) + TEXT_BOX_PAD_X;
+  const relX = localX - lineX;
+
+  if (layout.caretStops && layout.caretStops.length > 0) {
+    const lineStops = layout.caretStops.filter(
+      (stop) => stop.index >= line.startIndex && stop.index <= line.startIndex + line.text.length,
+    );
+    if (lineStops.length > 0) {
+      let best = lineStops[0]!;
+      let bestDist = Math.abs(best.x - localX);
+      for (const stop of lineStops) {
+        const dist = Math.abs(stop.x - localX);
+        if (dist < bestDist) {
+          best = stop;
+          bestDist = dist;
+        }
+      }
+      return Math.max(0, Math.min(best.index, textLength));
+    }
+  }
 
   const ctx = getTextMeasureContext();
   ctx.font = buildFontString(typo);
@@ -112,9 +132,13 @@ export function cursorIndexFromPoint(
   return Math.max(0, Math.min(bestIndex, textLength));
 }
 
-function lineIndexFromLocalY(localY: number, layout: TextLayout): number {
+function lineIndexFromLocalY(
+  localY: number,
+  layout: TextLayout,
+  canonicalLines?: Array<{ y: number }>,
+): number {
   for (let i = 0; i < layout.lines.length; i++) {
-    const top = lineTopY(layout, i);
+    const top = canonicalLines?.[i]?.y ?? lineTopY(layout, i) + TEXT_BOX_PAD_Y;
     const bottom = top + layout.lineHeightPx;
     if (localY < bottom || i === layout.lines.length - 1) return i;
   }
@@ -130,42 +154,27 @@ export function moveCaretWithArrow(
   typo: ResolvedTextTypo,
   boxWidth: number,
   align: TextAlign,
-  style?: import("./textAdvancedStyle").TextAdvancedStyle,
+  style?: TextAdvancedStyle,
 ): number {
   if (key === "ArrowLeft") return Math.max(0, index - 1);
   if (key === "ArrowRight") return Math.min(text.length, index + 1);
 
   const displayIndex = style ? rawIndexToDisplayIndex(index, text, style) : index;
   const displayLength = style ? prepareTextForDisplay(text, style).length : text.length;
-  const caret = getCaretRectForIndex(displayIndex, layout, typo, boxWidth, align);
+  const caretRect = getCaretRect(displayIndex, layout, typo, boxWidth, align);
+  const caret = { x: caretRect.x, y: caretRect.y + layout.lineHeightPx * 0.5 };
   const targetY =
     key === "ArrowUp" ? caret.y - layout.lineHeightPx * 0.5 : caret.y + layout.lineHeightPx * 1.5;
-  const nextDisplay = cursorIndexFromPoint(caret.x, targetY, layout, typo, boxWidth, align, displayLength);
+  const nextDisplay = cursorIndexFromPoint(
+    caret.x,
+    targetY,
+    layout,
+    typo,
+    boxWidth,
+    align,
+    displayLength,
+  );
   return style ? displayIndexToRawIndex(nextDisplay, text, style) : nextDisplay;
-}
-
-function getCaretRectForIndex(
-  index: number,
-  layout: TextLayout,
-  typo: ResolvedTextTypo,
-  boxWidth: number,
-  align: TextAlign,
-): { x: number; y: number } {
-  const ctx = getTextMeasureContext();
-  ctx.font = buildFontString(typo);
-
-  for (let i = 0; i < layout.lines.length; i++) {
-    const line = layout.lines[i]!;
-    const end = line.startIndex + line.text.length;
-    if (index <= end || i === layout.lines.length - 1) {
-      const local = Math.max(0, Math.min(index - line.startIndex, line.text.length));
-      const x =
-        lineOffsetX(line.width, boxWidth, align) +
-        measureStringWidth(ctx, line.text.slice(0, local), typo.letterSpacing);
-      return { x, y: lineTopY(layout, i) + layout.lineHeightPx * 0.5 };
-    }
-  }
-  return { x: 0, y: 0 };
 }
 
 export function collapsedSelection(index: number): { anchor: number; focus: number } {

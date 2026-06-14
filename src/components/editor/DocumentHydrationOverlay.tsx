@@ -27,8 +27,8 @@ export function DocumentHydrationOverlay() {
       aria-busy="true"
     >
       <div className="mx-4 max-w-sm rounded-xl border border-app-border bg-app-bg px-6 py-5 shadow-xl">
-        <p className="text-[14px] font-semibold text-app-fg">Loading your file…</p>
-        <p className="mt-1.5 text-[13px] leading-relaxed text-app-muted">
+        <p className="text-sm font-semibold text-app-fg">Loading your file…</p>
+        <p className="mt-1.5 text-ui-sm leading-relaxed text-app-muted">
           Restoring layers from browser storage. Very large files may take a few seconds.
         </p>
         <div className="mt-4 h-1 overflow-hidden rounded-full bg-app-inset">

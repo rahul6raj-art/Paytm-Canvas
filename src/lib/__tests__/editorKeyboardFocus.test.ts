@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   isToolShortcutEvent,
+  isShortcutOverlayOpen,
   resolveKeyboardFieldTarget,
   shouldAllowNativeFieldClipboard,
   shouldBlockDeleteSelectionShortcut,
@@ -91,7 +92,7 @@ describe("editorKeyboardFocus shortcuts", () => {
     assert.equal(shouldYieldShortcutsToTyping(e, fakeTextarea()), true);
   });
 
-  it("yields tool shortcut letters in inspector text inputs (hex fields)", () => {
+  it("applies tool shortcut letters even when an inspector input retains focus", () => {
     const e = {
       key: "f",
       code: "KeyF",
@@ -101,7 +102,7 @@ describe("editorKeyboardFocus shortcuts", () => {
       shiftKey: false,
     } as KeyboardEvent;
     assert.equal(isToolShortcutEvent(e), true);
-    assert.equal(shouldYieldShortcutsToTyping(e, fakeInput()), true);
+    assert.equal(shouldYieldShortcutsToTyping(e, fakeInput()), false);
   });
 
   it("allows native paste in code import textarea", () => {
@@ -115,6 +116,31 @@ describe("editorKeyboardFocus shortcuts", () => {
     } as KeyboardEvent;
     assert.equal(shouldAllowNativeFieldClipboard(e, fakeTextarea()), true);
     assert.equal(shouldAllowNativeFieldClipboard(e, null), false);
+  });
+
+  it("allows arrow nudge when a single-line inspector input is empty", () => {
+    const e = {
+      key: "ArrowDown",
+      code: "ArrowDown",
+      metaKey: false,
+      ctrlKey: false,
+      altKey: false,
+      shiftKey: false,
+    } as KeyboardEvent;
+    const input = { tagName: "INPUT", value: "", isContentEditable: false };
+    assert.equal(shouldYieldShortcutsToTyping(e, input), false);
+  });
+
+  it("yields Enter in single-line inspector inputs", () => {
+    const e = {
+      key: "Enter",
+      code: "Enter",
+      metaKey: false,
+      ctrlKey: false,
+      altKey: false,
+      shiftKey: false,
+    } as KeyboardEvent;
+    assert.equal(shouldYieldShortcutsToTyping(e, fakeInput()), true);
   });
 
   it("yields Cmd+A and arrow keys when activeElement is an inspector input", () => {
@@ -153,5 +179,26 @@ describe("editorKeyboardFocus shortcuts", () => {
       else input.blur();
       input.remove();
     }
+  });
+
+  it("treats dashboard import overlays as shortcut blockers", () => {
+    assert.equal(
+      isShortcutOverlayOpen({
+        shortcutOverlayOpen: false,
+        commandMenuOpen: false,
+        aiModalOpen: false,
+        pluginMarketplaceOpen: false,
+        activePluginId: undefined,
+        shareModalOpen: false,
+        workspacePickerOpen: false,
+        teamInviteModalOpen: false,
+        codeRoundTripOpen: false,
+        importHubOpen: true,
+        importWebModalOpen: false,
+        importFigmaModalOpen: false,
+        prototypePreview: null,
+      } as never),
+      true,
+    );
   });
 });

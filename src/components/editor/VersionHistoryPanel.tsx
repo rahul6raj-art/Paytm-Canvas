@@ -56,7 +56,7 @@ export function VersionHistoryPanel() {
       >
         <div className="flex h-10 shrink-0 items-center gap-2 border-b border-app-border px-3">
           <History className="h-4 w-4 text-[#a3a3a3]" strokeWidth={2} />
-          <h2 id="version-history-title" className="min-w-0 flex-1 truncate text-[12px] font-semibold text-app-fg">
+          <h2 id="version-history-title" className="min-w-0 flex-1 truncate text-ui font-semibold text-app-fg">
             Version history
           </h2>
           <button
@@ -70,10 +70,10 @@ export function VersionHistoryPanel() {
         </div>
 
         <div className="border-b border-app-border-subtle p-3">
-          <p className="mb-2 text-[11px] leading-relaxed text-app-muted">
+          <p className="mb-2 text-ui leading-relaxed text-app-muted">
             Save a named snapshot of this file to the mock API. Restoring updates the API file and your local backup.
           </p>
-          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-app-subtle">
+          <label className="mb-1 block section-heading">
             Version name (optional)
           </label>
           <input
@@ -81,12 +81,12 @@ export function VersionHistoryPanel() {
             onChange={(e) => setNameDraft(e.target.value)}
             onKeyDown={(e) => handlePanelFieldKeyDown(e)}
             placeholder="e.g. Before layout refactor"
-            className="mb-2 h-9 w-full rounded-md border border-app-border bg-app-toolbar-well px-2.5 text-[12px] text-app-fg outline-none placeholder:text-app-subtle focus:border-[#0d99ff]/50"
+            className="mb-2 h-9 w-full rounded-md border border-app-border bg-app-toolbar-well px-2.5 text-ui text-app-fg outline-none placeholder:text-app-subtle focus:border-[#0d99ff]/50"
           />
           <Button
             type="button"
             variant="primary"
-            className="h-8 w-full text-[12px]"
+            className="h-8 w-full text-ui"
             disabled={creating}
             onClick={async () => {
               setCreating(true);
@@ -112,10 +112,10 @@ export function VersionHistoryPanel() {
 
         <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-app-subtle">Snapshots</span>
+            <span className="section-heading">Snapshots</span>
             <button
               type="button"
-              className="text-[10px] font-medium text-[#0d99ff] hover:underline"
+              className="text-ui font-medium text-[#0d99ff] hover:underline"
               onClick={() => void loadApiFileVersions()}
             >
               Refresh
@@ -123,14 +123,14 @@ export function VersionHistoryPanel() {
           </div>
 
           {apiVersionsStatus === "loading" ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-2 py-12 text-[12px] text-app-muted">
+            <div className="flex flex-1 flex-col items-center justify-center gap-2 py-12 text-ui text-app-muted">
               <Loader2 className="h-6 w-6 animate-spin text-[#0d99ff]" />
               Loading versions…
             </div>
           ) : null}
 
           {apiVersionsStatus === "failed" ? (
-            <p className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-2 text-[11px] text-red-200/95">
+            <p className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-2 text-ui text-red-200/95">
               Could not load versions. Try Refresh or check the mock API.
             </p>
           ) : null}
@@ -138,8 +138,8 @@ export function VersionHistoryPanel() {
           {apiVersionsStatus === "synced" && apiFileVersions.length === 0 ? (
             <div className="rounded-lg border border-dashed border-app-border bg-white/[0.02] px-4 py-10 text-center">
               <History className="mx-auto mb-2 h-8 w-8 text-[#4a4a4a]" strokeWidth={1.25} />
-              <p className="text-[12px] font-medium text-app-muted">No saved versions</p>
-              <p className="mt-1 text-[11px] leading-relaxed text-app-subtle">
+              <p className="text-ui font-medium text-app-muted">No saved versions</p>
+              <p className="mt-1 text-ui leading-relaxed text-app-subtle">
                 Name a snapshot above and choose <span className="font-medium text-app-subtle">Create version</span> to
                 store the current document on the mock API. You can restore any snapshot later.
               </p>
@@ -153,14 +153,14 @@ export function VersionHistoryPanel() {
                   key={v.id}
                   className="rounded-lg border border-app-border bg-app-toolbar-well p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
                 >
-                  <div className="mb-1 text-[12px] font-medium text-app-fg">{v.name}</div>
-                  <div className="mb-2 text-[10px] text-app-subtle">
+                  <div className="mb-1 text-ui font-medium text-app-fg">{v.name}</div>
+                  <div className="mb-2 text-ui text-app-subtle">
                     {formatVersionWhen(v.createdAt)} · {v.createdByDisplayName}
                   </div>
                   <Button
                     type="button"
                     variant="toolbar"
-                    className="h-7 w-full text-[11px]"
+                    className="h-7 w-full text-ui"
                     onClick={() => void restoreApiFileVersion(v.id)}
                   >
                     Restore this version

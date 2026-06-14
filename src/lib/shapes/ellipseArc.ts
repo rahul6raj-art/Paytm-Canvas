@@ -1,5 +1,7 @@
 /** Ellipse arc / sweep / inner ratio (Figma-style pie, arc, and ring shapes). */
 
+import { generatePolygonPoints } from "@/lib/shapes/pathGenerators";
+
 export const DEFAULT_ELLIPSE_ARC_START_DEG = 0;
 export const DEFAULT_ELLIPSE_ARC_SWEEP_DEG = 360;
 export const DEFAULT_ELLIPSE_ARC_INNER_RATIO = 0;
@@ -202,6 +204,55 @@ export function degreesFromLocalPoint(
   return normalizeDegrees((rad * 180) / Math.PI);
 }
 
+/** Parametric angle on an ellipse (matches `ellipsePointAtDeg` / arc path). */
+export function parametricDegreesFromLocalPoint(
+  cx: number,
+  cy: number,
+  rx: number,
+  ry: number,
+  px: number,
+  py: number,
+): number {
+  if (rx <= 0 || ry <= 0) return degreesFromLocalPoint(cx, cy, px, py);
+  const cosT = (px - cx) / rx;
+  const sinT = (py - cy) / ry;
+  const rad = Math.atan2(sinT, cosT);
+  return normalizeDegrees((rad * 180) / Math.PI);
+}
+
+/** Unit vector from center toward the parametric point at `deg`. */
+export function ellipseParametricUnitVector(
+  rx: number,
+  ry: number,
+  deg: number,
+): { ux: number; uy: number } {
+  const rad = (deg * Math.PI) / 180;
+  const vx = rx * Math.cos(rad);
+  const vy = ry * Math.sin(rad);
+  const len = Math.hypot(vx, vy) || 1;
+  return { ux: vx / len, uy: vy / len };
+}
+
+/** Distance from center to the outer parametric point at `deg`. */
+export function ellipseParametricOuterDistance(rx: number, ry: number, deg: number): number {
+  const rad = (deg * Math.PI) / 180;
+  return Math.hypot(rx * Math.cos(rad), ry * Math.sin(rad)) || 1;
+}
+
+/** Signed distance from center along the parametric ray at `deg`. */
+export function distanceAlongEllipseParametricRay(
+  cx: number,
+  cy: number,
+  px: number,
+  py: number,
+  rx: number,
+  ry: number,
+  deg: number,
+): number {
+  const { ux, uy } = ellipseParametricUnitVector(rx, ry, deg);
+  return (px - cx) * ux + (py - cy) * uy;
+}
+
 export function ellipsePointAtDeg(
   cx: number,
   cy: number,
@@ -243,15 +294,14 @@ export function radialDistanceAlongAngle(
 }
 
 /**
- * Bisector projection distance when innerRadius = 1 (matches handle placement).
- * Differs from `ellipseRadiusAtDeg` on non-circular ellipses.
+ * Outer parametric distance at `angleDeg` (alias kept for ratio-drag math).
  */
 export function bisectorRadialScaleAtRatioOne(
   width: number,
   height: number,
   angleDeg: number,
 ): number {
-  return ellipseRadiusAtDeg(width, height, angleDeg);
+  return ellipseParametricOuterDistance(width / 2, height / 2, angleDeg);
 }
 
 function clampArcInnerRatio(ratio: number, shiftKey?: boolean): number {
@@ -266,7 +316,7 @@ function clampArcInnerRatio(ratio: number, shiftKey?: boolean): number {
   );
 }
 
-/** Snap a local point onto the arc bisector ray (smooth ratio drag). */
+/** Snap a local point onto the arc bisector parametric ray (smooth ratio drag). */
 export function projectLocalOntoArcBisector(
   width: number,
   height: number,
@@ -276,13 +326,15 @@ export function projectLocalOntoArcBisector(
 ): { x: number; y: number } {
   const cx = width / 2;
   const cy = height / 2;
-  const outer = ellipseRadiusAtDeg(width, height, angleDeg);
-  const dist = Math.max(0, Math.min(outer, radialDistanceAlongAngle(cx, cy, px, py, angleDeg)));
-  const rad = (angleDeg * Math.PI) / 180;
-  return {
-    x: cx + dist * Math.cos(rad),
-    y: cy + dist * Math.sin(rad),
-  };
+  const rx = width / 2;
+  const ry = height / 2;
+  const outer = ellipseParametricOuterDistance(rx, ry, angleDeg);
+  const dist = Math.max(
+    0,
+    Math.min(outer, distanceAlongEllipseParametricRay(cx, cy, px, py, rx, ry, angleDeg)),
+  );
+  const t = dist / outer;
+  return ellipsePointAtDeg(cx, cy, rx * t, ry * t, angleDeg);
 }
 
 /** Grab state aligned to the visible ratio handle (avoids jump on pointer down). */
@@ -329,10 +381,12 @@ export function arcInnerRadiusRatioFromPointer(
 ): number {
   const cx = width / 2;
   const cy = height / 2;
-  const angle = degreesFromLocalPoint(cx, cy, px, py);
-  const outerR = ellipseRadiusAtDeg(width, height, angle);
+  const rx = width / 2;
+  const ry = height / 2;
+  const angle = parametricDegreesFromLocalPoint(cx, cy, rx, ry, px, py);
+  const outerR = ellipseParametricOuterDistance(rx, ry, angle);
   if (outerR <= 0) return MIN_ELLIPSE_ARC_INNER_RATIO;
-  const dist = Math.hypot(px - cx, py - cy);
+  const dist = distanceAlongEllipseParametricRay(cx, cy, px, py, rx, ry, angle);
   return clampArcInnerRatio(dist / outerR, opts?.shiftKey);
 }
 
@@ -347,9 +401,11 @@ export function arcInnerRadiusRatioFromLocalPoint(
 ): number {
   const cx = width / 2;
   const cy = height / 2;
-  const scale = bisectorRadialScaleAtRatioOne(width, height, angleDeg);
+  const rx = width / 2;
+  const ry = height / 2;
+  const scale = ellipseParametricOuterDistance(rx, ry, angleDeg);
   if (scale <= 0) return MIN_ELLIPSE_ARC_INNER_RATIO;
-  const proj = radialDistanceAlongAngle(cx, cy, px, py, angleDeg);
+  const proj = distanceAlongEllipseParametricRay(cx, cy, px, py, rx, ry, angleDeg);
   return clampArcInnerRatio(proj / scale, opts?.shiftKey);
 }
 
@@ -371,10 +427,12 @@ export function arcInnerRadiusRatioFromRelativeDrag(
 ): number {
   const cx = width / 2;
   const cy = height / 2;
-  const outer = ellipseRadiusAtDeg(width, height, ratioAngleDeg);
+  const rx = width / 2;
+  const ry = height / 2;
+  const outer = ellipseParametricOuterDistance(rx, ry, ratioAngleDeg);
   if (outer <= 1e-6) return MIN_ELLIPSE_ARC_INNER_RATIO;
-  const grabDist = radialDistanceAlongAngle(cx, cy, grabX, grabY, ratioAngleDeg);
-  const moveDist = radialDistanceAlongAngle(cx, cy, moveX, moveY, ratioAngleDeg);
+  const grabDist = distanceAlongEllipseParametricRay(cx, cy, grabX, grabY, rx, ry, ratioAngleDeg);
+  const moveDist = distanceAlongEllipseParametricRay(cx, cy, moveX, moveY, rx, ry, ratioAngleDeg);
   return clampArcInnerRatio(grabRatio + (moveDist - grabDist) / outer, opts?.shiftKey);
 }
 
@@ -430,7 +488,7 @@ export function ellipseStartHandleLocal(
   return ellipsePointAtDeg(cx, cy, width / 2, height / 2, startDeg);
 }
 
-/** Ratio handle on the inner arc (bisector). */
+/** Ratio handle on the inner arc at the sweep midpoint. */
 export function ellipseRatioHandleLocal(
   width: number,
   height: number,
@@ -441,6 +499,8 @@ export function ellipseRatioHandleLocal(
 ): { x: number; y: number } {
   const cx = width / 2;
   const cy = height / 2;
+  const outerRx = width / 2;
+  const outerRy = height / 2;
   const midDeg = ellipseArcMidDeg(startDeg, sweepDeg);
   const softenZero = opts?.softenZero !== false;
   const displayRatio =
@@ -449,13 +509,13 @@ export function ellipseRatioHandleLocal(
       : softenZero
         ? ELLIPSE_RATIO_HANDLE_MIN_RATIO
         : 0;
-  const outer = ellipseRadiusAtDeg(width, height, midDeg);
-  const dist = outer * displayRatio;
-  const rad = (midDeg * Math.PI) / 180;
-  return {
-    x: cx + dist * Math.cos(rad),
-    y: cy + dist * Math.sin(rad),
-  };
+  return ellipsePointAtDeg(
+    cx,
+    cy,
+    outerRx * displayRatio,
+    outerRy * displayRatio,
+    midDeg,
+  );
 }
 
 function fmt(n: number): string {
@@ -477,6 +537,44 @@ function appendEllipsePolyline(
     const p = ellipsePointAtDeg(cx, cy, rx, ry, startDeg + sweepDeg * t);
     parts.push(`L ${fmt(p.x)} ${fmt(p.y)}`);
   }
+}
+
+/** Closed polygon approximation for ellipse arcs (boolean / clipper ops). */
+export function ellipseLocalPolygonPoints(
+  width: number,
+  height: number,
+  arc: EllipseArcAngles,
+  segments = 64,
+): { x: number; y: number }[] {
+  const w = Math.max(1, width);
+  const h = Math.max(1, height);
+  if (isFullEllipseArc(arc.sweepDeg) && !hasEllipseArcInnerHole(arc.innerRadiusRatio)) {
+    return generatePolygonPoints(segments, w, h).map((p) => ({ x: p.x, y: p.y }));
+  }
+  const cx = w / 2;
+  const cy = h / 2;
+  const outerRx = w / 2;
+  const outerRy = h / 2;
+  const innerRx = outerRx * arc.innerRadiusRatio;
+  const innerRy = outerRy * arc.innerRadiusRatio;
+  const pts: { x: number; y: number }[] = [];
+  if (!hasEllipseArcInnerHole(arc.innerRadiusRatio)) {
+    pts.push({ x: cx, y: cy });
+  }
+  const steps = Math.max(8, Math.ceil((arc.sweepDeg / 360) * segments));
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const deg = arc.startDeg + arc.sweepDeg * t;
+    pts.push(ellipsePointAtDeg(cx, cy, outerRx, outerRy, deg));
+  }
+  if (hasEllipseArcInnerHole(arc.innerRadiusRatio)) {
+    for (let i = steps; i >= 0; i--) {
+      const t = i / steps;
+      const deg = arc.startDeg + arc.sweepDeg * t;
+      pts.push(ellipsePointAtDeg(cx, cy, innerRx, innerRy, deg));
+    }
+  }
+  return pts;
 }
 
 /**

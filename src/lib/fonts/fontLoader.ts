@@ -1,4 +1,7 @@
 import { matchFontOption, primaryFontName } from "./fontCatalog";
+import type { EditorFontAsset } from "@/lib/documentPersistence";
+
+const injectedUploaded = new Set<string>();
 
 const loadedGoogle = new Set<string>();
 const loadingGoogle = new Map<string, Promise<void>>();
@@ -39,14 +42,48 @@ function injectGoogleStylesheet(family: string): Promise<void> {
   return promise.finally(() => loadingGoogle.delete(key));
 }
 
+function injectUploadedFontFace(family: string, dataUrl: string): void {
+  const key = family.toLowerCase();
+  if (injectedUploaded.has(key)) return;
+  const id = `uf-${key.replace(/[^a-z0-9]+/g, "-")}`;
+  if (document.getElementById(id)) {
+    injectedUploaded.add(key);
+    return;
+  }
+  const style = document.createElement("style");
+  style.id = id;
+  const safe = family.replace(/"/g, '\\"');
+  style.textContent = `@font-face{font-family:"${safe}";src:url("${dataUrl}") format("truetype");font-display:swap;}`;
+  document.head.appendChild(style);
+  injectedUploaded.add(key);
+}
+
 /** Load web or system font so canvas `measureText` / `fillText` use the correct face. */
-export async function ensureFontFamilyLoaded(fontFamily: string): Promise<void> {
+export async function ensureFontFamilyLoaded(
+  fontFamily: string,
+  fontAssets?: Record<string, EditorFontAsset>,
+): Promise<void> {
   const primary = primaryFontName(fontFamily);
   if (!primary || primary === "sans-serif" || primary === "serif" || primary === "monospace") {
     return;
   }
 
   const match = matchFontOption(fontFamily);
+  if (match?.source === "uploaded" && fontAssets) {
+    const asset = Object.values(fontAssets).find(
+      (a) => a.family.trim().toLowerCase() === primary.toLowerCase(),
+    );
+    if (asset) {
+      injectUploadedFontFace(primary, asset.dataUrl);
+      try {
+        await document.fonts.load(`400 16px "${primary}"`);
+      } catch {
+        /* optional */
+      }
+      return;
+    }
+  }
+
   if (match?.source === "google") {
     await injectGoogleStylesheet(match.primary);
     try {

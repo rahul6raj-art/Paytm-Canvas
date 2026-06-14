@@ -79,21 +79,21 @@ function ComponentCard({
       <ComponentPreview width={master.width} height={master.height} />
       <div className="mt-1.5 flex items-center gap-1.5">
         <Component className="h-3.5 w-3.5 shrink-0 text-violet-300" strokeWidth={1.75} />
-        <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-app-fg">
+        <span className="min-w-0 flex-1 truncate text-ui font-medium text-app-fg">
           {showGroupContext ? master.name : group.label}
         </span>
         {showGroupContext ? (
-          <span className="shrink-0 rounded bg-app-hover px-1 py-0.5 text-[9px] font-semibold uppercase text-app-muted">
+          <span className="shrink-0 rounded bg-app-hover px-1 py-0.5 text-ui font-semibold uppercase text-app-muted">
             Var
           </span>
         ) : null}
       </div>
       {subtitle ? (
-        <p className="mt-0.5 truncate text-[10px] text-app-subtle" title={subtitle}>
+        <p className="mt-0.5 truncate text-ui text-app-subtle" title={subtitle}>
           {subtitle}
         </p>
       ) : null}
-      <p className="mt-0.5 truncate font-mono text-[10px] text-[#737373]">
+      <p className="mt-0.5 truncate font-mono text-ui text-[#737373]">
         {Math.round(master.width)}×{Math.round(master.height)}
       </p>
     </button>
@@ -142,7 +142,7 @@ export function ComponentsPanel() {
     e.dataTransfer.effectAllowed = "copy";
     const ghost = document.createElement("div");
     ghost.className =
-      "rounded border border-violet-400/50 bg-violet-500/20 px-2 py-1 text-[11px] font-medium text-violet-100 shadow-lg";
+      "rounded border border-violet-400/50 bg-violet-500/20 px-2 py-1 text-ui font-medium text-violet-100 shadow-lg";
     ghost.textContent = name;
     ghost.style.position = "absolute";
     ghost.style.top = "-1000px";
@@ -209,7 +209,7 @@ export function ComponentsPanel() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 border-b border-app-border-subtle p-2">
+      <div className="shrink-0 border-b border-app-panel-edge p-2">
         <div className="relative">
           <Search
             className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-app-subtle"
@@ -224,7 +224,7 @@ export function ComponentsPanel() {
             onKeyDown={onSearchKeyDown}
             placeholder="Search components"
             aria-label="Search components"
-            className="h-8 w-full rounded-md border border-app-border bg-app-field py-0 pl-7 pr-7 text-[12px] text-app-field-fg placeholder:text-app-subtle focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            className="h-8 w-full rounded-md border border-app-border bg-app-field py-0 pl-7 pr-7 text-ui text-app-field-fg placeholder:text-app-subtle focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           />
           {query ? (
             <button
@@ -241,13 +241,13 @@ export function ComponentsPanel() {
           ) : null}
         </div>
         {searching ? (
-          <p className="mt-1.5 px-0.5 text-[10px] text-app-subtle">
+          <p className="mt-1.5 px-0.5 text-ui text-app-subtle">
             {resultCount === 0
               ? "No components match your search"
               : `${resultCount} of ${totalCount} component${totalCount === 1 ? "" : "s"}`}
           </p>
         ) : totalCount > 0 ? (
-          <p className="mt-1.5 px-0.5 text-[10px] text-app-subtle">
+          <p className="mt-1.5 px-0.5 text-ui text-app-subtle">
             {totalCount} component{totalCount === 1 ? "" : "s"} in this file
           </p>
         ) : null}
@@ -257,7 +257,7 @@ export function ComponentsPanel() {
           disabled={!canCreate}
           onClick={() => createComponentFromSelection()}
           className={cn(
-            "mt-2 flex h-8 w-full items-center justify-center gap-1.5 rounded-md border text-[11px] font-semibold transition-colors",
+            "mt-2 flex h-8 w-full items-center justify-center gap-1.5 rounded-md border text-ui font-semibold transition-colors",
             canCreate
               ? "border-violet-500/40 bg-violet-500/15 text-violet-100 hover:bg-violet-500/25"
               : "cursor-not-allowed border-app-border-subtle text-app-subtle",
@@ -266,7 +266,7 @@ export function ComponentsPanel() {
           <Plus className="h-3.5 w-3.5" strokeWidth={2} />
           Create component
         </button>
-        <p className="mt-1.5 px-0.5 text-[10px] leading-relaxed text-app-subtle">
+        <p className="mt-1.5 px-0.5 text-ui leading-relaxed text-app-subtle">
           Select layers, then create. Use{" "}
           <span className="font-medium text-app-subtle">⌘⌥K</span> · ↑↓ to browse · Enter to place.
         </p>
@@ -276,8 +276,8 @@ export function ComponentsPanel() {
         {totalCount === 0 ? (
           <div className="mx-1 rounded-lg border border-dashed border-app-border bg-white/[0.02] px-3 py-8 text-center">
             <Package className="mx-auto mb-2 h-8 w-8 text-[#4a4a4a]" strokeWidth={1.25} />
-            <p className="text-[12px] font-medium text-app-muted">No components yet</p>
-            <p className="mt-1 text-[11px] leading-relaxed text-app-subtle">
+            <p className="text-ui font-medium text-app-muted">No components yet</p>
+            <p className="mt-1 text-ui leading-relaxed text-app-subtle">
               Components you create appear here. Search by name or variant, then drag or click to place
               instances.
             </p>
@@ -285,15 +285,15 @@ export function ComponentsPanel() {
         ) : searching && resultCount === 0 ? (
           <div className="mx-1 rounded-lg border border-dashed border-app-border bg-white/[0.02] px-3 py-6 text-center">
             <Search className="mx-auto mb-2 h-7 w-7 text-[#4a4a4a]" strokeWidth={1.25} />
-            <p className="text-[12px] font-medium text-app-muted">No results</p>
-            <p className="mt-1 text-[11px] text-app-subtle">Try another name or variant label.</p>
+            <p className="text-ui font-medium text-app-muted">No results</p>
+            <p className="mt-1 text-ui text-app-subtle">Try another name or variant label.</p>
           </div>
         ) : (
           <div className="space-y-3">
             {filteredGroups.map((group) => (
               <div key={group.id}>
                 {group.variants.length > 1 ? (
-                  <p className="mb-1 truncate px-0.5 text-[10px] font-semibold uppercase tracking-wide text-app-subtle">
+                  <p className="mb-1 truncate px-0.5 section-heading">
                     {group.label}
                     <span className="ml-1 font-normal normal-case text-app-subtle">
                       · {group.variants.length} variants
@@ -319,7 +319,7 @@ export function ComponentsPanel() {
         )}
 
         {resultCount > 0 ? (
-          <p className="mt-3 px-1 text-[10px] leading-relaxed text-app-subtle">
+          <p className="mt-3 px-1 text-ui leading-relaxed text-app-subtle">
             Drag onto the canvas, click to place with the cursor, or double-click a master to select it on
             the canvas.
           </p>

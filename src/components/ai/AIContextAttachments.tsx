@@ -179,8 +179,8 @@ export function AIContextAttachments({
             >
               <Icon className="mt-0.5 h-4 w-4 shrink-0 text-app-muted" strokeWidth={1.75} />
               <span className="min-w-0">
-                <span className={cn("block text-[12px] font-medium", menuTitleClass)}>{meta.label}</span>
-                <span className={cn("block text-[10px] leading-snug", menuHintClass)}>{meta.hint}</span>
+                <span className={cn("block text-ui font-medium", menuTitleClass)}>{meta.label}</span>
+                <span className={cn("block text-ui leading-snug", menuHintClass)}>{meta.hint}</span>
               </span>
             </button>
           );
@@ -225,7 +225,7 @@ export function AIContextAttachments({
           "disabled:cursor-not-allowed disabled:opacity-40",
         )}
       >
-        <span className="inline-flex min-w-0 items-center gap-2 text-[12px] font-medium">
+        <span className="inline-flex min-w-0 items-center gap-2 text-ui font-medium">
           <Plus className="h-4 w-4 shrink-0 text-app-muted" strokeWidth={1.75} />
           <span className="truncate">Attach</span>
         </span>
@@ -289,14 +289,14 @@ export function AIContextAttachments({
                 ) : (
                   <span className="flex h-full w-full flex-col items-center justify-center gap-1 px-1 text-app-muted">
                     <Icon className="h-5 w-5 shrink-0" strokeWidth={1.75} />
-                    <span className="line-clamp-2 text-center text-[9px] leading-tight text-app-subtle">
+                    <span className="line-clamp-2 text-center text-ui leading-tight text-app-subtle">
                       {kindLabel}
                     </span>
                   </span>
                 )}
               </button>
 
-              <p className="truncate text-center text-[10px] text-app-muted" title={a.name}>
+              <p className="truncate text-center text-ui text-app-muted" title={a.name}>
                 {a.name}
               </p>
 
@@ -357,8 +357,8 @@ export function AIContextAttachments({
   return (
     <div className={cn("flex min-w-0 flex-col", className)}>
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-app-subtle">Context</p>
-        <span className="shrink-0 text-[10px] text-app-subtle">
+        <p className="section-heading">Context</p>
+        <span className="shrink-0 text-ui text-app-subtle">
           {attachments.length}/{MAX_CONTEXT_ATTACHMENTS}
           {reading ? (
             <span className="ml-1 inline-flex items-center gap-1 text-violet-300">

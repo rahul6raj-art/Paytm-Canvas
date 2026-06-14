@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   applyMoveToolPointerSelection,
   drillTargetForDoubleClick,
+  frameBodyReceivesPointerHits,
   isAdditiveSelectionClick,
+  isDeepSelectClick,
   selectionTargetForClick,
   shouldCollapseContainerHits,
 } from "@/lib/containerSelection";
@@ -46,17 +48,37 @@ function rect(id: string, parentId: string): EditorNode {
 }
 
 describe("containerSelection", () => {
-  it("maps child click to parent frame", () => {
+  it("selects the child when a populated frame is clicked", () => {
     const nodes = { f: frame("f"), r: rect("r", "f") };
     const childOrder = { f: ["r"] };
-    assert.equal(selectionTargetForClick("r", nodes, childOrder, null), "f");
+    assert.equal(selectionTargetForClick("r", nodes, childOrder, null), "r");
+    assert.equal(selectionTargetForClick("r", nodes, childOrder, null, true), "r");
+    assert.equal(frameBodyReceivesPointerHits("f", nodes, childOrder), false);
   });
 
-  it("collapses frame hits until drill-in", () => {
+  it("keeps empty frame body hittable", () => {
+    const nodes = { f: frame("f") };
+    const childOrder = { f: [] as string[] };
+    assert.equal(frameBodyReceivesPointerHits("f", nodes, childOrder), true);
+    assert.equal(shouldCollapseContainerHits("f", nodes, childOrder, null), false);
+  });
+
+  it("exposes frame children for direct hit testing", () => {
     const nodes = { f: frame("f"), r: rect("r", "f") };
     const childOrder = { f: ["r"] };
-    assert.equal(shouldCollapseContainerHits("f", nodes, childOrder, null), true);
+    assert.equal(shouldCollapseContainerHits("f", nodes, childOrder, null), false);
+    assert.equal(shouldCollapseContainerHits("f", nodes, childOrder, null, true), false);
     assert.equal(shouldCollapseContainerHits("f", nodes, childOrder, "f"), false);
+  });
+
+  it("still maps child click to parent group", () => {
+    const nodes = {
+      g: frame("g", { type: "group" }),
+      r: rect("r", "g"),
+    };
+    const childOrder = { g: ["r"] };
+    assert.equal(selectionTargetForClick("r", nodes, childOrder, null), "g");
+    assert.equal(shouldCollapseContainerHits("g", nodes, childOrder, null), true);
   });
 
   it("exposes auto-layout children for direct hit testing", () => {
@@ -69,18 +91,24 @@ describe("containerSelection", () => {
     assert.equal(selectionTargetForClick("r", nodes, childOrder, null), "r");
   });
 
-  it("double-click returns container and deepest child", () => {
+  it("double-click drills into editable frame from its child", () => {
     const nodes = { f: frame("f"), r: rect("r", "f") };
     const childOrder = { f: ["r"] };
     const drill = drillTargetForDoubleClick("r", 0, 0, nodes, childOrder, null, () => "r");
     assert.deepEqual(drill, { containerId: "f", selectId: "r" });
   });
 
-  it("isAdditiveSelectionClick detects shift and cmd/ctrl modifiers", () => {
+  it("isAdditiveSelectionClick uses shift only", () => {
     assert.equal(isAdditiveSelectionClick({ shiftKey: true }), true);
-    assert.equal(isAdditiveSelectionClick({ shiftKey: false, metaKey: true }), true);
-    assert.equal(isAdditiveSelectionClick({ shiftKey: false, ctrlKey: true }), true);
+    assert.equal(isAdditiveSelectionClick({ shiftKey: false, metaKey: true }), false);
+    assert.equal(isAdditiveSelectionClick({ shiftKey: true, metaKey: true }), true);
     assert.equal(isAdditiveSelectionClick({ shiftKey: false }), false);
+  });
+
+  it("isDeepSelectClick detects cmd/ctrl", () => {
+    assert.equal(isDeepSelectClick({ metaKey: true }), true);
+    assert.equal(isDeepSelectClick({ ctrlKey: true }), true);
+    assert.equal(isDeepSelectClick({}), false);
   });
 
   it("applyMoveToolPointerSelection toggles additive selection", () => {

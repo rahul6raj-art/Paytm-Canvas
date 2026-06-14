@@ -92,6 +92,37 @@ export function reconcileChildOrderWithParents(
   return out;
 }
 
+/** Layer panel child ids — honors childOrder z-order but only under the correct parent. */
+export function layerPanelChildIds(
+  parentId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): string[] {
+  const expectedParent = parentId === EDITOR_ROOT_KEY ? null : parentId;
+  const fromOrder = (childOrder[parentId] ?? []).filter((id) => {
+    if (id === EDITOR_ROOT_KEY || id === parentId) return false;
+    const n = nodes[id];
+    return n && (n.parentId ?? null) === expectedParent;
+  });
+  if (fromOrder.length > 0) return fromOrder;
+
+  const orderIndex = new Map<string, number>();
+  let idx = 0;
+  for (const list of Object.values(childOrder)) {
+    for (const id of list) {
+      if (!orderIndex.has(id)) orderIndex.set(id, idx++);
+    }
+  }
+
+  return Object.keys(nodes)
+    .filter((id) => {
+      if (id === EDITOR_ROOT_KEY || id === parentId) return false;
+      const n = nodes[id];
+      return n && (n.parentId ?? null) === expectedParent;
+    })
+    .sort((a, b) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0));
+}
+
 /** Insert a node into the correct parent list and remove it from all other lists. */
 export function insertNodeInChildOrder(
   childOrder: Record<string, string[]>,
@@ -159,7 +190,7 @@ export function pointInNodeRenderedWorldBounds(
   return local.x >= 0 && local.x <= w && local.y >= 0 && local.y <= h;
 }
 
-/** Parent map from childOrder (matches what DomSceneRenderer actually mounts). */
+/** Parent map from childOrder (editor scene tree). */
 export function buildParentMapFromChildOrder(
   childOrder: Record<string, string[]>,
 ): Map<string, string | null> {
@@ -173,7 +204,31 @@ export function buildParentMapFromChildOrder(
   return parentOf;
 }
 
-/** World matrix for a node using the childOrder tree (same tree as CanvasObject / DomSceneRenderer). */
+/** Prefer nodes[].parentId for auto-layout parents; else childOrder (matches canvas when desynced). */
+export function resolveRenderParentId(
+  nodeId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): string | null {
+  const n = nodes[nodeId];
+  if (!n) return null;
+  const parentFromOrder = buildParentMapFromChildOrder(childOrder).get(nodeId);
+
+  if (n.parentId != null && nodes[n.parentId]) {
+    const parent = nodes[n.parentId];
+    if ((parent.layoutMode ?? "none") !== "none") {
+      return n.parentId;
+    }
+  }
+
+  if (parentFromOrder !== undefined) {
+    return parentFromOrder;
+  }
+
+  return n.parentId ?? null;
+}
+
+/** World matrix for a node using the childOrder tree (same tree as CanvasObject). */
 export function getNodeWorldMatrixFromChildOrder(
   nodeId: string,
   nodes: Record<string, EditorNode>,
@@ -183,8 +238,7 @@ export function getNodeWorldMatrixFromChildOrder(
   if (!n) return null;
   try {
     const local = getNodeLocalMatrix(n);
-    const parentOf = buildParentMapFromChildOrder(childOrder);
-    const parentId = parentOf.get(nodeId) ?? null;
+    const parentId = resolveRenderParentId(nodeId, nodes, childOrder);
     if (!parentId || !nodes[parentId]) return local;
     const parentWorld = getNodeWorldMatrixFromChildOrder(parentId, nodes, childOrder);
     if (!parentWorld) return local;
@@ -449,7 +503,7 @@ export function worldToNodeLocalFromChildOrder(
   return applyMatrixToPoint(inv, { x: worldX, y: worldY });
 }
 
-/** World point → parent-local using the same tree as DomSceneRenderer. */
+/** World point → parent-local using the childOrder scene tree. */
 export function worldPointToParentLocalFromChildOrder(
   worldX: number,
   worldY: number,
@@ -463,6 +517,21 @@ export function worldPointToParentLocalFromChildOrder(
     return { x: worldX - pw.x, y: worldY - pw.y };
   }
   return applyMatrixToPoint(inv, { x: worldX, y: worldY });
+}
+
+/** Live drag endpoints are in world space; node x/y are parent-local when parented. */
+export function worldDragPairInParentSpace(
+  parentId: string | null | undefined,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+): { start: { x: number; y: number }; end: { x: number; y: number } } {
+  if (!parentId) return { start, end };
+  return {
+    start: worldPointToParentLocalFromChildOrder(start.x, start.y, parentId, nodes, childOrder),
+    end: worldPointToParentLocalFromChildOrder(end.x, end.y, parentId, nodes, childOrder),
+  };
 }
 
 /** Align nodes[].parentId with where the layer appears in childOrder. */
@@ -651,22 +720,24 @@ export function parentUsesAutoLayout(
   return mode === "horizontal" || mode === "vertical";
 }
 
-/** Clone positioning: offset duplicated tree root upward in world space; keep child locals. */
+export type CloneWorldOffset = { dx: number; dy: number };
+
+/** Clone positioning: null offset keeps the same local position; world offset shifts only the tree root. */
 export function clonedNodePosition(
   oldId: string,
   isTreeRoot: boolean,
-  offset: number,
+  worldOffset: CloneWorldOffset | null,
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
   newParentId: string | null,
   oldNode: EditorNode,
 ): { x: number; y: number } {
-  if (!isTreeRoot || offset === 0) {
+  if (!isTreeRoot || !worldOffset || (worldOffset.dx === 0 && worldOffset.dy === 0)) {
     return { x: oldNode.x, y: oldNode.y };
   }
   const topLeft = getRenderedWorldTopLeft(oldId, nodes, childOrder);
-  const wx = topLeft.x;
-  const wy = topLeft.y - offset;
+  const wx = topLeft.x + worldOffset.dx;
+  const wy = topLeft.y + worldOffset.dy;
   if (!newParentId) {
     return { x: wx, y: wy };
   }

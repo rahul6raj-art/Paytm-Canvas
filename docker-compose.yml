@@ -1,0 +1,99 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: craft
+      POSTGRES_PASSWORD: craft
+      POSTGRES_DB: craft
+    ports:
+      - "5432:5432"
+    volumes:
+      - craft_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U craft -d craft"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: craft
+      MINIO_ROOT_PASSWORD: craftcraft
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - craft_minio:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+
+  craft-api:
+    build:
+      context: .
+      dockerfile: packages/craft-api/Dockerfile
+    ports:
+      - "4000:4000"
+    environment:
+      DATABASE_URL: postgresql://craft:craft@postgres:5432/craft?schema=public
+      REDIS_URL: redis://redis:6379
+      CRAFT_API_PORT: 4000
+      CRAFT_API_ALLOW_ANON: 1
+      CRAFT_API_RBAC: 1
+      CRAFT_APP_URL: http://localhost:3000
+      CRAFT_SMTP_HOST: mailpit
+      CRAFT_SMTP_PORT: 1025
+      CRAFT_SMTP_FROM: Paytm Craft <noreply@craft.local>
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_URL: http://localhost:9000
+      S3_BUCKET: craft-assets
+      S3_ACCESS_KEY: craft
+      S3_SECRET_KEY: craftcraft
+      S3_REGION: us-east-1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  craft-realtime:
+    build:
+      context: .
+      dockerfile: packages/craft-realtime/Dockerfile
+    ports:
+      - "4001:4001"
+    environment:
+      DATABASE_URL: postgresql://craft:craft@postgres:5432/craft?schema=public
+      REDIS_URL: redis://redis:6379
+      CRAFT_SYNC_PORT: 4001
+      CRAFT_SYNC_ALLOW_ANON: 1
+      CRAFT_SYNC_DEBOUNCE_MS: 3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      craft-api:
+        condition: service_started
+
+volumes:
+  craft_pgdata:
+  craft_minio:

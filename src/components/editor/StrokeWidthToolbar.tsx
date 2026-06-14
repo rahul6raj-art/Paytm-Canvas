@@ -86,7 +86,7 @@ export function StrokeWidthToolbar() {
         type="text"
         inputMode="decimal"
         className={cn(
-          "h-7 w-10 border-0 bg-transparent text-center text-[11px] font-medium tabular-nums text-app-fg",
+          "h-7 w-10 border-0 bg-transparent text-center text-ui font-medium tabular-nums text-app-fg",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded",
         )}
         value={draft}

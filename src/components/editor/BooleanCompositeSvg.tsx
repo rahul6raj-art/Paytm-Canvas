@@ -1,132 +1,180 @@
 "use client";
 
-import type { ReactNode } from "react";
 import type { BooleanRenderModel } from "@/lib/booleanGeometry";
-import type { EditorNode } from "@/stores/useEditorStore";
+import { fillCss } from "@/lib/color";
+import {
+  effectiveFillType,
+  fillPaintCss,
+  gradientKindUsesCssPaint,
+  normalizeFillGradient,
+  svgFillPaint,
+} from "@/lib/fillGradient";
 import { svgSafeId } from "@/lib/svgMarkupCore";
-import { svgStrokePropsFromNode } from "@/lib/stroke";
+import { resolveSvgStrokePaint, strokeIsVisible, svgStrokePropsFromNode } from "@/lib/stroke";
+import type { EditorNode } from "@/stores/useEditorStore";
 
-/** Canvas boolean preview — same mask/clip strategy as code export. */
+function booleanFillPaint(
+  node: EditorNode,
+  groupId: string,
+  width: number,
+  height: number,
+  fallbackFill: string,
+): { fill: string; fillDefs: string[]; cssBackground: string | null } {
+  if (node.fillEnabled === false) {
+    return { fill: "none", fillDefs: [], cssBackground: null };
+  }
+
+  if (effectiveFillType(node) === "gradient") {
+    const g = normalizeFillGradient(node.fillGradient, node.fill);
+    if (gradientKindUsesCssPaint(g.kind)) {
+      return { fill: "none", fillDefs: [], cssBackground: fillPaintCss(node) };
+    }
+    const gradId = `pc-bg-${svgSafeId(groupId)}`;
+    const fillDefs: string[] = [];
+    const fill = svgFillPaint(node, {
+      gradientId: gradId,
+      width,
+      height,
+      registerGradient: (_id, markup) => fillDefs.push(markup),
+    });
+    return { fill, fillDefs, cssBackground: null };
+  }
+
+  const solid =
+    node.fill != null
+      ? fillCss(node.fill, node.fillOpacity, node.fillEnabled)
+      : fallbackFill;
+  return { fill: solid, fillDefs: [], cssBackground: null };
+}
+
+function booleanStrokePaint(
+  node: EditorNode,
+  groupId: string,
+  width: number,
+  height: number,
+): { stroke: string; strokeDefs: string[] } {
+  const showStroke = strokeIsVisible(node);
+  const strokeDefs: string[] = [];
+  const stroke = showStroke
+    ? resolveSvgStrokePaint(node, {
+        gradientId: `pc-sg-${svgSafeId(groupId)}`,
+        width,
+        height,
+        registerGradient: (_id, markup) => strokeDefs.push(markup),
+      })
+    : "none";
+  return { stroke, strokeDefs };
+}
+
+function CssMaskedBooleanFill({
+  pathD,
+  groupId,
+  width,
+  height,
+  background,
+}: {
+  pathD: string;
+  groupId: string;
+  width: number;
+  height: number;
+  background: string;
+}) {
+  const maskId = `pc-bgmask-${svgSafeId(groupId)}`;
+  return (
+    <>
+      <defs>
+        <mask id={maskId} maskUnits="userSpaceOnUse" x="0" y="0" width={width} height={height}>
+          <rect x="0" y="0" width={width} height={height} fill="black" />
+          <path d={pathD} fill="white" />
+        </mask>
+      </defs>
+      <foreignObject x="0" y="0" width={width} height={height} mask={`url(#${maskId})`}>
+        <div
+          {...({ xmlns: "http://www.w3.org/1999/xhtml" } as Record<string, string>)}
+          style={{
+            width: `${width}px`,
+            height: `${height}px`,
+            background,
+          }}
+        />
+      </foreignObject>
+    </>
+  );
+}
+
+function clipperPathD(render: BooleanRenderModel): string | null {
+  if (render.op === "clipper") return render.pathD;
+  if (render.op === "subtract") return render.baseD;
+  if ("pathDs" in render && render.pathDs.length > 0) return render.pathDs.join(" ");
+  return null;
+}
+
+/** Canvas boolean preview — Clipper2 path for all operand counts. */
 export function BooleanCompositeSvg({
   render,
   groupId,
   node,
   width,
   height,
-  fill,
+  fallbackFill,
 }: {
   render: BooleanRenderModel;
   groupId: string;
   node: EditorNode;
   width: number;
   height: number;
-  fill: string;
+  fallbackFill: string;
 }) {
-  const safe = svgSafeId(groupId);
-  const strokeOn = Boolean(node.strokeColor && (node.strokeWidth ?? 0) > 0);
+  const pathD = clipperPathD(render);
+  if (!pathD) return null;
+
+  const fillRule =
+    render.op === "clipper" ? render.fillRule : render.op === "subtract" ? "evenodd" : "nonzero";
+
+  const strokeOn = strokeIsVisible(node);
   const strokeProps = strokeOn ? svgStrokePropsFromNode(node) : {};
+  const { fill, fillDefs, cssBackground } = booleanFillPaint(node, groupId, width, height, fallbackFill);
+  const { stroke, strokeDefs } = booleanStrokePaint(node, groupId, width, height);
+
   const pathCommon = {
     fill,
     fillOpacity: node.fillOpacity ?? 1,
-    stroke: strokeOn ? node.strokeColor : "none",
+    stroke,
     strokeWidth: node.strokeWidth ?? 0,
     ...strokeProps,
     pointerEvents: "none" as const,
   };
 
-  if (render.op === "union") {
-    return (
-      <svg
-        className="absolute inset-0 overflow-visible"
+  const gradientDefsMarkup = [...fillDefs, ...strokeDefs].join("");
+
+  const cssFillEl =
+    cssBackground != null ? (
+      <CssMaskedBooleanFill
+        pathD={pathD}
+        groupId={groupId}
         width={width}
         height={height}
-        aria-hidden
-      >
-        {render.pathDs.map((d, i) => (
-          <path key={i} d={d} {...pathCommon} />
-        ))}
-      </svg>
-    );
-  }
+        background={cssBackground}
+      />
+    ) : null;
 
-  if (render.op === "subtract") {
-    const maskId = `pc-sub-mask-${safe}`;
-    return (
-      <svg
-        className="absolute inset-0 overflow-visible"
-        width={width}
-        height={height}
-        aria-hidden
-      >
-        <defs>
-          <mask id={maskId} maskUnits="userSpaceOnUse">
-            <path d={render.baseD} fill="white" />
-            <path d={render.subtractD} fill="black" />
-          </mask>
-        </defs>
-        <path d={render.baseD} mask={`url(#${maskId})`} {...pathCommon} />
-      </svg>
-    );
-  }
-
-  if (render.op === "intersect") {
-    const clipIds = render.pathDs.map((_, i) => `pc-int-${safe}-${i}`);
-    let inner: ReactNode = <path d={render.pathDs[0]} {...pathCommon} />;
-    for (let i = render.pathDs.length - 1; i >= 0; i--) {
-      const clipId = clipIds[i]!;
-      inner = (
-        <g key={clipId} clipPath={`url(#${clipId})`}>
-          {inner}
-        </g>
-      );
-    }
-    return (
-      <svg
-        className="absolute inset-0 overflow-visible"
-        width={width}
-        height={height}
-        aria-hidden
-      >
-        <defs>
-          {render.pathDs.map((d, i) => (
-            <clipPath key={clipIds[i]} id={clipIds[i]} clipPathUnits="userSpaceOnUse">
-              <path d={d} />
-            </clipPath>
-          ))}
-        </defs>
-        {inner}
-      </svg>
-    );
-  }
-
-  if (render.op === "exclude") {
-    return (
-      <svg
-        className="absolute inset-0 overflow-visible"
-        width={width}
-        height={height}
-        aria-hidden
-      >
-        <defs>
-          {render.pathDs.map((d, i) => {
-            const maskId = `pc-exc-mask-${safe}-${i}`;
-            return (
-              <mask key={maskId} id={maskId} maskUnits="userSpaceOnUse">
-                <path d={d} fill="white" />
-                {render.pathDs.map((other, j) =>
-                  j !== i ? <path key={j} d={other} fill="black" /> : null,
-                )}
-              </mask>
-            );
-          })}
-        </defs>
-        {render.pathDs.map((d, i) => {
-          const maskId = `pc-exc-mask-${safe}-${i}`;
-          return <path key={i} d={d} mask={`url(#${maskId})`} {...pathCommon} />;
-        })}
-      </svg>
-    );
-  }
-
-  return null;
+  return (
+    <svg
+      className="absolute inset-0 overflow-visible"
+      width={width}
+      height={height}
+      aria-hidden
+    >
+      {gradientDefsMarkup ? (
+        <defs dangerouslySetInnerHTML={{ __html: gradientDefsMarkup }} />
+      ) : null}
+      {cssFillEl}
+      <path
+        d={pathD}
+        fillRule={fillRule}
+        {...pathCommon}
+        fill={cssBackground ? "none" : pathCommon.fill}
+      />
+    </svg>
+  );
 }

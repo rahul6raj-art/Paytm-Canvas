@@ -4,13 +4,23 @@ import { useCallback, useMemo, useRef, useEffect, useState } from "react";
 import { Grid3X3, Ruler } from "lucide-react";
 import { CanvasRulers } from "./CanvasRulers";
 import { SelectionBox } from "./SelectionBox";
+import { TextBaselineGuide } from "./TextBaselineGuide";
+import { TextEditOverlay } from "./TextEditOverlay";
+import { CanvasViewportProvider } from "./CanvasViewportContext";
 import { ShapeEditHandlesOverlay } from "./ShapeEditHandlesOverlay";
+import { PathEditHandlesOverlay } from "./PathEditHandlesOverlay";
+import { GradientHandlesOverlay } from "./gradient/GradientHandlesOverlay";
 import { SceneRenderer } from "@/editor-core/renderer/SceneRenderer";
+import { NativeHitLayer } from "@/editor-core/renderer/NativeHitLayer";
 import { RootFrameLabels } from "./RootFrameLabels";
 import { PrototypeWireLayer } from "./PrototypeWireLayer";
 import { AltMeasureLayer } from "./AltMeasureLayer";
+import { FigmaFidelityOverlay } from "./FigmaFidelityOverlay";
 import { DragSnapOverlay } from "./DragSnapOverlay";
 import { SwapDragOverlay } from "./SwapDragOverlay";
+import { ShapeDrawAnchorDot } from "./ShapeDrawAnchorDot";
+import { ShapeDrawPreview } from "./ShapeDrawPreview";
+import { MultiSelectSwapHandlesOverlay } from "./MultiSelectSwapHandlesOverlay";
 import { AutoLayoutReorderOverlay } from "./AutoLayoutReorderOverlay";
 import { AutoLayoutHandlesOverlay } from "./AutoLayoutHandlesOverlay";
 import { AutoLayoutHoverOverlay } from "./AutoLayoutHoverOverlay";
@@ -19,7 +29,6 @@ import { LayoutGuidesOverlay } from "./LayoutGuidesOverlay";
 import { InspectMeasurementsLayer } from "./InspectMeasurementsLayer";
 import { PresenceLayer } from "./PresenceLayer";
 import { CommentPinLayer } from "./CommentPinLayer";
-import { GradientEditorLayer } from "./GradientEditorLayer";
 import { ComponentPlacementPreview } from "./ComponentPlacementPreview";
 import { ROOT, useEditorStore, type EditorNode } from "@/stores/useEditorStore";
 import { cn } from "@/lib/utils";
@@ -35,30 +44,45 @@ import {
 import { useOptionPointerTracking } from "@/hooks/useOptionPointerTracking";
 import { pickDeepestNodeAtWorldPoint, pickDeepestVisibleNodeAtWorldPoint, worldRect } from "@/lib/tree";
 import { startCanvasMarqueeSession } from "@/lib/canvasMarqueeSession";
-import { validateImageImportFile } from "@/lib/editorAssets";
+import { canAcceptCanvasFontDrop, handleCanvasFontDrop } from "@/lib/canvasFontImport";
+import { canAcceptCanvasImageDrop } from "@/lib/canvasImageImport";
+import { handleCanvasImageDrop, pasteCanvasImageFromClipboard } from "@/lib/canvasImagePlace";
+import { setLastCanvasWorldPoint } from "@/lib/canvasPointerMemory";
 import { EMPTY_CHILD_IDS } from "@/lib/editorConstants";
 import { registerMarqueeAbortHandler } from "@/lib/canvasMarqueeController";
 import { isPaytmCraftDebugCanvas } from "@/lib/env";
-import { getRendererMode } from "@/lib/rendererMode";
+import { getRendererMode, isNativeRendererEnabled } from "@/lib/rendererMode";
+import { NativeSceneCompositor } from "@/editor-core/renderer/NativeSceneCompositor";
+import { SvgHoverOutline } from "@/editor-core/renderer/SvgHoverOutline";
 import {
   isCanvasBgCreationTool,
   isCanvasChromeTarget,
 } from "@/lib/canvasInteractionGuards";
-import { boundsFromDrag, lineGeometryFromDrag, toolToShapeType, type ShapeType } from "@/lib/shapes";
-import { getRenderedWorldTopLeft } from "@/lib/editorGraph";
+import { toolToShapeType, type ShapeType } from "@/lib/shapes";
+import { getRenderedWorldTopLeft, layerPanelChildIds } from "@/lib/editorGraph";
 import { pathToSvgD } from "@/lib/pathGeometry";
 
 const PEN_CURVE_DRAG_THRESHOLD = 4;
 import { wheelZoomFactor, zoomAtScreenPoint } from "@/lib/canvasZoom";
+import { snapPanToDevicePixels } from "@/lib/crispRender";
 import {
   createRafPointerScheduler,
   forEachCoalescedPointerEvent,
 } from "@/lib/smoothPointer";
 import {
+  applyPanPreview,
+  clearPanPreview,
+  readPanPreviewDelta,
+  registerCanvasGrid,
+  registerCanvasSceneTransform,
+} from "@/lib/canvasEphemeralTransform";
+import {
   activateCanvasForShortcuts,
   focusCanvasViewport,
+  isEditableFieldElement,
   releaseFieldFocusForCanvas,
 } from "@/lib/editorKeyboardFocus";
+import { hasEditorClipboardContent } from "@/lib/editorClipboardAvailability";
 import {
   clearPostCreationPointerSuppress,
   shouldSuppressCanvasPointer,
@@ -219,144 +243,18 @@ function PencilStrokePreview({
   );
 }
 
-function TextDraftPreview({
-  draft,
-}: {
-  draft: { x0: number; y0: number; x1: number; y1: number; shiftKey: boolean; altKey: boolean };
-}) {
-  const box = boundsFromDrag(
-    { x: draft.x0, y: draft.y0 },
-    { x: draft.x1, y: draft.y1 },
-    { shiftKey: draft.shiftKey, altKey: draft.altKey },
-    { minSize: 8 },
-  );
-  return (
-    <div
-      className="pointer-events-none absolute z-[19] overflow-hidden rounded-sm border border-dashed border-[#18a0fb] bg-[rgba(13,153,255,0.08)]"
-      style={{ left: box.x, top: box.y, width: box.width, height: box.height }}
-      aria-hidden
-    />
-  );
-}
-
-function ShapeDraftPreview({
-  draft,
-}: {
-  draft: {
-    shapeType: ShapeType;
-    x0: number;
-    y0: number;
-    x1: number;
-    y1: number;
-    shiftKey: boolean;
-    altKey: boolean;
-  };
-}) {
-  const start = { x: draft.x0, y: draft.y0 };
-  const end = { x: draft.x1, y: draft.y1 };
-  const mods = { shiftKey: draft.shiftKey, altKey: draft.altKey };
-
-  if (draft.shapeType === "line" || draft.shapeType === "arrow") {
-    const g = lineGeometryFromDrag(start, end, mods);
-    const midY = g.height / 2;
-    return (
-      <div
-        className="pointer-events-none absolute z-[19] overflow-visible"
-        style={{
-          left: g.x,
-          top: g.y,
-          width: g.width,
-          height: g.height,
-          transform: g.rotation ? `rotate(${g.rotation}deg)` : undefined,
-          transformOrigin: "0 50%",
-        }}
-        aria-hidden
-      >
-        <svg
-          className="block overflow-visible"
-          width={Math.max(1, g.width)}
-          height={Math.max(1, g.height)}
-        >
-          <line
-            x1={0}
-            y1={midY}
-            x2={g.width}
-            y2={midY}
-            stroke="#18a0fb"
-            strokeWidth={2}
-            strokeLinecap="butt"
-            markerEnd={
-              draft.shapeType === "arrow"
-                ? "url(#craft-arrow-preview-end)"
-                : undefined
-            }
-          />
-          {draft.shapeType === "arrow" ? (
-            <defs>
-              <marker
-                id="craft-arrow-preview-end"
-                markerWidth="10"
-                markerHeight="10"
-                refX="9"
-                refY="5"
-                orient="auto"
-                markerUnits="strokeWidth"
-              >
-                <polygon points="0,0 10,5 0,10" fill="#18a0fb" />
-              </marker>
-            </defs>
-          ) : null}
-        </svg>
-      </div>
-    );
-  }
-
-  const box = boundsFromDrag(start, end, mods, {
-    preserveAspect: draft.shapeType === "ellipse",
-  });
-  const rounded = draft.shapeType === "ellipse";
-
-  return (
-    <svg
-      className="pointer-events-none absolute z-[19] overflow-visible"
-      style={{ left: box.x, top: box.y, width: box.width, height: box.height }}
-      width={Math.max(1, box.width)}
-      height={Math.max(1, box.height)}
-      aria-hidden
-    >
-      {rounded ? (
-        <ellipse
-          cx={box.width / 2}
-          cy={box.height / 2}
-          rx={box.width / 2}
-          ry={box.height / 2}
-          fill="rgba(13,153,255,0.12)"
-          stroke="#18a0fb"
-          strokeWidth={2}
-        />
-      ) : (
-        <rect
-          x={0}
-          y={0}
-          width={box.width}
-          height={box.height}
-          fill="rgba(13,153,255,0.12)"
-          stroke="#18a0fb"
-          strokeWidth={2}
-        />
-      )}
-    </svg>
-  );
-}
-
 export function Canvas() {
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasBgRef = useRef<HTMLDivElement>(null);
+  const sceneTransformRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
   const zoom = useEditorStore((s) => s.zoom);
+  const editingTextId = useEditorStore((s) => s.editingTextId);
   const transformInteractionMode = useEditorStore((s) => s.transformInteractionMode);
   const rotateHandleHovered = useEditorStore((s) => s.rotateHandleHovered);
   const rotateHandleHoverHandle = useEditorStore((s) => s.rotateHandleHoverHandle);
   const pan = useEditorStore((s) => s.pan);
+  const snappedPan = useMemo(() => snapPanToDevicePixels(pan), [pan.x, pan.y]);
   const setPan = useEditorStore((s) => s.setPan);
   const showGrid = useEditorStore((s) => s.showGrid);
   const showRulers = useEditorStore((s) => s.showRulers);
@@ -376,18 +274,23 @@ export function Canvas() {
   const addEllipseAt = useEditorStore((s) => s.addEllipseAt);
   const addLineAt = useEditorStore((s) => s.addLineAt);
   const addTriangleAt = useEditorStore((s) => s.addTriangleAt);
-  const createShapeFromDrag = useEditorStore((s) => s.createShapeFromDrag);
-  const addTextAt = useEditorStore((s) => s.addTextAt);
-  const createTextBoxFromDrag = useEditorStore((s) => s.createTextBoxFromDrag);
-  const createFrameAt = useEditorStore((s) => s.createFrameAt);
-  const createFrameWithBounds = useEditorStore((s) => s.createFrameWithBounds);
+  const startShapeFromDrag = useEditorStore((s) => s.startShapeFromDrag);
+  const updateShapeFromDrag = useEditorStore((s) => s.updateShapeFromDrag);
+  const finishShapeFromDrag = useEditorStore((s) => s.finishShapeFromDrag);
+  const cancelShapeFromDrag = useEditorStore((s) => s.cancelShapeFromDrag);
+  const startFrameFromDrag = useEditorStore((s) => s.startFrameFromDrag);
+  const updateFrameFromDrag = useEditorStore((s) => s.updateFrameFromDrag);
+  const finishFrameFromDrag = useEditorStore((s) => s.finishFrameFromDrag);
+  const cancelFrameFromDrag = useEditorStore((s) => s.cancelFrameFromDrag);
+  const startTextFromDrag = useEditorStore((s) => s.startTextFromDrag);
+  const updateTextFromDrag = useEditorStore((s) => s.updateTextFromDrag);
+  const finishTextFromDrag = useEditorStore((s) => s.finishTextFromDrag);
+  const cancelTextFromDrag = useEditorStore((s) => s.cancelTextFromDrag);
   const createInstance = useEditorStore((s) => s.createInstance);
   const addImageNodeAt = useEditorStore((s) => s.addImageNodeAt);
-  const importImageAsset = useEditorStore((s) => s.importImageAsset);
   const placingComponentMasterId = useEditorStore((s) => s.placingComponentMasterId);
   const setPlacingComponentMasterId = useEditorStore((s) => s.setPlacingComponentMasterId);
   const figImportBusy = useEditorStore((s) => s.figImportInProgress);
-  const rootIds = useEditorStore((s) => s.childOrder[ROOT] ?? EMPTY_CHILD_IDS);
   const childOrder = useEditorStore((s) => s.childOrder);
   const assets = useEditorStore((s) => s.assets);
   const designTokens = useEditorStore((s) => s.designTokens);
@@ -399,6 +302,11 @@ export function Canvas() {
   const pencilDrawingNodeId = useEditorStore((s) => s.pencilDrawingNodeId);
   const nodes = useEditorStore((s) => s.nodes);
 
+  const rootIds = useMemo(
+    () => layerPanelChildIds(ROOT, nodes, childOrder),
+    [nodes, childOrder],
+  );
+
   const [penHoverWorld, setPenHoverWorld] = useState<{ x: number; y: number } | null>(null);
   const [penPlacement, setPenPlacement] = useState<{
     anchor: { x: number; y: number };
@@ -408,42 +316,11 @@ export function Canvas() {
     null,
   );
   const [spaceDown, setSpaceDown] = useState(false);
+  const [commandDown, setCommandDown] = useState(false);
   const [optionDown, setOptionDown] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [marquee, setMarquee] = useState<null | { x0: number; y0: number; x1: number; y1: number }>(null);
-  const [frameDraft, setFrameDraft] = useState<null | { x0: number; y0: number; x1: number; y1: number }>(
-    null,
-  );
-  const [textDraft, setTextDraft] = useState<null | {
-    x0: number;
-    y0: number;
-    x1: number;
-    y1: number;
-    shiftKey: boolean;
-    altKey: boolean;
-  }>(null);
-  const textDraftRef = useRef<typeof textDraft>(null);
   const textSessionCleanupRef = useRef<(() => void) | null>(null);
-
-  const [shapeDraft, setShapeDraft] = useState<null | {
-    shapeType: ShapeType;
-    x0: number;
-    y0: number;
-    x1: number;
-    y1: number;
-    shiftKey: boolean;
-    altKey: boolean;
-  }>(null);
-  const frameDraftRef = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
-  const shapeDraftRef = useRef<{
-    shapeType: ShapeType;
-    x0: number;
-    y0: number;
-    x1: number;
-    y1: number;
-    shiftKey: boolean;
-    altKey: boolean;
-  } | null>(null);
   const shapeSessionCleanupRef = useRef<(() => void) | null>(null);
   const pencilSessionCleanupRef = useRef<(() => void) | null>(null);
   const penSessionCleanupRef = useRef<(() => void) | null>(null);
@@ -461,6 +338,10 @@ export function Canvas() {
       }
       if (shapeSessionCleanupRef.current) {
         shapeSessionCleanupRef.current();
+        cancelled = true;
+      }
+      if (textSessionCleanupRef.current) {
+        textSessionCleanupRef.current();
         cancelled = true;
       }
       if (pencilSessionCleanupRef.current) {
@@ -509,22 +390,27 @@ export function Canvas() {
   }, [tool]);
 
   useEffect(() => {
-    const syncOption = (e: KeyboardEvent) => setOptionDown(e.altKey);
+    const syncModifiers = (e: KeyboardEvent) => {
+      setOptionDown(e.altKey);
+      setCommandDown(e.metaKey || e.ctrlKey);
+    };
     const down = (e: KeyboardEvent) => {
       if (e.code === "Space") setSpaceDown(true);
-      syncOption(e);
+      syncModifiers(e);
     };
     const up = (e: KeyboardEvent) => {
       if (e.code === "Space") setSpaceDown(false);
-      syncOption(e);
+      syncModifiers(e);
     };
     const onBlur = () => {
       setOptionDown(false);
+      setCommandDown(false);
       setSpaceDown(false);
     };
     const onVisibility = () => {
       if (document.visibilityState === "hidden") {
         setOptionDown(false);
+        setCommandDown(false);
         setSpaceDown(false);
       }
     };
@@ -544,6 +430,88 @@ export function Canvas() {
     (clientX: number, clientY: number) =>
       clientToWorld(clientX, clientY, viewportRef.current, { pan, zoom }),
     [pan, zoom],
+  );
+
+  const onCanvasDragOverCapture = useCallback(
+    (e: React.DragEvent) => {
+      if (editorMode !== "design" || figImportBusy) return;
+      if (!canAcceptCanvasImageDrop(e.dataTransfer) && !canAcceptCanvasFontDrop(e.dataTransfer)) {
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = "copy";
+    },
+    [editorMode, figImportBusy],
+  );
+
+  const onCanvasDropCapture = useCallback(
+    async (e: React.DragEvent) => {
+      if (editorMode !== "design" || figImportBusy) return;
+      const dt = e.dataTransfer;
+      const compKey = dt.getData("application/x-pc-component");
+      if (compKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        const w = toWorld(e.clientX, e.clientY);
+        createInstance(compKey, w.x, w.y);
+        return;
+      }
+      const assetKey = dt.getData("application/x-pc-asset");
+      if (assetKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        const w = toWorld(e.clientX, e.clientY);
+        addImageNodeAt(assetKey, w.x, w.y);
+        return;
+      }
+      const acceptsImage = canAcceptCanvasImageDrop(dt);
+      const acceptsFont = canAcceptCanvasFontDrop(dt);
+      if (!acceptsImage && !acceptsFont) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (acceptsImage) {
+        await handleCanvasImageDrop(
+          dt,
+          e.clientX,
+          e.clientY,
+          toWorld,
+          viewportRef.current,
+          pan,
+          zoom,
+        );
+      }
+      if (acceptsFont) {
+        await handleCanvasFontDrop(dt);
+      }
+    },
+    [editorMode, figImportBusy, toWorld, createInstance, addImageNodeAt, pan, zoom],
+  );
+
+  const onCanvasPaste = useCallback(
+    async (e: React.ClipboardEvent) => {
+      if (editorMode !== "design" || figImportBusy) return;
+      if (isEditableFieldElement(e.target) || isEditableFieldElement(document.activeElement)) {
+        return;
+      }
+      const imagePasted = await pasteCanvasImageFromClipboard(
+        e.clipboardData,
+        toWorld,
+        viewportRef.current,
+        pan,
+        zoom,
+      );
+      if (imagePasted) {
+        e.preventDefault();
+        activateCanvasForShortcuts();
+        return;
+      }
+      if (hasEditorClipboardContent()) {
+        e.preventDefault();
+        useEditorStore.getState().pasteSelection();
+      }
+    },
+    [editorMode, figImportBusy, toWorld, pan, zoom],
   );
 
   const { optionOverSelection, optionPointerHoverId } = useOptionPointerTracking(
@@ -567,6 +535,9 @@ export function Canvas() {
     [toWorld],
   );
 
+  const wheelPanAccumRef = useRef({ dx: 0, dy: 0, raf: 0 });
+  const wheelZoomAccumRef = useRef({ factor: 1, mx: 0, my: 0, raf: 0 });
+
   const handleViewportWheel = useCallback((e: WheelEvent) => {
     const el = viewportRef.current;
     if (!el) return;
@@ -576,26 +547,47 @@ export function Canvas() {
     e.preventDefault();
     e.stopPropagation();
 
-    const st = useEditorStore.getState();
-
     if (e.ctrlKey || e.metaKey) {
       const r = el.getBoundingClientRect();
       const mx = e.clientX - r.left;
       const my = e.clientY - r.top;
-      const factor = wheelZoomFactor(e.deltaY, e.deltaMode, { pageHeight: el.clientHeight });
-      const next = zoomAtScreenPoint({
-        zoom: st.zoom,
-        pan: st.pan,
-        focusX: mx,
-        focusY: my,
-        factor,
+      const step = wheelZoomFactor(e.deltaY, e.deltaMode, { pageHeight: el.clientHeight });
+      const accum = wheelZoomAccumRef.current;
+      accum.factor *= step;
+      accum.mx = mx;
+      accum.my = my;
+      if (accum.raf) return;
+      accum.raf = requestAnimationFrame(() => {
+        accum.raf = 0;
+        const { factor, mx: fx, my: fy } = accum;
+        accum.factor = 1;
+        if (factor === 1) return;
+        const s = useEditorStore.getState();
+        const next = zoomAtScreenPoint({
+          zoom: s.zoom,
+          pan: s.pan,
+          focusX: fx,
+          focusY: fy,
+          factor,
+        });
+        useEditorStore.setState(next);
       });
-      useEditorStore.setState(next);
       return;
     }
 
     const scale = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1;
-    st.patchPan({ x: -e.deltaX * scale, y: -e.deltaY * scale });
+    const accum = wheelPanAccumRef.current;
+    accum.dx += -e.deltaX * scale;
+    accum.dy += -e.deltaY * scale;
+    if (accum.raf) return;
+    accum.raf = requestAnimationFrame(() => {
+      accum.raf = 0;
+      const { dx, dy } = accum;
+      accum.dx = 0;
+      accum.dy = 0;
+      if (dx === 0 && dy === 0) return;
+      useEditorStore.getState().patchPan({ x: dx, y: dy });
+    });
   }, []);
 
   useEffect(() => {
@@ -619,6 +611,16 @@ export function Canvas() {
     };
   }, [handleViewportWheel]);
 
+  useEffect(() => {
+    registerCanvasSceneTransform(sceneTransformRef.current);
+    registerCanvasGrid(gridRef.current);
+    return () => {
+      registerCanvasSceneTransform(null);
+      registerCanvasGrid(null);
+      clearPanPreview();
+    };
+  }, [showGrid]);
+
   const panning = tool === "hand" || spaceDown;
 
   const pointerCaptureTarget = useCallback((): HTMLElement => {
@@ -628,9 +630,14 @@ export function Canvas() {
   const onBgPointerDown = (e: React.PointerEvent) => {
     const liveTool = useEditorStore.getState().tool;
     if (shouldSuppressCanvasPointer() && liveTool !== "pencil") {
-      e.preventDefault();
-      e.stopPropagation();
-      return;
+      const st = useEditorStore.getState();
+      const w = toWorld(e.clientX, e.clientY);
+      const hitId = pickDeepestVisibleNodeAtWorldPoint(w.x, w.y, st.nodes, st.childOrder, st.zoom);
+      if (!hitId) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
     }
     clearPostCreationPointerSuppress();
     const debugCanvas = isPaytmCraftDebugCanvas();
@@ -656,7 +663,8 @@ export function Canvas() {
           ({ clientX, clientY }) => {
             const d = panDrag.current;
             if (!d) return;
-            setPan({ x: d.px + (clientX - d.sx), y: d.py + (clientY - d.sy) });
+            const z = useEditorStore.getState().zoom;
+            applyPanPreview({ x: d.px, y: d.py }, z, clientX - d.sx, clientY - d.sy);
           },
         );
         const onMove = (ev: PointerEvent) => {
@@ -666,7 +674,7 @@ export function Canvas() {
             panMoveScheduler.schedule({ clientX: pe.clientX, clientY: pe.clientY });
           });
         };
-        const onUp = (ev: PointerEvent) => {
+        const finishPan = (ev: PointerEvent) => {
           const d = panDrag.current;
           if (!d || ev.pointerId !== d.pointerId) return;
           forEachCoalescedPointerEvent(ev, (pe) => {
@@ -674,13 +682,20 @@ export function Canvas() {
           });
           panMoveScheduler.flush();
           panMoveScheduler.cancel();
+          if (d) {
+            const { dx, dy } = readPanPreviewDelta();
+            setPan({ x: d.px + dx, y: d.py + dy });
+          }
+          clearPanPreview();
           panDrag.current = null;
           setIsPanning(false);
-        window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onUp);
-      };
-      window.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerup", onUp);
+          window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("pointerup", finishPan);
+          window.removeEventListener("pointercancel", finishPan);
+        };
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", finishPan);
+        window.addEventListener("pointercancel", finishPan);
       return;
     }
 
@@ -704,94 +719,7 @@ export function Canvas() {
         creationBranch = "frame";
         frameSessionCleanupRef.current?.();
         const w0 = toWorld(e.clientX, e.clientY);
-        const rect0 = { x0: w0.x, y0: w0.y, x1: w0.x, y1: w0.y };
-        frameDraftRef.current = rect0;
-        setFrameDraft(rect0);
-
-        const target = pointerCaptureTarget();
-        const capId = e.pointerId;
-        try {
-          target.setPointerCapture(capId);
-        } catch {
-          /* ignore — pointerup still ends the session */
-        }
-
-        let ended = false;
-        const removeListeners = () => {
-          window.removeEventListener("pointermove", onMove);
-          window.removeEventListener("pointerup", onPointerEnd);
-          window.removeEventListener("pointercancel", onPointerEnd);
-        };
-
-        const finish = (commit: boolean) => {
-          if (ended) return;
-          ended = true;
-          frameSessionCleanupRef.current = null;
-          removeListeners();
-          try {
-            target.releasePointerCapture(capId);
-          } catch {
-            /* already released */
-          }
-          const m = frameDraftRef.current;
-          frameDraftRef.current = null;
-          setFrameDraft(null);
-          if (!commit || !m) return;
-
-          const mx0 = Math.min(m.x0, m.x1);
-          const my0 = Math.min(m.y0, m.y1);
-          const mw = Math.abs(m.x1 - m.x0);
-          const mh = Math.abs(m.y1 - m.y0);
-          if (mw < 4 && mh < 4) {
-            createFrameAt(w0.x, w0.y);
-          } else {
-            createFrameWithBounds(mx0, my0, mw, mh);
-          }
-          suppressPostCreationPointer();
-        };
-
-        frameSessionCleanupRef.current = () => finish(false);
-
-        const onMove = (ev: PointerEvent) => {
-          if (ev.pointerId !== capId) return;
-          const ww = toWorld(ev.clientX, ev.clientY);
-          const next = frameDraftRef.current
-            ? { ...frameDraftRef.current, x1: ww.x, y1: ww.y }
-            : { x0: w0.x, y0: w0.y, x1: ww.x, y1: ww.y };
-          frameDraftRef.current = next;
-          setFrameDraft(next);
-        };
-
-        const onPointerEnd = (ev: PointerEvent) => {
-          if (ev.pointerId !== capId) return;
-          finish(ev.type === "pointerup");
-        };
-
-        window.addEventListener("pointermove", onMove);
-        window.addEventListener("pointerup", onPointerEnd);
-        window.addEventListener("pointercancel", onPointerEnd);
-        return;
-      }
-
-      const shapeType =
-        activeTool === "triangle"
-          ? ("polygon" as ShapeType)
-          : toolToShapeType(activeTool);
-      if (shapeType) {
-        creationBranch = activeTool;
-        shapeSessionCleanupRef.current?.();
-        const w0 = toWorld(e.clientX, e.clientY);
-        const draft0 = {
-          shapeType,
-          x0: w0.x,
-          y0: w0.y,
-          x1: w0.x,
-          y1: w0.y,
-          shiftKey: e.shiftKey,
-          altKey: e.altKey,
-        };
-        shapeDraftRef.current = draft0;
-        setShapeDraft(draft0);
+        startFrameFromDrag(w0);
 
         const target = pointerCaptureTarget();
         const capId = e.pointerId;
@@ -810,7 +738,99 @@ export function Canvas() {
           window.removeEventListener("pointercancel", onPointerEnd);
         };
 
-        const finish = (commit: boolean) => {
+        frameSessionCleanupRef.current = () => {
+          if (ended) return;
+          ended = true;
+          frameSessionCleanupRef.current = null;
+          removeListeners();
+          cancelFrameFromDrag();
+        };
+
+        const onMove = (ev: PointerEvent) => {
+          if (ev.pointerId !== capId) return;
+          shiftHeld = ev.shiftKey;
+          altHeld = ev.altKey;
+          const ww = toWorld(ev.clientX, ev.clientY);
+          updateFrameFromDrag(ww, { shiftKey: shiftHeld, altKey: altHeld });
+        };
+
+        const onPointerEnd = (ev: PointerEvent) => {
+          if (ev.pointerId !== capId) return;
+          if (ended) return;
+          ended = true;
+          frameSessionCleanupRef.current = null;
+          removeListeners();
+          try {
+            target.releasePointerCapture(capId);
+          } catch {
+            /* ignore */
+          }
+          if (ev.type !== "pointerup") {
+            cancelFrameFromDrag();
+            return;
+          }
+          const ww = toWorld(ev.clientX, ev.clientY);
+          finishFrameFromDrag(ww, { shiftKey: shiftHeld, altKey: altHeld });
+          suppressPostCreationPointer();
+        };
+
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onPointerEnd);
+        window.addEventListener("pointercancel", onPointerEnd);
+        return;
+      }
+
+      const shapeType =
+        activeTool === "triangle"
+          ? ("polygon" as ShapeType)
+          : toolToShapeType(activeTool);
+      if (shapeType) {
+        creationBranch = activeTool;
+        shapeSessionCleanupRef.current?.();
+        const w0 = toWorld(e.clientX, e.clientY);
+        const shapeStyle = activeTool === "triangle" ? { polygonSides: 3 as const } : undefined;
+        startShapeFromDrag(
+          shapeType,
+          w0,
+          { shiftKey: e.shiftKey, altKey: e.altKey },
+          shapeStyle,
+        );
+
+        const target = pointerCaptureTarget();
+        const capId = e.pointerId;
+        try {
+          target.setPointerCapture(capId);
+        } catch {
+          /* ignore */
+        }
+        let shiftHeld = e.shiftKey;
+        let altHeld = e.altKey;
+        let ended = false;
+
+        const removeListeners = () => {
+          window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("pointerup", onPointerEnd);
+          window.removeEventListener("pointercancel", onPointerEnd);
+        };
+
+        shapeSessionCleanupRef.current = () => {
+          if (ended) return;
+          ended = true;
+          shapeSessionCleanupRef.current = null;
+          removeListeners();
+          cancelShapeFromDrag();
+        };
+
+        const onMove = (ev: PointerEvent) => {
+          if (ev.pointerId !== capId) return;
+          shiftHeld = ev.shiftKey;
+          altHeld = ev.altKey;
+          const ww = toWorld(ev.clientX, ev.clientY);
+          updateShapeFromDrag(ww, { shiftKey: shiftHeld, altKey: altHeld });
+        };
+
+        const onPointerEnd = (ev: PointerEvent) => {
+          if (ev.pointerId !== capId) return;
           if (ended) return;
           ended = true;
           shapeSessionCleanupRef.current = null;
@@ -820,49 +840,13 @@ export function Canvas() {
           } catch {
             /* ignore */
           }
-          const m = shapeDraftRef.current;
-          shapeDraftRef.current = null;
-          setShapeDraft(null);
-          if (!commit || !m) return;
-
-          const start = { x: m.x0, y: m.y0 };
-          const end = { x: m.x1, y: m.y1 };
-          const dist = Math.hypot(end.x - start.x, end.y - start.y);
-          if (dist < 4) {
-            const fallbackEnd =
-              shapeType === "line" || shapeType === "arrow"
-                ? { x: start.x + 120, y: start.y }
-                : { x: start.x + 120, y: start.y + 80 };
-            createShapeFromDrag(shapeType, start, fallbackEnd, {
-              shiftKey: false,
-              altKey: false,
-            }, activeTool === "triangle" ? { polygonSides: 3 } : undefined);
-          } else {
-            createShapeFromDrag(shapeType, start, end, {
-              shiftKey: shiftHeld,
-              altKey: altHeld,
-            }, activeTool === "triangle" ? { polygonSides: 3 } : undefined);
+          if (ev.type !== "pointerup") {
+            cancelShapeFromDrag();
+            return;
           }
-          suppressPostCreationPointer();
-        };
-
-        shapeSessionCleanupRef.current = () => finish(false);
-
-        const onMove = (ev: PointerEvent) => {
-          if (ev.pointerId !== capId) return;
-          shiftHeld = ev.shiftKey;
-          altHeld = ev.altKey;
           const ww = toWorld(ev.clientX, ev.clientY);
-          const next = shapeDraftRef.current
-            ? { ...shapeDraftRef.current, x1: ww.x, y1: ww.y, shiftKey: shiftHeld, altKey: altHeld }
-            : { ...draft0, x1: ww.x, y1: ww.y, shiftKey: shiftHeld, altKey: altHeld };
-          shapeDraftRef.current = next;
-          setShapeDraft(next);
-        };
-
-        const onPointerEnd = (ev: PointerEvent) => {
-          if (ev.pointerId !== capId) return;
-          finish(ev.type === "pointerup");
+          finishShapeFromDrag(ww, { shiftKey: shiftHeld, altKey: altHeld });
+          suppressPostCreationPointer();
         };
 
         window.addEventListener("pointermove", onMove);
@@ -957,17 +941,8 @@ export function Canvas() {
           return;
         }
 
-        const anchor = w;
-        const draft0 = {
-          x0: anchor.x,
-          y0: anchor.y,
-          x1: anchor.x,
-          y1: anchor.y,
-          shiftKey: e.shiftKey,
-          altKey: e.altKey,
-        };
-        textDraftRef.current = draft0;
-        setTextDraft(draft0);
+        textSessionCleanupRef.current?.();
+        startTextFromDrag(w);
 
         const target = pointerCaptureTarget();
         const capId = e.pointerId;
@@ -986,7 +961,24 @@ export function Canvas() {
           window.removeEventListener("pointercancel", onPointerEnd);
         };
 
-        const finish = (commit: boolean) => {
+        textSessionCleanupRef.current = () => {
+          if (ended) return;
+          ended = true;
+          textSessionCleanupRef.current = null;
+          removeListeners();
+          cancelTextFromDrag();
+        };
+
+        const onMove = (ev: PointerEvent) => {
+          if (ev.pointerId !== capId) return;
+          shiftHeld = ev.shiftKey;
+          altHeld = ev.altKey;
+          const ww = toWorld(ev.clientX, ev.clientY);
+          updateTextFromDrag(ww, { shiftKey: shiftHeld, altKey: altHeld });
+        };
+
+        const onPointerEnd = (ev: PointerEvent) => {
+          if (ev.pointerId !== capId) return;
           if (ended) return;
           ended = true;
           textSessionCleanupRef.current = null;
@@ -996,45 +988,13 @@ export function Canvas() {
           } catch {
             /* ignore */
           }
-          const m = textDraftRef.current;
-          textDraftRef.current = null;
-          setTextDraft(null);
-          if (!commit || !m) return;
-          const start = { x: m.x0, y: m.y0 };
-          const end = { x: m.x1, y: m.y1 };
-          const dist = Math.hypot(end.x - start.x, end.y - start.y);
-          if (dist < 4) {
-            addTextAt(start.x, start.y);
-          } else {
-            createTextBoxFromDrag(start, end, {
-              shiftKey: shiftHeld,
-              altKey: altHeld,
-            });
+          if (ev.type !== "pointerup") {
+            cancelTextFromDrag();
+            return;
           }
+          const ww = toWorld(ev.clientX, ev.clientY);
+          finishTextFromDrag(ww, { shiftKey: shiftHeld, altKey: altHeld });
           suppressPostCreationPointer();
-        };
-
-        textSessionCleanupRef.current = () => finish(false);
-
-        const onMove = (ev: PointerEvent) => {
-          if (ev.pointerId !== capId) return;
-          shiftHeld = ev.shiftKey;
-          altHeld = ev.altKey;
-          const ww = toWorld(ev.clientX, ev.clientY);
-          const next = textDraftRef.current
-            ? { ...textDraftRef.current, x1: ww.x, y1: ww.y, shiftKey: shiftHeld, altKey: altHeld }
-            : { ...draft0, x1: ww.x, y1: ww.y, shiftKey: shiftHeld, altKey: altHeld };
-          textDraftRef.current = next;
-          setTextDraft(next);
-        };
-
-        const onPointerEnd = (ev: PointerEvent) => {
-          if (ev.pointerId !== capId) return;
-          const ww = toWorld(ev.clientX, ev.clientY);
-          if (textDraftRef.current) {
-            textDraftRef.current = { ...textDraftRef.current, x1: ww.x, y1: ww.y };
-          }
-          finish(ev.type === "pointerup");
         };
 
         window.addEventListener("pointermove", onMove);
@@ -1136,6 +1096,11 @@ export function Canvas() {
 
     if (st.penDrawingNodeId || st.pencilDrawingNodeId) return;
 
+    if (st.pathEditModeNodeId && activeTool === "move") {
+      st.setSelectedPathPointIds([]);
+      return;
+    }
+
     clearSelection();
     if (debugCanvas) logBgPointerDown(e, creationBranch ?? "clear-selection");
   };
@@ -1143,9 +1108,14 @@ export function Canvas() {
   const onViewportPointerDownCapture = (e: React.PointerEvent) => {
     const liveTool = useEditorStore.getState().tool;
     if (shouldSuppressCanvasPointer() && liveTool !== "pencil") {
-      e.preventDefault();
-      e.stopPropagation();
-      return;
+      const st = useEditorStore.getState();
+      const w = toWorld(e.clientX, e.clientY);
+      const hitId = pickDeepestVisibleNodeAtWorldPoint(w.x, w.y, st.nodes, st.childOrder, st.zoom);
+      if (!hitId) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
     }
     if (e.button === 0 || e.button === 2) {
       releaseFieldFocusForCanvas();
@@ -1234,7 +1204,6 @@ export function Canvas() {
   }
 
   const placingComment = editorMode === "design" && tool === "comment" && isPlacingComment;
-  const creationCaptureActive = isCanvasBgCreationTool(tool, editorMode, { isPlacingComment });
   const crosshairTool =
     editorMode !== "inspect" &&
     (tool === "rect" ||
@@ -1306,33 +1275,47 @@ export function Canvas() {
     <div
       ref={viewportRef}
       data-canvas-viewport
+      data-renderer-mode={getRendererMode()}
       tabIndex={0}
       className="absolute inset-0 overflow-hidden touch-none overscroll-none outline-none"
       style={{ cursor, touchAction: "none", backgroundColor: canvasBackgroundColor }}
       onPointerDownCapture={onViewportPointerDownCapture}
+      onDragOverCapture={onCanvasDragOverCapture}
+      onDropCapture={onCanvasDropCapture}
+      onPaste={onCanvasPaste}
       onFocus={() => activateCanvasForShortcuts()}
       onPointerMove={(e) => {
+        setLastCanvasWorldPoint(toWorld(e.clientX, e.clientY));
         if (tool !== "pen" || !useEditorStore.getState().penDrawingNodeId) {
           setPenHoverWorld(null);
           return;
         }
         setPenHoverWorld(toWorld(e.clientX, e.clientY));
       }}
-      onPointerLeave={() => setPenHoverWorld(null)}
+      onPointerLeave={() => {
+        setLastCanvasWorldPoint(null);
+        setPenHoverWorld(null);
+      }}
     >
       <CanvasInteractionContext.Provider
         value={{
           spaceDown,
           panning,
+          commandDown,
           optionDown,
           optionOverSelection,
           optionPointerHoverId,
         }}
       >
       <CanvasToWorldContext.Provider value={toWorld}>
+      <CanvasViewportProvider viewportRef={viewportRef}>
+      {isNativeRendererEnabled() && !figImportBusy ? (
+        <NativeSceneCompositor viewportRef={viewportRef} />
+      ) : null}
       {showRulers ? <CanvasRulers zoom={zoom} pan={pan} viewportRef={viewportRef} /> : null}
       {showGrid ? (
         <div
+          ref={gridRef}
           className="pointer-events-none absolute inset-0"
           style={{
             opacity: 0.55,
@@ -1347,9 +1330,11 @@ export function Canvas() {
       ) : null}
 
       <div
-        className="absolute left-0 top-0 h-[6000px] w-[6000px] origin-top-left"
+        ref={sceneTransformRef}
+        data-canvas-scene-transform
+        className="absolute left-0 top-0 z-[2] h-[6000px] w-[6000px] origin-top-left"
         style={{
-          transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})`,
+          transform: `translate3d(${snappedPan.x}px, ${snappedPan.y}px, 0) scale(${zoom})`,
         }}
       >
         <div className="relative" style={{ width: 6000, height: 6000 }}>
@@ -1358,10 +1343,7 @@ export function Canvas() {
             ref={canvasBgRef}
             role="presentation"
             data-canvas-bg
-            className={cn(
-              "pointer-events-auto absolute inset-0",
-              creationCaptureActive ? "z-[40]" : "z-0",
-            )}
+            className="pointer-events-auto absolute inset-0 z-0"
             onPointerDown={onBgPointerDown}
             onDoubleClick={(e) => {
               if (editorMode !== "design") return;
@@ -1375,56 +1357,9 @@ export function Canvas() {
               e.preventDefault();
               st.finishPath(false);
             }}
-            onDragOver={(e) => {
-              if ([...e.dataTransfer.types].includes("application/x-pc-component")) {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = "copy";
-                return;
-              }
-              if ([...e.dataTransfer.types].includes("application/x-pc-asset")) {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = "copy";
-                return;
-              }
-              if (e.dataTransfer.types.includes("Files")) {
-                const f = e.dataTransfer.items[0]?.getAsFile?.() ?? e.dataTransfer.files?.[0];
-                if (f && validateImageImportFile(f) === null) {
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = "copy";
-                }
-              }
-            }}
-            onDrop={async (e) => {
-              const compKey = e.dataTransfer.getData("application/x-pc-component");
-              if (compKey) {
-                e.preventDefault();
-                const w = toWorld(e.clientX, e.clientY);
-                createInstance(compKey, w.x, w.y);
-                return;
-              }
-              const assetKey = e.dataTransfer.getData("application/x-pc-asset");
-              if (assetKey) {
-                e.preventDefault();
-                const w = toWorld(e.clientX, e.clientY);
-                addImageNodeAt(assetKey, w.x, w.y);
-                return;
-              }
-              const file = e.dataTransfer.files?.[0];
-              if (file) {
-                const err = validateImageImportFile(file);
-                if (err) {
-                  window.alert(err);
-                  return;
-                }
-                e.preventDefault();
-                const w = toWorld(e.clientX, e.clientY);
-                const aid = await importImageAsset(file);
-                if (aid) addImageNodeAt(aid, w.x, w.y);
-              }
-            }}
           />
           <div
-            className="pointer-events-none absolute inset-0 z-[1]"
+            className="absolute inset-0 z-[1]"
             data-canvas-scene
           >
             {figImportBusy ? null : (
@@ -1436,11 +1371,9 @@ export function Canvas() {
                 designTokens={designTokens}
                 selectedIds={selectedIds}
                 zoom={zoom}
+                editingTextId={editingTextId}
               />
             )}
-          </div>
-          <div className="pointer-events-none absolute inset-0 z-[20]">
-            {figImportBusy ? null : <RootFrameLabels rootIds={rootIds} />}
           </div>
           {editorMode === "design" && tool === "pen" && penDrawingNodeId && (penHoverWorld || penPlacement) ? (
             <PenStrokePreview
@@ -1459,23 +1392,6 @@ export function Canvas() {
             />
           ) : null}
           {editorMode === "design" ? <CommentPinLayer /> : null}
-          {frameDraft ? (
-            <div
-              className="pointer-events-none absolute z-[45] border border-accent/60 bg-app-panel/90 shadow-sm"
-              style={{
-                left: Math.min(frameDraft.x0, frameDraft.x1),
-                top: Math.min(frameDraft.y0, frameDraft.y1),
-                width: Math.abs(frameDraft.x1 - frameDraft.x0),
-                height: Math.abs(frameDraft.y1 - frameDraft.y0),
-              }}
-            />
-          ) : null}
-          {textDraft ? <TextDraftPreview draft={textDraft} /> : null}
-          {shapeDraft ? (
-            <div className="pointer-events-none absolute z-[45]">
-              <ShapeDraftPreview draft={shapeDraft} />
-            </div>
-          ) : null}
           {marquee ? (
             <div
               className="pointer-events-none absolute z-[19] border bg-[rgba(24,160,251,0.08)] will-change-[left,top,width,height]"
@@ -1488,19 +1404,38 @@ export function Canvas() {
               }}
             />
           ) : null}
-          <SelectionBox />
-          <ShapeEditHandlesOverlay />
-          <DragSnapOverlay />
-          <SwapDragOverlay />
-          <AutoLayoutReorderOverlay />
-          <AutoLayoutHoverOverlay />
           <AutoLayoutHandlesOverlay />
-          <AltMeasureLayer />
           <ComponentPlacementPreview />
-          <GradientEditorLayer />
           <PresenceLayer />
-          <InspectMeasurementsLayer />
         </div>
+      </div>
+
+      {!figImportBusy ? (
+        <NativeHitLayer nodes={nodes} childOrder={childOrder} zoom={zoom} />
+      ) : null}
+
+      <div
+        className="pointer-events-none absolute inset-0 z-[10] overflow-hidden"
+        data-canvas-screen-overlays
+      >
+        {figImportBusy ? null : <RootFrameLabels rootIds={rootIds} />}
+        <SvgHoverOutline />
+        <ShapeDrawAnchorDot />
+        <ShapeDrawPreview />
+        <TextBaselineGuide />
+        <SelectionBox />
+        <TextEditOverlay />
+        <MultiSelectSwapHandlesOverlay />
+        <SwapDragOverlay />
+        <DragSnapOverlay />
+        <AutoLayoutReorderOverlay />
+        <AutoLayoutHoverOverlay />
+        <AltMeasureLayer />
+        <FigmaFidelityOverlay />
+        <InspectMeasurementsLayer />
+        <ShapeEditHandlesOverlay />
+        <PathEditHandlesOverlay />
+        <GradientHandlesOverlay />
       </div>
 
       <LayoutGuidesOverlay zoom={zoom} pan={pan} viewportRef={viewportRef} />
@@ -1515,7 +1450,7 @@ export function Canvas() {
           }}
           title={showRulers ? "Hide rulers" : "Show rulers"}
           className={cn(
-            "flex h-6 items-center gap-1 rounded border px-1.5 text-[11px] font-medium transition-colors",
+            "flex h-6 items-center gap-1 rounded border px-1.5 text-ui font-medium transition-colors",
             showRulers
               ? "border-accent/40 bg-app-panel text-app-fg shadow-sm"
               : "border-app-border bg-app-panel/95 text-app-muted hover:border-app-border hover:bg-app-hover hover:text-app-fg",
@@ -1533,7 +1468,7 @@ export function Canvas() {
           }}
           title={showGrid ? "Hide layout grid" : "Show layout grid"}
           className={cn(
-            "flex h-6 items-center gap-1 rounded border px-1.5 text-[11px] font-medium transition-colors",
+            "flex h-6 items-center gap-1 rounded border px-1.5 text-ui font-medium transition-colors",
             showGrid
               ? "border-accent/40 bg-app-panel text-app-fg shadow-sm"
               : "border-app-border bg-app-panel/95 text-app-muted hover:border-app-border hover:bg-app-hover hover:text-app-fg",
@@ -1543,6 +1478,7 @@ export function Canvas() {
           Grid
         </button>
       </div>
+      </CanvasViewportProvider>
       </CanvasToWorldContext.Provider>
       </CanvasInteractionContext.Provider>
     </div>

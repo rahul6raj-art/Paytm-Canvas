@@ -1,4 +1,6 @@
 import type { DomSnapshotNode } from "@/lib/webImport/types";
+import { isTailwindUtilityText } from "@/lib/webImport/textContentHeuristics";
+import { parsePx } from "@/lib/webImport/cssParseUtils";
 
 const SKIP_TAGS = new Set([
   "script",
@@ -14,6 +16,7 @@ const SKIP_TAGS = new Set([
 
 export function isVisibleSnapshotNode(node: DomSnapshotNode): boolean {
   if (SKIP_TAGS.has(node.tagName)) return false;
+  if (isAccessibilityHidden(node)) return false;
   const { width, height } = node.rect;
   if (width < 1 || height < 1) return false;
   const opacity = parseFloat(node.styles.opacity ?? "1");
@@ -23,6 +26,34 @@ export function isVisibleSnapshotNode(node: DomSnapshotNode): boolean {
   const visibility = (node.styles as { visibility?: string }).visibility?.toLowerCase?.();
   if (visibility === "hidden" || visibility === "collapse") return false;
   return true;
+}
+
+function isAccessibilityHidden(node: DomSnapshotNode): boolean {
+  const cls = (node.className ?? "").toLowerCase();
+  if (
+    cls.includes("sr-only") ||
+    cls.includes("visually-hidden") ||
+    cls.includes("screen-reader")
+  ) {
+    return true;
+  }
+  const fs = parsePx(node.styles.fontSize, 16);
+  if (fs < 1) return true;
+  if (node.text && isTailwindUtilityText(node.text)) return true;
+  return false;
+}
+
+function hoistInvisibleChildren(node: DomSnapshotNode): DomSnapshotNode {
+  const children: DomSnapshotNode[] = [];
+  for (const child of node.children) {
+    const processed = hoistInvisibleChildren(child);
+    if (!isVisibleSnapshotNode(processed) && processed.children.length > 0) {
+      children.push(...processed.children);
+    } else {
+      children.push(processed);
+    }
+  }
+  return { ...node, children };
 }
 
 export function filterDomSnapshotTree(root: DomSnapshotNode): DomSnapshotNode | null {
@@ -41,7 +72,8 @@ export function filterDomSnapshotTree(root: DomSnapshotNode): DomSnapshotNode | 
     return { ...node, children };
   };
 
-  return walk(root);
+  const walked = walk(root);
+  return walked ? hoistInvisibleChildren(walked) : null;
 }
 
 export function countDomNodes(root: DomSnapshotNode): number {

@@ -2,11 +2,12 @@
 
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { useEditorStore } from "@/stores/useEditorStore";
+import { mergeInstanceOverrides } from "@/lib/componentModel";
 import {
-  CANVAS_HANDLE_SCREEN_PX,
-  CANVAS_OUTLINE_SCREEN_PX,
+  CANVAS_ELLIPSE_ARC_DOT_SCREEN_PX,
+  CANVAS_ELLIPSE_ARC_HANDLE_SCREEN_PX,
   CANVAS_VISUAL,
-  screenPxToWorld,
+  canvasCornerRadiusHandleStyle,
 } from "@/lib/canvasVisual";
 import {
   effectiveEllipseArc,
@@ -32,7 +33,13 @@ import {
 import { applyMatrixToPoint } from "@/lib/transformMath";
 import { useCanvasToWorld } from "./CanvasToWorldContext";
 import { clientToWorldFromDocument } from "@/lib/canvasCoordinates";
-import { useShapeEditHandlesGate } from "./useShapeEditHandles";
+import { screenPxToOverlay, worldPointToOverlay } from "@/lib/canvasOverlaySpace";
+import { useCanvasOverlaySpace } from "./useCanvasOverlaySpace";
+import { shouldShowEllipseArcHandlesOnCanvas } from "@/lib/editMode/shapeEditGate";
+import {
+  getDragPreviewSnapshot,
+  subscribeDragPreview,
+} from "@/lib/canvasEphemeralTransform";
 
 function localToWorld(
   nodeId: string,
@@ -52,10 +59,21 @@ type ArcHandleKind = "sweep" | "start" | "ratio";
 export function EllipseArcHandles() {
   const nodes = useEditorStore((s) => s.nodes);
   const childOrder = useEditorStore((s) => s.childOrder);
+  const selectedIds = useEditorStore((s) => s.selectedIds);
+  const editorMode = useEditorStore((s) => s.editorMode);
+  const tool = useEditorStore((s) => s.tool);
+  const penDrawingNodeId = useEditorStore((s) => s.penDrawingNodeId);
+  const pencilDrawingNodeId = useEditorStore((s) => s.pencilDrawingNodeId);
+  const isPlacingComment = useEditorStore((s) => s.isPlacingComment);
+  const transformInteractionMode = useEditorStore((s) => s.transformInteractionMode);
   const pan = useEditorStore((s) => s.pan);
   const zoom = useEditorStore((s) => s.zoom);
   const clientToWorld = useCanvasToWorld();
-  const { show: editActive, id } = useShapeEditHandlesGate();
+  const overlay = useCanvasOverlaySpace();
+  const dragPreview = useSyncExternalStore(subscribeDragPreview, getDragPreviewSnapshot, () => null);
+  const dragActive = Boolean(dragPreview?.movingIds.length);
+
+  const id = selectedIds.length === 1 ? selectedIds[0]! : null;
 
   const preview = useSyncExternalStore(
     subscribeEllipseArcPreview,
@@ -65,15 +83,33 @@ export function EllipseArcHandles() {
 
   const [arcDragUi, setArcDragUi] = useState<"ratio" | "sweep" | "start" | null>(null);
 
-  const node = id ? nodes[id] : null;
+  const rawNode = id ? nodes[id] : null;
+  const node = useMemo(
+    () => (rawNode ? mergeInstanceOverrides(rawNode, nodes) : null),
+    [rawNode, nodes],
+  );
 
-  const show = editActive && node?.type === "ellipse" && node.visible && !node.locked;
+  const show = shouldShowEllipseArcHandlesOnCanvas(
+    {
+      editorMode,
+      tool,
+      penDrawingNodeId,
+      pencilDrawingNodeId,
+      isPlacingComment,
+      selectedIds,
+      transformInteractionMode,
+      dragActive,
+    },
+    node,
+  );
 
-  const handleWorld = screenPxToWorld(CANVAS_HANDLE_SCREEN_PX, zoom);
-  const borderWorld = screenPxToWorld(CANVAS_OUTLINE_SCREEN_PX, zoom);
-  const dotPx = screenPxToWorld(6, zoom);
-  const off = handleWorld / 2;
-  const dotOff = dotPx / 2;
+  const handlePx = screenPxToOverlay(CANVAS_ELLIPSE_ARC_HANDLE_SCREEN_PX, overlay);
+  const dotPx = screenPxToOverlay(CANVAS_ELLIPSE_ARC_DOT_SCREEN_PX, overlay);
+  const handleStyle = canvasCornerRadiusHandleStyle(handlePx);
+  const dotStyle = canvasCornerRadiusHandleStyle(dotPx);
+  const handleHalf = handlePx / 2;
+  const dotHalf = dotPx / 2;
+  const labelOffset = screenPxToOverlay(20, overlay);
 
   const arc = useMemo(() => {
     if (!node) return null;
@@ -135,7 +171,7 @@ export function EllipseArcHandles() {
     return list;
   }, [show, id, node, arc, dragging, arcDragUi, ratioHandleAnchor]);
 
-  const dragLabelWorld = useMemo(() => {
+  const dragLabelScreen = useMemo(() => {
     if (!arcDragUi || !id || !node || !handles || !arc) return null;
     const text =
       arcDragUi === "ratio"
@@ -148,20 +184,23 @@ export function EllipseArcHandles() {
         nodes,
         childOrder,
       );
-      return { x: center.x, y: center.y, text };
+      const screen = worldPointToOverlay(center.x, center.y, overlay);
+      return { x: screen.x, y: screen.y, text, center: true };
     }
     const anchor =
       arcDragUi === "start"
         ? handles.find((h) => h.kind === "start")
         : handles.find((h) => h.kind === "sweep");
     if (!anchor) return null;
-    const w = localToWorld(id, anchor.local, nodes, childOrder);
+    const world = localToWorld(id, anchor.local, nodes, childOrder);
+    const screen = worldPointToOverlay(world.x, world.y, overlay);
     return {
-      x: w.x,
-      y: w.y - dotOff - screenPxToWorld(20, zoom),
+      x: screen.x,
+      y: screen.y - dotHalf - labelOffset,
       text,
+      center: false,
     };
-  }, [arcDragUi, id, node, handles, arc, nodes, childOrder, zoom, dotOff]);
+  }, [arcDragUi, id, node, handles, arc, nodes, childOrder, overlay, dotHalf, labelOffset]);
 
   const makePointerDown = useCallback(
     (kind: ArcHandleKind) => (e: React.PointerEvent) => {
@@ -194,7 +233,7 @@ export function EllipseArcHandles() {
       window.addEventListener("pointerup", onEnd);
       window.addEventListener("pointercancel", onEnd);
     },
-    [id, clientToWorld, zoom],
+    [id, clientToWorld, pan, zoom],
   );
 
   if (!show || !handles) return null;
@@ -203,8 +242,9 @@ export function EllipseArcHandles() {
     <>
       {handles.map(({ kind, local, dot }) => {
         const world = localToWorld(id!, local, nodes, childOrder);
-        const size = dot ? dotPx : handleWorld;
-        const half = size / 2;
+        const screen = worldPointToOverlay(world.x, world.y, overlay);
+        const half = dot ? dotHalf : handleHalf;
+        const style = dot ? dotStyle : handleStyle;
         return (
           <button
             key={kind}
@@ -224,33 +264,30 @@ export function EllipseArcHandles() {
                   ? "Drag to adjust arc start"
                   : "Drag to adjust sweep (Shift: 15° steps)"
             }
-            className="pointer-events-auto absolute z-[31] touch-none rounded-full border-2 border-[#18a0fb] bg-white will-change-transform"
+            className="pointer-events-auto absolute z-[31] touch-none will-change-transform"
             style={{
-              left: world.x - half,
-              top: world.y - half,
-              width: size,
-              height: size,
-              boxShadow: `0 0 0 ${borderWorld}px ${CANVAS_VISUAL.selection}`,
+              ...style,
+              left: screen.x - half,
+              top: screen.y - half,
               transition: dragging ? "none" : undefined,
             }}
             onPointerDown={makePointerDown(kind)}
           />
         );
       })}
-      {dragLabelWorld ? (
+      {dragLabelScreen ? (
         <div
-          className="pointer-events-none absolute z-[32] whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-white"
+          className="pointer-events-none absolute z-[32] whitespace-nowrap rounded px-1.5 py-0.5 text-ui font-semibold tabular-nums text-white"
           style={{
-            left: dragLabelWorld.x,
-            top: dragLabelWorld.y,
-            transform:
-              arcDragUi === "ratio"
-                ? "translate(-50%, -50%)"
-                : "translate(-50%, -100%)",
+            left: dragLabelScreen.x,
+            top: dragLabelScreen.y,
+            transform: dragLabelScreen.center
+              ? "translate(-50%, -50%)"
+              : "translate(-50%, -100%)",
             background: CANVAS_VISUAL.selection,
           }}
         >
-          {dragLabelWorld.text}
+          {dragLabelScreen.text}
         </div>
       ) : null}
     </>

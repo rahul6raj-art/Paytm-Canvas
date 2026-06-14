@@ -5,7 +5,7 @@ import {
   summarizeEffectsList,
 } from "@/lib/nodeEffects";
 import type { FillGradient } from "@/lib/fillGradient";
-import { normalizeFillGradient } from "@/lib/fillGradient";
+import { normalizeFillGradient, resolveEditableFillGradient } from "@/lib/fillGradient";
 
 export type DesignTokenType = "color" | "gradient" | "typography" | "spacing" | "effect";
 
@@ -68,16 +68,31 @@ export function isColorValue(v: unknown): v is ColorTokenValue {
 export function isGradientValue(v: unknown): v is GradientTokenValue {
   if (!v || typeof v !== "object") return false;
   const o = v as Record<string, unknown>;
-  const kind = o.kind;
+  const kind = o.kind ?? o.type;
   if (kind !== "linear" && kind !== "radial" && kind !== "angular" && kind !== "diamond") return false;
   if (!Array.isArray(o.stops) || o.stops.length < 2) return false;
-  return o.stops.every(
+  const stopsOk = o.stops.every(
     (s) =>
       s &&
       typeof s === "object" &&
       typeof (s as { color?: unknown }).color === "string" &&
       typeof (s as { position?: unknown }).position === "number",
   );
+  if (!stopsOk) return false;
+  if (o.handles != null) {
+    return (
+      Array.isArray(o.handles) &&
+      o.handles.length >= 3 &&
+      o.handles.every(
+        (h) =>
+          h &&
+          typeof h === "object" &&
+          typeof (h as { x?: unknown }).x === "number" &&
+          typeof (h as { y?: unknown }).y === "number",
+      )
+    );
+  }
+  return true;
 }
 
 export function isTypographyValue(v: unknown): v is TypographyTokenValue {
@@ -184,10 +199,15 @@ export function resolveNodeWithDesignTokens(
         };
       }
     } else if (tok?.type === "gradient" && isGradientValue(tok.value)) {
+      const localStops = node.fillGradient?.stops;
+      const gradient =
+        localStops && localStops.length >= 2
+          ? normalizeFillGradient(node.fillGradient, node.fill)
+          : normalizeFillGradient(tok.value);
       out = {
         ...out,
         fillType: "gradient",
-        fillGradient: normalizeFillGradient(tok.value),
+        fillGradient: gradient,
       };
     }
   }
@@ -220,6 +240,14 @@ export function resolveNodeWithDesignTokens(
   }
 
   return out;
+}
+
+/** Gradient for editing / canvas handles — merges linked style tokens with local overrides. */
+export function resolveNodeFillGradientForEdit(
+  node: EditorNode,
+  tokens: Record<string, DesignToken>,
+): FillGradient {
+  return resolveEditableFillGradient(resolveNodeWithDesignTokens(node, tokens));
 }
 
 /**

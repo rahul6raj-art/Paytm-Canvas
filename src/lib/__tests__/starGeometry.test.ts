@@ -7,6 +7,7 @@ import {
   roundedPolygonPathD,
   starGeometryPatch,
   starPathD,
+  starPathDForNode,
   starRatioFromLocalPoint,
   starVertices,
 } from "@/lib/shapes/starGeometry";
@@ -30,12 +31,12 @@ describe("starGeometry", () => {
     assert.ok(v[0]!.y < v[1]!.y);
   });
 
-  it("starPathD includes arcs when corner radius > 0", () => {
+  it("starPathD includes quadratic fillets when corner radius > 0", () => {
     const sharp = starPathD(100, 100, 5, 0.4, 0);
     const round = starPathD(100, 100, 5, 0.4, 8);
     assert.ok(sharp.includes("L "));
-    assert.ok(!sharp.includes(" A "));
-    assert.ok(round.includes(" A "));
+    assert.ok(!sharp.includes(" Q "));
+    assert.ok(round.includes(" Q "));
     assert.ok(round.endsWith(" Z"));
   });
 
@@ -43,6 +44,27 @@ describe("starGeometry", () => {
     const inner = starVertices(5, 0.4, 100, 100)[1]!;
     const r = starRatioFromLocalPoint(inner.x, inner.y, 5, 100, 100);
     assert.ok(Math.abs(r - 0.4) < 0.05);
+  });
+
+  it("starPathDForNode supports per-vertex corner radii", () => {
+    const uniform = starPathDForNode({
+      width: 100,
+      height: 100,
+      starPoints: 5,
+      starInnerRadius: 0.4,
+      cornerRadius: 6,
+    });
+    const mixed = starPathDForNode({
+      width: 100,
+      height: 100,
+      starPoints: 5,
+      starInnerRadius: 0.4,
+      cornerRadius: 0,
+      cornerRadii: [10, 2, 8, 0, 6, 0, 4, 0, 2, 0],
+    });
+    assert.ok(uniform.includes(" Q "));
+    assert.ok(mixed.includes(" Q "));
+    assert.notEqual(uniform, mixed);
   });
 
   it("starGeometryPatch syncs metadata and anchors", () => {
@@ -75,12 +97,12 @@ describe("starGeometry", () => {
     ];
     const r = 8;
     const d = roundedPolygonPathD(verts, r);
-    const arcMatch = /A\s+([\d.]+)\s+([\d.]+)\s+0\s+0\s+1\s+([\d.]+)\s+([\d.]+)/.exec(d);
-    assert.ok(arcMatch, "expected clockwise fillet arc at top vertex");
-    const endX = Number(arcMatch[3]);
-    const endY = Number(arcMatch[4]);
-    assert.ok(endX > 50 && endY > 0, "top corner arc should trim into the triangle");
-    assert.ok(endY < r + 2, "top corner arc should not bulge above the vertex");
+    const quadMatch = /Q\s+50\s+0\s+([\d.]+)\s+([\d.]+)/.exec(d);
+    assert.ok(quadMatch, "expected quadratic fillet at top vertex");
+    const endX = Number(quadMatch[1]);
+    const endY = Number(quadMatch[2]);
+    assert.ok(endX > 50 && endY > 0, "top corner curve should trim into the triangle");
+    assert.ok(endY < r + 2, "top corner curve should not bulge above the vertex");
   });
 
   it("maxStarCornerRadius is positive for default star", () => {

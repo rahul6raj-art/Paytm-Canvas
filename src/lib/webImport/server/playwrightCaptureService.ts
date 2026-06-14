@@ -13,10 +13,11 @@ import { filterDomSnapshotTree, countDomNodes, pruneDomTreeByLimit } from "@/lib
 import { normalizeDomSnapshot } from "@/lib/webImport/domNormalizer";
 import { annotateSectionHints, detectSections } from "@/lib/webImport/sectionDetector";
 import { annotateComponentHints } from "@/lib/webImport/componentDetector";
-import { domSnapshotToScene } from "@/lib/webImport/domToCanvasConverter";
-import { extractDomTreeInBrowser } from "@/lib/webImport/server/domExtractor";
+import { runDesignNativeImport } from "@/lib/webImport/pipeline";
+import { inlineDomImageSources } from "@/lib/webImport/server/inlineDomImageSources";
 import { launchImportBrowser } from "@/lib/webImport/server/launchPlaywrightBrowser";
 import { loadPageForImport } from "@/lib/webImport/server/pageLoad";
+import { loadDomExtractorBundle } from "@/lib/webImport/server/bundleDomExtractor";
 
 export type CaptureStep =
   | "launching"
@@ -56,6 +57,7 @@ export async function runImportWebCapture(
       deviceScaleFactor: 1,
       ignoreHTTPSErrors: false,
       acceptDownloads: false,
+      colorScheme: "light",
       userAgent:
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
       locale: "en-US",
@@ -120,10 +122,13 @@ export async function runImportWebCapture(
       };
     }
 
-    const rawTree = await page.evaluate(extractDomTreeInBrowser);
-    await context.close();
-
+    const rawTree = (await page.evaluate((bundleCode: string) => {
+      // eslint-disable-next-line no-eval
+      return eval(`${bundleCode}; __craftDomExtract.extractDomTreeInBrowser()`);
+    }, loadDomExtractorBundle())) as DomSnapshotNode;
     let tree = filterDomSnapshotTree(rawTree) ?? rawTree;
+    tree = await inlineDomImageSources(tree, context.request);
+    await context.close();
     tree = normalizeDomSnapshot(tree);
     tree = annotateSectionHints(tree);
     tree = annotateComponentHints(tree);
@@ -139,7 +144,7 @@ export async function runImportWebCapture(
     };
 
     const sections = detectSections(tree);
-    const { scene, assets } = domSnapshotToScene(tree, pageMeta);
+    const { scene, assets, fidelity } = runDesignNativeImport(tree, pageMeta);
 
     return {
       page: pageMeta,
@@ -148,6 +153,7 @@ export async function runImportWebCapture(
       scene,
       mode: body.mode,
       assets,
+      fidelity,
     };
   } finally {
     await browser.close();

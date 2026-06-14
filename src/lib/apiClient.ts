@@ -26,17 +26,78 @@ export interface CraftUser {
   displayName: string;
 }
 
-export interface CraftWorkspace {
+export type CraftApiTokenScope = "read" | "write";
+
+export type CraftApiTokenResourceScope =
+  | "files:read"
+  | "files:write"
+  | "assets:read"
+  | "assets:write"
+  | "comments:read"
+  | "comments:write"
+  | "teams:read"
+  | "teams:write"
+  | "workspaces:read"
+  | "realtime:write";
+
+export interface CraftApiTokenSummary {
+  id: string;
+  name: string;
+  tokenPrefix: string;
+  scope: CraftApiTokenScope;
+  resourceScopes?: CraftApiTokenResourceScope[];
+  createdAt: string;
+  expiresAt?: string | null;
+  lastUsedAt?: string | null;
+}
+
+export interface CraftApiTokenCreated extends CraftApiTokenSummary {
+  /** Returned once on create — store securely; not retrievable later. */
+  token: string;
+}
+
+export interface CraftTeam {
   id: string;
   name: string;
   slug: string;
 }
+
+export interface CraftWorkspace {
+  id: string;
+  teamId: string;
+  name: string;
+  slug: string;
+}
+
+export type CraftWorkspaceRole = "owner" | "admin" | "member" | "guest";
+
+export interface CraftWorkspaceMember {
+  userId: string;
+  email: string;
+  displayName: string;
+  initials: string;
+  role: CraftWorkspaceRole;
+}
+
+export interface CraftWorkspaceInvite {
+  id: string;
+  workspaceId: string;
+  email: string;
+  role: CraftWorkspaceRole;
+  invitedByUserId: string;
+  createdAt: string;
+}
+
+export type CraftWorkspaceInviteOutcome =
+  | { kind: "member"; member: CraftWorkspaceMember }
+  | { kind: "invite"; invite: CraftWorkspaceInvite; emailSent?: boolean };
 
 export interface CraftFileSummary {
   id: string;
   workspaceId: string;
   name: string;
   updatedAt: string;
+  revision?: string;
 }
 
 export interface CraftFileDetail extends CraftFileSummary {
@@ -80,8 +141,27 @@ export interface CraftFileVersionSummary {
   createdByDisplayName: string;
 }
 
-export interface CraftFileVersionDetail extends CraftFileVersionSummary {
-  documentJson: unknown;
+export interface CraftAsset {
+  id: string;
+  workspaceId: string;
+  fileName: string;
+  mime: string;
+  byteSize: number;
+  url: string;
+  width?: number | null;
+  height?: number | null;
+  createdAt: string;
+  createdByUserId: string;
+}
+
+export interface CraftAssetUploadUrl {
+  assetId: string;
+  storageKey: string;
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  publicUrl: string;
+  fields: Record<string, string>;
 }
 
 function isLocalMode(): boolean {
@@ -122,6 +202,11 @@ async function readEnvelope<T>(res: Response): Promise<T> {
   return json.data as T;
 }
 
+function shouldSendCredentials(): boolean {
+  const mode = getPaytmCraftPublicEnv().mode;
+  return mode === "api" || mode === "remote";
+}
+
 async function v1Fetch<T>(path: string, init?: RequestInit): Promise<T> {
   const url = buildV1Url(path);
   const headers = new Headers(init?.headers);
@@ -133,7 +218,11 @@ async function v1Fetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (!headers.has("Accept")) {
     headers.set("Accept", "application/json");
   }
-  const res = await fetch(url, { ...init, headers });
+  const res = await fetch(url, {
+    ...init,
+    headers,
+    credentials: shouldSendCredentials() ? "include" : "same-origin",
+  });
   return readEnvelope<T>(res);
 }
 
@@ -141,19 +230,61 @@ async function v1Fetch<T>(path: string, init?: RequestInit): Promise<T> {
  * HTTP client for Paytm Craft backends.
  *
  * - **local**: read helpers return empty / null; mutating calls throw {@link ApiNotConnectedError}.
- * - **api**: calls this Next.js app’s `/api/v1/*` Route Handlers (in-memory mock store). Editor persistence
- *   still uses {@link LocalSyncProvider} — this client is for preparing real API integration.
+ * - **api**: calls this Next.js app’s `/api/v1/*` Route Handlers (in-memory mock store).
+ *   Document persistence uses {@link ApiSyncProvider} / {@link RemoteSyncProvider} when mode is `api` or `remote`.
  * - **remote**: calls `NEXT_PUBLIC_PAYTM_CRAFT_API_URL` when set; otherwise throws {@link ApiNotConnectedError}.
  */
 export const apiClient = {
-  async login(_email: string, _password: string): Promise<CraftUser> {
-    void _email;
-    void _password;
-    throw new ApiNotConnectedError("Login is not implemented yet");
+  async login(email: string, password: string): Promise<CraftUser> {
+    if (isLocalMode()) throw new ApiNotConnectedError();
+    return v1Fetch<CraftUser>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
   },
 
   async logout(): Promise<void> {
-    throw new ApiNotConnectedError("Logout is not implemented yet");
+    if (isLocalMode()) throw new ApiNotConnectedError();
+    await v1Fetch<{ ok: true }>("/auth/logout", {
+      method: "POST",
+      body: "{}",
+    });
+  },
+
+  async listApiTokens(): Promise<CraftApiTokenSummary[]> {
+    if (isLocalMode()) return [];
+    return v1Fetch<CraftApiTokenSummary[]>("/auth/tokens");
+  },
+
+  async createApiToken(
+    name: string,
+    options?: {
+      expiresInDays?: number | null;
+      scope?: CraftApiTokenScope;
+      resourceScopes?: CraftApiTokenResourceScope[];
+    },
+  ): Promise<CraftApiTokenCreated> {
+    if (isLocalMode()) throw new ApiNotConnectedError();
+    const body: {
+      name: string;
+      expiresInDays?: number;
+      scope?: CraftApiTokenScope;
+      resourceScopes?: CraftApiTokenResourceScope[];
+    } = { name };
+    if (options?.expiresInDays != null) body.expiresInDays = options.expiresInDays;
+    if (options?.scope) body.scope = options.scope;
+    if (options?.resourceScopes?.length) body.resourceScopes = options.resourceScopes;
+    return v1Fetch<CraftApiTokenCreated>("/auth/tokens", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  async revokeApiToken(tokenId: string): Promise<void> {
+    if (isLocalMode()) throw new ApiNotConnectedError();
+    await v1Fetch<{ ok: true }>(`/auth/tokens/${encodeURIComponent(tokenId)}`, {
+      method: "DELETE",
+    });
   },
 
   async getCurrentUser(): Promise<CraftUser | null> {
@@ -164,6 +295,16 @@ export const apiClient = {
   async listWorkspaces(): Promise<CraftWorkspace[]> {
     if (isLocalMode()) return [];
     return v1Fetch<CraftWorkspace[]>("/workspaces");
+  },
+
+  async listTeams(): Promise<CraftTeam[]> {
+    if (isLocalMode()) return [];
+    return v1Fetch<CraftTeam[]>("/teams");
+  },
+
+  async listTeamMembers(teamId: string): Promise<CraftWorkspaceMember[]> {
+    if (isLocalMode()) return [];
+    return v1Fetch<CraftWorkspaceMember[]>(`/teams/${encodeURIComponent(teamId)}/members`);
   },
 
   async listFiles(workspaceId: string | { workspaceId: string }): Promise<CraftFileSummary[]> {
@@ -213,13 +354,17 @@ export const apiClient = {
     payload: { documentJson: unknown },
     opts?: { revision?: string },
   ): Promise<{ revision: string }> {
-    void opts;
     if (isLocalMode()) throw new ApiNotConnectedError();
-    await v1Fetch<CraftFileDetail>(`/files/${encodeURIComponent(fileId)}`, {
+    const headers: Record<string, string> = {};
+    if (opts?.revision) {
+      headers["If-Match"] = opts.revision;
+    }
+    const detail = await v1Fetch<CraftFileDetail>(`/files/${encodeURIComponent(fileId)}`, {
       method: "PUT",
+      headers,
       body: JSON.stringify({ documentJson: payload.documentJson }),
     });
-    return { revision: `mock-${Date.now()}` };
+    return { revision: detail.revision ?? opts?.revision ?? "1" };
   },
 
   async listFileVersions(fileId: string): Promise<CraftFileVersionSummary[]> {
@@ -272,6 +417,92 @@ export const apiClient = {
       {
         method: "POST",
         body: form,
+      },
+    );
+  },
+
+  async requestAssetUploadUrl(
+    workspaceId: string,
+    params: { fileName: string; contentType?: string },
+  ): Promise<CraftAssetUploadUrl> {
+    if (isLocalMode()) throw new ApiNotConnectedError();
+    return v1Fetch<CraftAssetUploadUrl>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/assets/upload-url`,
+      {
+        method: "POST",
+        body: JSON.stringify(params),
+      },
+    );
+  },
+
+  async completeAssetUpload(
+    workspaceId: string,
+    params: {
+      assetId: string;
+      storageKey: string;
+      fileName: string;
+      mime?: string;
+      byteSize?: number;
+      width?: number;
+      height?: number;
+    },
+  ): Promise<CraftAsset> {
+    if (isLocalMode()) throw new ApiNotConnectedError();
+    return v1Fetch<CraftAsset>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/assets/complete`,
+      {
+        method: "POST",
+        body: JSON.stringify(params),
+      },
+    );
+  },
+
+  async listAssets(workspaceId: string): Promise<CraftAsset[]> {
+    if (isLocalMode()) return [];
+    return v1Fetch<CraftAsset[]>(`/workspaces/${encodeURIComponent(workspaceId)}/assets`);
+  },
+
+  async listWorkspaceMembers(workspaceId: string): Promise<CraftWorkspaceMember[]> {
+    if (isLocalMode()) return [];
+    return v1Fetch<CraftWorkspaceMember[]>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/members`,
+    );
+  },
+
+  async inviteWorkspaceMember(
+    workspaceId: string,
+    params: { email: string; role?: CraftWorkspaceRole },
+  ): Promise<CraftWorkspaceMember> {
+    const outcome = await this.inviteToWorkspace(workspaceId, params);
+    if (outcome.kind === "invite") {
+      throw new ApiRequestError(
+        "User not found — pending invite created; use inviteToWorkspace instead",
+        404,
+        "NOT_FOUND",
+      );
+    }
+    return outcome.member;
+  },
+
+  async listWorkspaceInvites(workspaceId: string): Promise<CraftWorkspaceInvite[]> {
+    if (isLocalMode()) return [];
+    return v1Fetch<CraftWorkspaceInvite[]>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/invites`,
+    );
+  },
+
+  async inviteToWorkspace(
+    workspaceId: string,
+    params: { email: string; role?: CraftWorkspaceRole },
+  ): Promise<CraftWorkspaceInviteOutcome> {
+    if (isLocalMode()) throw new ApiNotConnectedError();
+    const body: Record<string, unknown> = { email: params.email.trim() };
+    if (params.role) body.role = params.role;
+    return v1Fetch<CraftWorkspaceInviteOutcome>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/invites`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
       },
     );
   },

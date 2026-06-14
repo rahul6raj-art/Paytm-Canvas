@@ -16,6 +16,7 @@ export type InstanceOverridePatch = Partial<
     | "strokePosition"
     | "strokeSides"
     | "strokeSidesCustom"
+    | "strokeSidesCustomColors"
     | "cornerRadius"
     | "cornerRadii"
     | "textColor"

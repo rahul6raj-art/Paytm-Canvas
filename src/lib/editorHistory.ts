@@ -1,5 +1,5 @@
 import type { EditorComment } from "@/lib/comments";
-import type { EditorAsset } from "@/lib/documentPersistence";
+import type { EditorAsset, EditorFontAsset } from "@/lib/documentPersistence";
 import type { DesignToken } from "@/lib/designTokens";
 import type { EditorNode, LayoutGuide } from "@/stores/useEditorStore";
 
@@ -9,6 +9,8 @@ export interface PersistedEditorSnapshot {
   nodes: Record<string, EditorNode>;
   childOrder: Record<string, string[]>;
   assets: Record<string, EditorAsset>;
+  /** Omitted on snapshots from older editor builds; treated as `{}`. */
+  fontAssets?: Record<string, EditorFontAsset>;
   /** Omitted on snapshots from older editor builds; treated as `{}`. */
   designTokens?: Record<string, DesignToken>;
   selectedIds: string[];
@@ -26,6 +28,7 @@ export type HistorySnapshotInput = Pick<
   | "nodes"
   | "childOrder"
   | "assets"
+  | "fontAssets"
   | "designTokens"
   | "selectedIds"
   | "zoom"
@@ -43,6 +46,7 @@ export function editorStateToHistorySnapshot(s: HistorySnapshotInput): Persisted
     nodes: structuredClone(s.nodes),
     childOrder: structuredClone(s.childOrder),
     assets: structuredClone(s.assets),
+    fontAssets: structuredClone(s.fontAssets ?? {}),
     designTokens: structuredClone(s.designTokens),
     selectedIds: [...s.selectedIds],
     zoom: s.zoom,
@@ -61,6 +65,7 @@ export function clonePersistedEditorSnapshot(s: PersistedEditorSnapshot): Persis
     nodes: s.nodes,
     childOrder: s.childOrder,
     assets: s.assets,
+    fontAssets: s.fontAssets ?? {},
     designTokens: s.designTokens ?? {},
     selectedIds: s.selectedIds,
     zoom: s.zoom,
@@ -85,6 +90,7 @@ export function historySnapshotToEditorPatch(snap: PersistedEditorSnapshot) {
   const nodes = structuredClone(snap.nodes);
   const childOrder = structuredClone(snap.childOrder);
   const assets = structuredClone(snap.assets);
+  const fontAssets = structuredClone(snap.fontAssets ?? {});
   const designTokens = structuredClone(snap.designTokens ?? {});
   const selectedIds = filterSelectedIdsToExisting(snap.selectedIds, nodes);
   const comments = structuredClone(snap.comments);
@@ -93,12 +99,13 @@ export function historySnapshotToEditorPatch(snap: PersistedEditorSnapshot) {
     nodes,
     childOrder,
     assets,
+    fontAssets,
     designTokens,
     selectedIds,
     zoom: snap.zoom,
     pan: { ...snap.pan },
     showGrid: snap.showGrid,
-    showRulers: snap.showRulers ?? true,
+    showRulers: snap.showRulers ?? false,
     canvasBackgroundColor: snap.canvasBackgroundColor,
     comments,
     layoutGuides: structuredClone(snap.layoutGuides ?? []),

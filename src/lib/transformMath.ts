@@ -159,13 +159,13 @@ export function getRotatedHandlePositions(
 
 const HANDLE_BASE_ANGLE: Record<ResizeHandle, number> = {
   e: 0,
-  ne: 45,
+  ne: 135,
   n: 90,
-  nw: 135,
+  nw: 45,
   w: 180,
-  sw: 225,
+  sw: 315,
   s: 270,
-  se: 315,
+  se: 225,
 };
 
 const CURSOR_BY_SNAPPED_ANGLE: Record<number, string> = {

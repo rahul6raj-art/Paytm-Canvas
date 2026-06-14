@@ -1,9 +1,9 @@
-import { DEFAULT_GRADIENT_TRANSFORM, newGradientStopId, type FillGradient } from "@/lib/fillGradient";
 import { newNodeEffectId, type NodeEffect } from "@/lib/nodeEffects";
 import type { FigmaColor, FigmaPaint } from "@/integrations/figma/types";
 import { mergeStrokeIntoNode } from "@/lib/strokeSpec";
 import type { EditorNode } from "@/stores/useEditorStore";
 import type { FigmaApiNode } from "@/integrations/figma/types";
+import { gradientFillFieldsFromPaints } from "@/lib/figImport/figmaGradientPaint";
 
 export function rgbaToHex(c: FigmaColor): string {
   const r = Math.round(Math.max(0, Math.min(1, c.r)) * 255);
@@ -26,32 +26,20 @@ export function solidFromPaints(paints?: FigmaPaint[]): { fill?: string; fillOpa
   };
 }
 
-export function gradientFromPaints(paints?: FigmaPaint[]): {
-  fillType?: "gradient";
-  fillGradient?: FillGradient;
-} {
-  const p = visiblePaints(paints).find((x) => x.type === "GRADIENT_LINEAR" && x.gradientStops?.length);
-  if (!p?.gradientStops) return {};
-  const handles = p.gradientHandlePositions;
-  let rotation = 0;
-  if (handles && handles.length >= 2) {
-    const dx = handles[1]!.x - handles[0]!.x;
-    const dy = handles[1]!.y - handles[0]!.y;
-    rotation = (Math.atan2(dy, dx) * 180) / Math.PI;
-  }
-  return {
-    fillType: "gradient",
-    fillGradient: {
-      kind: "linear",
-      transform: { ...DEFAULT_GRADIENT_TRANSFORM, rotation },
-      stops: p.gradientStops.map((s) => ({
-        id: newGradientStopId(),
-        position: s.position,
-        color: rgbaToHex(s.color),
-        opacity: s.color.a ?? 1,
-      })),
-    },
-  };
+export function gradientFromPaints(paints?: FigmaPaint[]): Pick<
+  EditorNode,
+  "fillType" | "fillGradient" | "fill" | "fillOpacity"
+> {
+  return gradientFillFieldsFromPaints(paints);
+}
+
+export function primaryFillFromPaints(paints?: FigmaPaint[]): Pick<
+  EditorNode,
+  "fill" | "fillOpacity" | "fillType" | "fillGradient"
+> {
+  const gradient = gradientFromPaints(paints);
+  if (gradient.fillType === "gradient") return gradient;
+  return solidFromPaints(paints);
 }
 
 export function imageRefFromPaints(paints?: FigmaPaint[]): string | undefined {

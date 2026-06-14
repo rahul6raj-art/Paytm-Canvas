@@ -1,6 +1,11 @@
 import { ROOT, useEditorStore, type EditorNode } from "@/stores/useEditorStore";
+import { applyLayoutPatchWithAutoLayout } from "@/lib/autoLayout";
 import { canSwapAutoLayoutSiblings } from "@/lib/autoLayoutArrowReorder";
 import { idsToDetachForAutoLayoutDrag } from "@/lib/autoLayoutDrag";
+import { freezeAutoLayoutGap } from "@/lib/layoutEngine/inferGap";
+import { isAutoLayoutContainer, type LayoutEngineNode } from "@/lib/layoutEngine/types";
+import { CANVAS_CLICK_SLOP_SCREEN_PX } from "@/lib/canvasInteractionGuards";
+import { screenPxToWorld } from "@/lib/canvasVisual";
 import {
   computeAutoLayoutInsertIndicator,
   editorNodesToLayoutMap,
@@ -21,6 +26,7 @@ import { getNodeTransformedWorldBounds } from "@/lib/transformMath";
 import {
   getRenderedWorldBounds,
   isAncestorOf,
+  topLevelSelectedIds,
   worldOriginToNodeXYFromChildOrder,
   worldPointToParentLocalFromChildOrder,
 } from "@/lib/editorGraph";
@@ -28,15 +34,17 @@ import {
   captureSwapWorldOrigins,
   findSwapTargetAtPoint,
   resolveSwapDropTarget,
+  swapCandidatesForMultiSelect,
   swapNodeWorldPositions,
-  swapPartnerForMultiSelect,
 } from "@/lib/canvasSwapDrag";
 import { pickDeepestFrameAtWorldPoint } from "@/lib/tree";
+import { createRafPointerScheduler, forEachCoalescedPointerEvent } from "@/lib/smoothPointer";
+import { commitWasmFirstGeometryPatches } from "@/engine/craftEngineWasmFirstMutation";
 import {
-  createRafPointerScheduler,
-  forEachCoalescedPointerEvent,
-  type RafPointerScheduler,
-} from "@/lib/smoothPointer";
+  applyDragPreview,
+  clearDragPreview,
+} from "@/lib/canvasEphemeralTransform";
+import { refreshDuplicateStepAfterMove } from "@/lib/duplicateRepeatOffset";
 
 export type ClientToWorldFn = (clientX: number, clientY: number) => { x: number; y: number };
 
@@ -56,16 +64,86 @@ type DragSession = {
   movingIds: string[];
   startWorld: Record<string, { x: number; y: number }>;
   startBounds: Record<string, WorldRect>;
-  swapPartnerId?: string;
+  swapCandidateIds?: string[];
   swapTargetId?: string | null;
   mode: "free" | "al-reorder";
   alContext?: AutoLayoutReorderContext;
   lastAlInsert?: number;
+  lastPreviewDelta: { dx: number; dy: number };
+  activated: boolean;
+  clientToWorld: ClientToWorldFn;
+  /** Option/Alt drag duplicate — do not learn Cmd+D repeat offset from this move. */
+  skipDuplicateStepRefresh?: boolean;
 };
 
 let activeDrag: DragSession | null = null;
-let activeMoveScheduler: RafPointerScheduler<{ clientX: number; clientY: number }> | null =
-  null;
+
+function resolveAlReorderChildOrderIndex(
+  ctx: AutoLayoutReorderContext,
+  clientX: number,
+  clientY: number,
+  clientToWorld: ClientToWorldFn,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): number {
+  const world = clientToWorld(clientX, clientY);
+  const local = worldPointToParentLocalFromChildOrder(
+    world.x,
+    world.y,
+    ctx.parentId,
+    nodes,
+    childOrder,
+  );
+  const layoutMap = editorNodesToLayoutMap(nodes);
+  const flowInsert = flowInsertIndexFromPointer(
+    ctx.parentId,
+    layoutMap,
+    childOrder,
+    local.x,
+    local.y,
+    ctx.draggedId,
+  );
+  return flowInsertIndexToChildOrderIndex(
+    ctx.parentId,
+    flowInsert,
+    layoutMap,
+    childOrder,
+    ctx.mode,
+    ctx.draggedId,
+  );
+}
+
+function freezeAutoLayoutParentGapsForDrag(
+  movingIds: readonly string[],
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): Record<string, EditorNode> {
+  const parents = new Set<string>();
+  for (const id of movingIds) {
+    const parentId = nodes[id]?.parentId;
+    if (!parentId) continue;
+    const parent = nodes[parentId];
+    if (parent && isAutoLayoutContainer(parent as LayoutEngineNode)) {
+      parents.add(parentId);
+    }
+  }
+  if (parents.size === 0) return nodes;
+  let next = nodes;
+  for (const parentId of parents) {
+    const patch = freezeAutoLayoutGap(
+      next[parentId] as LayoutEngineNode,
+      next as Record<string, LayoutEngineNode>,
+      childOrder,
+    );
+    if (patch) {
+      next = applyLayoutPatchWithAutoLayout(next, childOrder, parentId, patch) as Record<
+        string,
+        EditorNode
+      >;
+    }
+  }
+  return next;
+}
 
 function detachAutoLayoutChildrenForDrag(movingIds: string[], nodes: Record<string, EditorNode>): void {
   const toDetach = idsToDetachForAutoLayoutDrag(movingIds, nodes, nodes);
@@ -75,8 +153,91 @@ function detachAutoLayoutChildrenForDrag(movingIds: string[], nodes: Record<stri
   }
 }
 
+function clickSlopWorld(zoom: number): number {
+  return screenPxToWorld(CANVAS_CLICK_SLOP_SCREEN_PX, zoom);
+}
+
+function swapCaptureIds(
+  primaryId: string,
+  movingIds: string[],
+  swapCandidateIds?: string[],
+): string[] {
+  if (swapCandidateIds?.length) {
+    return Array.from(new Set([primaryId, ...swapCandidateIds]));
+  }
+  return movingIds;
+}
+
+function activateNodeDrag(d: DragSession): void {
+  if (d.activated) return;
+  d.activated = true;
+  const st = useEditorStore.getState();
+  st.pushHistory();
+
+  if (!d.alContext) {
+    const frozen = freezeAutoLayoutParentGapsForDrag(d.movingIds, st.nodes, st.childOrder);
+    if (frozen !== st.nodes) {
+      useEditorStore.setState({ nodes: frozen });
+    }
+    detachAutoLayoutChildrenForDrag(d.movingIds, useEditorStore.getState().nodes);
+    const st2 = useEditorStore.getState();
+    d.startWorld = captureSwapWorldOrigins(
+      swapCaptureIds(d.primaryId, d.movingIds, d.swapCandidateIds),
+      st2.nodes,
+      st2.childOrder,
+    );
+    for (const sid of d.movingIds) {
+      d.startBounds[sid] = getRenderedWorldBounds(sid, st2.nodes, st2.childOrder);
+    }
+    for (const cid of d.swapCandidateIds ?? []) {
+      d.startBounds[cid] = getRenderedWorldBounds(cid, st2.nodes, st2.childOrder);
+    }
+  } else if (d.alContext) {
+    const st2 = useEditorStore.getState();
+    d.lastAlInsert = resolveAlReorderChildOrderIndex(
+      d.alContext,
+      d.sx,
+      d.sy,
+      d.clientToWorld,
+      st2.nodes,
+      st2.childOrder,
+    );
+  }
+
+  st.setIsMovingSelection(true);
+  document.body.style.cursor = "move";
+}
+
+function commitDragPositions(d: DragSession): boolean {
+  const { dx, dy } = d.lastPreviewDelta;
+  if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) return false;
+  const state = useEditorStore.getState();
+  const updates: Array<{ nodeId: string; node: (typeof state.nodes)[string] }> = [];
+  for (const sid of d.movingIds) {
+    const sw = d.startWorld[sid];
+    const n = state.nodes[sid];
+    if (!sw || !n) continue;
+    const desired = { x: sw.x + dx, y: sw.y + dy };
+    const xy = worldOriginToNodeXYFromChildOrder(sid, state.nodes, state.childOrder, desired);
+    updates.push({ nodeId: sid, node: { ...n, x: xy.x, y: xy.y } });
+  }
+  if (updates.length === 0) return false;
+  if (commitWasmFirstGeometryPatches(updates)) return true;
+  for (const { nodeId, node } of updates) {
+    state.updateNode(nodeId, { x: node.x, y: node.y }, { skipHistory: true });
+  }
+  return true;
+}
+
+function refreshDuplicateStepAfterDragCommit(): void {
+  const st = useEditorStore.getState();
+  refreshDuplicateStepAfterMove(st.selectedIds, st.nodes, st.childOrder);
+}
+
 function convertAlReorderToFreeDrag(d: DragSession): void {
   if (!d.alContext) return;
+  clearDragPreview();
+  d.lastPreviewDelta = { dx: 0, dy: 0 };
   detachAutoLayoutChildrenForDrag(d.movingIds, useEditorStore.getState().nodes);
   const st = useEditorStore.getState();
   d.mode = "free";
@@ -84,7 +245,7 @@ function convertAlReorderToFreeDrag(d: DragSession): void {
   d.lastAlInsert = undefined;
   st.setAutoLayoutReorderIndicator(null);
   d.startWorld = captureSwapWorldOrigins(
-    d.swapPartnerId ? [d.primaryId, d.swapPartnerId] : d.movingIds,
+    swapCaptureIds(d.primaryId, d.movingIds, d.swapCandidateIds),
     st.nodes,
     st.childOrder,
   );
@@ -101,6 +262,9 @@ export function beginCanvasNodeDrag(opts: {
   clientY: number;
   clientToWorld: ClientToWorldFn;
   captureTarget: Element;
+  forceSwapDrag?: boolean;
+  /** Set when the drag follows Option/Alt in-place clone (not Cmd+D repeat). */
+  fromAltDragDuplicate?: boolean;
 }): boolean {
   if (useEditorStore.getState().transformInteractionMode !== "none") return false;
   if (isAutoLayoutHandleDragActive()) return false;
@@ -112,31 +276,36 @@ export function beginCanvasNodeDrag(opts: {
   });
   if (dragTargets.length === 0) return false;
 
-  s1.pushHistory();
-  document.body.style.cursor = "move";
+  const tops = topLevelSelectedIds(s1.selectedIds, s1.nodes);
+  const swapCandidates = swapCandidatesForMultiSelect(
+    opts.nodeId,
+    s1.selectedIds,
+    s1.nodes,
+    s1.childOrder,
+  );
+  const swapMode =
+    swapCandidates.length > 0 &&
+    (opts.forceSwapDrag === true || (tops.length === 2 && dragTargets.includes(opts.nodeId)));
+
+  if (opts.forceSwapDrag && swapCandidates.length === 0) return false;
 
   const primaryId = dragTargets.includes(opts.nodeId) ? opts.nodeId : dragTargets[0]!;
-  const swapPartnerId = swapPartnerForMultiSelect(opts.nodeId, s1.selectedIds, s1.nodes);
-  const movingIds =
-    swapPartnerId && dragTargets.includes(opts.nodeId) ? [opts.nodeId] : dragTargets;
+  const movingIds = swapMode && dragTargets.includes(opts.nodeId) ? [opts.nodeId] : dragTargets;
 
   const dragNode = s1.nodes[opts.nodeId];
   const dragContainerUnit =
     dragNode?.type === "frame" || dragNode?.type === "group";
   const alContext =
-    swapPartnerId || dragContainerUnit
+    swapMode || dragContainerUnit
       ? null
       : getAutoLayoutReorderContext([opts.nodeId], s1.nodes, s1.nodes);
 
   const dragMovingIds = alContext ? [opts.nodeId] : movingIds;
-
-  if (!alContext) {
-    detachAutoLayoutChildrenForDrag(dragMovingIds, s1.nodes);
-  }
+  const swapCandidateIds = swapMode ? swapCandidates : undefined;
 
   const st = useEditorStore.getState();
   const startWorld = captureSwapWorldOrigins(
-    swapPartnerId ? [primaryId, swapPartnerId] : dragMovingIds,
+    swapCaptureIds(primaryId, dragMovingIds, swapCandidateIds),
     st.nodes,
     st.childOrder,
   );
@@ -144,8 +313,8 @@ export function beginCanvasNodeDrag(opts: {
   for (const sid of dragMovingIds) {
     startBounds[sid] = getRenderedWorldBounds(sid, st.nodes, st.childOrder);
   }
-  if (swapPartnerId) {
-    startBounds[swapPartnerId] = getRenderedWorldBounds(swapPartnerId, st.nodes, st.childOrder);
+  for (const cid of swapCandidateIds ?? []) {
+    startBounds[cid] = getRenderedWorldBounds(cid, st.nodes, st.childOrder);
   }
 
   activeDrag = {
@@ -156,12 +325,15 @@ export function beginCanvasNodeDrag(opts: {
     movingIds: dragMovingIds,
     startWorld,
     startBounds,
-    swapPartnerId,
+    swapCandidateIds,
     swapTargetId: null,
     mode: alContext ? "al-reorder" : "free",
     alContext: alContext ?? undefined,
+    lastPreviewDelta: { dx: 0, dy: 0 },
+    activated: false,
+    clientToWorld: opts.clientToWorld,
+    skipDuplicateStepRefresh: opts.fromAltDragDuplicate === true,
   };
-  useEditorStore.getState().setIsMovingSelection(true);
   useEditorStore.getState().setSwapDragIndicator(null);
   useEditorStore.getState().setAutoLayoutReorderIndicator(null);
 
@@ -175,7 +347,14 @@ export function beginCanvasNodeDrag(opts: {
     const d = activeDrag;
     if (!d) return;
     const state = useEditorStore.getState();
-    const { updateNode, setSnapOverlay, reorderNode } = state;
+    const { setSnapOverlay, reorderNode } = state;
+
+    if (!d.activated) {
+      const fdx = screenDeltaToWorld(clientX - d.sx, state.zoom);
+      const fdy = screenDeltaToWorld(clientY - d.sy, state.zoom);
+      if (Math.hypot(fdx, fdy) < clickSlopWorld(state.zoom)) return;
+      activateNodeDrag(d);
+    }
 
     const world = opts.clientToWorld(clientX, clientY);
 
@@ -217,7 +396,7 @@ export function beginCanvasNodeDrag(opts: {
           d.alContext.mode,
           d.alContext.draggedId,
         );
-        if (idx !== d.lastAlInsert) {
+        if (d.lastAlInsert !== undefined && idx !== d.lastAlInsert) {
           d.lastAlInsert = idx;
           reorderNode(d.alContext.draggedId, d.alContext.parentId, idx);
         }
@@ -244,7 +423,7 @@ export function beginCanvasNodeDrag(opts: {
       world.y,
       state.nodes,
       state.childOrder,
-      d.swapPartnerId,
+      d.swapCandidateIds,
     );
     if (swapTarget !== d.swapTargetId) {
       d.swapTargetId = swapTarget;
@@ -303,20 +482,13 @@ export function beginCanvasNodeDrag(opts: {
     const fdx2 = fdx + snap.dx;
     const fdy2 = fdy + snap.dy;
 
-    if (Math.abs(fdx2) < 1e-9 && Math.abs(fdy2) < 1e-9) return;
-
-    for (const sid of d.movingIds) {
-      const sw = d.startWorld[sid]!;
-      const desired = { x: sw.x + fdx2, y: sw.y + fdy2 };
-      const xy = worldOriginToNodeXYFromChildOrder(sid, state.nodes, state.childOrder, desired);
-      updateNode(sid, { x: xy.x, y: xy.y }, { skipHistory: true });
-    }
+    d.lastPreviewDelta = { dx: fdx2, dy: fdy2 };
+    applyDragPreview(d.movingIds, fdx2, fdy2);
   };
 
   const moveScheduler = createRafPointerScheduler<{ clientX: number; clientY: number }>(
     ({ clientX, clientY }) => applyMove(clientX, clientY),
   );
-  activeMoveScheduler = moveScheduler;
 
   const onMove = (ev: PointerEvent) => {
     const d = activeDrag;
@@ -334,11 +506,31 @@ export function beginCanvasNodeDrag(opts: {
     });
     moveScheduler.flush();
     moveScheduler.cancel();
-    activeMoveScheduler = null;
+    const session = d;
     activeDrag = null;
     document.body.style.cursor = "";
+    if (!session.activated) {
+      clearDragPreview();
+      const stEnd = useEditorStore.getState();
+      stEnd.setIsMovingSelection(false);
+      stEnd.setGuides([]);
+      stEnd.setSwapDragIndicator(null);
+      stEnd.setAutoLayoutReorderIndicator(null);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      return;
+    }
+    let committedFreeDrag = false;
+    if (session.mode === "free") {
+      committedFreeDrag = commitDragPositions(session);
+    }
+    clearDragPreview();
     const stEnd = useEditorStore.getState();
     stEnd.setIsMovingSelection(false);
+    if (committedFreeDrag && !session.skipDuplicateStepRefresh) {
+      refreshDuplicateStepAfterDragCommit();
+    }
     stEnd.setGuides([]);
     stEnd.setSwapDragIndicator(null);
     stEnd.setAutoLayoutReorderIndicator(null);
@@ -348,33 +540,33 @@ export function beginCanvasNodeDrag(opts: {
 
     const st = useEditorStore.getState();
     if (st.editorMode === "prototype") return;
-    const primary = st.nodes[d.primaryId];
+    const primary = st.nodes[session.primaryId];
     if (!primary) return;
 
     const world = opts.clientToWorld(ev.clientX, ev.clientY);
     const swapDropId = resolveSwapDropTarget(
-      d.primaryId,
-      d.swapPartnerId,
-      d.swapTargetId,
+      session.primaryId,
+      session.swapCandidateIds,
+      session.swapTargetId,
       world.x,
       world.y,
       st.nodes,
       st.childOrder,
     );
-    if (swapDropId && d.startWorld[d.primaryId] && d.startWorld[swapDropId]) {
-      if (canSwapAutoLayoutSiblings(d.primaryId, swapDropId, st.nodes)) {
-        st.swapAutoLayoutSiblings(d.primaryId, swapDropId, { skipHistory: true });
+    if (swapDropId && session.startWorld[session.primaryId] && session.startWorld[swapDropId]) {
+      if (canSwapAutoLayoutSiblings(session.primaryId, swapDropId, st.nodes)) {
+        st.swapAutoLayoutSiblings(session.primaryId, swapDropId, { skipHistory: true });
         return;
       }
       const swapped = swapNodeWorldPositions(
-        d.primaryId,
+        session.primaryId,
         swapDropId,
-        d.startWorld[d.primaryId]!,
-        d.startWorld[swapDropId]!,
+        session.startWorld[session.primaryId]!,
+        session.startWorld[swapDropId]!,
         st.nodes,
         st.childOrder,
       );
-      st.updateNode(d.primaryId, { x: swapped.nodes[d.primaryId]!.x, y: swapped.nodes[d.primaryId]!.y }, {
+      st.updateNode(session.primaryId, { x: swapped.nodes[session.primaryId]!.x, y: swapped.nodes[session.primaryId]!.y }, {
         skipHistory: true,
       });
       st.updateNode(
@@ -390,11 +582,11 @@ export function beginCanvasNodeDrag(opts: {
       world.y,
       st.nodes,
       st.childOrder,
-      d.primaryId,
-      d.primaryId,
+      session.primaryId,
+      session.primaryId,
     );
     if (alDrop) {
-      const idsToMove = d.movingIds.filter((id) => {
+      const idsToMove = session.movingIds.filter((id) => {
         const n = st.nodes[id];
         return (
           n &&
@@ -414,16 +606,16 @@ export function beginCanvasNodeDrag(opts: {
     }
 
     const frameHit = pickDeepestFrameAtWorldPoint(world.x, world.y, st.nodes, st.childOrder, {
-      excludeDescendantsOf: d.primaryId,
+      excludeDescendantsOf: session.primaryId,
     });
     if (
       frameHit &&
-      frameHit !== d.primaryId &&
-      !isAncestorOf(st.nodes, d.primaryId, frameHit) &&
+      frameHit !== session.primaryId &&
+      !isAncestorOf(st.nodes, session.primaryId, frameHit) &&
       primary.parentId !== frameHit
     ) {
-      const list = [...(st.childOrder[frameHit] ?? [])].filter((x) => x !== d.primaryId);
-      st.moveNodeToParent(d.primaryId, frameHit, list.length);
+      const list = [...(st.childOrder[frameHit] ?? [])].filter((x) => x !== session.primaryId);
+      st.moveNodeToParent(session.primaryId, frameHit, list.length);
       return;
     }
     if (primary.parentId) {
@@ -434,8 +626,8 @@ export function beginCanvasNodeDrag(opts: {
           : null;
       const stillOverParent = parentBounds && pointInWorldRect(world.x, world.y, parentBounds);
       if (!stillOverParent && !frameHit) {
-        const roots = (st.childOrder[ROOT] ?? []).filter((x) => x !== d.primaryId);
-        st.moveNodeToParent(d.primaryId, ROOT, roots.length);
+        const roots = (st.childOrder[ROOT] ?? []).filter((x) => x !== session.primaryId);
+        st.moveNodeToParent(session.primaryId, ROOT, roots.length);
       }
     }
   };
@@ -446,9 +638,20 @@ export function beginCanvasNodeDrag(opts: {
   return true;
 }
 
+/** Begin a swap-only drag from a multi-select pink center handle. */
+export function beginCanvasSwapHandleDrag(opts: {
+  nodeId: string;
+  pointerId: number;
+  clientX: number;
+  clientY: number;
+  clientToWorld: ClientToWorldFn;
+  captureTarget: Element;
+}): boolean {
+  return beginCanvasNodeDrag({ ...opts, forceSwapDrag: true });
+}
+
 export function cancelCanvasNodeDrag(): void {
-  activeMoveScheduler?.cancel();
-  activeMoveScheduler = null;
+  clearDragPreview();
   activeDrag = null;
   document.body.style.cursor = "";
   const st = useEditorStore.getState();

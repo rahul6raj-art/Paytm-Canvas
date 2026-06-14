@@ -6,12 +6,20 @@ import {
   getRenderedWorldBounds,
   insertNodeInChildOrder,
   isAncestorOf,
+  layerPanelChildIds,
   pointInNodeRenderedWorldBounds,
   repairNodeHierarchy,
   worldPointToParentLocalFromChildOrder,
 } from "@/lib/editorGraph";
 import { isWorldPointVisibleThroughClipAncestors } from "@/lib/clipChildren";
+import { isWorldPointVisibleThroughMaskAncestors } from "@/lib/mask/maskHitTesting";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
+import {
+  craftEngineHitTest,
+  isCraftEngineReady,
+} from "@/engine/craftEngineRegistry";
+import { isNativeRendererEnabled } from "@/lib/rendererMode";
+import { useEditorStore } from "@/stores/useEditorStore";
 import {
   applyMatrixToPoint,
   getNodeTransformedWorldBounds,
@@ -83,10 +91,12 @@ export function insertNodeWithFrameParenting(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
   selectedIds: string[],
+  opts?: { minDimension?: number },
 ): { nodes: Record<string, EditorNode>; childOrder: Record<string, string[]> } {
   const frameId = resolveFrameParentForShapeInsert(worldBounds, nodes, childOrder, selectedIds);
-  const w = Math.max(1, worldBounds.width);
-  const h = Math.max(1, worldBounds.height);
+  const min = opts?.minDimension ?? 1;
+  const w = Math.max(min, worldBounds.width);
+  const h = Math.max(min, worldBounds.height);
   let placed = node;
 
   if (frameId) {
@@ -117,7 +127,9 @@ export function insertNodeWithFrameParenting(
   }
 
   const nodesDraft = { ...nodes, [placed.id]: placed };
-  let co = insertNodeInChildOrder(childOrder, placed.id, placed.parentId);
+  const co = insertNodeInChildOrder(childOrder, placed.id, placed.parentId);
+  // Live shape drag starts at 0×0; full geometry repair would clamp to 1×1.
+  if (min === 0) return { nodes: nodesDraft, childOrder: co };
   return repairNodeHierarchy(nodesDraft, co);
 }
 
@@ -266,8 +278,9 @@ export function pickDeepestFrameOrGroupAtWorldPoint(
   function dfs(nid: string): string | null {
     if (!inRect(nid) || skip(nid)) return null;
     if (!isWorldPointVisibleThroughClipAncestors(worldX, worldY, nid, nodes, childOrder)) return null;
+    if (!isWorldPointVisibleThroughMaskAncestors(worldX, worldY, nid, nodes, childOrder)) return null;
     const n = nodes[nid];
-    const rawKids = childOrder[nid] ?? [];
+    const rawKids = layerPanelChildIds(nid, nodes, childOrder);
     const kids =
       n?.type === "group" && n.maskId ? maskGroupChildHitOrder(n, rawKids) : rawKids;
     for (const k of [...kids].reverse()) {
@@ -277,7 +290,7 @@ export function pickDeepestFrameOrGroupAtWorldPoint(
     if (n?.type === "frame" || n?.type === "group") return nid;
     return null;
   }
-  const roots = [...(childOrder[EDITOR_ROOT_KEY] ?? [])].reverse();
+  const roots = [...layerPanelChildIds(EDITOR_ROOT_KEY, nodes, childOrder)].reverse();
   for (const r of roots) {
     const hit = dfs(r);
     if (hit) return hit;
@@ -305,6 +318,80 @@ export function pickDeepestFrameAtWorldPoint(
   return null;
 }
 
+function pickViaNativeEngine(
+  worldX: number,
+  worldY: number,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  types?: NodeKind[],
+  zoom = 1,
+): string | null {
+  if (!isNativeRendererEnabled() || !isCraftEngineReady()) return null;
+  const st = useEditorStore.getState();
+  if (
+    st.transformInteractionMode !== "none" ||
+    st.isMovingSelection ||
+    st.isApplyingWasmMirror ||
+    st.isApplyingHistory
+  ) {
+    return null;
+  }
+  const hit = craftEngineHitTest(worldX, worldY);
+  if (!hit) return null;
+  const n = nodes[hit];
+  if (!n?.visible || n.locked) return null;
+  if (!pointInNodeRenderedWorldBounds(worldX, worldY, hit, nodes, childOrder, zoom)) {
+    return null;
+  }
+  if (!isWorldPointVisibleThroughClipAncestors(worldX, worldY, hit, nodes, childOrder)) {
+    return null;
+  }
+  if (!isWorldPointVisibleThroughMaskAncestors(worldX, worldY, hit, nodes, childOrder)) {
+    return null;
+  }
+  if (types && !types.includes(n.type)) return null;
+  return hit;
+}
+
+function pickDeepestNodeViaDfs(
+  worldX: number,
+  worldY: number,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  opts?: { types?: NodeKind[]; zoom?: number },
+): string | null {
+  const types = opts?.types;
+  const zoom = opts?.zoom ?? 1;
+
+  function dfs(nid: string): string | null {
+    const n = nodes[nid];
+    if (!n?.visible) return null;
+    if (!pointInNodeRenderedWorldBounds(worldX, worldY, nid, nodes, childOrder, zoom)) {
+      return null;
+    }
+    if (!isWorldPointVisibleThroughClipAncestors(worldX, worldY, nid, nodes, childOrder)) {
+      return null;
+    }
+    if (!isWorldPointVisibleThroughMaskAncestors(worldX, worldY, nid, nodes, childOrder)) {
+      return null;
+    }
+    const kids = maskGroupChildHitOrder(n, layerPanelChildIds(nid, nodes, childOrder));
+    for (const k of [...kids].reverse()) {
+      const h = dfs(k);
+      if (h) return h;
+    }
+    if (types && !types.includes(n.type)) return null;
+    return nid;
+  }
+
+  const roots = [...layerPanelChildIds(EDITOR_ROOT_KEY, nodes, childOrder)].reverse();
+  for (const r of roots) {
+    const h = dfs(r);
+    if (h) return h;
+  }
+  return null;
+}
+
 /** Deepest visible node under the point (top-most in z-order). Optional `types` filters leaf hits. */
 export function pickDeepestNodeAtWorldPoint(
   worldX: number,
@@ -314,29 +401,13 @@ export function pickDeepestNodeAtWorldPoint(
   opts?: { types?: NodeKind[]; zoom?: number },
 ): string | null {
   const types = opts?.types;
-  function dfs(nid: string): string | null {
-    const n = nodes[nid];
-    if (!n?.visible) return null;
-    if (!pointInNodeRenderedWorldBounds(worldX, worldY, nid, nodes, childOrder, opts?.zoom ?? 1)) {
-      return null;
-    }
-    if (!isWorldPointVisibleThroughClipAncestors(worldX, worldY, nid, nodes, childOrder)) {
-      return null;
-    }
-    const kids = maskGroupChildHitOrder(n, childOrder[nid] ?? []);
-    for (const k of [...kids].reverse()) {
-      const h = dfs(k);
-      if (h) return h;
-    }
-    if (types && !types.includes(n.type)) return null;
-    return nid;
+  const zoom = opts?.zoom ?? 1;
+  const tsHit = pickDeepestNodeViaDfs(worldX, worldY, nodes, childOrder, opts);
+  const wasmHit = pickViaNativeEngine(worldX, worldY, nodes, childOrder, types, zoom);
+  if (wasmHit && tsHit && wasmHit !== tsHit && isAncestorOf(nodes, wasmHit, tsHit)) {
+    return tsHit;
   }
-  const roots = [...(childOrder[EDITOR_ROOT_KEY] ?? [])].reverse();
-  for (const r of roots) {
-    const h = dfs(r);
-    if (h) return h;
-  }
-  return null;
+  return wasmHit ?? tsHit;
 }
 
 /** Frame to insert new layers into — prefers artboard under `world`, then selection, then first root frame. */

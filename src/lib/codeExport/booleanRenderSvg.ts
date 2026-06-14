@@ -1,5 +1,6 @@
 import type { BooleanRenderModel } from "@/lib/booleanGeometry";
-import { svgSafeId } from "@/lib/svgMarkupCore";
+import { resolveShapeFillAttr } from "@/lib/gradient/svgSceneFill";
+import { svgSafeId, wrapSvgNodeFilter } from "@/lib/svgMarkupCore";
 import type { EditorNode } from "@/stores/useEditorStore";
 
 function escapeSvgPathD(d: string): string {
@@ -28,65 +29,36 @@ function pathAttrs(fillAttr: string, strokeAttrs: string, fillOpacity: number): 
   return `fill="${fillAttr}"${opacity}${strokeAttrs}`;
 }
 
-/** SVG defs + paths for boolean preview (canvas and code export). */
+function clipperPathD(render: BooleanRenderModel): string | null {
+  if (render.op === "clipper") return render.pathD;
+  if (render.op === "subtract") return render.baseD;
+  if ("pathDs" in render && render.pathDs.length > 0) return render.pathDs.join(" ");
+  return null;
+}
+
+function clipperFillRule(render: BooleanRenderModel): "nonzero" | "evenodd" {
+  if (render.op === "clipper") return render.fillRule;
+  if (render.op === "subtract" || render.op === "exclude") return "evenodd";
+  return "nonzero";
+}
+
+/** SVG path for boolean preview (canvas and code export) — Clipper2 result. */
 export function svgInnerMarkupFromBooleanRender(
   render: BooleanRenderModel,
-  groupId: string,
+  _groupId: string,
   fillAttr: string,
-  idPrefix: string,
+  _idPrefix: string,
   strokeAttrs = "",
   fillOpacity = 1,
 ): string {
-  const safe = svgSafeId(groupId);
+  const pathD = clipperPathD(render);
+  if (!pathD) return "";
+
+  const d = escapeSvgPathD(pathD);
+  const rule =
+    clipperFillRule(render) === "evenodd" ? ` fill-rule="evenodd"` : ` fill-rule="nonzero"`;
   const pa = pathAttrs(fillAttr, strokeAttrs, fillOpacity);
-
-  if (render.op === "union") {
-    return render.pathDs
-      .map((d) => `<path d="${escapeSvgPathD(d)}" ${pa}/>`)
-      .join("");
-  }
-
-  if (render.op === "subtract") {
-    const maskId = `${idPrefix}-sub-${safe}`;
-    const baseD = escapeSvgPathD(render.baseD);
-    const subtractD = escapeSvgPathD(render.subtractD);
-    return `<defs><mask id="${maskId}" maskUnits="userSpaceOnUse"><path d="${baseD}" fill="white"/><path d="${subtractD}" fill="black"/></mask></defs><path d="${baseD}" ${pa} mask="url(#${maskId})"/>`;
-  }
-
-  if (render.op === "intersect") {
-    const clipIds = render.pathDs.map((_, i) => `${idPrefix}-int-${safe}-${i}`);
-    const defs = render.pathDs
-      .map((d, i) => {
-        const clipId = clipIds[i]!;
-        return `<clipPath id="${clipId}" clipPathUnits="userSpaceOnUse"><path d="${escapeSvgPathD(d)}"/></clipPath>`;
-      })
-      .join("");
-    const fillD = escapeSvgPathD(render.pathDs[0]!);
-    let inner = `<path d="${fillD}" ${pa}/>`;
-    for (let i = render.pathDs.length - 1; i >= 0; i--) {
-      inner = `<g clip-path="url(#${clipIds[i]})">${inner}</g>`;
-    }
-    return `<defs>${defs}</defs>${inner}`;
-  }
-
-  if (render.op === "exclude") {
-    const parts: string[] = [];
-    render.pathDs.forEach((d, i) => {
-      const maskId = `${idPrefix}-exc-${safe}-${i}`;
-      const whiteD = escapeSvgPathD(d);
-      const blackPaths = render.pathDs
-        .filter((_, j) => j !== i)
-        .map((other) => `<path d="${escapeSvgPathD(other)}" fill="black"/>`)
-        .join("");
-      parts.push(
-        `<mask id="${maskId}" maskUnits="userSpaceOnUse"><path d="${whiteD}" fill="white"/>${blackPaths}</mask>`,
-        `<path d="${whiteD}" ${pa} mask="url(#${maskId})"/>`,
-      );
-    });
-    return `<defs>${parts.filter((p) => p.startsWith("<mask")).join("")}</defs>${parts.filter((p) => p.startsWith("<path")).join("")}`;
-  }
-
-  return "";
+  return `<path d="${d}"${rule} ${pa}/>`;
 }
 
 export function booleanRenderSvgMarkup(
@@ -118,4 +90,68 @@ export function booleanRenderFillAttr(
   fill: string,
 ): string {
   return fill === "transparent" ? "none" : escapeHtmlAttr(fill);
+}
+
+/** Boolean composite markup for the native SVG scene renderer. */
+export function booleanGroupSceneInnerMarkup(opts: {
+  groupId: string;
+  node: EditorNode;
+  render: BooleanRenderModel;
+  width: number;
+  height: number;
+  registerGradient: (id: string, markup: string) => void;
+  renderScale?: number;
+  filterRef?: string;
+}): string {
+  const { groupId, node, render, width, height, registerGradient, renderScale = 1, filterRef } =
+    opts;
+  const safe = svgSafeId(groupId);
+  const w = Math.max(1, width);
+  const h = Math.max(1, height);
+
+  const { fillAttr: rawFill, underlayMarkup } = resolveShapeFillAttr({
+    node,
+    width: w,
+    height: h,
+    nodeId: `pc-bg-${safe}`,
+    registerGradient,
+    renderScale,
+  });
+
+  const fillAttr =
+    rawFill === "none" || rawFill.startsWith("url(")
+      ? rawFill
+      : booleanRenderFillAttr(rawFill);
+
+  const strokeAttrs = booleanStrokeAttrParts(node);
+  const fillOpacity = node.fillOpacity ?? 1;
+  const useCssPathsFill = rawFill === "none" && Boolean(underlayMarkup);
+  const pathFillAttr = useCssPathsFill ? "none" : fillAttr;
+
+  const pathD = clipperPathD(render);
+
+  let cssMaskAndUnderlay = "";
+  if (useCssPathsFill && pathD) {
+    const maskId = `pc-bgmask-${safe}`;
+    const underlayWithMask = underlayMarkup.replace(
+      "<foreignObject",
+      `<foreignObject mask="url(#${maskId})"`,
+    );
+    cssMaskAndUnderlay =
+      `<mask id="${maskId}" maskUnits="userSpaceOnUse" x="0" y="0" width="${w}" height="${h}">` +
+      `<rect x="0" y="0" width="${w}" height="${h}" fill="black"/>` +
+      `<path d="${escapeSvgPathD(pathD)}" fill="white"/></mask>` +
+      underlayWithMask;
+  }
+
+  const inner = svgInnerMarkupFromBooleanRender(
+    render,
+    groupId,
+    pathFillAttr,
+    "pc-bool",
+    strokeAttrs,
+    fillOpacity,
+  );
+
+  return wrapSvgNodeFilter(`${cssMaskAndUnderlay}${inner}`, filterRef);
 }

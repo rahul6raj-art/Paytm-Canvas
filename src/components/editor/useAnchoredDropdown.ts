@@ -109,14 +109,23 @@ export function useDismissAnchoredDropdown(
   onClose: () => void,
   anchorRef: RefObject<HTMLElement | null>,
   menuRef: RefObject<HTMLElement | null>,
+  options?: {
+    ignoreRefs?: RefObject<HTMLElement | null>[];
+    /** When true, outside clicks do not dismiss (e.g. value scrub in progress). */
+    blockDismissRef?: RefObject<boolean>;
+  },
 ) {
   useLayoutEffect(() => {
     if (!open) return;
 
     const onDown = (e: MouseEvent) => {
+      if (options?.blockDismissRef?.current) return;
       const t = e.target as Node;
       if (anchorRef.current?.contains(t)) return;
       if (menuRef.current?.contains(t)) return;
+      for (const ref of options?.ignoreRefs ?? []) {
+        if (ref.current?.contains(t)) return;
+      }
       onClose();
     };
 
@@ -130,5 +139,5 @@ export function useDismissAnchoredDropdown(
       cancelAnimationFrame(id);
       if (active) document.removeEventListener("mousedown", onDown);
     };
-  }, [open, onClose, anchorRef, menuRef]);
+  }, [open, onClose, anchorRef, menuRef, options?.ignoreRefs, options?.blockDismissRef]);
 }

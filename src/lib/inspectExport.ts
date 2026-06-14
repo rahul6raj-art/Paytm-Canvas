@@ -9,7 +9,7 @@ import {
 import { buildNodeEffectRenderStyle, firstVisibleDropShadowFilter } from "@/lib/nodeEffects";
 import { fillCss, normalizeHex } from "@/lib/color";
 import { effectiveFillType } from "@/lib/fillGradient";
-import { paintFillOnCanvas, resolveSolidFillCss } from "@/lib/canvasGradientPaint";
+import { paintGradientFillInBox, resolveSolidFillCss } from "@/lib/canvasGradientPaint";
 import { pathToSvgD } from "@/lib/pathGeometry";
 import { buildLayerCssTransform, composeSvgTransform, wrapSvgNodeRotation } from "@/lib/transformMath";
 import {
@@ -25,6 +25,7 @@ import {
   svgRectLike,
   svgSafeId,
   svgTextMarkup,
+  wrapSvgNodeFilter,
 } from "@/lib/svgMarkupCore";
 import { shouldClipChildren, clipExportCssProperties } from "@/lib/clipChildren";
 import {
@@ -46,6 +47,7 @@ import {
   roundedRectPathD,
 } from "@/lib/cornerRadius";
 import type { LayoutMode } from "@/lib/autoLayout";
+import { buildSinglePageJpegPdf, jpegDataUrlToBytes } from "@/lib/pdfExport";
 
 export function nearestAncestorFrameId(
   nodes: Record<string, EditorNode>,
@@ -60,8 +62,21 @@ export function nearestAncestorFrameId(
   return null;
 }
 
-export function downloadTextFile(filename: string, content: string, mimeType = "text/plain;charset=utf-8") {
-  const blob = new Blob([content], { type: mimeType });
+export type SaveFileDialogType = {
+  description: string;
+  mimeType: string;
+  extension: string;
+};
+
+function ensureFilenameExtension(filename: string, extension: string): string {
+  const ext = extension.startsWith(".") ? extension : `.${extension}`;
+  const lower = filename.toLowerCase();
+  if (lower.endsWith(ext)) return filename;
+  const base = filename.replace(/\.[^./\\]+$/, "");
+  return `${base}${ext}`;
+}
+
+function triggerBrowserDownload(filename: string, blob: Blob): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -71,6 +86,73 @@ export function downloadTextFile(filename: string, content: string, mimeType = "
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+function isSaveDialogAbort(err: unknown): boolean {
+  return err instanceof DOMException && err.name === "AbortError";
+}
+
+/** Open the native save dialog when supported; otherwise download to the default folder. */
+export async function saveBlobWithDialog(
+  blob: Blob,
+  suggestedName: string,
+  fileType: SaveFileDialogType,
+): Promise<boolean> {
+  const filename = ensureFilenameExtension(suggestedName, fileType.extension);
+  const picker = typeof window !== "undefined" ? window.showSaveFilePicker : undefined;
+  if (picker) {
+    try {
+      const handle = await picker({
+        suggestedName: filename,
+        types: [
+          {
+            description: fileType.description,
+            accept: { [fileType.mimeType]: [fileType.extension] },
+          },
+        ],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return true;
+    } catch (err) {
+      if (isSaveDialogAbort(err)) return false;
+      throw err;
+    }
+  }
+  triggerBrowserDownload(filename, blob);
+  return true;
+}
+
+/** Save text via native save dialog when supported. */
+export async function saveTextWithDialog(
+  filename: string,
+  content: string,
+  mimeType = "text/plain;charset=utf-8",
+  fileType?: SaveFileDialogType,
+): Promise<boolean> {
+  const blob = new Blob([content], { type: mimeType });
+  const ext = fileType?.extension ?? (filename.includes(".") ? `.${filename.split(".").pop()}` : ".txt");
+  const mime = fileType?.mimeType ?? mimeType.split(";")[0] ?? "text/plain";
+  return saveBlobWithDialog(blob, filename, {
+    description: fileType?.description ?? "Text file",
+    mimeType: mime,
+    extension: ext,
+  });
+}
+
+/** @deprecated Use saveTextWithDialog */
+export async function downloadTextFile(
+  filename: string,
+  content: string,
+  mimeType = "text/plain;charset=utf-8",
+): Promise<boolean> {
+  const ext = filename.includes(".") ? `.${filename.split(".").pop()}` : ".txt";
+  return saveTextWithDialog(filename, content, mimeType, {
+    description: "Text file",
+    mimeType: mimeType.split(";")[0] ?? "text/plain",
+    extension: ext,
+  });
 }
 
 function loadHtmlImage(src: string): Promise<HTMLImageElement | null> {
@@ -421,17 +503,26 @@ export function nodeToSvgGroupMarkup(
       const render = buildBooleanRenderForGroup(node.id, flowKids, nodes, op, childOrder);
       if (render) {
         const fill = fillCss(node.fill, node.fillOpacity, node.fillEnabled);
-        inner = svgInnerMarkupFromBooleanRender(
-          render,
-          node.id,
-          booleanRenderFillAttr(fill),
-          "pc-bool-inspect",
+        inner = wrapSvgNodeFilter(
+          svgInnerMarkupFromBooleanRender(
+            render,
+            node.id,
+            booleanRenderFillAttr(fill),
+            "pc-bool-inspect",
+          ),
+          filterRef,
         );
       }
     } else if (node.maskId) {
       const clipId = `pc-mask-${svgSafeId(node.id)}`;
-      const md = buildMaskClipPathDForGroup(node.id, node.maskId, nodes, childOrder);
-      if (md) clipDefs.push(`<clipPath id="${clipId}"><path d="${escXml(md)}" /></clipPath>`);
+      const clip = buildMaskClipPathDForGroup(node.id, node.maskId, nodes, childOrder);
+      if (clip) {
+        const ruleAttr =
+          clip.clipRule === "evenodd" ? ` clip-rule="evenodd"` : ` clip-rule="nonzero"`;
+        clipDefs.push(
+          `<clipPath id="${clipId}"><path d="${escXml(clip.clipD)}"${ruleAttr} /></clipPath>`,
+        );
+      }
       let clipped = "";
       for (const cid of kids) {
         if (cid === node.maskId) continue;
@@ -440,7 +531,10 @@ export function nodeToSvgGroupMarkup(
         const childMarkup = nodeToSvgGroupMarkup(c, nodes, childOrder, assets, designTokens);
         clipped += `<g transform="${composeSvgTransform(c)}">${childMarkup}</g>`;
       }
-      inner = md ? `<g clip-path="url(#${clipId})">${clipped}</g>` : clipped;
+      inner = wrapSvgNodeFilter(
+        clip ? `<g clip-path="url(#${clipId})">${clipped}</g>` : clipped,
+        filterRef,
+      );
     } else {
       const shell = !node.isBooleanGroup ? svgRectLike(resolved, shapeOpts) : "";
       let childrenMarkup = "";
@@ -512,10 +606,7 @@ async function renderNodeToCanvas(
 
   const paintShapeFill = (w: number, h: number) => {
     if (drawNode.fillEnabled === false) return;
-    if (useGradientFill && paintFillOnCanvas(ctx, drawNode, w, h)) {
-      ctx.fill();
-      return;
-    }
+    if (useGradientFill && paintGradientFillInBox(ctx, drawNode, w, h)) return;
     if (fill !== "transparent") {
       ctx.fillStyle = fill;
       ctx.fill();
@@ -529,7 +620,14 @@ async function renderNodeToCanvas(
     } else {
       addNodeRoundedRectPath(ctx, drawNode, 0, 0, drawNode.width, drawNode.height);
     }
-    paintShapeFill(drawNode.width, drawNode.height);
+    if (useGradientFill) {
+      ctx.save();
+      ctx.clip();
+      paintShapeFill(drawNode.width, drawNode.height);
+      ctx.restore();
+    } else {
+      paintShapeFill(drawNode.width, drawNode.height);
+    }
     if (sw > 0 && sc) {
       ctx.strokeStyle = sc;
       ctx.lineWidth = sw;
@@ -542,7 +640,14 @@ async function renderNodeToCanvas(
   } else if (drawNode.type === "ellipse") {
     ctx.beginPath();
     ctx.ellipse(drawNode.width / 2, drawNode.height / 2, drawNode.width / 2, drawNode.height / 2, 0, 0, Math.PI * 2);
-    paintShapeFill(drawNode.width, drawNode.height);
+    if (useGradientFill) {
+      ctx.save();
+      ctx.clip();
+      paintShapeFill(drawNode.width, drawNode.height);
+      ctx.restore();
+    } else {
+      paintShapeFill(drawNode.width, drawNode.height);
+    }
     if (sw > 0 && sc) {
       ctx.strokeStyle = sc;
       ctx.lineWidth = sw;
@@ -621,6 +726,46 @@ async function renderNodeToCanvas(
   ctx.restore();
 }
 
+/** Supported PNG export density multipliers (Figma-style). */
+export const PNG_EXPORT_SCALES = [1, 1.5, 2, 3, 4] as const;
+export type PngExportScale = (typeof PNG_EXPORT_SCALES)[number];
+
+export const PNG_EXPORT_SCALE_OPTIONS = PNG_EXPORT_SCALES.map((scale) => ({
+  value: String(scale),
+  label: scale === 1 ? "1×" : `${scale}×`,
+}));
+
+export function pngExportFilename(baseName: string, scale: number): string {
+  const stem = baseName.replace(/\.png$/i, "");
+  if (scale === 1) return `${stem}.png`;
+  return `${stem}@${scale}x.png`;
+}
+
+export async function renderNodeExportCanvas(
+  node: EditorNode,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  assets?: Record<string, EditorAsset>,
+  designTokens?: Record<string, DesignToken>,
+  scale = 1,
+): Promise<HTMLCanvasElement | null> {
+  const exportScale = Math.max(0.25, scale);
+  const logicalW = Math.max(1, Math.ceil(node.width));
+  const logicalH = Math.max(1, Math.ceil(node.height));
+  const canvas = document.createElement("canvas");
+  const w = Math.max(1, Math.ceil(logicalW * exportScale));
+  const h = Math.max(1, Math.ceil(logicalH * exportScale));
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.scale(exportScale, exportScale);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, logicalW, logicalH);
+  await renderNodeToCanvas(ctx, node, nodes, childOrder, 0, 0, assets, designTokens);
+  return canvas;
+}
+
 export async function downloadNodePng(
   node: EditorNode,
   nodes: Record<string, EditorNode>,
@@ -628,37 +773,52 @@ export async function downloadNodePng(
   filename: string,
   assets?: Record<string, EditorAsset>,
   designTokens?: Record<string, DesignToken>,
+  scale = 1,
 ): Promise<void> {
-  const canvas = document.createElement("canvas");
-  const w = Math.max(1, Math.ceil(node.width));
-  const h = Math.max(1, Math.ceil(node.height));
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, w, h);
-  await renderNodeToCanvas(ctx, node, nodes, childOrder, 0, 0, assets, designTokens);
+  const canvas = await renderNodeExportCanvas(node, nodes, childOrder, assets, designTokens, scale);
+  if (!canvas) return;
   await new Promise<void>((resolve, reject) => {
     canvas.toBlob(
-      (blob) => {
+      async (blob) => {
         if (!blob) {
           reject(new Error("PNG export failed"));
           return;
         }
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename.endsWith(".png") ? filename : `${filename}.png`;
-        a.rel = "noopener";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-        resolve();
+        try {
+          await saveBlobWithDialog(blob, filename, {
+            description: "PNG image",
+            mimeType: "image/png",
+            extension: ".png",
+          });
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
       },
       "image/png",
       1,
     );
+  });
+}
+
+export async function downloadNodePdf(
+  node: EditorNode,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  filename: string,
+  assets?: Record<string, EditorAsset>,
+  designTokens?: Record<string, DesignToken>,
+): Promise<void> {
+  const canvas = await renderNodeExportCanvas(node, nodes, childOrder, assets, designTokens);
+  if (!canvas) return;
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+  const jpeg = jpegDataUrlToBytes(dataUrl);
+  if (!jpeg) throw new Error("PDF export failed");
+  const pdf = buildSinglePageJpegPdf(jpeg, canvas.width, canvas.height);
+  const blob = new Blob([pdf], { type: "application/pdf" });
+  await saveBlobWithDialog(blob, filename, {
+    description: "PDF document",
+    mimeType: "application/pdf",
+    extension: ".pdf",
   });
 }

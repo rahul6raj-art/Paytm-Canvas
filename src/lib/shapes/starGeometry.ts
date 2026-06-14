@@ -1,7 +1,14 @@
 import type { EditorNode } from "@/stores/useEditorStore";
 import { newPathPointId, type PathPoint } from "@/lib/pathGeometry";
+import { resizeCornerRadiiForCount } from "@/lib/cornerRadius";
+import {
+  createRoundedPathSvgD,
+  createRoundedPathWithRadiiSvgD,
+  maxQuadraticCornerRadiusAtVertex,
+  type Point2,
+} from "@/lib/geometry";
 
-export type Point2 = { x: number; y: number };
+export type { Point2 };
 
 export const STAR_POINTS_MIN = 3;
 export const STAR_POINTS_MAX = 100;
@@ -92,24 +99,9 @@ export function starRatioFromLocalPoint(
   return clampStarRatio(t);
 }
 
-/** Max fillet radius before adjacent corners overlap on a closed polygon. */
+/** Max fillet radius before adjacent corners overlap (quadratic fillets). */
 export function maxCornerRadiusAtVertex(prev: Point2, curr: Point2, next: Point2): number {
-  const v0x = prev.x - curr.x;
-  const v0y = prev.y - curr.y;
-  const v1x = next.x - curr.x;
-  const v1y = next.y - curr.y;
-  const len0 = Math.hypot(v0x, v0y);
-  const len1 = Math.hypot(v1x, v1y);
-  if (len0 < 1e-6 || len1 < 1e-6) return 0;
-  const n0x = v0x / len0;
-  const n0y = v0y / len0;
-  const n1x = v1x / len1;
-  const n1y = v1y / len1;
-  const dot = Math.max(-1, Math.min(1, n0x * n1x + n0y * n1y));
-  const angle = Math.acos(dot);
-  const half = angle / 2;
-  if (half < 1e-6) return 0;
-  return Math.min(len0, len1) * Math.tan(half) * 0.999;
+  return maxQuadraticCornerRadiusAtVertex(prev, curr, next);
 }
 
 export function maxStarCornerRadius(
@@ -139,6 +131,98 @@ export function clampStarCornerRadius(
 ): number {
   const maxR = maxStarCornerRadius(pointCount, ratio, width, height);
   return Math.max(0, Math.min(maxR, radius));
+}
+
+export function maxStarVertexCornerRadius(
+  pointCount: number,
+  ratio: number,
+  width: number,
+  height: number,
+  vertexIndex: number,
+): number {
+  const verts = starVertices(pointCount, ratio, width, height);
+  const n = verts.length;
+  const i = ((vertexIndex % n) + n) % n;
+  const prev = verts[(i - 1 + n) % n]!;
+  const curr = verts[i]!;
+  const next = verts[(i + 1) % n]!;
+  return maxCornerRadiusAtVertex(prev, curr, next);
+}
+
+export function clampStarOuterCornerRadius(
+  pointCount: number,
+  ratio: number,
+  width: number,
+  height: number,
+  radius: number,
+): number {
+  return Math.max(
+    0,
+    Math.min(maxStarVertexCornerRadius(pointCount, ratio, width, height, 0), radius),
+  );
+}
+
+export function clampStarInnerCornerRadius(
+  pointCount: number,
+  ratio: number,
+  width: number,
+  height: number,
+  radius: number,
+): number {
+  return Math.max(
+    0,
+    Math.min(maxStarVertexCornerRadius(pointCount, ratio, width, height, 1), radius),
+  );
+}
+
+export function clampStarVertexCornerRadii(
+  pointCount: number,
+  ratio: number,
+  width: number,
+  height: number,
+  radii: readonly number[],
+): number[] {
+  const spikes = clampStarPointCount(pointCount);
+  const r = clampStarRatio(ratio);
+  const verts = starVertices(spikes, r, width, height);
+  const n = verts.length;
+  return Array.from({ length: n }, (_, i) => {
+    const val = Math.max(0, radii[i] ?? 0);
+    const prev = verts[(i - 1 + n) % n]!;
+    const curr = verts[i]!;
+    const next = verts[(i + 1) % n]!;
+    return Math.max(0, Math.min(val, maxCornerRadiusAtVertex(prev, curr, next)));
+  });
+}
+
+export function getStarVertexCornerRadii(
+  node: Pick<
+    EditorNode,
+    | "starPoints"
+    | "starInnerRadius"
+    | "cornerRadius"
+    | "cornerRadii"
+    | "starOuterCornerRadius"
+    | "starInnerCornerRadius"
+    | "width"
+    | "height"
+  >,
+): number[] {
+  const points = clampStarPointCount(node.starPoints ?? DEFAULT_STAR_POINTS);
+  const total = points * 2;
+  const params = effectiveStarParams(node);
+  const defaults = Array.from({ length: total }, (_, i) =>
+    i % 2 === 0 ? params.outerCornerRadius : params.innerCornerRadius,
+  );
+  const base = resizeCornerRadiiForCount(node.cornerRadii, total, node.cornerRadius ?? 0);
+  const merged = base.map((r, i) => (node.cornerRadii?.length ? r : defaults[i]!));
+  return clampStarVertexCornerRadii(
+    points,
+    node.starInnerRadius ?? DEFAULT_STAR_INNER_RATIO,
+    node.width,
+    node.height,
+    merged,
+  );
 }
 
 /** Inward unit bisector at a vertex (for corner-radius handle placement). */
@@ -203,62 +287,15 @@ export function starCornerRadiusFromLocalPoint(
   return clampStarCornerRadius(pointCount, ratio, width, height, Math.max(0, metric));
 }
 
-/** Closed SVG path with circular fillets at every vertex. */
+/** Closed SVG path with quadratic fillets at every vertex (per-vertex radii). */
+export function roundedPolygonPathDWithRadii(vertices: Point2[], radii: readonly number[]): string {
+  return createRoundedPathWithRadiiSvgD(vertices, radii, true);
+}
+
+/** Closed SVG path with quadratic fillets at every vertex. */
 export function roundedPolygonPathD(vertices: Point2[], radius: number): string {
   const n = vertices.length;
-  if (n < 3) return "";
-  const r = Math.max(0, radius);
-  if (r <= 0) {
-    const first = vertices[0]!;
-    let d = `M ${first.x} ${first.y}`;
-    for (let i = 1; i < n; i++) {
-      const p = vertices[i]!;
-      d += ` L ${p.x} ${p.y}`;
-    }
-    return `${d} Z`;
-  }
-
-  let d = "";
-  for (let i = 0; i < n; i++) {
-    const prev = vertices[(i - 1 + n) % n]!;
-    const curr = vertices[i]!;
-    const next = vertices[(i + 1) % n]!;
-
-    const inX = curr.x - prev.x;
-    const inY = curr.y - prev.y;
-    const outX = next.x - curr.x;
-    const outY = next.y - curr.y;
-    const len0 = Math.hypot(inX, inY);
-    const len1 = Math.hypot(outX, outY);
-    if (len0 < 1e-6 || len1 < 1e-6) continue;
-
-    const inNx = inX / len0;
-    const inNy = inY / len0;
-    const outNx = outX / len1;
-    const outNy = outY / len1;
-
-    const dot = Math.max(-1, Math.min(1, inNx * outNx + inNy * outNy));
-    const angle = Math.acos(dot);
-    const half = angle / 2;
-    if (half < 1e-6) continue;
-
-    const maxAt = maxCornerRadiusAtVertex(prev, curr, next);
-    const useR = Math.min(r, maxAt);
-    const trim = Math.min(useR / Math.tan(half), len0 / 2, len1 / 2);
-    const arcR = trim * Math.tan(half);
-
-    const pStart = { x: curr.x - inNx * trim, y: curr.y - inNy * trim };
-    const pEnd = { x: curr.x + outNx * trim, y: curr.y + outNy * trim };
-
-    const cross = inNx * outNy - inNy * outNx;
-    const sweep = cross > 0 ? 1 : 0;
-    const largeArc = angle > Math.PI ? 1 : 0;
-
-    if (!d) d = `M ${pStart.x} ${pStart.y}`;
-    else d += ` L ${pStart.x} ${pStart.y}`;
-    d += ` A ${arcR} ${arcR} 0 ${largeArc} ${sweep} ${pEnd.x} ${pEnd.y}`;
-  }
-  return d ? `${d} Z` : "";
+  return roundedPolygonPathDWithRadii(vertices, Array.from({ length: n }, () => radius));
 }
 
 export function starPathD(
@@ -267,52 +304,124 @@ export function starPathD(
   pointCount: number,
   ratio: number,
   cornerRadius = 0,
+  outerCornerRadius?: number,
+  innerCornerRadius?: number,
 ): string {
   const w = Math.max(1, width);
   const h = Math.max(1, height);
   const spikes = clampStarPointCount(pointCount);
   const r = clampStarRatio(ratio);
-  const cr = clampStarCornerRadius(spikes, r, w, h, cornerRadius);
+  const fallback = clampStarCornerRadius(spikes, r, w, h, cornerRadius);
+  const outer = clampStarOuterCornerRadius(
+    spikes,
+    r,
+    w,
+    h,
+    outerCornerRadius ?? fallback,
+  );
+  const inner = clampStarInnerCornerRadius(
+    spikes,
+    r,
+    w,
+    h,
+    innerCornerRadius ?? fallback,
+  );
   const verts = starVertices(spikes, r, w, h);
-  return roundedPolygonPathD(verts, cr);
+  return createRoundedPathSvgD(
+    verts,
+    (_point, index) => (index % 2 === 0 ? outer : inner),
+    true,
+  );
 }
 
 export type StarParams = {
   pointCount: number;
   ratio: number;
   cornerRadius: number;
+  outerCornerRadius: number;
+  innerCornerRadius: number;
 };
 
 export function effectiveStarParams(
   node: Pick<
     EditorNode,
-    "starPoints" | "starInnerRadius" | "cornerRadius" | "width" | "height"
+    | "starPoints"
+    | "starInnerRadius"
+    | "cornerRadius"
+    | "starOuterCornerRadius"
+    | "starInnerCornerRadius"
+    | "width"
+    | "height"
   >,
 ): StarParams {
   const pointCount = clampStarPointCount(node.starPoints ?? DEFAULT_STAR_POINTS);
   const ratio = clampStarRatio(node.starInnerRadius ?? DEFAULT_STAR_INNER_RATIO);
-  const cornerRadius = clampStarCornerRadius(
+  const fallback = clampStarCornerRadius(
     pointCount,
     ratio,
     node.width,
     node.height,
     node.cornerRadius ?? 0,
   );
-  return { pointCount, ratio, cornerRadius };
+  const outerCornerRadius = clampStarOuterCornerRadius(
+    pointCount,
+    ratio,
+    node.width,
+    node.height,
+    node.starOuterCornerRadius ?? fallback,
+  );
+  const innerCornerRadius = clampStarInnerCornerRadius(
+    pointCount,
+    ratio,
+    node.width,
+    node.height,
+    node.starInnerCornerRadius ?? fallback,
+  );
+  return { pointCount, ratio, cornerRadius: fallback, outerCornerRadius, innerCornerRadius };
 }
 
 export function starPathDForNode(
   node: Pick<
     EditorNode,
-    "width" | "height" | "starPoints" | "starInnerRadius" | "cornerRadius"
+    | "width"
+    | "height"
+    | "starPoints"
+    | "starInnerRadius"
+    | "cornerRadius"
+    | "cornerRadii"
+    | "starOuterCornerRadius"
+    | "starInnerCornerRadius"
   >,
   override?: Partial<StarParams>,
 ): string {
   const base = effectiveStarParams(node);
   const pointCount = override?.pointCount ?? base.pointCount;
   const ratio = override?.ratio ?? base.ratio;
-  const cornerRadius = override?.cornerRadius ?? base.cornerRadius;
-  return starPathD(node.width, node.height, pointCount, ratio, cornerRadius);
+  const w = Math.max(1, node.width);
+  const h = Math.max(1, node.height);
+  const verts = starVertices(pointCount, ratio, w, h);
+
+  if (
+    override?.cornerRadius != null ||
+    override?.outerCornerRadius != null ||
+    override?.innerCornerRadius != null
+  ) {
+    const cornerRadius = override?.cornerRadius ?? base.cornerRadius;
+    const outerCornerRadius = override?.outerCornerRadius ?? base.outerCornerRadius;
+    const innerCornerRadius = override?.innerCornerRadius ?? base.innerCornerRadius;
+    return starPathD(
+      w,
+      h,
+      pointCount,
+      ratio,
+      cornerRadius,
+      outerCornerRadius,
+      innerCornerRadius,
+    );
+  }
+
+  const radii = getStarVertexCornerRadii({ ...node, starPoints: pointCount, starInnerRadius: ratio });
+  return roundedPolygonPathDWithRadii(verts, radii);
 }
 
 /** Path anchors for bounds / legacy hit tests (sharp vertices). */
@@ -333,27 +442,129 @@ export function starPathPoints(
 export function starGeometryPatch(
   node: Pick<
     EditorNode,
-    "width" | "height" | "starPoints" | "starInnerRadius" | "cornerRadius"
+    | "width"
+    | "height"
+    | "starPoints"
+    | "starInnerRadius"
+    | "cornerRadius"
+    | "cornerRadii"
+    | "starOuterCornerRadius"
+    | "starInnerCornerRadius"
   >,
   partial: Partial<{
     starPoints: number;
     starInnerRadius: number;
     cornerRadius: number;
+    outerCornerRadius: number;
+    innerCornerRadius: number;
   }>,
-): Pick<EditorNode, "starPoints" | "starInnerRadius" | "cornerRadius" | "pathPoints"> {
+): Pick<
+  EditorNode,
+  | "starPoints"
+  | "starInnerRadius"
+  | "cornerRadius"
+  | "cornerRadii"
+  | "starOuterCornerRadius"
+  | "starInnerCornerRadius"
+  | "pathPoints"
+> {
   const pointCount = clampStarPointCount(partial.starPoints ?? node.starPoints ?? DEFAULT_STAR_POINTS);
   const ratio = clampStarRatio(partial.starInnerRadius ?? node.starInnerRadius ?? DEFAULT_STAR_INNER_RATIO);
-  const cornerRadius = clampStarCornerRadius(
-    pointCount,
-    ratio,
-    node.width,
-    node.height,
-    partial.cornerRadius ?? node.cornerRadius ?? 0,
-  );
-  return {
+  const base = {
     starPoints: pointCount,
     starInnerRadius: ratio,
-    cornerRadius,
     pathPoints: starPathPoints(pointCount, ratio, node.width, node.height),
+  };
+
+  if (
+    partial.cornerRadius != null &&
+    partial.outerCornerRadius == null &&
+    partial.innerCornerRadius == null
+  ) {
+    const fallback = clampStarCornerRadius(
+      pointCount,
+      ratio,
+      node.width,
+      node.height,
+      partial.cornerRadius,
+    );
+    return {
+      ...base,
+      cornerRadius: fallback,
+      cornerRadii: undefined,
+      starOuterCornerRadius: fallback,
+      starInnerCornerRadius: fallback,
+    };
+  }
+
+  if (partial.outerCornerRadius != null || partial.innerCornerRadius != null) {
+    const fallback = clampStarCornerRadius(
+      pointCount,
+      ratio,
+      node.width,
+      node.height,
+      partial.cornerRadius ?? node.cornerRadius ?? 0,
+    );
+    const outerCornerRadius = clampStarOuterCornerRadius(
+      pointCount,
+      ratio,
+      node.width,
+      node.height,
+      partial.outerCornerRadius ?? node.starOuterCornerRadius ?? fallback,
+    );
+    const innerCornerRadius = clampStarInnerCornerRadius(
+      pointCount,
+      ratio,
+      node.width,
+      node.height,
+      partial.innerCornerRadius ?? node.starInnerCornerRadius ?? fallback,
+    );
+    return {
+      ...base,
+      cornerRadius: node.cornerRadius,
+      cornerRadii: undefined,
+      starOuterCornerRadius: outerCornerRadius,
+      starInnerCornerRadius: innerCornerRadius,
+    };
+  }
+
+  if (node.cornerRadii?.length) {
+    const total = pointCount * 2;
+    const resized = resizeCornerRadiiForCount(
+      node.cornerRadii,
+      total,
+      node.cornerRadius ?? 0,
+    );
+    const clamped = getStarVertexCornerRadii({
+      ...node,
+      starPoints: pointCount,
+      starInnerRadius: ratio,
+      cornerRadii: resized,
+    });
+    const allSame = clamped.length > 0 && clamped.every((r) => r === clamped[0]);
+    return allSame
+      ? {
+          ...base,
+          cornerRadius: clamped[0],
+          cornerRadii: undefined,
+          starOuterCornerRadius: clamped[0],
+          starInnerCornerRadius: clamped[0],
+        }
+      : {
+          ...base,
+          cornerRadius: undefined,
+          cornerRadii: clamped,
+          starOuterCornerRadius: undefined,
+          starInnerCornerRadius: undefined,
+        };
+  }
+
+  const params = effectiveStarParams({ ...node, starPoints: pointCount, starInnerRadius: ratio });
+  return {
+    ...base,
+    cornerRadius: params.cornerRadius,
+    cornerRadii: undefined,
+    starOuterCornerRadius: params.outerCornerRadius,
+    starInnerCornerRadius: params.innerCornerRadius,
   };
 }

@@ -1,4 +1,4 @@
-import { isAncestorOf } from "@/lib/editorGraph";
+import { isAncestorOf, layerPanelChildIds } from "@/lib/editorGraph";
 import { isAutoLayoutContainerNode } from "@/lib/autoLayoutArrowReorder";
 import type { EditorNode } from "@/stores/useEditorStore";
 
@@ -7,7 +7,18 @@ export function hasVisibleChildren(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
 ): boolean {
-  return (childOrder[nodeId] ?? []).some((cid) => nodes[cid]?.visible);
+  return layerPanelChildIds(nodeId, nodes, childOrder).some((cid) => nodes[cid]?.visible);
+}
+
+/** Empty frames are selectable by tapping anywhere; populated frames only via the title. */
+export function frameBodyReceivesPointerHits(
+  nodeId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): boolean {
+  const node = nodes[nodeId];
+  if (node?.type !== "frame") return true;
+  return !hasVisibleChildren(nodeId, nodes, childOrder);
 }
 
 export function isEditableContainer(
@@ -22,12 +33,21 @@ export function isEditableContainer(
   return node.type === "group" || node.type === "frame";
 }
 
+/** ⌘/Ctrl held — select nested layers inside frames and groups (Figma-style deep select). */
+export function isDeepSelectClick(e: {
+  metaKey?: boolean;
+  ctrlKey?: boolean;
+}): boolean {
+  return Boolean(e.metaKey) || Boolean(e.ctrlKey);
+}
+
 /** When true, child layers must not receive pointer hits — the container moves as one unit. */
 export function shouldCollapseContainerHits(
   nodeId: string,
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
   objectEditModeNodeId: string | null,
+  deepSelect = false,
 ): boolean {
   const node = nodes[nodeId];
   if (!node?.visible) return false;
@@ -36,9 +56,11 @@ export function shouldCollapseContainerHits(
   if (objectEditModeNodeId && isAncestorOf(nodes, nodeId, objectEditModeNodeId)) {
     return false;
   }
+  if (deepSelect) return false;
   if (isAutoLayoutContainerNode(node)) return false;
   if (node.isBooleanGroup && !node.maskId) return true;
-  return node.type === "group" || node.type === "frame";
+  if (node.type === "frame") return false;
+  return node.type === "group";
 }
 
 /** Map a hit on a child to its parent group/frame for click + drag (unless drilling in). */
@@ -47,12 +69,14 @@ export function selectionTargetForClick(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
   objectEditModeNodeId: string | null,
+  deepSelect = false,
 ): string {
   if (!hitId) return hitId;
   if (objectEditModeNodeId) {
     if (hitId === objectEditModeNodeId) return hitId;
     if (isAncestorOf(nodes, objectEditModeNodeId, hitId)) return hitId;
   }
+  if (deepSelect) return hitId;
   const n = nodes[hitId];
   const parentId = n?.parentId;
   if (!parentId) return hitId;
@@ -61,6 +85,7 @@ export function selectionTargetForClick(
   if (!hasVisibleChildren(parentId, nodes, childOrder)) return hitId;
   if (parent.type === "group" || parent.type === "frame") {
     if (isAutoLayoutContainerNode(parent)) return hitId;
+    if (parent.type === "frame") return hitId;
     return parentId;
   }
   return hitId;
@@ -90,6 +115,20 @@ export function drillTargetForDoubleClick(
     return { containerId, selectId: deepest };
   }
 
+  const parentId = nodes[deepest]?.parentId;
+  if (parentId) {
+    const parent = nodes[parentId];
+    if (
+      parent?.visible &&
+      !parent.locked &&
+      parent.type === "frame" &&
+      hasVisibleChildren(parentId, nodes, childOrder) &&
+      isEditableContainer(parent, parentId, nodes, childOrder)
+    ) {
+      return { containerId: parentId, selectId: deepest };
+    }
+  }
+
   const cn = nodes[deepest];
   if (cn && isEditableContainer(cn, deepest, nodes, childOrder)) {
     return { containerId: deepest, selectId: deepest };
@@ -98,13 +137,13 @@ export function drillTargetForDoubleClick(
   return null;
 }
 
-/** Shift/Cmd/Ctrl+click adds to selection — must not start a drag on pointer down. */
+/** Shift+click (incl. ⌘/Ctrl+Shift) adds to selection — must not start a drag on pointer down. */
 export function isAdditiveSelectionClick(e: {
   shiftKey: boolean;
   metaKey?: boolean;
   ctrlKey?: boolean;
 }): boolean {
-  return e.shiftKey || Boolean(e.metaKey) || Boolean(e.ctrlKey);
+  return e.shiftKey;
 }
 
 /** Preserve multi-selection when dragging an already-selected layer (Figma-style). */

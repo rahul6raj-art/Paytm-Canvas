@@ -1,5 +1,5 @@
 import type { ResizeHandle } from "@/lib/resize";
-import { screenPxToWorld } from "@/lib/canvasVisual";
+import { CANVAS_HANDLE_SCREEN_PX, screenPxToWorld } from "@/lib/canvasVisual";
 
 /** Corner handles that support Figma-style rotate-from-corner. */
 export const ROTATE_CORNER_HANDLES: ResizeHandle[] = ["nw", "ne", "se", "sw"];
@@ -45,11 +45,19 @@ export function pointerOnCornerHandleRotateHalf(
   }
 }
 
-/** Screen distance from corner along outward diagonal to the rotate hit zone center. */
+/** Screen distance from top edge to the top-center rotate affordance. */
 export const CANVAS_ROTATE_ZONE_OFFSET_SCREEN_PX = 16;
 
+/** Gap past the corner resize handle to the rotate hit zone (screen px). */
+export const CANVAS_ROTATE_CORNER_GAP_SCREEN_PX = 3;
+
+/** Outward distance from shape corner to rotate zone center (past the square handle). */
+export function rotateCornerZoneOffsetWorld(zoom: number): number {
+  return screenPxToWorld(CANVAS_HANDLE_SCREEN_PX / 2 + CANVAS_ROTATE_CORNER_GAP_SCREEN_PX, zoom);
+}
+
 /** Rotate hit target size in screen pixels (tight corner target). */
-export const CANVAS_ROTATE_HIT_SCREEN_PX = 14;
+export const CANVAS_ROTATE_HIT_SCREEN_PX = 18;
 
 /** Thickness of rotate hit bands just outside selection edges (screen px). */
 export const CANVAS_ROTATE_EDGE_BAND_THICKNESS_SCREEN_PX = 10;
@@ -75,9 +83,66 @@ import {
   CANVAS_ROTATE_CURSOR_FALLBACK,
   canvasViewportRotateCursorCss,
   rotateCursorCssForHandle,
+  rotateCursorCssForWorldOutward,
 } from "@/lib/canvasRotateCursor";
 
-export { rotateCursorCssForHandle } from "@/lib/canvasRotateCursor";
+export {
+  rotateCursorCssForHandle,
+  rotateCursorCssForWorldOutward,
+} from "@/lib/canvasRotateCursor";
+
+/** Corner vertex on axis-aligned overlay bounds. */
+export function cornerOnOverlayBounds(
+  handle: ResizeHandle,
+  bounds: { x: number; y: number; width: number; height: number },
+): { x: number; y: number } {
+  const { x, y, width, height } = bounds;
+  switch (handle) {
+    case "nw":
+      return { x, y };
+    case "ne":
+      return { x: x + width, y };
+    case "se":
+      return { x: x + width, y: y + height };
+    case "sw":
+      return { x, y: y + height };
+    default:
+      return { x: x + width / 2, y: y + height / 2 };
+  }
+}
+
+const CORNER_INDEX: Partial<Record<ResizeHandle, 0 | 1 | 2 | 3>> = {
+  nw: 0,
+  ne: 1,
+  se: 2,
+  sw: 3,
+};
+
+/** Hit point + pivot for orienting the rotate cursor from real geometry. */
+export function rotateCursorGeometryForHandle(
+  handle: ResizeHandle | "top",
+  bounds: { x: number; y: number; width: number; height: number },
+  zoom: number,
+  worldCorners?: [{ x: number; y: number }, { x: number; y: number }, { x: number; y: number }, { x: number; y: number }] | null,
+): { hit: { x: number; y: number }; center: { x: number; y: number } } {
+  const center = {
+    x: bounds.x + bounds.width / 2,
+    y: bounds.y + bounds.height / 2,
+  };
+  if (handle === "top") {
+    let topMid: { x: number; y: number } | undefined;
+    if (worldCorners) {
+      const [nw, ne] = worldCorners;
+      topMid = { x: (nw.x + ne.x) / 2, y: (nw.y + ne.y) / 2 };
+    }
+    return { hit: topRotateHandleWorld(bounds, zoom, topMid), center };
+  }
+  const idx = CORNER_INDEX[handle];
+  if (worldCorners && idx !== undefined) {
+    return { hit: worldCorners[idx], center };
+  }
+  return { hit: cornerOnOverlayBounds(handle, bounds), center };
+}
 
 function canvasViewportEl(): HTMLElement | null {
   return document.querySelector("[data-canvas-viewport]") as HTMLElement | null;
@@ -88,8 +153,15 @@ export function applyRotateDragCursor(
   captureEl?: HTMLElement | null,
   handle?: ResizeHandle | "top",
   selectionRotationDeg = 0,
+  opts?: {
+    hit?: { x: number; y: number };
+    center?: { x: number; y: number };
+  },
 ): void {
-  const cursor = canvasViewportRotateCursorCss(handle ?? null, selectionRotationDeg);
+  const cursor =
+    opts?.hit && opts?.center
+      ? rotateCursorCssForWorldOutward(opts.hit, opts.center)
+      : canvasViewportRotateCursorCss(handle ?? null, selectionRotationDeg);
   document.body.style.cursor = cursor;
   const viewport = canvasViewportEl();
   if (viewport) {
@@ -153,7 +225,7 @@ export function rotateZonesForAxisBounds(
   bounds: { x: number; y: number; width: number; height: number },
   zoom: number,
 ): RotateZone[] {
-  const offset = screenPxToWorld(CANVAS_ROTATE_ZONE_OFFSET_SCREEN_PX, zoom);
+  const offset = rotateCornerZoneOffsetWorld(zoom);
   const size = screenPxToWorld(CANVAS_ROTATE_HIT_SCREEN_PX, zoom);
   const cx = bounds.x + bounds.width / 2;
   const cy = bounds.y + bounds.height / 2;
@@ -177,7 +249,7 @@ export function rotateZonesForCornerHandles(
   bounds: { x: number; y: number; width: number; height: number },
   zoom: number,
 ): RotateZone[] {
-  const offset = screenPxToWorld(CANVAS_ROTATE_ZONE_OFFSET_SCREEN_PX, zoom);
+  const offset = rotateCornerZoneOffsetWorld(zoom);
   const size = screenPxToWorld(CANVAS_ROTATE_HIT_SCREEN_PX, zoom);
   const cx = bounds.x + bounds.width / 2;
   const cy = bounds.y + bounds.height / 2;

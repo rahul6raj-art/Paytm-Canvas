@@ -1,20 +1,9 @@
-import {
-  extractRenderableGradientFill,
-  resolveGradientGeometry,
-  type FigNode,
-  type FigPaint,
-} from "openfig-core";
+import type { FigNode, FigPaint } from "openfig-core";
 import type { InstanceOverridePatch } from "@/lib/componentModel";
-import {
-  DEFAULT_GRADIENT_TRANSFORM,
-  newGradientStopId,
-  type FillGradient,
-  type GradientKind,
-} from "@/lib/fillGradient";
+import { gradientFillFieldsFromPaints } from "@/lib/figImport/figmaGradientPaint";
 import { newNodeEffectId, type NodeEffect } from "@/lib/nodeEffects";
 import { figmaBlendModeToLayer } from "@/lib/layerBlendMode";
 import type { EditorNode, ImageFitMode, StrokePosition } from "@/stores/useEditorStore";
-import type { DesignToken } from "@/lib/designTokens";
 import {
   figStyleOverrideTable,
   normalizePaintType,
@@ -107,43 +96,10 @@ export function solidFillFromPaints(paints?: FigPaint[]): {
 
 export function gradientFillFromPaints(
   paints: FigPaint[] | undefined,
-  width: number,
-  height: number,
-): { fillType?: "gradient"; fillGradient?: FillGradient } {
-  const g = extractRenderableGradientFill(normalizePaints(paints));
-  if (!g) return {};
-  const stops = g.stops.map((s) => ({
-    id: newGradientStopId(),
-    position: Math.max(0, Math.min(100, s.position * 100)),
-    color: rgbaToHex(s.color),
-  }));
-  if (stops.length < 2) return {};
-
-  let rotation = DEFAULT_GRADIENT_TRANSFORM.rotation;
-  const geom = resolveGradientGeometry(g, Math.max(1, width), Math.max(1, height));
-  if (geom?.type === "linear") {
-    rotation =
-      (Math.atan2(geom.end.y - geom.start.y, geom.end.x - geom.start.x) * 180) / Math.PI;
-  } else if (geom?.type === "radial" && geom.angle != null) {
-    rotation = geom.angle;
-  }
-
-  const gradientType = g.type as GradientKind;
-  const kind: GradientKind =
-    gradientType === "radial" ||
-    gradientType === "angular" ||
-    gradientType === "diamond"
-      ? gradientType
-      : "linear";
-
-  return {
-    fillType: "gradient",
-    fillGradient: {
-      kind,
-      transform: { ...DEFAULT_GRADIENT_TRANSFORM, rotation },
-      stops,
-    },
-  };
+  _width: number,
+  _height: number,
+): Pick<import("@/stores/useEditorStore").EditorNode, "fillType" | "fillGradient" | "fill" | "fillOpacity"> {
+  return gradientFillFieldsFromPaints(normalizePaints(paints) as import("@/lib/figImport/figmaGradientPaint").FigmaGradientPaint[]);
 }
 
 export function imagePaintFromPaints(paints?: FigPaint[]): FigPaint | null {
@@ -278,24 +234,9 @@ export function fillTokenIdForPaints(
 }
 
 export function buildTokensByVariableKey(
-  tokens: Record<string, DesignToken>,
-  variableColors: Map<string, FigColor>,
+  variableKeyToTokenId: Map<string, string>,
 ): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const [varKey, color] of variableColors) {
-    const hex = rgbaToHex(color);
-    for (const token of Object.values(tokens)) {
-      if (token.type !== "color") continue;
-      if (
-        "hex" in token.value &&
-        token.value.hex.toLowerCase() === hex.toLowerCase()
-      ) {
-        map.set(varKey, token.id);
-        break;
-      }
-    }
-  }
-  return map;
+  return new Map(variableKeyToTokenId);
 }
 
 export function instanceOverridesFromSymbol(

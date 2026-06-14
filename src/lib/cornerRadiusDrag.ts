@@ -3,11 +3,12 @@ import {
   clampCornerRadii,
   getNodeCornerRadii,
   hasIndependentCornerRadii,
+  resolveCornerRadiusDragMax,
   type CornerRadii,
 } from "@/lib/cornerRadius";
 import {
   cornerRadiiStylePatch,
-  isRoundedRectPath,
+  isCornerRoundablePath,
   radiusFromRelativeCornerDrag,
 } from "@/lib/shapes/shapeToPath";
 import { worldToLocalForNode } from "@/lib/tree";
@@ -65,10 +66,10 @@ function patchForCornerRadii(
   node: EditorNode,
   radii: CornerRadii,
 ): Partial<EditorNode> {
-  const clamped = clampCornerRadii(radii, node.width, node.height);
-  if (node.type === "path" && isRoundedRectPath(node)) {
-    return cornerRadiiStylePatch(node, clamped);
+  if (node.type === "path" && isCornerRoundablePath(node)) {
+    return cornerRadiiStylePatch(node, radii);
   }
+  const clamped = clampCornerRadii(radii, node.width, node.height);
   const allSame =
     clamped[0] === clamped[1] && clamped[1] === clamped[2] && clamped[2] === clamped[3];
   if (allSame) {
@@ -129,7 +130,13 @@ function applyAtPointer(session: DragSession, clientX: number, clientY: number, 
     state.nodes,
     state.childOrder,
   );
-  const maxR = Math.min(n.width, n.height) / 2;
+  const maxR = resolveCornerRadiusDragMax(
+    session.cornerIndex,
+    session.startRadii,
+    session.linkCorners,
+    n.width,
+    n.height,
+  );
   const raw = radiusFromRelativeCornerDrag(
     session.cornerIndex,
     session.grabRadius,

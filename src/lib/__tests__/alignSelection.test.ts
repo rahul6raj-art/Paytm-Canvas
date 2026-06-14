@@ -4,8 +4,11 @@ import type { EditorNode } from "@/stores/useEditorStore";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import {
   alignNodesInDocument,
+  alignNodesInDocumentToGrid,
+  alignParentIdForSelection,
   applyAlignToNodes,
   applyDistributeToNodes,
+  canAlignSelection,
   suspendAutoLayoutForManualPosition,
 } from "@/lib/alignSelection";
 import { getRenderedWorldBounds } from "@/lib/editorGraph";
@@ -157,6 +160,42 @@ describe("applyDistributeToNodes", () => {
     const gap2 = bc.x - (bb.x + bb.width);
     assert.ok(Math.abs(gap1 - gap2) < 0.5);
   });
+
+  it("distributes vertical spacing by rendered bounds", () => {
+    const nodes: Record<string, EditorNode> = {
+      a: rect("a", 0, 0, 40, 30),
+      b: rect("b", 0, 120, 40, 30),
+      c: rect("c", 0, 260, 40, 30),
+    };
+    const childOrder = childOrderRoot(["a", "b", "c"]);
+    const out = applyDistributeToNodes(nodes, childOrder, ["a", "b", "c"], "vertical");
+    const ba = getRenderedWorldBounds("a", out, childOrder);
+    const bb = getRenderedWorldBounds("b", out, childOrder);
+    const bc = getRenderedWorldBounds("c", out, childOrder);
+    const gap1 = bb.y - (ba.y + ba.height);
+    const gap2 = bc.y - (bb.y + bb.height);
+    assert.ok(Math.abs(gap1 - gap2) < 0.5);
+  });
+
+  it("distributes rotated layers using visual bounds", () => {
+    const nodes: Record<string, EditorNode> = {
+      a: rect("a", 0, 0, 40, 30, 0),
+      b: rect("b", 200, 0, 40, 30, 45),
+      c: rect("c", 420, 0, 40, 30, 0),
+    };
+    const childOrder = childOrderRoot(["a", "b", "c"]);
+    const out = applyDistributeToNodes(nodes, childOrder, ["a", "b", "c"], "horizontal");
+    const ba = getRenderedWorldBounds("a", out, childOrder);
+    const bb = getRenderedWorldBounds("b", out, childOrder);
+    const bc = getRenderedWorldBounds("c", out, childOrder);
+    const gap1 = bb.x - (ba.x + ba.width);
+    const gap2 = bc.x - (bb.x + bb.width);
+    assert.ok(Math.abs(gap1 - gap2) < 1);
+    assert.ok(Math.abs(ba.x - getRenderedWorldBounds("a", nodes, childOrder).x) < 1);
+    assert.ok(
+      Math.abs(bc.x + bc.width - (getRenderedWorldBounds("c", nodes, childOrder).x + getRenderedWorldBounds("c", nodes, childOrder).width)) < 1,
+    );
+  });
 });
 
 describe("suspendAutoLayoutForManualPosition", () => {
@@ -174,6 +213,61 @@ describe("suspendAutoLayoutForManualPosition", () => {
     const childOrder = { [EDITOR_ROOT_KEY]: ["parent"], parent: ["a", "b"] };
     const out = suspendAutoLayoutForManualPosition(nodes, childOrder, ["a", "b"]);
     assert.equal(out.parent?.layoutMode, "none");
+  });
+});
+
+describe("align to parent frame", () => {
+  it("allows aligning a single child to its parent frame", () => {
+    const nodes: Record<string, EditorNode> = {
+      frame: {
+        ...rect("frame", 100, 50, 400, 300),
+        type: "frame",
+        name: "Frame",
+      },
+      shape: { ...rect("shape", 80, 120, 40, 30), parentId: "frame" },
+    };
+    const childOrder = { [EDITOR_ROOT_KEY]: ["frame"], frame: ["shape"] };
+    assert.equal(alignParentIdForSelection(["shape"], nodes, childOrder), "frame");
+    assert.equal(canAlignSelection(["shape"], nodes, childOrder), true);
+    const out = alignNodesInDocument(nodes, childOrder, ["shape"], "center-h");
+    const bs = getRenderedWorldBounds("shape", out, childOrder);
+    const bf = getRenderedWorldBounds("frame", out, childOrder);
+    const shapeCenter = bs.x + bs.width / 2;
+    const frameCenter = bf.x + bf.width / 2;
+    assert.ok(Math.abs(shapeCenter - frameCenter) < 0.5);
+  });
+
+  it("aligns a single text layer to the top of its parent frame", () => {
+    const nodes: Record<string, EditorNode> = {
+      frame: {
+        ...rect("frame", 0, 0, 200, 160),
+        type: "frame",
+        name: "Frame",
+        paddingTop: 12,
+        paddingLeft: 8,
+      },
+      text: {
+        id: "text",
+        parentId: "frame",
+        type: "text",
+        name: "Label",
+        x: 40,
+        y: 50,
+        width: 80,
+        height: 24,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        expanded: true,
+        content: "Hello",
+        fontSize: 14,
+      },
+    };
+    const childOrder = { [EDITOR_ROOT_KEY]: ["frame"], frame: ["text"] };
+    const out = applyAlignToNodes(nodes, childOrder, ["text"], "top");
+    const bt = getRenderedWorldBounds("text", out, childOrder);
+    const bf = getRenderedWorldBounds("frame", out, childOrder);
+    assert.ok(Math.abs(bt.y - (bf.y + 12)) < 0.5);
   });
 });
 
@@ -197,5 +291,20 @@ describe("alignNodesInDocument", () => {
     const ba = getRenderedWorldBounds("a", out, childOrder);
     const bb = getRenderedWorldBounds("b", out, childOrder);
     assert.ok(Math.abs(ba.y - bb.y) < 0.5);
+  });
+});
+
+describe("alignNodesInDocumentToGrid", () => {
+  it("aligns selection to top-left in one pass", () => {
+    const nodes: Record<string, EditorNode> = {
+      a: rect("a", 40, 60, 40, 30),
+      b: rect("b", 120, 90, 30, 20),
+    };
+    const childOrder = childOrderRoot(["a", "b"]);
+    const out = alignNodesInDocumentToGrid(nodes, childOrder, ["a", "b"], 0, 0);
+    const ba = getRenderedWorldBounds("a", out, childOrder);
+    const bb = getRenderedWorldBounds("b", out, childOrder);
+    assert.equal(ba.x, bb.x);
+    assert.equal(ba.y, bb.y);
   });
 });

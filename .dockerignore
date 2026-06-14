@@ -1,0 +1,8 @@
+node_modules
+.next
+.git
+.craft-mock-api
+packages/craft-engine/target
+*.md
+!packages/craft-api/prisma/**
+!packages/craft-realtime/src/**

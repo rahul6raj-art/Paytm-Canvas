@@ -1,4 +1,5 @@
 import type { EditorState } from "@/stores/useEditorStore";
+import { editorCanRedoHistory, editorCanUndoHistory } from "@/engine/editorHistoryState";
 import { COMMAND_BY_ID } from "@/lib/commands";
 import { applyThemePreference } from "@/lib/theme";
 
@@ -46,6 +47,7 @@ export const EDITOR_MENUS: EditorMenuDef[] = [
       action("Import file…", () => {
         document.querySelector<HTMLInputElement>("[data-editor-import-input]")?.click();
       }),
+      action("Import from Web…", (s) => s.openImportWebModal()),
       action("Design ↔ Code (export)…", (s) => s.openCodeRoundTrip("export")),
       action("Design ↔ Code (import)…", (s) => s.openCodeRoundTrip("import")),
       div(),
@@ -60,11 +62,11 @@ export const EDITOR_MENUS: EditorMenuDef[] = [
     items: [
       action("Undo", (s) => s.undo(), {
         shortcut: "⌘Z",
-        enabled: (s) => s.historyPast.length > 0,
+        enabled: (s) => editorCanUndoHistory(s),
       }),
       action("Redo", (s) => s.redo(), {
         shortcut: "⌘⇧Z",
-        enabled: (s) => s.historyFuture.length > 0,
+        enabled: (s) => editorCanRedoHistory(s),
       }),
       div(),
       cmd("cut-selection"),

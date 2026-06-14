@@ -1,6 +1,6 @@
 import { useEditorStore, type EditorNode } from "@/stores/useEditorStore";
 import {
-  clampStarCornerRadius,
+  effectiveStarParams,
   isStarNode,
   starCornerRadiusFromLocalPoint,
   starGeometryPatch,
@@ -17,6 +17,8 @@ export type StarPreview = {
   pointCount: number;
   ratio: number;
   cornerRadius: number;
+  outerCornerRadius: number;
+  innerCornerRadius: number;
 } | null;
 
 type StarDragKind = "ratio" | "cornerRadius";
@@ -35,7 +37,9 @@ type StarDragSession = {
 let activeDrag: StarDragSession | null = null;
 let livePreview: StarPreview = null;
 let previewListeners = new Set<() => void>();
-let pendingPatch: Partial<Pick<EditorNode, "starInnerRadius" | "cornerRadius">> | null = null;
+let pendingPatch: Partial<
+  Pick<EditorNode, "starInnerRadius" | "cornerRadius" | "starOuterCornerRadius" | "starInnerCornerRadius">
+> | null = null;
 let rafId = 0;
 
 function notifyPreview(): void {
@@ -59,6 +63,8 @@ function setPreview(nodeId: string, params: StarParams): void {
     pointCount: params.pointCount,
     ratio: params.ratio,
     cornerRadius: params.cornerRadius,
+    outerCornerRadius: params.outerCornerRadius,
+    innerCornerRadius: params.innerCornerRadius,
   };
   notifyPreview();
 }
@@ -80,7 +86,11 @@ function flushStoreUpdate(): void {
   state.updateNode(d.nodeId, starGeometryPatch(n, patch), { skipHistory: true });
 }
 
-function scheduleStoreUpdate(patch: Partial<Pick<EditorNode, "starInnerRadius" | "cornerRadius">>): void {
+function scheduleStoreUpdate(
+  patch: Partial<
+    Pick<EditorNode, "starInnerRadius" | "cornerRadius" | "starOuterCornerRadius" | "starInnerCornerRadius">
+  >,
+): void {
   pendingPatch = { ...pendingPatch, ...patch };
   if (rafId) return;
   rafId = requestAnimationFrame(flushStoreUpdate);
@@ -106,7 +116,7 @@ function beginStarDrag(
   const local = worldToLocalForNode(world.x, world.y, opts.nodeId, state.nodes, state.childOrder);
   const pointCount = n.starPoints ?? 5;
   const ratio = n.starInnerRadius ?? 0.4;
-  const cornerRadius = n.cornerRadius ?? 0;
+  const params = effectiveStarParams(n);
 
   activeDrag = {
     kind,
@@ -114,12 +124,12 @@ function beginStarDrag(
     nodeId: opts.nodeId,
     pointCount,
     grabRatio: ratio,
-    grabCornerRadius: cornerRadius,
+    grabCornerRadius: params.outerCornerRadius,
     grabLocalX: local.x,
     grabLocalY: local.y,
   };
 
-  setPreview(opts.nodeId, { pointCount, ratio, cornerRadius });
+  setPreview(opts.nodeId, params);
 
   try {
     opts.captureTarget.setPointerCapture(opts.pointerId);
@@ -145,20 +155,14 @@ function beginStarDrag(
           node.width,
           node.height,
         );
-        setPreview(d.nodeId, {
-          pointCount: d.pointCount,
-          ratio: nextRatio,
-          cornerRadius: clampStarCornerRadius(
-            d.pointCount,
-            nextRatio,
-            node.width,
-            node.height,
-            node.cornerRadius ?? 0,
-          ),
+        const nextParams = effectiveStarParams({
+          ...node,
+          starInnerRadius: nextRatio,
         });
+        setPreview(d.nodeId, nextParams);
         scheduleStoreUpdate({ starInnerRadius: nextRatio });
       } else {
-        const nextCr = starCornerRadiusFromLocalPoint(
+        const nextOuter = starCornerRadiusFromLocalPoint(
           loc.x,
           loc.y,
           d.pointCount,
@@ -166,12 +170,12 @@ function beginStarDrag(
           node.width,
           node.height,
         );
-        setPreview(d.nodeId, {
-          pointCount: d.pointCount,
-          ratio: node.starInnerRadius ?? 0.4,
-          cornerRadius: nextCr,
+        const nextParams = effectiveStarParams({
+          ...node,
+          starOuterCornerRadius: nextOuter,
         });
-        scheduleStoreUpdate({ cornerRadius: nextCr });
+        setPreview(d.nodeId, nextParams);
+        scheduleStoreUpdate({ outerCornerRadius: nextOuter });
       }
     }
   };

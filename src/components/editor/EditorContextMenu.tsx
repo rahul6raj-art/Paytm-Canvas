@@ -10,6 +10,7 @@ import {
   findInstanceRoot,
 } from "@/lib/componentModel";
 import { canAddAutoLayoutToSelection } from "@/lib/autoLayoutSelection";
+import { canAlignSelection } from "@/lib/alignSelection";
 import {
   getBooleanEligibleSelection,
   isMaskGroup,
@@ -21,12 +22,13 @@ type Item =
   | { type: "sep" };
 
 const rowCls =
-  "flex w-full items-center justify-between gap-3 px-2 py-[5px] text-left text-[12px] leading-4 text-app-fg hover:bg-app-hover disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent";
+  "flex w-full items-center justify-between gap-3 px-2 py-[5px] text-left text-ui leading-4 text-app-fg hover:bg-app-hover disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent";
 
 export function EditorContextMenu() {
   const contextMenu = useEditorStore((s) => s.contextMenu);
   const closeContextMenu = useEditorStore((s) => s.closeContextMenu);
   const nodes = useEditorStore((s) => s.nodes);
+  const childOrder = useEditorStore((s) => s.childOrder);
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const setLayerRenameId = useEditorStore((s) => s.setLayerRenameId);
   const duplicateSingle = useEditorStore((s) => s.duplicateSingle);
@@ -88,12 +90,7 @@ export function EditorContextMenu() {
       const n = nodes[id];
       return n && !n.locked && n.visible;
     });
-    const alignOk =
-      tops.length >= 2 &&
-      tops.every((id) => {
-        const n = nodes[id];
-        return n && !n.locked && n.visible;
-      });
+    const alignOk = canAlignSelection(selectedIds, nodes, childOrder);
     const distOk =
       tops.length >= 3 &&
       tops.every((id) => {
@@ -385,6 +382,7 @@ export function EditorContextMenu() {
     node,
     nodeId,
     nodes,
+    childOrder,
     selectedIds,
     setLayerRenameId,
     duplicateSingle,
@@ -482,7 +480,7 @@ export function EditorContextMenu() {
             }}
           >
             <span>{it.label}</span>
-            {it.hint ? <span className="shrink-0 font-mono text-[10px] text-app-subtle">{it.hint}</span> : null}
+            {it.hint ? <span className="shrink-0 font-mono text-ui text-app-subtle">{it.hint}</span> : null}
           </button>
         ),
       )}

@@ -1,49 +1,55 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { formatShortcutLabel } from "@/lib/commands";
 import type { ResolvedMenuItem } from "@/lib/editorMenuConfig";
+import {
+  anchoredMenuStyle,
+  useAnchoredDropdownPosition,
+  useDismissAnchoredDropdown,
+} from "../useAnchoredDropdown";
 
 export function EditorMenuDropdown({
   open,
   items,
   onClose,
-  align = "left",
+  anchorRef,
 }: {
   open: boolean;
   items: (ResolvedMenuItem | "divider")[];
   onClose: () => void;
-  align?: "left" | "right";
+  anchorRef: RefObject<HTMLButtonElement | null>;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const position = useAnchoredDropdownPosition(anchorRef, open, 2, {
+    viewportClamp: true,
+    maxHeight: 480,
+    width: 240,
+    remeasureKey: items.length,
+  });
+  useDismissAnchoredDropdown(open, onClose, anchorRef, menuRef);
 
   useEffect(() => {
     if (!open) return;
-    const onPointerDown = (e: PointerEvent) => {
-      if (!ref.current?.contains(e.target as Node)) onClose();
-    };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
-    window.addEventListener("pointerdown", onPointerDown);
     window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("pointerdown", onPointerDown);
-      window.removeEventListener("keydown", onKeyDown);
-    };
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!open || typeof document === "undefined") return null;
 
-  return (
+  return createPortal(
     <div
-      ref={ref}
+      ref={menuRef}
       role="menu"
       className={cn(
-        "absolute top-full z-[60] mt-0.5 min-w-[220px] max-h-[min(70vh,480px)] overflow-y-auto rounded-md border border-app-border bg-app-surface py-1 shadow-xl thin-scroll",
-        align === "right" ? "right-0" : "left-0",
+        "fixed z-[120] min-w-[220px] overflow-y-auto rounded-md border border-app-border bg-app-surface py-1 shadow-xl thin-scroll",
       )}
+      style={anchoredMenuStyle(position)}
     >
       {items.map((item, i) => {
         if (item === "divider") {
@@ -57,7 +63,7 @@ export function EditorMenuDropdown({
             role="menuitem"
             disabled={item.disabled}
             className={cn(
-              "flex w-full items-center justify-between gap-4 px-3 py-1.5 text-left text-[11px]",
+              "flex w-full items-center justify-between gap-4 px-3 py-1.5 text-left text-ui",
               item.disabled
                 ? "cursor-not-allowed text-app-subtle"
                 : "text-app-fg hover:bg-app-hover",
@@ -70,11 +76,12 @@ export function EditorMenuDropdown({
           >
             <span>{item.label}</span>
             {shortcut ? (
-              <span className="shrink-0 font-mono text-[10px] tabular-nums text-app-subtle">{shortcut}</span>
+              <span className="shrink-0 font-mono text-ui tabular-nums text-app-subtle">{shortcut}</span>
             ) : null}
           </button>
         );
       })}
-    </div>
+    </div>,
+    document.body,
   );
 }

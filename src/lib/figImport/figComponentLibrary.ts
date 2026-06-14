@@ -43,6 +43,12 @@ type LibraryWalk = {
   ) => import("@/stores/useEditorStore").EditorNode | null;
   nextId: (ctx: ImportCtx, prefix: string) => string;
   appendChild: (ctx: ImportCtx, parentKey: string, childId: string) => void;
+  finalizeContainer?: (
+    figKey: string,
+    paytmParentId: string,
+    doc: FigDocument,
+    ctx: ImportCtx,
+  ) => void;
 };
 
 /**
@@ -100,7 +106,9 @@ export function importFigmaComponentLibrary(
       componentId: cmpId,
     };
     ctx.nodes[masterId] = master;
-    /** Defer deep symbol trees until an on-canvas instance needs them (keeps import fast). */
+    walk.walkFigTree(key, masterId, fig, ctx, null);
+    walk.finalizeContainer?.(key, masterId, fig, ctx);
+    ctx.hydratedSymbols.add(key);
 
     const variantProps = (node as FigNode & { variantProperties?: Record<string, string> }).variantProperties;
     if (variantProps && Object.keys(variantProps).length > 0) {

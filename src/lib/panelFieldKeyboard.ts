@@ -45,6 +45,7 @@ export function handlePanelFieldKeyDown(
 
   if (e.key === "Enter" && options.onEnter) {
     e.preventDefault();
+    e.stopPropagation();
     options.onEnter();
     return;
   }

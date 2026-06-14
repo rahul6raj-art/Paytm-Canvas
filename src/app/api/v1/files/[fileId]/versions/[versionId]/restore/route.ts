@@ -16,5 +16,6 @@ export async function POST(_request: Request, context: RouteContext) {
     updatedAt: updated.updatedAt,
     createdAt: updated.createdAt,
     documentJson: updated.documentJson,
+    revision: updated.revision,
   });
 }

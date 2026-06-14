@@ -60,7 +60,7 @@ describe("pencil stroke", () => {
     assert.ok((finished.pathPoints?.length ?? 0) >= 2);
   });
 
-  it("recovers from a stale in-progress pencil session", () => {
+  it("recovers from a stale in-progress pencil session", async () => {
     const store = useEditorStore.getState();
     store.setTool("pencil");
     store.startPencilStroke({ x: 50, y: 50 });
@@ -68,6 +68,7 @@ describe("pencil stroke", () => {
     const staleId = useEditorStore.getState().pencilDrawingNodeId;
     assert.ok(staleId);
 
+    await new Promise((r) => setTimeout(r, 5));
     store.startPencilStroke({ x: 200, y: 200 });
 
     const s = useEditorStore.getState();

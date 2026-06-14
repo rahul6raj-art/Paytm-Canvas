@@ -7,10 +7,14 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
   type KeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, RefreshCw } from "lucide-react";
+import { ChevronDown, RefreshCw, Upload } from "lucide-react";
+import { useEditorStore } from "@/stores/useEditorStore";
+import { FONT_IMPORT_ACCEPT } from "@/lib/editorFontAssets";
+import { uploadedFontOptionsFromAssets } from "@/lib/fonts/uploadedFonts";
 import { trySelectAllPanelField } from "@/lib/panelFieldKeyboard";
 import {
   ensureFontFamilyLoaded,
@@ -50,9 +54,12 @@ export function FontFamilyPicker({
   const anchorRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const listId = useId();
   const inputId = useId();
 
+  const fontAssets = useEditorStore((s) => s.fontAssets);
+  const importFontFile = useEditorStore((s) => s.importFontFile);
   const { groups, filter, localStatus, localFontsSupported, refreshInstalled } = useFontCatalog();
   const position = useAnchoredDropdownPosition(anchorRef, open, 4, {
     viewportClamp: true,
@@ -92,10 +99,22 @@ export function FontFamilyPicker({
   }, [open, query, flatOptions.length]);
 
   const pick = async (opt: FontFamilyOption) => {
-    await ensureFontFamilyLoaded(opt.value);
+    await ensureFontFamilyLoaded(opt.value, fontAssets);
     onChange(opt.value);
     setOpen(false);
     anchorRef.current?.focus();
+  };
+
+  const onFontFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const assetId = await importFontFile(file);
+    if (!assetId) return;
+    const asset = useEditorStore.getState().fontAssets[assetId];
+    if (!asset) return;
+    const opt = uploadedFontOptionsFromAssets({ [assetId]: asset })[0];
+    if (opt) await pick(opt);
   };
 
   const close = useCallback(() => {
@@ -190,14 +209,29 @@ export function FontFamilyPicker({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onMenuKeyDown}
-            className="h-8 w-full rounded-md border border-app-border bg-app-field px-2.5 text-[12px] text-app-field-fg placeholder:text-app-subtle focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            className="h-8 w-full rounded-md border border-app-border bg-app-field px-2.5 text-ui text-app-field-fg placeholder:text-app-subtle focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={FONT_IMPORT_ACCEPT}
+            className="hidden"
+            onChange={(e) => void onFontFileChange(e)}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-app-border py-1.5 text-ui text-[#aaa] hover:border-accent/40 hover:bg-app-hover hover:text-app-fg"
+          >
+            <Upload className="h-3 w-3" />
+            Upload TTF or OTF…
+          </button>
           {localFontsSupported ? (
             <button
               type="button"
               disabled={localStatus === "loading"}
               onClick={() => void refreshInstalled()}
-              className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md py-1 text-[10px] text-[#aaa] hover:bg-app-hover hover:text-app-fg disabled:opacity-50"
+              className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md py-1 text-ui text-[#aaa] hover:bg-app-hover hover:text-app-fg disabled:opacity-50"
             >
               <RefreshCw className={cn("h-3 w-3", localStatus === "loading" && "animate-spin")} />
               {localStatus === "loading"
@@ -207,8 +241,8 @@ export function FontFamilyPicker({
                   : "Load fonts installed on this device"}
             </button>
           ) : (
-            <p className="mt-1.5 px-0.5 text-[10px] leading-snug text-[#888]">
-              Installed-font scan needs Chrome or Edge. Open-source and system fonts are still available.
+            <p className="mt-1.5 px-0.5 text-ui leading-snug text-[#888]">
+              Installed-font scan needs Chrome or Edge. Upload or use Google Fonts instead.
             </p>
           )}
         </div>
@@ -216,12 +250,12 @@ export function FontFamilyPicker({
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-1">
           {!matchFontOption(value) && value ? (
             <div className="border-b border-app-border-subtle px-2 pb-2">
-              <p className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-[#888]">
+              <p className="px-2 py-1 section-heading">
                 Current
               </p>
               <button
                 type="button"
-                className="flex w-full items-center rounded-md px-2 py-1.5 text-left text-[12px] text-[#f0f0f0] bg-[rgba(13,153,255,0.12)]"
+                className="flex w-full items-center rounded-md px-2 py-1.5 text-left text-ui text-[#f0f0f0] bg-[rgba(13,153,255,0.12)]"
                 style={{ fontFamily: value }}
                 onClick={() => setOpen(false)}
               >
@@ -231,7 +265,7 @@ export function FontFamilyPicker({
           ) : null}
 
           {filteredGroups.every((g) => g.fonts.length === 0) ? (
-            <p className="px-3 py-4 text-center text-[12px] text-[#888]" role="status">
+            <p className="px-3 py-4 text-center text-ui text-[#888]" role="status">
               No fonts match your search.
             </p>
           ) : (
@@ -240,7 +274,7 @@ export function FontFamilyPicker({
               return filteredGroups.map((group) =>
               group.fonts.length === 0 ? null : (
                 <div key={group.id} className="mb-1">
-                  <p className="sticky top-0 z-[1] bg-app-panel px-3 py-1 text-[10px] font-medium uppercase tracking-wide text-[#888]">
+                  <p className="sticky top-0 z-[1] bg-app-panel px-3 py-1 section-heading">
                     {group.label}
                     {group.id === "google" ? ` (${group.fonts.length})` : null}
                   </p>
@@ -259,7 +293,7 @@ export function FontFamilyPicker({
                         role="option"
                         aria-selected={selected}
                         className={cn(
-                          "flex w-full items-center rounded-md px-3 py-1.5 text-left text-[12px] text-[#e8e8e8] hover:bg-app-hover",
+                          "flex w-full items-center rounded-md px-3 py-1.5 text-left text-ui text-[#e8e8e8] hover:bg-app-hover",
                           selected && "bg-[rgba(13,153,255,0.15)] text-white",
                           active && !selected && "bg-app-hover",
                         )}
@@ -301,7 +335,7 @@ export function FontFamilyPicker({
           }
         }}
         className={cn(
-          "flex h-7 max-w-full items-center gap-1 rounded-md border border-app-border bg-app-field pl-2 pr-1 text-[11px] text-app-field-fg hover:border-app-border disabled:opacity-45",
+          "flex h-7 max-w-full items-center gap-1 rounded-md border border-app-border bg-app-field pl-2 pr-1 text-ui text-app-field-fg hover:border-app-border disabled:opacity-45",
           buttonClassName,
         )}
         style={{ fontFamily: value }}

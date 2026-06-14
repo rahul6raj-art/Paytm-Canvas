@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { craftPublicConfigInitScript } from "@/lib/craftPublicConfigScript";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 import "./globals.css";
 
@@ -20,10 +21,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={inter.variable} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: craftPublicConfigInitScript() }} />
       </head>
       <body
         suppressHydrationWarning
         className={`${inter.className} min-h-dvh bg-app-bg font-sans text-app-fg antialiased`}
+        data-app-chrome
       >
         <ThemeProvider>{children}</ThemeProvider>
       </body>

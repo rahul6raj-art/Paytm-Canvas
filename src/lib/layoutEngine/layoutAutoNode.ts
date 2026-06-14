@@ -137,6 +137,9 @@ export function layoutAutoNode(
     computedHeight: extent.height,
     layoutDirty: false,
   };
+  if (parent.layoutGapAuto) {
+    parentPatch.layoutGap = gap;
+  }
   if (parentPrimaryAxisHug(parent)) {
     const target =
       mode === "horizontal" ? extent.width : extent.height;

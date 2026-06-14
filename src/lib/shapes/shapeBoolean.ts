@@ -1,6 +1,5 @@
 /**
- * Legacy entry — delegates to booleanGeometry.ts.
- * Replace internals with a clipper library without changing store/UI APIs.
+ * Legacy entry — delegates to booleanGeometry.ts (Clipper2 flatten kernel).
  */
 export type { BooleanOperation } from "@/lib/booleanGeometry";
 export {

@@ -1,5 +1,6 @@
 import { clampCornerRadii, cornerRadiiToCss, getNodeCornerRadii } from "@/lib/cornerRadius";
 import { effectiveStrokeType } from "@/lib/fillGradient";
+import { effectColorToRgba } from "@/lib/nodeEffects";
 import { resolveStrokeStyle } from "@/lib/stroke";
 import type { StrokePosition, EditorNode } from "@/stores/useEditorStore";
 
@@ -12,6 +13,16 @@ export type StrokeSidesCustom = {
   bottom?: boolean | number;
   left?: boolean | number;
 };
+
+/** Per-side stroke color overrides (custom mode). Falls back to `strokeColor`. */
+export type StrokeSidesCustomColors = {
+  top?: string;
+  right?: string;
+  bottom?: string;
+  left?: string;
+};
+
+export type StrokeSideKey = keyof StrokeSidesCustom;
 
 export type ResolvedStrokeSides = {
   top: boolean;
@@ -66,7 +77,64 @@ export function strokeSideWidthsAreUniform(widths: ResolvedStrokeSideWidths): bo
   );
 }
 
-export type StrokeEdgeRect = { x: number; y: number; width: number; height: number };
+/** True when active sides (width > 0) have different stroke weights. */
+export function strokeSideWeightsAreMixed(
+  node: Pick<EditorNode, "strokeWidth" | "strokeSides" | "strokeSidesCustom">,
+): boolean {
+  const sides = resolveStrokeSides(node);
+  const widths = resolveStrokeSideWidths(node);
+  const active: number[] = [];
+  if (sides.top && widths.top > 0) active.push(widths.top);
+  if (sides.right && widths.right > 0) active.push(widths.right);
+  if (sides.bottom && widths.bottom > 0) active.push(widths.bottom);
+  if (sides.left && widths.left > 0) active.push(widths.left);
+  if (active.length < 2) return false;
+  const first = active[0]!;
+  return !active.every((w) => w === first);
+}
+
+export function resolveStrokeSideColor(
+  node: Pick<EditorNode, "strokeColor" | "strokeSidesCustomColors">,
+  side: StrokeSideKey,
+): string {
+  const override = node.strokeSidesCustomColors?.[side];
+  if (override) return override;
+  return node.strokeColor ?? "#000000";
+}
+
+export function resolveStrokeSidePaint(
+  node: Pick<EditorNode, "strokeColor" | "strokeOpacity" | "strokeSidesCustomColors">,
+  side: StrokeSideKey,
+): string {
+  return effectColorToRgba(resolveStrokeSideColor(node, side), node.strokeOpacity ?? 1);
+}
+
+/** True when active sides (width > 0) have different stroke colors. */
+export function strokeSideColorsAreMixed(
+  node: Pick<
+    EditorNode,
+    "strokeWidth" | "strokeSides" | "strokeSidesCustom" | "strokeColor" | "strokeSidesCustomColors"
+  >,
+): boolean {
+  const sides = resolveStrokeSides(node);
+  const widths = resolveStrokeSideWidths(node);
+  const colors: string[] = [];
+  if (sides.top && widths.top > 0) colors.push(resolveStrokeSideColor(node, "top"));
+  if (sides.right && widths.right > 0) colors.push(resolveStrokeSideColor(node, "right"));
+  if (sides.bottom && widths.bottom > 0) colors.push(resolveStrokeSideColor(node, "bottom"));
+  if (sides.left && widths.left > 0) colors.push(resolveStrokeSideColor(node, "left"));
+  if (colors.length < 2) return false;
+  const first = colors[0]!;
+  return !colors.every((c) => c === first);
+}
+
+export type StrokeEdgeRect = {
+  side: StrokeSideKey;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 
 export function supportsStrokeSides(node: Pick<EditorNode, "type">): boolean {
   return node.type === "rectangle" || node.type === "frame";
@@ -108,29 +176,42 @@ export function strokeSidesCustomFromPreset(
 
 /** Partial side selection, or custom mode with different per-side widths. */
 export function usesPerEdgeStroke(
-  node: Pick<EditorNode, "type" | "strokeWidth" | "strokeSides" | "strokeSidesCustom">,
-): boolean {
-  if (!supportsStrokeSides(node)) return false;
-  const sides = resolveStrokeSides(node);
-  const allOn = sides.top && sides.right && sides.bottom && sides.left;
-  if (!allOn) return true;
-  if ((node.strokeSides ?? "all") === "custom") {
-    return !strokeSideWidthsAreUniform(resolveStrokeSideWidths(node));
-  }
-  return false;
-}
-
-/**
- * Figma individual strokes on rectangles/frames use the CSS border model
- * (per-side widths + border-radius), not open SVG path strokes.
- */
-export function strokeUsesCssIndividualBorders(
   node: Pick<
     EditorNode,
     | "type"
     | "strokeWidth"
     | "strokeSides"
     | "strokeSidesCustom"
+    | "strokeColor"
+    | "strokeSidesCustomColors"
+  >,
+): boolean {
+  if (!supportsStrokeSides(node)) return false;
+  const sides = resolveStrokeSides(node);
+  const allOn = sides.top && sides.right && sides.bottom && sides.left;
+  if (!allOn) return true;
+  if ((node.strokeSides ?? "all") === "custom") {
+    if (!strokeSideWidthsAreUniform(resolveStrokeSideWidths(node))) return true;
+    if (strokeSideColorsAreMixed(node)) return true;
+  }
+  return false;
+}
+
+/**
+ * Figma individual strokes on sharp rectangles/frames use the CSS border model
+ * (per-side widths). Rounded shapes use geometry-based side stroke paths.
+ */
+export function strokeUsesCssIndividualBorders(
+  node: Pick<
+    EditorNode,
+    | "type"
+    | "width"
+    | "height"
+    | "strokeWidth"
+    | "strokeSides"
+    | "strokeSidesCustom"
+    | "strokeColor"
+    | "strokeSidesCustomColors"
     | "strokePosition"
     | "strokeStyle"
     | "strokeType"
@@ -140,9 +221,15 @@ export function strokeUsesCssIndividualBorders(
   >,
 ): boolean {
   if (!supportsStrokeSides(node) || !usesPerEdgeStroke(node)) return false;
+  if (strokeSideColorsAreMixed(node)) return false;
   if (effectiveStrokeType(node) === "gradient") return false;
   if (resolveStrokeStyle(node) !== "solid") return false;
-  // Figma individual strokes render as inset side bands (CSS border model).
+  const [tl, tr, br, bl] = clampCornerRadii(
+    getNodeCornerRadii(node),
+    node.width,
+    node.height,
+  );
+  if (tl > 0 || tr > 0 || br > 0 || bl > 0) return false;
   const pos = node.strokePosition ?? "center";
   return pos === "inside" || pos === "center";
 }
@@ -154,6 +241,10 @@ export type IndividualBorderStrokeStyle = {
   borderRadius: string | number;
   borderStyle: "solid";
   borderColor: string;
+  borderTopColor: string;
+  borderRightColor: string;
+  borderBottomColor: string;
+  borderLeftColor: string;
   borderTopWidth: number;
   borderRightWidth: number;
   borderBottomWidth: number;
@@ -173,6 +264,7 @@ export function individualBorderStrokeStyle(
     | "strokeSidesCustom"
     | "strokeColor"
     | "strokeOpacity"
+    | "strokeSidesCustomColors"
     | "cornerRadius"
     | "cornerRadii"
   >,
@@ -183,6 +275,10 @@ export function individualBorderStrokeStyle(
   const radii = cornerRadiiToCss(
     clampCornerRadii(getNodeCornerRadii(node), node.width, node.height),
   );
+  const topColor = resolveStrokeSidePaint(node, "top");
+  const rightColor = resolveStrokeSidePaint(node, "right");
+  const bottomColor = resolveStrokeSidePaint(node, "bottom");
+  const leftColor = resolveStrokeSidePaint(node, "left");
   return {
     position: "absolute",
     inset: 0,
@@ -190,6 +286,10 @@ export function individualBorderStrokeStyle(
     borderRadius: radii,
     borderStyle: "solid",
     borderColor: strokeColor,
+    borderTopColor: topColor,
+    borderRightColor: rightColor,
+    borderBottomColor: bottomColor,
+    borderLeftColor: leftColor,
     borderTopWidth: sides.top ? sideWidths.top : 0,
     borderRightWidth: sides.right ? sideWidths.right : 0,
     borderBottomWidth: sides.bottom ? sideWidths.bottom : 0,
@@ -220,7 +320,6 @@ export function strokeUsesAxisAlignedRects(
   height: number,
 ): boolean {
   if (strokeUsesCssIndividualBorders(node)) return false;
-  if (effectiveStrokeType(node) === "gradient") return false;
   if (!usesPerEdgeStroke(node)) return false;
   const [tl, tr, br, bl] = clampCornerRadii(
     getNodeCornerRadii(node),
@@ -243,27 +342,27 @@ export function strokeEdgeRects(
 
   if (sides.top && sideWidths.top > 0) {
     const sw = sideWidths.top;
-    if (position === "inside") rects.push({ x: 0, y: 0, width: w, height: sw });
-    else if (position === "outside") rects.push({ x: 0, y: -sw, width: w, height: sw });
-    else rects.push({ x: 0, y: -sw / 2, width: w, height: sw });
+    if (position === "inside") rects.push({ side: "top", x: 0, y: 0, width: w, height: sw });
+    else if (position === "outside") rects.push({ side: "top", x: 0, y: -sw, width: w, height: sw });
+    else rects.push({ side: "top", x: 0, y: -sw / 2, width: w, height: sw });
   }
   if (sides.bottom && sideWidths.bottom > 0) {
     const sw = sideWidths.bottom;
-    if (position === "inside") rects.push({ x: 0, y: h - sw, width: w, height: sw });
-    else if (position === "outside") rects.push({ x: 0, y: h, width: w, height: sw });
-    else rects.push({ x: 0, y: h - sw / 2, width: w, height: sw });
+    if (position === "inside") rects.push({ side: "bottom", x: 0, y: h - sw, width: w, height: sw });
+    else if (position === "outside") rects.push({ side: "bottom", x: 0, y: h, width: w, height: sw });
+    else rects.push({ side: "bottom", x: 0, y: h - sw / 2, width: w, height: sw });
   }
   if (sides.left && sideWidths.left > 0) {
     const sw = sideWidths.left;
-    if (position === "inside") rects.push({ x: 0, y: 0, width: sw, height: h });
-    else if (position === "outside") rects.push({ x: -sw, y: 0, width: sw, height: h });
-    else rects.push({ x: -sw / 2, y: 0, width: sw, height: h });
+    if (position === "inside") rects.push({ side: "left", x: 0, y: 0, width: sw, height: h });
+    else if (position === "outside") rects.push({ side: "left", x: -sw, y: 0, width: sw, height: h });
+    else rects.push({ side: "left", x: -sw / 2, y: 0, width: sw, height: h });
   }
   if (sides.right && sideWidths.right > 0) {
     const sw = sideWidths.right;
-    if (position === "inside") rects.push({ x: w - sw, y: 0, width: sw, height: h });
-    else if (position === "outside") rects.push({ x: w, y: 0, width: sw, height: h });
-    else rects.push({ x: w - sw / 2, y: 0, width: sw, height: h });
+    if (position === "inside") rects.push({ side: "right", x: w - sw, y: 0, width: sw, height: h });
+    else if (position === "outside") rects.push({ side: "right", x: w, y: 0, width: sw, height: h });
+    else rects.push({ side: "right", x: w - sw / 2, y: 0, width: sw, height: h });
   }
   return rects;
 }
@@ -299,6 +398,7 @@ export function strokeSidesToReactStyle(
     | "strokePosition"
     | "strokeSides"
     | "strokeSidesCustom"
+    | "strokeSidesCustomColors"
   >,
 ): Record<string, string> {
   const sw = node.strokeWidth ?? 0;
@@ -312,12 +412,19 @@ export function strokeSidesToReactStyle(
   }
   const sides = resolveStrokeSides(node);
   const sideWidths = resolveStrokeSideWidths(node);
-  const color = node.strokeColor;
   const style: Record<string, string> = { boxSizing: "border-box" };
-  if (sides.top && sideWidths.top > 0) style.borderTop = `${sideWidths.top}px solid ${color}`;
-  if (sides.right && sideWidths.right > 0) style.borderRight = `${sideWidths.right}px solid ${color}`;
-  if (sides.bottom && sideWidths.bottom > 0) style.borderBottom = `${sideWidths.bottom}px solid ${color}`;
-  if (sides.left && sideWidths.left > 0) style.borderLeft = `${sideWidths.left}px solid ${color}`;
+  if (sides.top && sideWidths.top > 0) {
+    style.borderTop = `${sideWidths.top}px solid ${resolveStrokeSideColor(node, "top")}`;
+  }
+  if (sides.right && sideWidths.right > 0) {
+    style.borderRight = `${sideWidths.right}px solid ${resolveStrokeSideColor(node, "right")}`;
+  }
+  if (sides.bottom && sideWidths.bottom > 0) {
+    style.borderBottom = `${sideWidths.bottom}px solid ${resolveStrokeSideColor(node, "bottom")}`;
+  }
+  if (sides.left && sideWidths.left > 0) {
+    style.borderLeft = `${sideWidths.left}px solid ${resolveStrokeSideColor(node, "left")}`;
+  }
   return style;
 }
 

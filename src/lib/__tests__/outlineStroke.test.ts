@@ -125,8 +125,16 @@ describe("outlineStroke", () => {
       strokeType: "gradient",
       strokeGradient: {
         kind: "linear",
-        stops: [{ id: "s1", color: "#ff0000", position: 0 }],
+        stops: [
+          { id: "s1", color: "#ff0000", position: 0 },
+          { id: "s2", color: "#0000ff", position: 100 },
+        ],
         transform: { cx: 0.5, cy: 0.5, width: 1, height: 1, rotation: 0 },
+        handles: [
+          { x: 0, y: 0.5 },
+          { x: 1, y: 0.5 },
+          { x: 1, y: 0 },
+        ],
       },
     });
     assert.equal(canOutlineStroke(node), true);

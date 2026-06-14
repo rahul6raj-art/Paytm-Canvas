@@ -53,7 +53,7 @@ function payloadToSlice(payload: CodeRoundTripPayloadV1): EditorPersistSlice {
     zoom: 1,
     pan: { x: 0, y: 0 },
     showGrid: true,
-    showRulers: true,
+    showRulers: false,
     canvasBackgroundColor: DEFAULT_CANVAS_BACKGROUND,
     comments: [],
   });

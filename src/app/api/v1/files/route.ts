@@ -1,8 +1,11 @@
 import { jsonV1Data, jsonV1Error } from "@/lib/apiV1Responses";
 import { isNonEmptyString, parseJsonBody } from "@/lib/apiV1Validation";
+import { mockApiTokenGuard } from "@/lib/mockApiRequestAuth";
 import { fileToSummary, mockApiStore } from "@/lib/mockApiStore";
 
 export async function GET(request: Request) {
+  const denied = mockApiTokenGuard(request, "GET", { read: "files:read", write: "files:write" });
+  if (denied) return denied;
   const { searchParams } = new URL(request.url);
   const workspaceId = searchParams.get("workspaceId")?.trim() || undefined;
   if (workspaceId && !mockApiStore.workspaceExists(workspaceId)) {
@@ -13,6 +16,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const denied = mockApiTokenGuard(request, "POST", { read: "files:read", write: "files:write" });
+  if (denied) return denied;
   let body: unknown;
   try {
     body = await request.json();

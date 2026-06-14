@@ -1,11 +1,18 @@
 "use client";
 
-import { useState } from "react";
-import { Eye, EyeOff, Minus, Plus } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Eye, EyeOff, Minus } from "lucide-react";
 import { PropertiesSection } from "../PropertiesSection";
 import { ColorInput } from "../ColorInput";
 import { PropertyNumberInput } from "../PropertyInput";
-import { InspectorLabelRow } from "./InspectorPrimitives";
+import { InspectorLabelRow, InspectorSectionAddButton } from "./InspectorPrimitives";
+import {
+  EffectBlurIcon,
+  EffectOffsetXIcon,
+  EffectOffsetYIcon,
+  EffectSpreadIcon,
+} from "./InspectorSettingIcons";
 import {
   EFFECT_TYPE_OPTIONS,
   effectTypeLabel,
@@ -16,10 +23,21 @@ import {
   type NoiseEffectMode,
 } from "@/lib/nodeEffects";
 import type { DesignToken } from "@/lib/designTokens";
+import { appFieldClassCompact } from "@/lib/appFieldStyles";
+import {
+  inspectorIconClass,
+  inspectorIconStroke,
+  inspectorLucideProps,
+  inspectorRowActionBtnClass,
+} from "@/lib/inspectorIconStyles";
 import { cn } from "@/lib/utils";
+import {
+  adjacentPanelDialogStyle,
+  useAdjacentPanelDialogPosition,
+} from "../useAdjacentPanelDialogPosition";
+import { useDismissAnchoredDropdown } from "../useAnchoredDropdown";
 
-const field =
-  "h-6 min-h-[24px] w-full rounded border border-app-border bg-app-field px-1.5 text-[12px] text-app-field-fg focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40";
+const field = appFieldClassCompact;
 
 export function EffectsSection({
   instanceKey,
@@ -28,7 +46,6 @@ export function EffectsSection({
   effectToken,
   hasEffectToken,
   onAddEffect,
-  onCreateEffectToken,
   onDetachEffectToken,
   onToggleEffect,
   onDeleteEffect,
@@ -41,7 +58,6 @@ export function EffectsSection({
   effectToken: DesignToken | undefined;
   hasEffectToken: boolean;
   onAddEffect: (type: NodeEffectType) => void;
-  onCreateEffectToken: () => void;
   onDetachEffectToken: () => void;
   onToggleEffect: (effectId: string) => void;
   onDeleteEffect: (effectId: string) => void;
@@ -49,39 +65,77 @@ export function EffectsSection({
   onChangeEffectType: (effectId: string, type: NodeEffectType) => void;
 }) {
   const [addOpen, setAddOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLUListElement>(null);
+  const position = useAdjacentPanelDialogPosition(addButtonRef, addOpen, {
+    width: 220,
+    maxHeight: 280,
+  });
+  useDismissAnchoredDropdown(addOpen, () => setAddOpen(false), addButtonRef, menuRef);
+
+  useEffect(() => setMounted(true), []);
+
+  const addMenu =
+    addOpen && mounted ? (
+      <ul
+        ref={menuRef}
+        role="menu"
+        aria-label="Add effect"
+        className="fixed z-[120] overflow-y-auto overscroll-contain rounded-md border border-app-border bg-app-panel py-1 shadow-xl"
+        style={adjacentPanelDialogStyle(position)}
+      >
+        {EFFECT_TYPE_OPTIONS.map((opt) => (
+          <li key={opt.type}>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={locked}
+              className="flex w-full px-3 py-1.5 text-left text-ui text-app-fg hover:bg-app-hover disabled:opacity-40"
+              onClick={() => {
+                onAddEffect(opt.type);
+                setAddOpen(false);
+              }}
+            >
+              {opt.label}
+            </button>
+          </li>
+        ))}
+      </ul>
+    ) : null;
 
   return (
-    <PropertiesSection title="Effects" defaultOpen>
+    <PropertiesSection
+      title="Effects"
+      headerActions={
+        <InspectorSectionAddButton
+          title="Add effect"
+          disabled={locked}
+          buttonRef={addButtonRef}
+          onClick={() => setAddOpen((o) => !o)}
+        />
+      }
+    >
       {effectToken ? (
-        <p className="mb-1.5 truncate text-[10px] text-app-muted">
+        <p className="mb-1.5 truncate text-ui text-app-muted">
           Style: <span className="font-medium text-app-fg">{effectToken.name}</span>
         </p>
       ) : null}
-      <div className="mb-2 flex flex-wrap gap-1">
-        <button
-          type="button"
-          disabled={locked}
-          onClick={onCreateEffectToken}
-          className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-[10px] font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
-        >
-          + Effect style
-        </button>
-        {hasEffectToken ? (
+      {hasEffectToken ? (
+        <div className="mb-2 flex flex-wrap gap-1">
           <button
             type="button"
             disabled={locked}
             onClick={onDetachEffectToken}
-            className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-[10px] font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
+            className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-ui font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
           >
             Detach
           </button>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
-      {effects.length === 0 ? (
-        <p className="mb-2 text-[10px] text-app-subtle">No effects on this layer.</p>
-      ) : (
-        <ul className="mb-2 space-y-2">
+      {effects.length > 0 ? (
+        <ul className="space-y-2">
           {effects.map((e) => (
             <EffectRow
               key={e.id}
@@ -95,46 +149,8 @@ export function EffectsSection({
             />
           ))}
         </ul>
-      )}
-
-      <div className="relative">
-        <button
-          type="button"
-          disabled={locked}
-          onClick={() => setAddOpen((o) => !o)}
-          className="flex h-7 w-full items-center justify-center gap-1 rounded border border-app-border bg-app-panel text-[11px] font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
-        >
-          <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-          Add effect
-        </button>
-        {addOpen ? (
-          <>
-            <button
-              type="button"
-              className="fixed inset-0 z-10 cursor-default"
-              aria-label="Close effect menu"
-              onClick={() => setAddOpen(false)}
-            />
-            <ul className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-md border border-app-border bg-app-panel py-1 shadow-lg">
-              {EFFECT_TYPE_OPTIONS.map((opt) => (
-                <li key={opt.type}>
-                  <button
-                    type="button"
-                    disabled={locked}
-                    className="flex w-full px-3 py-1.5 text-left text-[12px] text-app-fg hover:bg-app-hover disabled:opacity-40"
-                    onClick={() => {
-                      onAddEffect(opt.type);
-                      setAddOpen(false);
-                    }}
-                  >
-                    {opt.label}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </>
-        ) : null}
-      </div>
+      ) : null}
+      {mounted && addMenu ? createPortal(addMenu, document.body) : null}
     </PropertiesSection>
   );
 }
@@ -179,22 +195,18 @@ function EffectRow({
           disabled={locked}
           title={e.visible ? "Hide effect" : "Show effect"}
           onClick={onToggle}
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-muted hover:bg-app-hover disabled:opacity-40"
+          className={cn(inspectorRowActionBtnClass, "inspector-icon-btn h-6 w-6")}
         >
-          {e.visible ? (
-            <Eye className="h-3.5 w-3.5" strokeWidth={1.75} />
-          ) : (
-            <EyeOff className="h-3.5 w-3.5" strokeWidth={1.75} />
-          )}
+          {e.visible ? <Eye {...inspectorLucideProps()} /> : <EyeOff {...inspectorLucideProps()} />}
         </button>
         <button
           type="button"
           disabled={locked}
           onClick={onDelete}
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-muted hover:bg-app-hover hover:text-rose-300 disabled:opacity-40"
+          className={cn(inspectorRowActionBtnClass, "inspector-icon-btn h-6 w-6 hover:text-rose-300")}
           aria-label={`Remove ${effectTypeLabel(e.type)}`}
         >
-          <Minus className="h-3.5 w-3.5" strokeWidth={2} />
+          <Minus className={inspectorIconClass} strokeWidth={inspectorIconStroke} />
         </button>
       </div>
 
@@ -238,6 +250,7 @@ function ShadowEffectFields({
         <PropertyNumberInput
           commitOnInput
           label="X"
+          leadingIcon={<EffectOffsetXIcon />}
           value={e.x ?? 0}
           instanceKey={`${instanceKey}-efx-${e.id}-x`}
           disabled={disabled}
@@ -246,6 +259,7 @@ function ShadowEffectFields({
         <PropertyNumberInput
           commitOnInput
           label="Y"
+          leadingIcon={<EffectOffsetYIcon />}
           value={e.y ?? 0}
           instanceKey={`${instanceKey}-efx-${e.id}-y`}
           disabled={disabled}
@@ -254,6 +268,7 @@ function ShadowEffectFields({
         <PropertyNumberInput
           commitOnInput
           label="Blur"
+          leadingIcon={<EffectBlurIcon />}
           value={e.blur ?? 0}
           instanceKey={`${instanceKey}-efx-${e.id}-blur`}
           disabled={disabled}
@@ -264,6 +279,7 @@ function ShadowEffectFields({
         <PropertyNumberInput
           commitOnInput
           label="Spread"
+          leadingIcon={<EffectSpreadIcon />}
           value={e.spread ?? 0}
           instanceKey={`${instanceKey}-efx-${e.id}-spread`}
           disabled={disabled}
@@ -306,6 +322,7 @@ function BlurEffectFields({
       <PropertyNumberInput
         commitOnInput
         label="Blur"
+        leadingIcon={<EffectBlurIcon />}
         value={e.blur ?? 0}
         instanceKey={`${instanceKey}-efx-${e.id}-blur`}
         disabled={disabled}

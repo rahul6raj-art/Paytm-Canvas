@@ -1,4 +1,6 @@
-# Paytm Craft — Realtime collaboration (planned)
+# Paytm Craft — Realtime collaboration
+
+**Status:** reference — **Postgres-backed Yjs sync implemented** in `packages/craft-realtime` (Track 4). Redis presence is optional when `REDIS_URL` is set.
 
 End state: multiple users edit the same **file** with **sub-second** sync, **offline-tolerant** merges via **Yjs**, and **ephemeral presence** (cursors, selection, avatars) via **Redis** + WebSocket fan-out.
 
@@ -10,11 +12,13 @@ End state: multiple users edit the same **file** with **sub-second** sync, **off
 - The web client’s scene graph maps to shared types; alternatively, store a single **`Y.Text`** or **`Y.Map`** holding serialized Paytm Craft JSON and diff at a coarser grain for v1 (simpler, worse merge semantics for simultaneous edits).
 - **Target**: fine-grained Yjs structures aligned with `nodes` / `childOrder` for minimal conflicts.
 
-### 2. Hocuspocus (WebSocket)
+### 2. craft-realtime (WebSocket)
 
-- Authenticate during WebSocket upgrade: JWT query param or short-lived ticket from API.
-- **Persistence**: `onStoreDocument` debounced (e.g. 2–5s) writes Yjs state to Postgres (`file_versions` or dedicated `yjs_updates` append table).
-- **Load**: `onLoadDocument` hydrates from latest snapshot + incremental updates.
+Implemented in **`packages/craft-realtime`** (custom Yjs relay, not Hocuspocus):
+
+- Authenticate during WebSocket upgrade: session cookie or API token (`sessionToken` in join payload).
+- **Persistence**: debounced writes to Postgres `file_yjs_states` (`onStoreDocument`).
+- **Load**: `onLoadDocument` hydrates from stored Yjs snapshot.
 
 ### 3. WebSocket sync protocol (conceptual)
 
@@ -41,8 +45,10 @@ Use **binary** frames for Yjs updates where possible to reduce bandwidth.
 
 ### 6. Local-only mode (today)
 
-- The Next.js app persists via **browser `localStorage`** and does not open a WebSocket for sync.
-- `src/lib/syncProvider.ts` exposes **`LocalSyncProvider`** for future wiring; **`RemoteSyncProvider`** remains a stub until the realtime service is connected.
+- The Next.js app persists via **browser `localStorage`** and optional **HTTP** (`api` / `remote` modes).
+- When **`NEXT_PUBLIC_PAYTM_CRAFT_SYNC_URL`** is set, `EditorRealtimeSync` opens a **Yjs** WebSocket session per API-backed file (`src/lib/realtimeSyncClient.ts`).
+- **Dev mock relay** (in-memory): `npm run dev:sync` → `ws://localhost:3001/yjs`
+- **Postgres-backed relay** (Track 4.3): `npm run sync:dev` → `ws://localhost:4001/yjs` via `packages/craft-realtime` (`onLoadDocument` / `onStoreDocument` → `file_yjs_states`). Optional Redis TTL for awareness when `REDIS_URL` is set.
 
 ## Related docs
 

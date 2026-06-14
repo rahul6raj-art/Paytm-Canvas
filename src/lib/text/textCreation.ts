@@ -1,12 +1,13 @@
 import type { EditorNode } from "@/stores/useEditorStore";
 import { resolveTextTypo } from "@/lib/textTypography";
-import { boundsFromDrag, type Point, type ShapeModifiers } from "@/lib/shapes/shapeCreation";
-import { computeTextBoxSize } from "@/lib/text/textLayout";
 import {
-  EMPTY_TEXT_PLACEHOLDER_WIDTH,
-  MIN_TEXT_BOX,
-  type TextResizeMode,
-} from "@/lib/text/textNodeModel";
+  boundsFromDrag,
+  type Point,
+  type ShapeDragPhase,
+  type ShapeModifiers,
+} from "@/lib/shapes/shapeCreation";
+import { computeTextBoxSize } from "@/lib/text/textLayout";
+import { MIN_TEXT_BOX, type TextResizeMode } from "@/lib/text/textNodeModel";
 
 export type TextStyleSeed = Partial<
   Pick<
@@ -24,6 +25,27 @@ export type TextStyleSeed = Partial<
   >
 >;
 
+function minTextSizeForPhase(phase: ShapeDragPhase): number {
+  return phase === "live" ? 0 : MIN_TEXT_BOX;
+}
+
+/** Geometry patch while live-dragging a new text box. */
+export function textGeometryPatchFromDrag(
+  start: Point,
+  end: Point,
+  modifiers: ShapeModifiers,
+  phase: ShapeDragPhase = "commit",
+): Pick<EditorNode, "x" | "y" | "width" | "height"> {
+  const minSize = minTextSizeForPhase(phase);
+  const box = boundsFromDrag(start, end, modifiers, { minSize });
+  return {
+    x: Math.round(box.x),
+    y: Math.round(box.y),
+    width: Math.max(minSize, Math.round(box.width)),
+    height: Math.max(minSize, Math.round(box.height)),
+  };
+}
+
 /** Build a new text node (caller assigns id/parent and inserts). */
 export function createTextNode(
   x: number,
@@ -32,14 +54,15 @@ export function createTextNode(
   height: number,
   mode: TextResizeMode,
   style?: TextStyleSeed,
+  phase: ShapeDragPhase = "commit",
 ): Omit<EditorNode, "id" | "parentId"> {
   const typo = resolveTextTypo(style ?? {});
-  const size = computeTextBoxSize("", typo, mode, width, height);
-  const boxW =
-    mode === "auto-width"
-      ? Math.max(size.width, EMPTY_TEXT_PLACEHOLDER_WIDTH)
-      : Math.max(MIN_TEXT_BOX, width);
-  const boxH = Math.max(MIN_TEXT_BOX, size.height);
+  const liveZero = phase === "live" && width <= 0 && height <= 0;
+  const size = liveZero
+    ? { width: 0, height: 0 }
+    : computeTextBoxSize("", typo, mode, width, height);
+  const boxW = liveZero ? 0 : mode === "auto-width" ? size.width : Math.max(MIN_TEXT_BOX, width);
+  const boxH = liveZero ? 0 : Math.max(MIN_TEXT_BOX, size.height);
   return {
     type: "text",
     name: "Text",
@@ -81,6 +104,20 @@ export function createPointTextAt(
   return { x: worldX, y: worldY, node };
 }
 
+/** Draft text node at drag endpoints (caller assigns id / inserts). */
+export function createTextDraftNodeFromDrag(
+  start: Point,
+  end: Point,
+  modifiers: ShapeModifiers,
+  style?: TextStyleSeed,
+  phase: ShapeDragPhase = "commit",
+): Omit<EditorNode, "id" | "parentId"> {
+  const box = textGeometryPatchFromDrag(start, end, modifiers, phase);
+  const mode: TextResizeMode =
+    Math.hypot(end.x - start.x, end.y - start.y) < 4 ? "auto-width" : "auto-height";
+  return createTextNode(box.x, box.y, box.width, box.height, mode, style, phase);
+}
+
 /** Fixed-width text box from a drag gesture (auto height wrapping). */
 export function createTextBoxFromDrag(
   start: Point,
@@ -88,11 +125,6 @@ export function createTextBoxFromDrag(
   modifiers: ShapeModifiers,
   style?: TextStyleSeed,
 ): { x: number; y: number; width: number; height: number; node: Omit<EditorNode, "id" | "parentId"> } {
-  const box = boundsFromDrag(start, end, modifiers, { minSize: MIN_TEXT_BOX });
-  const width = Math.max(MIN_TEXT_BOX, box.width);
-  const height = Math.max(MIN_TEXT_BOX, box.height);
-  const mode: TextResizeMode =
-    Math.hypot(end.x - start.x, end.y - start.y) < 4 ? "auto-width" : "auto-height";
-  const node = createTextNode(box.x, box.y, width, height, mode, style);
-  return { x: box.x, y: box.y, width: node.width, height: node.height, node };
+  const node = createTextDraftNodeFromDrag(start, end, modifiers, style, "commit");
+  return { x: node.x, y: node.y, width: node.width, height: node.height, node };
 }

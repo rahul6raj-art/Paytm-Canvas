@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import {
   clonedNodePosition,
+  layerPanelChildIds,
   parentUsesAutoLayout,
   getRenderedWorldTopLeft,
   insertNodeInChildOrder,
@@ -147,6 +148,21 @@ describe("childOrderReconcile", () => {
     assert.equal(parentUsesAutoLayout(null, nodes), false);
   });
 
+  it("clonedNodePosition keeps the same position when offset is 0", () => {
+    const nodes = {
+      f1: frame("f1", 120, 200),
+      r1: rect("r1", "f1", 10, 20),
+    };
+    const childOrder = {
+      [EDITOR_ROOT_KEY]: ["f1"],
+      f1: ["r1"],
+    };
+    const rootPos = clonedNodePosition("f1", true, null, nodes, childOrder, null, nodes.f1!);
+    assert.deepEqual(rootPos, { x: 120, y: 200 });
+    const childPos = clonedNodePosition("r1", false, null, nodes, childOrder, "f1", nodes.r1!);
+    assert.deepEqual(childPos, { x: 10, y: 20 });
+  });
+
   it("clonedNodePosition offsets only the tree root upward in world space", () => {
     const nodes = {
       f1: frame("f1", 80, 80),
@@ -156,9 +172,9 @@ describe("childOrderReconcile", () => {
       [EDITOR_ROOT_KEY]: ["f1"],
       f1: ["r1"],
     };
-    const rootPos = clonedNodePosition("f1", true, 24, nodes, childOrder, null, nodes.f1!);
+    const rootPos = clonedNodePosition("f1", true, { dx: 0, dy: -24 }, nodes, childOrder, null, nodes.f1!);
     assert.deepEqual(rootPos, { x: 80, y: 56 });
-    const childPos = clonedNodePosition("r1", false, 24, nodes, childOrder, "f1", nodes.r1!);
+    const childPos = clonedNodePosition("r1", false, { dx: 0, dy: -24 }, nodes, childOrder, "f1", nodes.r1!);
     assert.deepEqual(childPos, { x: 0, y: 0 });
     assert.deepEqual(getRenderedWorldTopLeft("r1", nodes, childOrder), { x: 80, y: 80 });
   });
@@ -193,5 +209,15 @@ describe("childOrderReconcile", () => {
     const next = insertNodeInChildOrder(childOrder, "r1", "f1");
     assert.deepEqual(next[EDITOR_ROOT_KEY], ["f1"]);
     assert.deepEqual(next.f1, ["r1"]);
+  });
+
+  it("layerPanelChildIds hides children wrongly listed at root", () => {
+    const nodes = { f1: frame("f1", 87, 8), r1: rect("r1", "f1", 127, 673) };
+    const childOrder = {
+      [EDITOR_ROOT_KEY]: ["f1", "r1"],
+      f1: [],
+    };
+    assert.deepEqual(layerPanelChildIds(EDITOR_ROOT_KEY, nodes, childOrder), ["f1"]);
+    assert.deepEqual(layerPanelChildIds("f1", nodes, childOrder), ["r1"]);
   });
 });

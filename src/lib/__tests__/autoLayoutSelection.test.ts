@@ -113,6 +113,24 @@ describe("applyAutoLayoutToContainer — existing frame", () => {
     assert.equal(result!.childOrder.f?.length, 2);
     assert.notEqual(result!.nodes.f.layoutMode, "none");
   });
+
+  it("reconciles childOrder when children were still listed at the page root", () => {
+    const nodes: Record<string, EditorNode> = {
+      f: frame("f"),
+      a: rect("a", 10, 10, 40, 20, { parentId: "f" }),
+      b: rect("b", 60, 10, 40, 20, { parentId: "f", name: "Rectangle b" }),
+    };
+    const childOrder = {
+      [EDITOR_ROOT_KEY]: ["f", "a", "b"],
+      f: [],
+    };
+
+    const result = applyAutoLayoutToContainer(nodes, childOrder, "f");
+    assert.ok(result);
+    assert.deepEqual(result!.childOrder[EDITOR_ROOT_KEY], ["f"]);
+    assert.equal(result!.childOrder.f?.length, 2);
+    assert.equal(result!.nodes.f.expanded, true);
+  });
 });
 
 describe("applyAutoLayoutToSelection — children inside frame", () => {
@@ -128,6 +146,22 @@ describe("applyAutoLayoutToSelection — children inside frame", () => {
     assert.ok(result);
     assert.deepEqual(result!.selectedIds, ["f"]);
     assert.equal(result!.nodes.f.layoutMode, "horizontal");
+    assert.equal(result!.nodes.f.layoutGapAuto, false);
     assert.equal(Object.keys(result!.nodes).filter((id) => id.startsWith("frame-al-")).length, 0);
+  });
+
+  it("wraps root-level siblings when childOrder lists operands only via parentId", () => {
+    const nodes: Record<string, EditorNode> = {
+      f: frame("f"),
+      a: rect("a", 10, 10, 40, 20, { parentId: "f" }),
+      b: rect("b", 60, 10, 40, 20, { parentId: "f" }),
+    };
+    const childOrder = { [EDITOR_ROOT_KEY]: ["f"], f: [] };
+
+    const result = applyAutoLayoutToSelection(nodes, childOrder, ["a", "b"]);
+    assert.ok(result);
+    assert.deepEqual(result!.selectedIds, ["f"]);
+    assert.equal(result!.nodes.f.layoutMode, "horizontal");
+    assert.deepEqual(result!.childOrder.f, ["a", "b"]);
   });
 });

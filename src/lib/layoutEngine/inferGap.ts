@@ -1,6 +1,7 @@
 import { flowChildIds } from "./layoutAutoNode";
-import { sortIdsForAutoLayoutFlow } from "./flowOrder";
 import { isAutoLayoutContainer, type LayoutEngineNode, type LayoutMode } from "./types";
+
+export type FrozenLayoutGap = Pick<LayoutEngineNode, "layoutGap" | "layoutGapAuto">;
 
 /** Median spacing between adjacent flow children (Figma “Auto” gap). */
 export function inferAutoLayoutGap(
@@ -9,11 +10,11 @@ export function inferAutoLayoutGap(
   mode: Exclude<LayoutMode, "none">,
 ): number {
   if (childIds.length < 2) return 0;
-  const sorted = sortIdsForAutoLayoutFlow(childIds, nodes, mode);
   const gaps: number[] = [];
-  for (let i = 0; i < sorted.length - 1; i++) {
-    const a = nodes[sorted[i]!]!;
-    const b = nodes[sorted[i + 1]!]!;
+  for (let i = 0; i < childIds.length - 1; i++) {
+    const a = nodes[childIds[i]!]!;
+    const b = nodes[childIds[i + 1]!]!;
+    if (!a || !b) continue;
     if (mode === "horizontal") {
       const g = b.x - (a.x + a.width);
       if (g >= 0 && g < 800) gaps.push(g);
@@ -40,6 +41,24 @@ export function resolveLayoutGap(
 }
 
 /**
+ * Snapshot the effective gap (inferred when Auto is on) before turning it off.
+ * Prevents relayout from snapping to a stale stored layoutGap (often 0).
+ */
+export function freezeAutoLayoutGap(
+  parent: LayoutEngineNode | undefined,
+  nodes: Record<string, LayoutEngineNode>,
+  childOrder: Record<string, string[]>,
+): FrozenLayoutGap | null {
+  if (!parent || !isAutoLayoutContainer(parent)) return null;
+  if (!parent.layoutGapAuto) return null;
+
+  const mode = parent.layoutMode as Exclude<LayoutMode, "none">;
+  const kids = flowChildIds(parent.id, nodes, childOrder);
+  const preservedGap = resolveLayoutGap(parent, kids, nodes, mode);
+  return { layoutGapAuto: false, layoutGap: preservedGap };
+}
+
+/**
  * When inserting a child into auto-layout, freeze the current effective gap so
  * relayout does not re-infer spacing from the dropped node's transient position.
  */
@@ -48,7 +67,7 @@ export function freezeAutoLayoutGapBeforeChildInsert(
   nodes: Record<string, LayoutEngineNode>,
   childOrder: Record<string, string[]>,
   incomingChildId: string,
-): Pick<LayoutEngineNode, "layoutGap" | "layoutGapAuto"> | null {
+): FrozenLayoutGap | null {
   if (!parent || !isAutoLayoutContainer(parent)) return null;
   if (!parent.layoutGapAuto) return null;
 

@@ -4,46 +4,19 @@ import {
   getSwapTargetBounds,
   worldCenterAtCapturedOrigin,
 } from "@/lib/canvasSwapDrag";
-import { CANVAS_VISUAL, screenPxToWorld } from "@/lib/canvasVisual";
+import {
+  worldPointToOverlay,
+  worldRectToOverlay,
+} from "@/lib/canvasOverlaySpace";
+import {
+  CANVAS_SWAP_OUTLINE_SCREEN_PX,
+  CANVAS_VISUAL,
+} from "@/lib/canvasVisual";
 import { useEditorStore } from "@/stores/useEditorStore";
+import { useCanvasOverlaySpace } from "./useCanvasOverlaySpace";
+import { SwapPinkDot } from "./SwapPinkDot";
 
-const PINK = CANVAS_VISUAL.swapPink;
 const PINK_RING = CANVAS_VISUAL.swapPinkRing;
-
-function SwapPinkDot({
-  cx,
-  cy,
-  zoom,
-  variant,
-}: {
-  cx: number;
-  cy: number;
-  zoom: number;
-  variant: "solid" | "ring";
-}) {
-  const r = screenPxToWorld(5, zoom);
-  const stroke = screenPxToWorld(2, zoom);
-  const size = r * 2;
-  return (
-    <div
-      className="absolute rounded-full"
-      style={{
-        left: cx,
-        top: cy,
-        width: size,
-        height: size,
-        transform: "translate(-50%, -50%)",
-        background: variant === "solid" ? PINK : "transparent",
-        border: `${stroke}px solid ${variant === "solid" ? "#ffffff" : PINK}`,
-        boxShadow:
-          variant === "solid"
-            ? `0 0 0 ${screenPxToWorld(1, zoom)}px ${PINK_RING}`
-            : `0 0 0 ${screenPxToWorld(1, zoom)}px rgba(255, 255, 255, 0.9)`,
-        animation: variant === "solid" ? "swap-pink-pulse 0.85s ease-in-out infinite" : undefined,
-      }}
-    />
-  );
-}
 
 /** Figma-style pink dots while dragging one layer over another to swap positions. */
 export function SwapDragOverlay() {
@@ -51,7 +24,7 @@ export function SwapDragOverlay() {
   const nodes = useEditorStore((s) => s.nodes);
   const childOrder = useEditorStore((s) => s.childOrder);
   const editorMode = useEditorStore((s) => s.editorMode);
-  const zoom = useEditorStore((s) => s.zoom);
+  const overlay = useCanvasOverlaySpace();
 
   if (
     editorMode !== "design" ||
@@ -81,7 +54,18 @@ export function SwapDragOverlay() {
     childOrder,
   );
 
-  const strokeW = screenPxToWorld(1.5, zoom);
+  const targetScreen = worldRectToOverlay(targetBounds, overlay);
+  const targetCenterScreen = worldPointToOverlay(targetCenter.x, targetCenter.y, overlay);
+  const sourceStartScreen = worldPointToOverlay(
+    sourceStartCenter.x,
+    sourceStartCenter.y,
+    overlay,
+  );
+  const targetStartScreen = worldPointToOverlay(
+    targetStartCenter.x,
+    targetStartCenter.y,
+    overlay,
+  );
 
   return (
     <div className="pointer-events-none absolute inset-0 z-[36] overflow-visible" aria-hidden>
@@ -94,38 +78,37 @@ export function SwapDragOverlay() {
       <div
         className="absolute box-border rounded-sm"
         style={{
-          left: targetBounds.x,
-          top: targetBounds.y,
-          width: Math.max(1, targetBounds.width),
-          height: Math.max(1, targetBounds.height),
-          border: `${strokeW}px dashed ${PINK_RING}`,
+          left: targetScreen.x,
+          top: targetScreen.y,
+          width: Math.max(1, targetScreen.width),
+          height: Math.max(1, targetScreen.height),
+          border: `${CANVAS_SWAP_OUTLINE_SCREEN_PX}px dashed ${PINK_RING}`,
         }}
       />
       <svg className="absolute inset-0 h-full w-full overflow-visible" aria-hidden>
         <line
-          x1={sourceStartCenter.x}
-          y1={sourceStartCenter.y}
-          x2={targetCenter.x}
-          y2={targetCenter.y}
+          x1={sourceStartScreen.x}
+          y1={sourceStartScreen.y}
+          x2={targetCenterScreen.x}
+          y2={targetCenterScreen.y}
           stroke={PINK_RING}
-          strokeWidth={strokeW}
-          strokeDasharray={`${screenPxToWorld(4, zoom)} ${screenPxToWorld(3, zoom)}`}
-          vectorEffect="non-scaling-stroke"
+          strokeWidth={CANVAS_SWAP_OUTLINE_SCREEN_PX}
+          strokeDasharray="4 3"
         />
       </svg>
-      <SwapPinkDot cx={targetCenter.x} cy={targetCenter.y} zoom={zoom} variant="solid" />
       <SwapPinkDot
-        cx={sourceStartCenter.x}
-        cy={sourceStartCenter.y}
-        zoom={zoom}
+        left={targetCenterScreen.x}
+        top={targetCenterScreen.y}
         variant="solid"
+        pulse
       />
       <SwapPinkDot
-        cx={targetStartCenter.x}
-        cy={targetStartCenter.y}
-        zoom={zoom}
-        variant="ring"
+        left={sourceStartScreen.x}
+        top={sourceStartScreen.y}
+        variant="solid"
+        pulse
       />
+      <SwapPinkDot left={targetStartScreen.x} top={targetStartScreen.y} variant="ring" />
     </div>
   );
 }

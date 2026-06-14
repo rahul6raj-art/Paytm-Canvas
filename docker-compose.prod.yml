@@ -1,0 +1,17 @@
+# Production-oriented overrides for docker compose.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  craft-api:
+    environment:
+      CRAFT_API_ENV: production
+      CRAFT_API_ALLOW_ANON: 0
+      CRAFT_API_COOKIE_SECURE: 1
+      CRAFT_API_TRUST_PROXY: 1
+      # Set to your deployed Next.js origin(s), comma-separated
+      CRAFT_API_CORS_ORIGIN: http://localhost:3000
+
+  craft-realtime:
+    environment:
+      CRAFT_SYNC_ENV: production
+      CRAFT_SYNC_ALLOW_ANON: 0

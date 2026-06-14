@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  freezeAutoLayoutGap,
   freezeAutoLayoutGapBeforeChildInsert,
   layoutAutoNode,
   layoutAutoNodeDeep,
@@ -142,6 +143,27 @@ describe("layoutEngine — nested auto layout", () => {
 });
 
 describe("layoutEngine — auto gap", () => {
+  it("freezeAutoLayoutGap preserves inferred gap when turning Auto off", () => {
+    const nodes: Record<string, LayoutEngineNode> = {
+      parent: rootFrame("parent", {
+        layoutMode: "horizontal",
+        layoutGap: 0,
+        layoutGapAuto: true,
+        layoutSizingHorizontal: "fixed",
+        layoutSizingVertical: "fixed",
+        width: 200,
+        height: 80,
+      }),
+      a: frame("a", 0, 0, 40, 40, { parentId: "parent" }),
+      b: frame("b", 0, 0, 40, 40, { parentId: "parent", x: 52, y: 0 }),
+    };
+    const childOrder = { parent: ["a", "b"] };
+    const patch = freezeAutoLayoutGap(nodes.parent, nodes, childOrder);
+    assert.ok(patch);
+    assert.equal(patch!.layoutGapAuto, false);
+    assert.equal(patch!.layoutGap, 12);
+  });
+
   it("freezeAutoLayoutGapBeforeChildInsert preserves inferred gap before child insert", () => {
     const nodes: Record<string, LayoutEngineNode> = {
       parent: rootFrame("parent", {
@@ -186,6 +208,25 @@ describe("layoutEngine — auto gap", () => {
     const childOrder = { parent: ["a", "b"] };
     const out = layoutAutoNode("parent", nodes, childOrder);
     assert.equal(out.children.b?.x, 40 + 12);
+  });
+
+  it("syncs layoutGap on parent when layoutGapAuto relayouts", () => {
+    const nodes: Record<string, LayoutEngineNode> = {
+      parent: rootFrame("parent", {
+        layoutMode: "horizontal",
+        layoutGap: 0,
+        layoutGapAuto: true,
+        layoutSizingHorizontal: "fixed",
+        layoutSizingVertical: "fixed",
+        width: 200,
+        height: 80,
+      }),
+      a: frame("a", 0, 0, 40, 40, { parentId: "parent" }),
+      b: frame("b", 0, 0, 40, 40, { parentId: "parent", x: 52, y: 0 }),
+    };
+    const childOrder = { parent: ["a", "b"] };
+    const out = layoutAutoNode("parent", nodes, childOrder);
+    assert.equal(out.parent?.layoutGap, 12);
   });
 });
 

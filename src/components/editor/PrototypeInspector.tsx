@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { useEditorStore, type EditorNode } from "@/stores/useEditorStore";
 import { defaultPrototypeLink, type PrototypeAction, type PrototypeTransition, type PrototypeTrigger } from "@/lib/prototype";
+import { InspectorSectionAddButton } from "./design-panel/InspectorPrimitives";
 
 function frameOptions(nodes: Record<string, EditorNode>): { id: string; name: string }[] {
   return Object.values(nodes)
@@ -42,14 +43,8 @@ export function PrototypeInspector({ node }: { node: EditorNode }) {
   return (
     <div className="space-y-3 p-3">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-app-subtle">Interactions</p>
-        <button
-          type="button"
-          onClick={addInteraction}
-          className="rounded-md border border-white/10 bg-app-hover px-2 py-1 text-[11px] font-medium text-app-fg transition-colors hover:border-accent/40 hover:bg-accent/10"
-        >
-          Add interaction
-        </button>
+        <p className="section-heading">Interactions</p>
+        <InspectorSectionAddButton title="Add interaction" onClick={addInteraction} />
       </div>
 
       {links.length > 0 ? (
@@ -62,8 +57,8 @@ export function PrototypeInspector({ node }: { node: EditorNode }) {
                 className={
                   l.id === selectedPrototypeLinkId ||
                   (!selectedPrototypeLinkId && links[0]?.id === l.id)
-                    ? "w-full rounded-md border border-accent/45 bg-accent/10 px-2 py-1.5 text-left text-[11px] text-white"
-                    : "w-full rounded-md border border-transparent px-2 py-1.5 text-left text-[11px] text-app-muted hover:border-white/10 hover:bg-app-hover"
+                    ? "w-full rounded-md border border-accent/45 bg-accent/10 px-2 py-1.5 text-left text-ui text-white"
+                    : "w-full rounded-md border border-transparent px-2 py-1.5 text-left text-ui text-app-muted hover:border-white/10 hover:bg-app-hover"
                 }
               >
                 {l.trigger} → {l.action}
@@ -72,18 +67,16 @@ export function PrototypeInspector({ node }: { node: EditorNode }) {
             </li>
           ))}
         </ul>
-      ) : (
-        <p className="text-[12px] leading-relaxed text-app-subtle">No interactions yet. Drag the blue handle on the canvas to wire to a frame, or add one here.</p>
-      )}
+      ) : null}
 
       {displayLink ? (
         <div className="space-y-2 border-t border-app-border-subtle pt-3">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-app-subtle">Selected interaction</p>
+          <p className="section-heading">Selected interaction</p>
 
           <label className="block space-y-1">
-            <span className="text-[10px] text-app-subtle">Trigger</span>
+            <span className="text-ui text-app-subtle">Trigger</span>
             <select
-              className="h-8 w-full rounded-md border border-white/10 bg-app-panel px-2 text-[12px] text-app-fg outline-none focus:border-accent/50"
+              className="h-8 w-full rounded-md border border-white/10 bg-app-panel px-2 text-ui text-app-fg outline-none focus:border-accent/50"
               value={displayLink.trigger}
               onChange={(e) =>
                 updatePrototypeLink(displayLink.id, { trigger: e.target.value as PrototypeTrigger })
@@ -95,9 +88,9 @@ export function PrototypeInspector({ node }: { node: EditorNode }) {
           </label>
 
           <label className="block space-y-1">
-            <span className="text-[10px] text-app-subtle">Action</span>
+            <span className="text-ui text-app-subtle">Action</span>
             <select
-              className="h-8 w-full rounded-md border border-white/10 bg-app-panel px-2 text-[12px] text-app-fg outline-none focus:border-accent/50"
+              className="h-8 w-full rounded-md border border-white/10 bg-app-panel px-2 text-ui text-app-fg outline-none focus:border-accent/50"
               value={displayLink.action}
               onChange={(e) =>
                 updatePrototypeLink(displayLink.id, { action: e.target.value as PrototypeAction })
@@ -111,9 +104,9 @@ export function PrototypeInspector({ node }: { node: EditorNode }) {
 
           {displayLink.action !== "back" ? (
             <label className="block space-y-1">
-              <span className="text-[10px] text-app-subtle">Destination frame</span>
+              <span className="text-ui text-app-subtle">Destination frame</span>
               <select
-                className="h-8 w-full rounded-md border border-white/10 bg-app-panel px-2 text-[12px] text-app-fg outline-none focus:border-accent/50"
+                className="h-8 w-full rounded-md border border-white/10 bg-app-panel px-2 text-ui text-app-fg outline-none focus:border-accent/50"
                 value={displayLink.targetFrameId ?? ""}
                 onChange={(e) =>
                   updatePrototypeLink(displayLink.id, {
@@ -132,9 +125,9 @@ export function PrototypeInspector({ node }: { node: EditorNode }) {
           ) : null}
 
           <label className="block space-y-1">
-            <span className="text-[10px] text-app-subtle">Transition</span>
+            <span className="text-ui text-app-subtle">Transition</span>
             <select
-              className="h-8 w-full rounded-md border border-white/10 bg-app-panel px-2 text-[12px] text-app-fg outline-none focus:border-accent/50"
+              className="h-8 w-full rounded-md border border-white/10 bg-app-panel px-2 text-ui text-app-fg outline-none focus:border-accent/50"
               value={displayLink.transition}
               onChange={(e) =>
                 updatePrototypeLink(displayLink.id, { transition: e.target.value as PrototypeTransition })
@@ -150,7 +143,7 @@ export function PrototypeInspector({ node }: { node: EditorNode }) {
           <button
             type="button"
             onClick={() => deletePrototypeLink(displayLink.id)}
-            className="w-full rounded-md border border-red-500/25 bg-red-500/10 py-1.5 text-[11px] font-medium text-red-200/90 hover:bg-red-500/20"
+            className="w-full rounded-md border border-red-500/25 bg-red-500/10 py-1.5 text-ui font-medium text-red-200/90 hover:bg-red-500/20"
           >
             Delete interaction
           </button>

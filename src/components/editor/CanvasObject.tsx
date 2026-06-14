@@ -2,7 +2,6 @@
 
 import { useCallback, useMemo, useRef } from "react";
 import { Artboard } from "./Artboard";
-import { ShapeGradientFill } from "./ShapeGradientFill";
 import { releaseFieldFocusForCanvas } from "@/lib/editorKeyboardFocus";
 import { cn } from "@/lib/utils";
 import { ROOT, useEditorStore, type EditorNode } from "@/stores/useEditorStore";
@@ -15,7 +14,7 @@ import {
 } from "@/lib/tree";
 import type { LayoutNode } from "@/lib/autoLayout";
 import { buildParentMapFromChildOrder, isAncestorOf } from "@/lib/editorGraph";
-import { mergeInstanceOverrides } from "@/lib/componentModel";
+import { findInstanceRoot } from "@/lib/componentModel";
 import { legacyEffectShadowAppend, resolveEffectBoxShadow, resolveNodeWithDesignTokens } from "@/lib/designTokens";
 import { buildNodeEffectRenderStyle, firstVisibleDropShadowFilter } from "@/lib/nodeEffects";
 import { EffectOverlays } from "./EffectOverlays";
@@ -31,7 +30,9 @@ import {
 import {
   applyMoveToolPointerSelection,
   isAdditiveSelectionClick,
+  isDeepSelectClick,
   drillTargetForDoubleClick,
+  frameBodyReceivesPointerHits,
   selectionTargetForClick,
   shouldCollapseContainerHits,
 } from "@/lib/containerSelection";
@@ -40,6 +41,12 @@ import {
   shouldEnterPathEditOnEdit,
 } from "@/lib/editMode/shapeEditGate";
 import { clampCornerRadii, cornerRadiiToCss, getNodeCornerRadii } from "@/lib/cornerRadius";
+import { isRoundedRectPath } from "@/lib/shapes/shapeToPath";
+import {
+  pathEditAnchorStyle,
+  pathEditBezierHandleStyle,
+  selectedPathPoints,
+} from "@/lib/pathEditAnchors";
 import { layerBlendCanvasStyle } from "@/lib/layerBlendMode";
 import { prepareAltDragDuplicate } from "@/lib/canvasAltDrag";
 import { EMPTY_CHILD_IDS } from "@/lib/editorConstants";
@@ -50,12 +57,17 @@ import {
   isCanvasSelectTool,
 } from "@/lib/canvasInteractionGuards";
 import { TextCanvasView } from "./TextCanvasView";
+import { PathEditPathOutline } from "./PathEditPathOutline";
 import { ShapeVectorView } from "./ShapeVectorView";
 import { BooleanGroupView, MaskGroupView } from "./BooleanGroupView";
 import { shouldClipChildren, clipContentContainerStyle } from "@/lib/clipChildren";
+import { shouldRenderCanvasNode } from "@/lib/canvasViewportCull";
+import { useCanvasViewportCull } from "./CanvasViewportContext";
+import { getDragPreviewOffsetForIds } from "@/lib/canvasEphemeralTransform";
 import { cssRotationStyle } from "@/lib/transformMath";
 import { shouldSuppressCanvasPointer } from "@/lib/canvasCreationGuard";
 import { didPointerExitElement } from "@/lib/domPointer";
+import { isZeroAreaDraftNode } from "@/lib/shapes/shapeDraft";
 
 function isUnder(nodes: Record<string, EditorNode>, nodeId: string, ancestorId: string): boolean {
   let cur: string | null = nodes[nodeId]?.parentId ?? null;
@@ -123,26 +135,48 @@ function pointInWorldRect(
   return px >= r.x && py >= r.y && px <= r.x + r.width && py <= r.y + r.height;
 }
 
-export function CanvasObject({ id }: { id: string }) {
-  const nodesMap = useEditorStore((s) => s.nodes);
+export function CanvasObject({
+  id,
+  skipViewportCull = false,
+}: {
+  id: string;
+  skipViewportCull?: boolean;
+}) {
+  const nodeRaw = useEditorStore((s) => s.nodes[id]);
+  const instanceRootId = useEditorStore((s) => findInstanceRoot(s.nodes, id));
+  const instanceOverridePatch = useEditorStore((s) => {
+    if (!instanceRootId) return undefined;
+    const raw = s.nodes[instanceRootId]?.instanceOverrides?.[id];
+    return raw && typeof raw === "object" ? raw : undefined;
+  });
   const assets = useEditorStore((s) => s.assets);
   const designTokens = useEditorStore((s) => s.designTokens);
-  const nodeRaw = nodesMap[id];
   const node = useMemo(() => {
     if (!nodeRaw) return null;
-    const merged = mergeInstanceOverrides(nodeRaw, nodesMap);
+    const merged =
+      instanceOverridePatch != null
+        ? ({ ...nodeRaw, ...instanceOverridePatch } as EditorNode)
+        : nodeRaw;
     return resolveNodeWithDesignTokens(merged, designTokens);
-  }, [id, nodeRaw, nodesMap, designTokens]);
+  }, [nodeRaw, instanceOverridePatch, designTokens]);
+  const maskNode = useEditorStore((s) =>
+    nodeRaw?.maskId ? s.nodes[nodeRaw.maskId] : undefined,
+  );
+  const viewportCull = useCanvasViewportCull();
+  const childOrder = useEditorStore((s) => s.childOrder);
+  const dragOffset = getDragPreviewOffsetForIds([id]);
+  const childIds = childOrder[id] ?? EMPTY_CHILD_IDS;
   const imageSrcResolved = useMemo(() => {
     if (!node || node.type !== "image") return undefined;
     return node.imageSrc ?? (node.assetId ? assets[node.assetId]?.dataUrl : undefined);
   }, [node, assets]);
-  const childOrder = useEditorStore((s) => s.childOrder);
-  const childIds = childOrder[id] ?? EMPTY_CHILD_IDS;
   const objectEditModeNodeId = useEditorStore((s) => s.objectEditModeNodeId);
   const tool = useEditorStore((s) => s.tool);
   const zoom = useEditorStore((s) => s.zoom);
   const penDrawingNodeId = useEditorStore((s) => s.penDrawingNodeId);
+  const shapeDrawingNodeId = useEditorStore((s) => s.shapeDrawingSession?.nodeId ?? null);
+  const frameDrawingNodeId = useEditorStore((s) => s.frameDrawingSession?.nodeId ?? null);
+  const textDrawingNodeId = useEditorStore((s) => s.textDrawingSession?.nodeId ?? null);
   const select = useEditorStore((s) => s.select);
   const updateNode = useEditorStore((s) => s.updateNode);
   const updateNodeStyle = useEditorStore((s) => s.updateNodeStyle);
@@ -159,15 +193,15 @@ export function CanvasObject({ id }: { id: string }) {
   const finishPrototypeConnection = useEditorStore((s) => s.finishPrototypeConnection);
   const updatePrototypeWirePointer = useEditorStore((s) => s.updatePrototypeWirePointer);
   const pathEditModeNodeId = useEditorStore((s) => s.pathEditModeNodeId);
-  const selectedPathPointId = useEditorStore((s) => s.selectedPathPointId);
-  const updatePathPoint = useEditorStore((s) => s.updatePathPoint);
-  const setSelectedPathPointId = useEditorStore((s) => s.setSelectedPathPointId);
+  const selectedPathPointIds = useEditorStore((s) => s.selectedPathPointIds);
+  const updatePathPoints = useEditorStore((s) => s.updatePathPoints);
+  const togglePathPointSelection = useEditorStore((s) => s.togglePathPointSelection);
   const setPathEditMode = useEditorStore((s) => s.setPathEditMode);
   const pushHistory = useEditorStore((s) => s.pushHistory);
   const createInstance = useEditorStore((s) => s.createInstance);
 
   const toWorld = useCanvasToWorld();
-  const { spaceDown, panning: canvasPanning, optionDown, optionOverSelection } =
+  const { spaceDown, panning: canvasPanning, commandDown, optionDown, optionOverSelection } =
     useCanvasInteraction();
   const isPlacingComment = useEditorStore((s) => s.isPlacingComment);
   const objectPointerEvents = canvasObjectPointerEvents({
@@ -182,9 +216,9 @@ export function CanvasObject({ id }: { id: string }) {
 
   const pathPointDragRef = useRef<{
     pointerId: number;
-    pointId: string;
+    pointIds: string[];
     startWorld: { x: number; y: number };
-    startPt: { x: number; y: number };
+    startPts: Record<string, { x: number; y: number }>;
   } | null>(null);
 
   const clientToWorld = useCallback(
@@ -235,18 +269,38 @@ export function CanvasObject({ id }: { id: string }) {
       if (editorMode === "inspect" || tool !== "move" || node?.type !== "path") return;
       e.stopPropagation();
       e.preventDefault();
+      const st0 = useEditorStore.getState();
+      const pathNode = st0.nodes[id];
+      const pt = pathNode?.pathPoints?.find((p) => p.id === pointId);
+      if (!pt || !pathNode) return;
+      setPathEditMode(id);
+      let dragIds: string[];
+      if (e.shiftKey) {
+        if (st0.selectedPathPointIds.includes(pointId)) {
+          togglePathPointSelection(pointId, true);
+          return;
+        }
+        dragIds = [...st0.selectedPathPointIds, pointId];
+        togglePathPointSelection(pointId, true);
+      } else if (st0.selectedPathPointIds.includes(pointId) && st0.selectedPathPointIds.length > 1) {
+        dragIds = st0.selectedPathPointIds;
+      } else {
+        dragIds = [pointId];
+        togglePathPointSelection(pointId, false);
+      }
+      if (isRoundedRectPath(pathNode)) return;
       pushHistory();
       const w = clientToWorld(e.clientX, e.clientY);
-      const st0 = useEditorStore.getState();
-      const pt = st0.nodes[id]?.pathPoints?.find((p) => p.id === pointId);
-      if (!pt) return;
-      setPathEditMode(id);
-      setSelectedPathPointId(pointId);
+      const startPts: Record<string, { x: number; y: number }> = {};
+      for (const pid of dragIds) {
+        const p = pathNode.pathPoints?.find((x) => x.id === pid);
+        if (p) startPts[pid] = { x: p.x, y: p.y };
+      }
       pathPointDragRef.current = {
         pointerId: e.pointerId,
-        pointId,
+        pointIds: dragIds,
         startWorld: w,
-        startPt: { x: pt.x, y: pt.y },
+        startPts,
       };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 
@@ -256,12 +310,13 @@ export function CanvasObject({ id }: { id: string }) {
         const nw = clientToWorld(clientX, clientY);
         const ddx = nw.x - d.startWorld.x;
         const ddy = nw.y - d.startWorld.y;
-        updatePathPoint(
-          id,
-          pointId,
-          { x: d.startPt.x + ddx, y: d.startPt.y + ddy },
-          { skipHistory: true },
-        );
+        const patches: Record<string, { x: number; y: number }> = {};
+        for (const pid of d.pointIds) {
+          const start = d.startPts[pid];
+          if (!start) continue;
+          patches[pid] = { x: start.x + ddx, y: start.y + ddy };
+        }
+        updatePathPoints(id, patches, { skipHistory: true });
       };
 
       const pathScheduler = createRafPointerScheduler<{ clientX: number; clientY: number }>(
@@ -299,9 +354,9 @@ export function CanvasObject({ id }: { id: string }) {
       node?.type,
       pushHistory,
       setPathEditMode,
-      setSelectedPathPointId,
+      togglePathPointSelection,
       tool,
-      updatePathPoint,
+      updatePathPoints,
     ],
   );
 
@@ -320,11 +375,13 @@ export function CanvasObject({ id }: { id: string }) {
       if (e.button === 0) releaseFieldFocusForCanvas();
 
       const st = useEditorStore.getState();
+      const deepSelect = isDeepSelectClick(e);
       const targetId = selectionTargetForClick(
         node.id,
         st.nodes,
         st.childOrder,
         st.objectEditModeNodeId,
+        deepSelect,
       );
 
       if (editorMode === "inspect") {
@@ -389,6 +446,7 @@ export function CanvasObject({ id }: { id: string }) {
         clientY: e.clientY,
         clientToWorld,
         captureTarget: e.currentTarget as HTMLElement,
+        fromAltDragDuplicate: e.altKey,
       });
     },
     [node, select, tool, clientToWorld, editorMode, objectPointerEvents, createInstance],
@@ -403,26 +461,33 @@ export function CanvasObject({ id }: { id: string }) {
 
   if (!node || !node.visible) return null;
 
+  const nodesSnapshot = useEditorStore.getState().nodes;
+  if (
+    !shouldRenderCanvasNode(id, nodesSnapshot, childOrder, viewportCull, {
+      skipViewportCull,
+      dragOffset: dragOffset.dx !== 0 || dragOffset.dy !== 0 ? dragOffset : undefined,
+    })
+  ) {
+    return null;
+  }
+
+  const childSkipViewportCull = skipViewportCull || shouldClipChildren(node);
+
   const cornerRadiusCss =
     node.type === "rectangle" || node.type === "frame"
       ? cornerRadiiToCss(clampCornerRadii(getNodeCornerRadii(node), node.width, node.height))
       : undefined;
   const isRootFrame = node.type === "frame" && renderParentId === null;
-  const showInspectHover =
-    editorMode === "inspect" && hoveredCanvasId === id && !selectedIds.includes(id) && node.visible;
-  const showDesignHover =
-    editorMode !== "inspect" &&
-    hoveredCanvasId === id &&
-    !selectedIds.includes(id) &&
-    !node.locked &&
-    node.visible;
-
   const collapseChildHits = shouldCollapseContainerHits(
     id,
-    nodesMap,
+    nodesSnapshot,
     childOrder,
     objectEditModeNodeId,
+    commandDown,
   );
+  const frameBodyHits = frameBodyReceivesPointerHits(id, nodesSnapshot, childOrder);
+  const layerPointerEvents =
+    node.type === "frame" && !frameBodyHits ? "none" : objectPointerEvents;
 
   const childrenTree = (
     <div
@@ -430,14 +495,20 @@ export function CanvasObject({ id }: { id: string }) {
       style={collapseChildHits ? { pointerEvents: "none" } : undefined}
     >
       {childIds.map((cid) => (
-        <CanvasObject key={cid} id={cid} />
+        <CanvasObject key={cid} id={cid} skipViewportCull={childSkipViewportCull} />
       ))}
     </div>
   );
 
+  const hideZeroDraft =
+    (shapeDrawingNodeId === id ||
+      frameDrawingNodeId === id ||
+      textDrawingNodeId === id) &&
+    isZeroAreaDraftNode(node);
+
   let body: React.ReactNode;
   if (node.type === "text") {
-    body = (
+    body = hideZeroDraft ? null : (
       <TextCanvasView
         node={node}
         isEditing={isEditingText}
@@ -446,21 +517,21 @@ export function CanvasObject({ id }: { id: string }) {
     );
   } else if (node.type === "group") {
     if (node.maskId) {
-      const maskNode = nodesMap[node.maskId];
+      const mask = maskNode;
       const contentIds = childIds.filter((cid) => cid !== node.maskId);
       body = (
         <MaskGroupView
           groupId={id}
           node={node}
-          maskNode={maskNode ?? null}
+          maskNode={mask ?? null}
           contentTree={
             <div className="relative h-full w-full">
               {contentIds.map((cid) => (
-                <CanvasObject key={cid} id={cid} />
+                <CanvasObject key={cid} id={cid} skipViewportCull={childSkipViewportCull} />
               ))}
             </div>
           }
-          maskLayer={maskNode ? <CanvasObject id={node.maskId!} /> : null}
+          maskLayer={mask ? <CanvasObject id={node.maskId!} skipViewportCull={childSkipViewportCull} /> : null}
         />
       );
     } else if (node.isBooleanGroup) {
@@ -495,7 +566,7 @@ export function CanvasObject({ id }: { id: string }) {
           overflow: "visible",
         }}
       >
-        <ShapeVectorView node={node} nodeId={id} />
+        {hideZeroDraft ? null : <ShapeVectorView node={node} nodeId={id} />}
         <div
           className="absolute inset-0"
           style={
@@ -516,7 +587,7 @@ export function CanvasObject({ id }: { id: string }) {
     node.type === "arrow" ||
     node.type === "polygon"
   ) {
-    body = <ShapeVectorView node={node} nodeId={id} />;
+    body = hideZeroDraft ? null : <ShapeVectorView node={node} nodeId={id} />;
   } else if (node.type === "path") {
     const pts = node.pathPoints ?? [];
     const singleSelected = selectedIds.length === 1 && selectedIds[0] === id;
@@ -526,24 +597,86 @@ export function CanvasObject({ id }: { id: string }) {
       singleSelected &&
       pathEditModeNodeId === id &&
       pts.length > 0;
+    const roundedRectPath = isRoundedRectPath(node);
+    const selectedPts = selectedPathPoints(pts, selectedPathPointIds);
+    const primarySelectedId = selectedPathPointIds[0] ?? null;
+    const selectedPt = pts.find((p) => p.id === primarySelectedId);
+    const showBezierHandles = selectedPts.length === 1 && selectedPt && !roundedRectPath;
     body = (
       <>
         <ShapeVectorView node={node} nodeId={id} />
         {showAnchors ? (
           <div className="pointer-events-none absolute inset-0">
-            {pts.map((pt) => (
+            <PathEditPathOutline node={node} nodeId={id} zoom={zoom} />
+            {showBezierHandles && (selectedPt?.handleIn || selectedPt?.handleOut) ? (
+              <svg
+                className="pointer-events-none absolute inset-0 overflow-visible"
+                width={node.width}
+                height={node.height}
+                aria-hidden
+              >
+                {selectedPt.handleIn ? (
+                  <line
+                    x1={selectedPt.x}
+                    y1={selectedPt.y}
+                    x2={selectedPt.x + selectedPt.handleIn.x}
+                    y2={selectedPt.y + selectedPt.handleIn.y}
+                    stroke="var(--pc-canvas-selection)"
+                    strokeWidth={1}
+                  />
+                ) : null}
+                {selectedPt.handleOut ? (
+                  <line
+                    x1={selectedPt.x}
+                    y1={selectedPt.y}
+                    x2={selectedPt.x + selectedPt.handleOut.x}
+                    y2={selectedPt.y + selectedPt.handleOut.y}
+                    stroke="var(--pc-canvas-selection)"
+                    strokeWidth={1}
+                  />
+                ) : null}
+              </svg>
+            ) : null}
+            {showBezierHandles && selectedPt
+              ? (["handle-in", "handle-out"] as const).map((kind) => {
+                  const h = kind === "handle-in" ? selectedPt.handleIn : selectedPt.handleOut;
+                  if (!h) return null;
+                  return (
+                    <button
+                      key={kind}
+                      type="button"
+                      aria-label={kind === "handle-in" ? "Handle in" : "Handle out"}
+                      className="pointer-events-auto absolute touch-none"
+                      style={{
+                        ...pathEditBezierHandleStyle(zoom),
+                        left: selectedPt.x + h.x,
+                        top: selectedPt.y + h.y,
+                      }}
+                      onPointerDown={(ev) => {
+                        ev.stopPropagation();
+                        togglePathPointSelection(selectedPt.id, ev.shiftKey);
+                      }}
+                    />
+                  );
+                })
+              : null}
+            {pts.map((pt) => {
+              const selected = selectedPathPointIds.includes(pt.id);
+              return (
               <button
                 key={pt.id}
                 type="button"
                 aria-label="Anchor point"
-                className={cn(
-                  "pointer-events-auto absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 border-2 border-[color:var(--pc-canvas-selection)] bg-white",
-                  pathEditModeNodeId === id && selectedPathPointId === pt.id ? "ring-2 ring-amber-300" : "",
-                )}
-                style={{ left: pt.x, top: pt.y }}
+                className="pointer-events-auto absolute touch-none"
+                style={{
+                  ...pathEditAnchorStyle(zoom, selected),
+                  left: pt.x,
+                  top: pt.y,
+                }}
                 onPointerDown={(ev) => onPathAnchorPointerDown(pt.id, ev)}
               />
-            ))}
+            );
+            })}
           </div>
         ) : null}
       </>
@@ -564,7 +697,7 @@ export function CanvasObject({ id }: { id: string }) {
         />
       </div>
     ) : (
-      <div className="flex h-full w-full items-center justify-center bg-slate-700 text-[11px] text-slate-300">
+      <div className="flex h-full w-full items-center justify-center bg-slate-700 text-ui text-slate-300">
         Missing image
       </div>
     );
@@ -573,18 +706,13 @@ export function CanvasObject({ id }: { id: string }) {
   const radiusStyle = node.type === "frame" ? cornerRadiusCss : undefined;
 
   const tokenShadow = resolveEffectBoxShadow(node, designTokens);
-  const ringShadow = showInspectHover
-    ? `0 0 0 1px ${CANVAS_VISUAL.inspectHover}`
-    : showDesignHover
-      ? `0 0 0 1px ${CANVAS_VISUAL.hoverOutline}`
-      : undefined;
   const hasRichEff = !!(node.effects && node.effects.length > 0);
   const tokenLeg = hasRichEff ? legacyEffectShadowAppend(node, designTokens) : tokenShadow;
   const er = buildNodeEffectRenderStyle(hasRichEff ? node.effects : undefined, tokenLeg);
   const dropF = firstVisibleDropShadowFilter(hasRichEff ? node.effects : undefined);
   const filterParts = [dropF, er.filter].filter(Boolean);
   const combinedFilter = filterParts.length ? filterParts.join(" ") : undefined;
-  const combinedShadow = [er.boxShadow, ringShadow].filter(Boolean).join(", ") || undefined;
+  const combinedShadow = er.boxShadow || undefined;
   const glassBg =
     er.glassBackground && node.fillEnabled !== false
       ? er.glassBackground
@@ -607,7 +735,7 @@ export function CanvasObject({ id }: { id: string }) {
         top: node.y,
         width: node.width,
         height: node.height,
-        pointerEvents: objectPointerEvents,
+        pointerEvents: layerPointerEvents,
         borderRadius: radiusStyle,
         outline:
           node.type === "group" &&

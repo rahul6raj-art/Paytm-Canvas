@@ -34,8 +34,8 @@ export function ImportHub() {
       >
         <div className="flex items-start justify-between gap-3 border-b border-app-border-subtle px-6 py-5">
           <div>
-            <h2 className="text-[18px] font-semibold tracking-tight text-app-fg">Import design</h2>
-            <p className="mt-1 text-[13px] text-app-muted">
+            <h2 className="text-lg font-semibold tracking-tight text-app-fg">Import design</h2>
+            <p className="mt-1 text-ui-sm text-app-muted">
               Bring external designs into Paytm Canvas as editable layers.
             </p>
           </div>
@@ -59,8 +59,8 @@ export function ImportHub() {
               <Figma className="h-6 w-6" strokeWidth={1.75} />
             </span>
             <div>
-              <h3 className="text-[15px] font-semibold text-app-fg">Import from Figma</h3>
-              <p className="mt-1 text-[13px] leading-relaxed text-app-muted">
+              <h3 className="text-base font-semibold text-app-fg">Import from Figma</h3>
+              <p className="mt-1 text-ui-sm leading-relaxed text-app-muted">
                 Turn Figma designs into interactive components
               </p>
             </div>
@@ -75,8 +75,8 @@ export function ImportHub() {
               <Globe className="h-6 w-6" strokeWidth={1.75} />
             </span>
             <div>
-              <h3 className="text-[15px] font-semibold text-app-fg">Import from Web</h3>
-              <p className="mt-1 text-[13px] leading-relaxed text-app-muted">
+              <h3 className="text-base font-semibold text-app-fg">Import from Web</h3>
+              <p className="mt-1 text-ui-sm leading-relaxed text-app-muted">
                 Capture website elements into Paytm Canvas
               </p>
             </div>
@@ -91,8 +91,8 @@ export function ImportHub() {
               <Code2 className="h-6 w-6" strokeWidth={1.75} />
             </span>
             <div>
-              <h3 className="text-[15px] font-semibold text-app-fg">Design ↔ Code</h3>
-              <p className="mt-1 text-[13px] leading-relaxed text-app-muted">
+              <h3 className="text-base font-semibold text-app-fg">Design ↔ Code</h3>
+              <p className="mt-1 text-ui-sm leading-relaxed text-app-muted">
                 Capture live React from Storybook, edit on canvas, export code
               </p>
             </div>

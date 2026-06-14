@@ -15,6 +15,7 @@ import {
   searchCommands,
 } from "@/lib/commands";
 import { cn } from "@/lib/utils";
+import { activateCanvasForShortcuts } from "@/lib/editorKeyboardFocus";
 
 const CATEGORY_ORDER: CommandCategory[] = [
   "Tools",
@@ -96,7 +97,10 @@ export function CommandMenu() {
   }, [filtered, query, storeSlice]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      requestAnimationFrame(() => activateCanvasForShortcuts());
+      return;
+    }
     setQuery("");
     setSelectedId(null);
     queueMicrotask(() => inputRef.current?.focus());
@@ -194,18 +198,18 @@ export function CommandMenu() {
             placeholder="Search commands…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="h-8 w-full rounded-md border border-transparent bg-app-hover px-2 text-[12px] text-app-fg outline-none ring-0 placeholder:text-app-subtle focus:border-accent/40"
+            className="h-8 w-full rounded-md border border-transparent bg-app-hover px-2 text-ui text-app-fg outline-none ring-0 placeholder:text-app-subtle focus:border-accent/40"
           />
         </div>
         <div ref={listRef} className="max-h-[min(52vh,420px)] overflow-y-auto py-1">
           {groupedRows.length === 0 ? (
-            <p className="px-3 py-4 text-center text-[12px] text-app-subtle">No matching commands.</p>
+            <p className="px-3 py-4 text-center text-ui text-app-subtle">No matching commands.</p>
           ) : (
             groupedRows.map((row, idx) =>
               row.type === "header" ? (
                 <div
                   key={`h-${row.label}-${idx}`}
-                  className="sticky top-0 z-[1] bg-app-panel/95 px-3 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wide text-app-subtle"
+                  className="sticky top-0 z-[1] bg-app-panel/95 px-3 pb-0.5 pt-2 section-heading"
                 >
                   {row.label}
                 </div>
@@ -218,17 +222,17 @@ export function CommandMenu() {
                   onClick={() => runCommand(row.cmd)}
                   disabled={!row.cmd.enabled(snapshot())}
                   className={cn(
-                    "flex w-full items-start gap-2 px-3 py-1.5 text-left text-[12px] leading-snug transition-colors",
+                    "flex w-full items-start gap-2 px-3 py-1.5 text-left text-ui leading-snug transition-colors",
                     row.cmd.id === selectedId ? "bg-accent/18 text-white" : "text-app-fg hover:bg-white/[0.05]",
                     !row.cmd.enabled(snapshot()) && "cursor-not-allowed opacity-40 hover:bg-transparent",
                   )}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="font-medium">{row.cmd.title}</div>
-                    <div className="text-[11px] text-app-subtle">{row.cmd.subtitle}</div>
+                    <div className="text-ui text-app-subtle">{row.cmd.subtitle}</div>
                   </div>
                   {row.cmd.shortcut ? (
-                    <span className="shrink-0 pt-0.5 text-[10px] tabular-nums text-app-subtle">
+                    <span className="shrink-0 pt-0.5 text-ui tabular-nums text-app-subtle">
                       {formatShortcutLabel(row.cmd.shortcut)}
                     </span>
                   ) : null}
@@ -237,7 +241,7 @@ export function CommandMenu() {
             )
           )}
         </div>
-        <div className="flex items-center justify-between border-t border-app-border-subtle px-3 py-1 text-[10px] text-app-subtle">
+        <div className="flex items-center justify-between border-t border-app-border-subtle px-3 py-1 text-ui text-app-subtle">
           <span>↑↓ navigate · ↵ run · esc close</span>
           <span>{ALL_COMMANDS.length} commands</span>
         </div>

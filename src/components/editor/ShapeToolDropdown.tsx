@@ -9,37 +9,36 @@ import {
   Hexagon,
   Minus,
   PencilLine,
-  Shapes,
   Sparkles,
   Square,
   Triangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ToolButton } from "./ToolButton";
+import { CanvasToolRailIcon } from "./CanvasToolRailIcon";
+import {
+  CANVAS_TOOL_RAIL_SPLIT_CHEVRON_CLASS,
+  CANVAS_TOOL_RAIL_SPLIT_MAIN_CLASS,
+  isShapeTool,
+  type ShapeTool,
+} from "@/lib/canvasToolRail";
 import { useEditorStore, type Tool } from "@/stores/useEditorStore";
 import { clearPostCreationPointerSuppress } from "@/lib/canvasCreationGuard";
 import { activateCanvasForShortcuts } from "@/lib/editorKeyboardFocus";
 import {
+  anchoredMenuStyle,
   useAnchoredDropdownPosition,
   useDismissAnchoredDropdown,
 } from "./useAnchoredDropdown";
 
-type ShapeTool =
-  | "rect"
-  | "ellipse"
-  | "line"
-  | "arrow"
-  | "pencil"
-  | "polygon"
-  | "star"
-  | "triangle";
-
-const shapeItems: {
+type ShapeToolItem = {
   id: ShapeTool;
   label: string;
   icon: typeof Square;
   shortcut?: string;
-}[] = [
+};
+
+const shapeItems: ShapeToolItem[] = [
   { id: "rect", label: "Rectangle", icon: Square, shortcut: "R" },
   { id: "ellipse", label: "Ellipse / Circle", icon: Circle, shortcut: "O" },
   { id: "line", label: "Line", icon: Minus, shortcut: "L" },
@@ -50,16 +49,16 @@ const shapeItems: {
   { id: "triangle", label: "Triangle", icon: Triangle },
 ];
 
-const SHAPE_TOOLS: ShapeTool[] = [
-  "rect",
-  "ellipse",
-  "line",
-  "arrow",
-  "pencil",
-  "polygon",
-  "star",
-  "triangle",
-];
+const shapeIconByTool: Record<ShapeTool, typeof Square> = {
+  rect: Square,
+  ellipse: Circle,
+  line: Minus,
+  arrow: ArrowRight,
+  pencil: PencilLine,
+  polygon: Hexagon,
+  star: Sparkles,
+  triangle: Triangle,
+};
 
 export function ShapeToolDropdown() {
   const [open, setOpen] = useState(false);
@@ -67,33 +66,20 @@ export function ShapeToolDropdown() {
   const wrapRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const tool = useEditorStore((s) => s.tool);
+  const lastShapeTool = useEditorStore((s) => s.lastShapeTool);
   const setTool = useEditorStore((s) => s.setTool);
 
-  const position = useAnchoredDropdownPosition(wrapRef, open);
+  const position = useAnchoredDropdownPosition(wrapRef, open, 4, {
+    viewportClamp: true,
+    maxHeight: 320,
+  });
   useDismissAnchoredDropdown(open, () => setOpen(false), wrapRef, menuRef);
 
   useEffect(() => setMounted(true), []);
 
-  const activeShape = SHAPE_TOOLS.includes(tool as ShapeTool) ? (tool as ShapeTool) : null;
-
-  const ActiveIcon =
-    activeShape === "ellipse"
-      ? Circle
-      : activeShape === "line"
-        ? Minus
-        : activeShape === "arrow"
-          ? ArrowRight
-          : activeShape === "pencil"
-            ? PencilLine
-          : activeShape === "polygon"
-            ? Hexagon
-            : activeShape === "star"
-              ? Sparkles
-              : activeShape === "triangle"
-                ? Triangle
-                : activeShape === "rect"
-                  ? Square
-                  : Shapes;
+  const activeShape = isShapeTool(tool) ? tool : null;
+  const displayShape = activeShape ?? lastShapeTool;
+  const DisplayIcon = shapeIconByTool[displayShape];
 
   const pick = (t: Tool) => {
     clearPostCreationPointerSuppress();
@@ -103,14 +89,14 @@ export function ShapeToolDropdown() {
   };
 
   const activateShape = () => {
-    setTool(activeShape ?? "rect");
+    setTool(displayShape);
   };
 
-  const activeMeta = shapeItems.find((s) => s.id === activeShape);
+  const displayMeta = shapeItems.find((s) => s.id === displayShape);
   const drawHint =
-    activeShape === "pencil"
+    displayShape === "pencil"
       ? "drag on canvas to draw"
-      : activeShape === "line" || activeShape === "arrow"
+      : displayShape === "line" || displayShape === "arrow"
         ? "drag — ⇧ snap 45°, ⌥ from center"
         : "drag on canvas to draw";
 
@@ -120,7 +106,7 @@ export function ShapeToolDropdown() {
         ref={menuRef}
         role="menu"
         className="fixed z-[100] min-w-[200px] rounded-md border border-app-border bg-app-panel py-0.5 shadow-lg"
-        style={{ left: position.left, top: position.top }}
+        style={anchoredMenuStyle(position)}
       >
         {shapeItems.map(({ id, label, icon: Icon, shortcut }) => (
           <button
@@ -128,7 +114,7 @@ export function ShapeToolDropdown() {
             type="button"
             role="menuitem"
             className={cn(
-              "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11px] font-medium transition-colors",
+              "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-ui font-medium transition-colors",
               tool === id ? "bg-accent/20 text-white" : "text-app-fg hover:bg-app-hover",
             )}
             onMouseDown={(e) => e.preventDefault()}
@@ -136,7 +122,7 @@ export function ShapeToolDropdown() {
           >
             <Icon className="h-3.5 w-3.5 shrink-0 text-[#a3a3a3]" strokeWidth={1.75} />
             <span className="flex-1">{label}</span>
-            {shortcut ? <span className="text-[10px] text-app-subtle">{shortcut}</span> : null}
+            {shortcut ? <span className="text-ui text-app-subtle">{shortcut}</span> : null}
           </button>
         ))}
       </div>
@@ -149,13 +135,13 @@ export function ShapeToolDropdown() {
           active={activeShape != null}
           title={
             activeShape
-              ? `${activeMeta?.label ?? "Shape"} — ${drawHint}`
-              : "Rectangle (R) — drag on canvas to draw"
+              ? `${displayMeta?.label ?? "Shape"} — ${drawHint}`
+              : `${displayMeta?.label ?? "Shape"} (${displayMeta?.shortcut ?? "R"}) — ${drawHint}`
           }
           onClick={activateShape}
-          className="h-8 min-w-8 shrink-0 rounded-r-none px-1.5"
+          className={CANVAS_TOOL_RAIL_SPLIT_MAIN_CLASS}
         >
-          <ActiveIcon className="h-[15px] w-[15px]" strokeWidth={1.85} />
+          <CanvasToolRailIcon icon={DisplayIcon} />
         </ToolButton>
         <ToolButton
           active={open}
@@ -163,9 +149,9 @@ export function ShapeToolDropdown() {
           aria-label="Shape menu"
           aria-expanded={open}
           onClick={() => setOpen((o) => !o)}
-          className="h-8 w-5 shrink-0 rounded-l-none border-l border-app-border-subtle px-0"
+          className={CANVAS_TOOL_RAIL_SPLIT_CHEVRON_CLASS}
         >
-          <ChevronDown className="h-2.5 w-2.5 opacity-60" strokeWidth={2.5} />
+          <ChevronDown className="h-3 w-3 opacity-60" strokeWidth={2.5} />
         </ToolButton>
       </div>
       {menu && mounted ? createPortal(menu, document.body) : null}

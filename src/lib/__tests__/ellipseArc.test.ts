@@ -11,6 +11,7 @@ import {
   ellipseArcPathD,
   ellipseArcRatioDragBaseline,
   ellipseEndAngleUnwrapped,
+  ellipsePointAtDeg,
   ellipseRatioHandleLocal,
   projectLocalOntoArcBisector,
   ellipseSweepHandleLocal,
@@ -46,6 +47,14 @@ describe("ellipseArc", () => {
     const p = ellipseRatioHandleLocal(100, 100, 0, 180, 0.5);
     assert.ok(Math.abs(p.x - 50) < 0.01);
     assert.ok(Math.abs(p.y - 75) < 0.01);
+  });
+
+  it("ratio handle sits on inner ellipse for wide ellipses", () => {
+    const ratio = 0.5;
+    const handle = ellipseRatioHandleLocal(200, 100, 0, 90, ratio);
+    const inner = ellipsePointAtDeg(100, 50, 100 * ratio, 50 * ratio, 45);
+    assert.ok(Math.abs(handle.x - inner.x) < 0.01);
+    assert.ok(Math.abs(handle.y - inner.y) < 0.01);
   });
 
   it("partial arc path closes through center", () => {

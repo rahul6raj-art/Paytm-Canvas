@@ -1,7 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
-import { getRenderedWorldTopLeft, repairNodeHierarchy } from "@/lib/editorGraph";
+import {
+  getRenderedWorldTopLeft,
+  repairNodeHierarchy,
+  worldDragPairInParentSpace,
+} from "@/lib/editorGraph";
+import { shapeGeometryPatchFromDrag } from "@/lib/shapes/shapeCreation";
 import { insertNodeWithFrameParenting, resolveFrameParentForShapeInsert } from "@/lib/tree";
 import type { EditorNode } from "@/stores/useEditorStore";
 
@@ -166,5 +171,67 @@ describe("insertNodeWithFrameParenting", () => {
     assert.equal(inserted.nodes[id]!.x, 50);
     assert.equal(inserted.nodes[id]!.y, 50);
     assert.deepEqual(inserted.childOrder.f1, ["f3"]);
+  });
+
+  it("preserves 0×0 bounds when minDimension is 0 (live shape drag)", () => {
+    const nodes = { f1: frame("f1", 0, 0, 400, 400) };
+    const childOrder = { [EDITOR_ROOT_KEY]: ["f1"], f1: [] };
+    const id = "r0";
+    const node = {
+      ...frame("r0", 0, 0, 0, 0),
+      id,
+      parentId: null,
+      type: "rectangle" as const,
+      fill: "#000",
+      strokeWidth: 0,
+      strokePosition: "center" as const,
+      fillOpacity: 1,
+      opacity: 1,
+    };
+    const inserted = insertNodeWithFrameParenting(
+      node,
+      { x: 120, y: 140, width: 0, height: 0 },
+      nodes,
+      childOrder,
+      [],
+      { minDimension: 0 },
+    );
+    assert.equal(inserted.nodes[id]!.width, 0);
+    assert.equal(inserted.nodes[id]!.height, 0);
+    assert.equal(inserted.nodes[id]!.x, 120);
+    assert.equal(inserted.nodes[id]!.y, 140);
+  });
+});
+
+describe("worldDragPairInParentSpace", () => {
+  it("converts live shape drag endpoints to parent-local coordinates", () => {
+    const nodes = { f1: frame("f1", 100, 100, 400, 400) };
+    const childOrder = { [EDITOR_ROOT_KEY]: ["f1"], f1: [] };
+    const worldStart = { x: 150, y: 150 };
+    const worldEnd = { x: 250, y: 200 };
+    const drag = worldDragPairInParentSpace("f1", nodes, childOrder, worldStart, worldEnd);
+    assert.deepEqual(drag.start, { x: 50, y: 50 });
+    assert.deepEqual(drag.end, { x: 150, y: 100 });
+    const patch = shapeGeometryPatchFromDrag(
+      "rectangle",
+      drag.start,
+      drag.end,
+      { shiftKey: false, altKey: false },
+      undefined,
+      "live",
+    );
+    assert.equal(patch.x, 50);
+    assert.equal(patch.y, 50);
+    assert.equal(patch.width, 100);
+    assert.equal(patch.height, 50);
+  });
+
+  it("leaves world endpoints unchanged when the node has no parent", () => {
+    const nodes = { f1: frame("f1", 100, 100, 400, 400) };
+    const childOrder = { [EDITOR_ROOT_KEY]: ["f1"], f1: [] };
+    const start = { x: 150, y: 150 };
+    const end = { x: 250, y: 200 };
+    const drag = worldDragPairInParentSpace(null, nodes, childOrder, start, end);
+    assert.deepEqual(drag, { start, end });
   });
 });

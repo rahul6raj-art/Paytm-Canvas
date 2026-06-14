@@ -15,6 +15,7 @@ import {
 import { appFieldClass } from "@/lib/appFieldStyles";
 import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
+import { inspectorIconClass, inspectorIconStroke } from "@/lib/inspectorIconStyles";
 import type { EditorNode, NodeStylePatch } from "@/stores/useEditorStore";
 import type {
   TextCaseMode,
@@ -63,14 +64,14 @@ function IconToggleGroup<T extends string>({
 function StyleRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="w-[88px] shrink-0 text-[11px] font-medium text-app-subtle">{label}</span>
+      <span className="w-[88px] shrink-0 text-ui font-medium text-app-subtle">{label}</span>
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
 }
 
 function CaseIcon({ mode }: { mode: "none" | "upper" | "lower" | "title" | "small-caps" }) {
-  const className = "text-[10px] font-semibold leading-none tracking-tight";
+  const className = "text-ui font-semibold leading-none tracking-tight";
   switch (mode) {
     case "upper":
       return <span className={className}>AG</span>;
@@ -79,9 +80,9 @@ function CaseIcon({ mode }: { mode: "none" | "upper" | "lower" | "title" | "smal
     case "title":
       return <span className={className}>Ag</span>;
     case "small-caps":
-      return <span className={cn(className, "text-[8px]")}>AG</span>;
+      return <span className={cn(className, "text-ui")}>AG</span>;
     default:
-      return <Minus className="h-3.5 w-3.5" strokeWidth={2} />;
+      return <Minus className={inspectorIconClass} strokeWidth={inspectorIconStroke} />;
   }
 }
 
@@ -109,9 +110,9 @@ function VerticalTrimIcon({ mode }: { mode: TextVerticalTrim }) {
 
 function TruncateIcon({ mode }: { mode: TextTruncateMode }) {
   if (mode === "end") {
-    return <span className="text-[10px] font-semibold leading-none">A…</span>;
+    return <span className="text-ui font-semibold leading-none">A…</span>;
   }
-  return <Minus className="h-3.5 w-3.5" strokeWidth={2} />;
+  return <Minus className={inspectorIconClass} strokeWidth={inspectorIconStroke} />;
 }
 
 const ALIGN_OPTIONS: readonly {
@@ -120,10 +121,10 @@ const ALIGN_OPTIONS: readonly {
   title: string;
   icon: ReactNode;
 }[] = [
-  { value: "left", label: "Align left", title: "Align left", icon: <AlignLeft className="h-3.5 w-3.5" strokeWidth={2} /> },
-  { value: "center", label: "Align center", title: "Align center", icon: <AlignCenter className="h-3.5 w-3.5" strokeWidth={2} /> },
-  { value: "right", label: "Align right", title: "Align right", icon: <AlignRight className="h-3.5 w-3.5" strokeWidth={2} /> },
-  { value: "justify", label: "Justify", title: "Justify", icon: <AlignJustify className="h-3.5 w-3.5" strokeWidth={2} /> },
+  { value: "left", label: "Align left", title: "Align left", icon: <AlignLeft className={inspectorIconClass} strokeWidth={inspectorIconStroke} /> },
+  { value: "center", label: "Align center", title: "Align center", icon: <AlignCenter className={inspectorIconClass} strokeWidth={inspectorIconStroke} /> },
+  { value: "right", label: "Align right", title: "Align right", icon: <AlignRight className={inspectorIconClass} strokeWidth={inspectorIconStroke} /> },
+  { value: "justify", label: "Justify", title: "Justify", icon: <AlignJustify className={inspectorIconClass} strokeWidth={inspectorIconStroke} /> },
 ];
 
 export function TextStyleSection({
@@ -157,9 +158,9 @@ export function TextStyleSection({
       <StyleRow label="Decoration">
         <IconToggleGroup<TextDecorationMode>
           options={[
-            { value: "none", label: "None", title: "No decoration", icon: <Minus className="h-3.5 w-3.5" strokeWidth={2} /> },
-            { value: "underline", label: "Underline", title: "Underline", icon: <Underline className="h-3.5 w-3.5" strokeWidth={2} /> },
-            { value: "strikethrough", label: "Strikethrough", title: "Strikethrough", icon: <Strikethrough className="h-3.5 w-3.5" strokeWidth={2} /> },
+            { value: "none", label: "None", title: "No decoration", icon: <Minus className={inspectorIconClass} strokeWidth={inspectorIconStroke} /> },
+            { value: "underline", label: "Underline", title: "Underline", icon: <Underline className={inspectorIconClass} strokeWidth={inspectorIconStroke} /> },
+            { value: "strikethrough", label: "Strikethrough", title: "Strikethrough", icon: <Strikethrough className={inspectorIconClass} strokeWidth={inspectorIconStroke} /> },
           ]}
           value={textDecoration}
           onChange={(v) => onPatch({ textDecoration: v })}
@@ -199,9 +200,9 @@ export function TextStyleSection({
       <StyleRow label="List style">
         <IconToggleGroup<TextListStyle>
           options={[
-            { value: "none", label: "None", title: "No list", icon: <Minus className="h-3.5 w-3.5" strokeWidth={2} /> },
-            { value: "bullet", label: "Bulleted", title: "Bulleted list", icon: <List className="h-3.5 w-3.5" strokeWidth={2} /> },
-            { value: "numbered", label: "Numbered", title: "Numbered list", icon: <ListOrdered className="h-3.5 w-3.5" strokeWidth={2} /> },
+            { value: "none", label: "None", title: "No list", icon: <Minus className={inspectorIconClass} strokeWidth={inspectorIconStroke} /> },
+            { value: "bullet", label: "Bulleted", title: "Bulleted list", icon: <List className={inspectorIconClass} strokeWidth={inspectorIconStroke} /> },
+            { value: "numbered", label: "Numbered", title: "Numbered list", icon: <ListOrdered className={inspectorIconClass} strokeWidth={inspectorIconStroke} /> },
           ]}
           value={listStyle}
           onChange={(v) => onPatch({ listStyle: v })}

@@ -96,14 +96,14 @@ export function CodeRoundTripModal() {
     setStatus(ok ? "Copied to clipboard." : "Copy failed.");
   }, [exported]);
 
-  const onDownload = useCallback(() => {
+  const onDownload = useCallback(async () => {
     if (!exported) return;
-    downloadTextFile(
+    const saved = await downloadTextFile(
       `${exported.componentName}.tsx`,
       exported.source,
       "text/plain;charset=utf-8",
     );
-    setStatus("Downloaded .tsx file.");
+    if (saved) setStatus("Downloaded .tsx file.");
   }, [exported]);
 
   const onApplyParseImport = useCallback(async () => {
@@ -210,7 +210,7 @@ export function CodeRoundTripModal() {
               <Code2 className="h-5 w-5" strokeWidth={1.75} />
             </span>
             <div>
-              <h2 className="text-[17px] font-semibold text-white">Design ↔ Code</h2>
+              <h2 className="text-lg font-semibold text-white">Design ↔ Code</h2>
             </div>
           </div>
           <button
@@ -236,7 +236,7 @@ export function CodeRoundTripModal() {
               type="button"
               onClick={() => setTab(id)}
               className={cn(
-                "rounded-t-md px-3 py-2 text-[12px] font-semibold transition-colors",
+                "rounded-t-md px-3 py-2 text-ui font-semibold transition-colors",
                 tab === id
                   ? "bg-[#262626] text-white"
                   : "text-app-subtle hover:text-app-fg",
@@ -251,7 +251,7 @@ export function CodeRoundTripModal() {
           {tab === "export" ? (
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] text-app-subtle">
+                <span className="text-ui text-app-subtle">
                   Exporting:{" "}
                   <span className="font-medium text-app-fg">{exported?.componentName}</span>
                   {exported?.exportRootIds.length
@@ -262,7 +262,7 @@ export function CodeRoundTripModal() {
                   <button
                     type="button"
                     onClick={onCopy}
-                    className="inline-flex items-center gap-1 rounded-md border border-app-border bg-app-panel px-2 py-1 text-[11px] font-medium text-app-fg hover:bg-app-hover"
+                    className="inline-flex items-center gap-1 rounded-md border border-app-border bg-app-panel px-2 py-1 text-ui font-medium text-app-fg hover:bg-app-hover"
                   >
                     <Copy className="h-3.5 w-3.5" />
                     Copy
@@ -270,14 +270,14 @@ export function CodeRoundTripModal() {
                   <button
                     type="button"
                     onClick={onDownload}
-                    className="inline-flex items-center gap-1 rounded-md border border-app-border bg-app-panel px-2 py-1 text-[11px] font-medium text-app-fg hover:bg-app-hover"
+                    className="inline-flex items-center gap-1 rounded-md border border-app-border bg-app-panel px-2 py-1 text-ui font-medium text-app-fg hover:bg-app-hover"
                   >
                     <Download className="h-3.5 w-3.5" />
                     Download .tsx
                   </button>
                 </div>
               </div>
-              <p className="text-[11px] leading-relaxed text-app-subtle">
+              <p className="text-ui leading-relaxed text-app-subtle">
                 Select a frame before exporting to limit scope. Keep the{" "}
                 <code className="text-app-muted">@paytm-craft-payload</code> block when editing
                 externally.
@@ -285,7 +285,7 @@ export function CodeRoundTripModal() {
               <textarea
                 readOnly
                 value={exported?.source ?? ""}
-                className="h-[min(52vh,480px)] w-full resize-y rounded-lg border border-app-border bg-[#0f0f10] p-3 font-mono text-[11px] leading-relaxed text-app-fg focus-visible:border-accent focus-visible:outline-none"
+                className="h-[min(52vh,480px)] w-full resize-y rounded-lg border border-app-border bg-[#0f0f10] p-3 font-mono text-ui leading-relaxed text-app-fg focus-visible:border-accent focus-visible:outline-none"
                 spellCheck={false}
               />
             </div>
@@ -296,7 +296,7 @@ export function CodeRoundTripModal() {
                   type="button"
                   onClick={() => setImportMethod("live")}
                   className={cn(
-                    "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold transition-colors",
+                    "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-ui font-semibold transition-colors",
                     importMethod === "live"
                       ? "bg-sky-600 text-white"
                       : "border border-app-border bg-app-panel text-app-muted hover:bg-app-hover",
@@ -309,7 +309,7 @@ export function CodeRoundTripModal() {
                   type="button"
                   onClick={() => setImportMethod("parse")}
                   className={cn(
-                    "rounded-lg px-3 py-1.5 text-[11px] font-semibold transition-colors",
+                    "rounded-lg px-3 py-1.5 text-ui font-semibold transition-colors",
                     importMethod === "parse"
                       ? "bg-violet-600 text-white"
                       : "border border-app-border bg-app-panel text-app-muted hover:bg-app-hover",
@@ -317,12 +317,12 @@ export function CodeRoundTripModal() {
                 >
                   Structure parse (.tsx)
                 </button>
-                <label className="ml-auto flex items-center gap-2 text-[11px] text-app-subtle">
+                <label className="ml-auto flex items-center gap-2 text-ui text-app-subtle">
                   Apply mode
                   <select
                     value={importMode}
                     onChange={(e) => setImportMode(e.target.value as "replace" | "append")}
-                    className="rounded border border-app-border bg-[#262626] px-2 py-1 text-[11px] text-app-fg"
+                    className="rounded border border-app-border bg-[#262626] px-2 py-1 text-ui text-app-fg"
                   >
                     <option value="replace">Replace canvas</option>
                     <option value="append">Append to canvas</option>
@@ -332,12 +332,12 @@ export function CodeRoundTripModal() {
 
               {importMethod === "live" ? (
                 <>
-                  <ol className="list-decimal space-y-1 pl-5 text-[11px] text-app-muted">
+                  <ol className="list-decimal space-y-1 pl-5 text-ui text-app-muted">
                     <li>Start dev server or Storybook (e.g. port 6006).</li>
                     <li>Open the screen URL in a browser to confirm it renders.</li>
                     <li>Paste that URL here and capture at 390×844 (mobile).</li>
                   </ol>
-                  <label className="block text-[11px] font-medium text-[#b4b4b4]">
+                  <label className="block text-ui font-medium text-[#b4b4b4]">
                     Preview URL
                     <input
                       type="url"
@@ -347,14 +347,14 @@ export function CodeRoundTripModal() {
                         setError(null);
                       }}
                       placeholder="http://localhost:6006/iframe.html?id=…"
-                      className="mt-1 w-full rounded-lg border border-app-border bg-[#0f0f10] px-3 py-2 font-mono text-[11px] text-app-fg focus-visible:border-accent focus-visible:outline-none"
+                      className="mt-1 w-full rounded-lg border border-app-border bg-[#0f0f10] px-3 py-2 font-mono text-ui text-app-fg focus-visible:border-accent focus-visible:outline-none"
                     />
                   </label>
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       onClick={() => fileRef.current?.click()}
-                      className="inline-flex items-center gap-1 rounded-md border border-app-border bg-app-panel px-2.5 py-1 text-[11px] font-medium text-app-fg hover:bg-app-hover"
+                      className="inline-flex items-center gap-1 rounded-md border border-app-border bg-app-panel px-2.5 py-1 text-ui font-medium text-app-fg hover:bg-app-hover"
                     >
                       <Upload className="h-3.5 w-3.5" />
                       Attach .tsx (optional)
@@ -374,17 +374,17 @@ export function CodeRoundTripModal() {
                       setError(null);
                     }}
                     placeholder="Optional: paste PMLHomePage.tsx to preserve imports and component names on export…"
-                    className="h-[min(28vh,220px)] w-full resize-y rounded-lg border border-app-border bg-[#0f0f10] p-3 font-mono text-[11px] leading-relaxed text-app-fg focus-visible:border-accent focus-visible:outline-none"
+                    className="h-[min(28vh,220px)] w-full resize-y rounded-lg border border-app-border bg-[#0f0f10] p-3 font-mono text-ui leading-relaxed text-app-fg focus-visible:border-accent focus-visible:outline-none"
                     spellCheck={false}
                   />
                   {captureStepLabel ? (
-                    <p className="text-[11px] text-sky-300">{captureStepLabel}…</p>
+                    <p className="text-ui text-sky-300">{captureStepLabel}…</p>
                   ) : null}
                   <button
                     type="button"
                     disabled={busy || !previewUrl.trim()}
                     onClick={onApplyLiveCapture}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-sky-600 py-2.5 text-[13px] font-semibold text-white hover:bg-sky-500 disabled:opacity-45"
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-sky-600 py-2.5 text-ui-sm font-semibold text-white hover:bg-sky-500 disabled:opacity-45"
                   >
                     <RefreshCw className={cn("h-4 w-4", busy && "animate-spin")} />
                     Capture live preview
@@ -392,7 +392,7 @@ export function CodeRoundTripModal() {
                 </>
               ) : (
                 <>
-                  <div className="rounded-lg border border-violet-500/25 bg-violet-500/10 px-3 py-2 text-[11px] leading-relaxed text-violet-100/90">
+                  <div className="rounded-lg border border-violet-500/25 bg-violet-500/10 px-3 py-2 text-ui leading-relaxed text-violet-100/90">
                     <strong className="font-semibold">Structure-only import.</strong> Parses JSX without
                     running your app. Custom components become placeholder frames; CSS imports are not
                     applied. For full fidelity use Live preview capture.
@@ -401,7 +401,7 @@ export function CodeRoundTripModal() {
                     <button
                       type="button"
                       onClick={() => fileRef.current?.click()}
-                      className="inline-flex items-center gap-1 rounded-md border border-app-border bg-app-panel px-2.5 py-1 text-[11px] font-medium text-app-fg hover:bg-app-hover"
+                      className="inline-flex items-center gap-1 rounded-md border border-app-border bg-app-panel px-2.5 py-1 text-ui font-medium text-app-fg hover:bg-app-hover"
                     >
                       <Upload className="h-3.5 w-3.5" />
                       Upload .tsx
@@ -414,14 +414,14 @@ export function CodeRoundTripModal() {
                       setError(null);
                     }}
                     placeholder="Paste or upload your React component (.tsx)…"
-                    className="h-[min(44vh,380px)] w-full resize-y rounded-lg border border-app-border bg-[#0f0f10] p-3 font-mono text-[11px] leading-relaxed text-app-fg focus-visible:border-accent focus-visible:outline-none"
+                    className="h-[min(44vh,380px)] w-full resize-y rounded-lg border border-app-border bg-[#0f0f10] p-3 font-mono text-ui leading-relaxed text-app-fg focus-visible:border-accent focus-visible:outline-none"
                     spellCheck={false}
                   />
                   <button
                     type="button"
                     disabled={busy || !importSource.trim()}
                     onClick={onApplyParseImport}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-600 py-2.5 text-[13px] font-semibold text-white hover:bg-violet-500 disabled:opacity-45"
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-600 py-2.5 text-ui-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-45"
                   >
                     <RefreshCw className={cn("h-4 w-4", busy && "animate-spin")} />
                     Parse structure to canvas
@@ -430,13 +430,13 @@ export function CodeRoundTripModal() {
               )}
 
               {error ? (
-                <pre className="whitespace-pre-wrap rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-[11px] leading-relaxed text-red-200">
+                <pre className="whitespace-pre-wrap rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-ui leading-relaxed text-red-200">
                   {error}
                 </pre>
               ) : null}
             </div>
           )}
-          {status ? <p className="text-[11px] text-emerald-400">{status}</p> : null}
+          {status ? <p className="text-ui text-emerald-400">{status}</p> : null}
         </div>
       </div>
     </div>

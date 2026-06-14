@@ -2,9 +2,15 @@ import type { EditorAsset } from "@/lib/documentPersistence";
 
 export const IMAGE_IMPORT_ACCEPT = "image/png,image/jpeg,image/webp,image/svg+xml";
 
+export const VIDEO_IMPORT_ACCEPT = "video/mp4,video/webm,video/quicktime";
+
 export const MAX_IMAGE_IMPORT_BYTES = 5 * 1024 * 1024;
 
-const ALLOWED_MIMES = new Set(["image/png", "image/jpeg", "image/webp", "image/svg+xml"]);
+export const MAX_VIDEO_IMPORT_BYTES = 50 * 1024 * 1024;
+
+const ALLOWED_IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/webp", "image/svg+xml"]);
+
+const ALLOWED_VIDEO_MIMES = new Set(["video/mp4", "video/webm", "video/quicktime"]);
 
 export function validateImageImportFile(file: File): string | null {
   if (!file.size) return "Empty file.";
@@ -12,8 +18,23 @@ export function validateImageImportFile(file: File): string | null {
     return `Image is too large (max ${Math.round(MAX_IMAGE_IMPORT_BYTES / (1024 * 1024))}MB).`;
   }
   const type = (file.type || "").toLowerCase();
-  if (!ALLOWED_MIMES.has(type)) {
+  const isSvgByExt = file.name.toLowerCase().endsWith(".svg");
+  if (!ALLOWED_IMAGE_MIMES.has(type) && !(isSvgByExt && !type)) {
     return "Unsupported image type. Use PNG, JPEG, WebP, or SVG.";
+  }
+  return null;
+}
+
+export function validateVideoImportFile(file: File): string | null {
+  if (!file.size) return "Empty file.";
+  if (file.size > MAX_VIDEO_IMPORT_BYTES) {
+    return `Video is too large (max ${Math.round(MAX_VIDEO_IMPORT_BYTES / (1024 * 1024))}MB).`;
+  }
+  const type = (file.type || "").toLowerCase();
+  const ext = file.name.toLowerCase();
+  const byExt = ext.endsWith(".mp4") || ext.endsWith(".webm") || ext.endsWith(".mov");
+  if (!ALLOWED_VIDEO_MIMES.has(type) && !byExt) {
+    return "Unsupported video type. Use MP4, WebM, or MOV.";
   }
   return null;
 }
@@ -67,5 +88,33 @@ export async function buildEditorAssetFromFile(file: File): Promise<EditorAsset>
     createdAt: new Date().toISOString(),
     width: dims?.width,
     height: dims?.height,
+  };
+}
+
+/** Reads a video file as a data URL for fill layers. */
+export async function buildEditorVideoAssetFromFile(file: File): Promise<EditorAsset> {
+  const err = validateVideoImportFile(file);
+  if (err) throw new Error(err);
+
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => {
+      const r = fr.result;
+      if (typeof r !== "string") {
+        reject(new Error("Could not read file."));
+        return;
+      }
+      resolve(r);
+    };
+    fr.onerror = () => reject(new Error("Could not read file."));
+    fr.readAsDataURL(file);
+  });
+
+  return {
+    id: newAssetId(),
+    name: file.name || "Video",
+    mimeType: (file.type || "video/mp4").toLowerCase(),
+    dataUrl,
+    createdAt: new Date().toISOString(),
   };
 }

@@ -251,4 +251,41 @@ describe("auto layout", () => {
     assert.equal(next.parent!.width, 120);
     assert.ok((next.c!.x ?? 0) + (next.c!.width ?? 0) > 120);
   });
+
+  it("reflows children vertically when layoutMode switches horizontal → vertical", () => {
+    const nodes: Record<string, LayoutNode> = {
+      parent: {
+        id: "parent",
+        parentId: null,
+        type: "frame",
+        x: 0,
+        y: 0,
+        width: 200,
+        height: 120,
+        visible: true,
+        locked: false,
+        layoutMode: "horizontal",
+        layoutGap: 10,
+        paddingTop: 0,
+        paddingRight: 0,
+        paddingBottom: 0,
+        paddingLeft: 0,
+        layoutSizingHorizontal: "hug",
+        layoutSizingVertical: "hug",
+      },
+      a: frame("a", 0, 0, 50, 40, { parentId: "parent" }),
+      b: frame("b", 0, 0, 50, 40, { parentId: "parent" }),
+    };
+    const childOrder = { parent: ["a", "b"] };
+    const horizontal = applyLayoutPatchWithAutoLayout(nodes, childOrder, "parent", {});
+    assert.equal(horizontal.b!.x, 60);
+    assert.equal(horizontal.b!.y, 0);
+
+    const vertical = applyLayoutPatchWithAutoLayout(horizontal, childOrder, "parent", {
+      layoutMode: "vertical",
+    });
+    assert.equal(vertical.parent!.layoutMode, "vertical");
+    assert.equal(vertical.b!.x, 0);
+    assert.equal(vertical.b!.y, 50);
+  });
 });

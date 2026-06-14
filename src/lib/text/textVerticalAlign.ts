@@ -14,7 +14,7 @@ export function verticalContentOffsetY(
   align?: EditorNode["verticalAlign"] | VerticalAlign,
 ): number {
   const a = normalizeVerticalAlign(align);
-  const slack = Math.max(0, innerHeight - contentHeight);
+  const slack = innerHeight - contentHeight;
   if (a === "middle") return slack / 2;
   if (a === "bottom") return slack;
   return 0;

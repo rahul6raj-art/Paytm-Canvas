@@ -3,80 +3,42 @@
  * Points are in the path node's local coordinate system (origin = top-left of the node's bounds).
  */
 
+import { parseSvgPathToAbsolute } from "@/lib/svgImport/parseSvgPath";
+
 export interface PathPoint {
   id: string;
   x: number;
   y: number;
   handleIn?: { x: number; y: number };
   handleOut?: { x: number; y: number };
+  /** Per-node corner radius for straight-segment vector paths. */
+  cornerRadius?: number;
 }
 
 export function newPathPointId(): string {
   return `pt-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-/** Parse SVG path `d` (M/L/C/H/V/Z) into path points for import / boolean round-trip. */
+/** Parse SVG path `d` (M/L/H/V/C/S/Q/T/A/Z) into editable path points for import. */
 export function svgPathDToPathPoints(svgPath: string): PathPoint[] {
-  const tokens = svgPath.match(/[a-zA-Z]|-?\d*\.?\d+(?:e[-+]?\d+)?/g);
-  if (!tokens?.length) return [];
+  const segments = parseSvgPathToAbsolute(svgPath);
   const points: PathPoint[] = [];
-  let i = 0;
-  let cx = 0;
-  let cy = 0;
-  let startX = 0;
-  let startY = 0;
-
-  const readNum = () => parseFloat(tokens[i++] ?? "0");
-
-  while (i < tokens.length) {
-    const cmd = tokens[i++]!;
-    const rel = cmd === cmd.toLowerCase();
-    const c = cmd.toUpperCase();
-
-    if (c === "M") {
-      const x = readNum() + (rel ? cx : 0);
-      const y = readNum() + (rel ? cy : 0);
-      cx = x;
-      cy = y;
-      startX = x;
-      startY = y;
-      points.push({ id: newPathPointId(), x, y });
-    } else if (c === "L") {
-      const x = readNum() + (rel ? cx : 0);
-      const y = readNum() + (rel ? cy : 0);
-      cx = x;
-      cy = y;
-      points.push({ id: newPathPointId(), x, y });
-    } else if (c === "H") {
-      const x = readNum() + (rel ? cx : 0);
-      cx = x;
-      points.push({ id: newPathPointId(), x, y: cy });
-    } else if (c === "V") {
-      const y = readNum() + (rel ? cy : 0);
-      cy = y;
-      points.push({ id: newPathPointId(), x: cx, y });
-    } else if (c === "C") {
-      const c1x = readNum() + (rel ? cx : 0);
-      const c1y = readNum() + (rel ? cy : 0);
-      const c2x = readNum() + (rel ? cx : 0);
-      const c2y = readNum() + (rel ? cy : 0);
-      const x = readNum() + (rel ? cx : 0);
-      const y = readNum() + (rel ? cy : 0);
+  for (const seg of segments) {
+    if (seg.type === "M") {
+      points.push({ id: newPathPointId(), x: seg.x, y: seg.y });
+    } else if (seg.type === "L") {
+      points.push({ id: newPathPointId(), x: seg.x, y: seg.y });
+    } else if (seg.type === "C") {
       const prev = points[points.length - 1];
       if (prev) {
-        prev.handleOut = { x: c1x - prev.x, y: c1y - prev.y };
+        prev.handleOut = { x: seg.x1 - prev.x, y: seg.y1 - prev.y };
       }
       points.push({
         id: newPathPointId(),
-        x,
-        y,
-        handleIn: prev ? { x: c2x - x, y: c2y - y } : undefined,
+        x: seg.x,
+        y: seg.y,
+        handleIn: prev ? { x: seg.x2 - seg.x, y: seg.y2 - seg.y } : undefined,
       });
-      cx = x;
-      cy = y;
-    } else if (c === "Z") {
-      cx = startX;
-      cy = startY;
     }
   }
   return points;

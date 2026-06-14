@@ -1,46 +1,40 @@
 "use client";
 
-import { isSvgDomHitFallbackEnabled, isSvgRendererEnabled } from "@/lib/rendererMode";
-import { DomSceneRenderer } from "./DomSceneRenderer";
+import { useSyncExternalStore } from "react";
+import {
+  getDragPreviewSnapshot,
+  getResizePreviewEpoch,
+  subscribeDragPreview,
+  subscribeResizePreview,
+} from "@/lib/canvasEphemeralTransform";
 import { SvgDomOverlays } from "./SvgDomOverlays";
-import { SvgHitLayer } from "./SvgHitLayer";
-import { SvgHoverOutline } from "./SvgHoverOutline";
 import { SvgSceneRenderer } from "./SvgSceneRenderer";
 import type { SceneRendererProps } from "./RendererTypes";
 
 /**
- * Scene graph entry: DOM (default) or experimental SVG scene + SVG hit layer.
+ * Native renderer: WASM GPU compositor (underlay) + SVG scene for reliable visuals.
+ * SVG rebuilds with drag/resize preview overlays; `NativeHitLayer` handles picking.
  */
 export function SceneRenderer(props: SceneRendererProps) {
-  if (!isSvgRendererEnabled()) {
-    return <DomSceneRenderer {...props} />;
-  }
-
-  if (isSvgDomHitFallbackEnabled()) {
-    return (
-      <>
-        <SvgSceneRenderer {...props} />
-        <div
-          className="pointer-events-none absolute inset-0 z-[2] opacity-0"
-          aria-hidden
-          data-svg-dom-hit-fallback
-        >
-          <DomSceneRenderer {...props} />
-        </div>
-      </>
-    );
-  }
+  const resizeOverlayActive = useSyncExternalStore(
+    subscribeResizePreview,
+    () => getResizePreviewEpoch() > 0,
+    () => false,
+  );
+  const dragOverlayActive = useSyncExternalStore(
+    subscribeDragPreview,
+    () => Boolean(getDragPreviewSnapshot()?.movingIds.length),
+    () => false,
+  );
+  const interactionPreviewActive = resizeOverlayActive || dragOverlayActive;
 
   return (
     <>
-      <SvgSceneRenderer {...props} />
-      <SvgHitLayer
-        rootIds={props.rootIds}
-        nodes={props.nodes}
-        childOrder={props.childOrder}
-        zoom={props.zoom}
+      <SvgSceneRenderer
+        {...props}
+        showDebugBadge={false}
+        interactionPreview={interactionPreviewActive}
       />
-      <SvgHoverOutline />
       <SvgDomOverlays />
     </>
   );

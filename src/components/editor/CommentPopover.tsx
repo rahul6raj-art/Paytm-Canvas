@@ -167,8 +167,8 @@ export function CommentPopover() {
             title={comment.author.name}
           />
           <div className="min-w-0 flex-1">
-            <div className="text-[12px] font-semibold text-white">{comment.author.name}</div>
-            <div className="text-[10px] text-app-subtle">
+            <div className="text-ui font-semibold text-white">{comment.author.name}</div>
+            <div className="text-ui text-app-subtle">
               {new Date(comment.createdAt).toLocaleString(undefined, {
                 dateStyle: "medium",
                 timeStyle: "short",
@@ -188,7 +188,7 @@ export function CommentPopover() {
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
           <textarea
             ref={bodyRef}
-            className="min-h-[72px] w-full resize-y rounded-md border border-white/10 bg-app-surface px-2 py-1.5 text-[12px] text-app-fg outline-none ring-0 placeholder:text-[#666] focus:border-[#0d99ff]/60"
+            className="min-h-[72px] w-full resize-y rounded-md border border-white/10 bg-app-surface px-2 py-1.5 text-ui text-app-fg outline-none ring-0 placeholder:text-[#666] focus:border-[#0d99ff]/60"
             placeholder="Write a comment…"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -205,12 +205,12 @@ export function CommentPopover() {
                       className="h-2 w-2 shrink-0 rounded-full"
                       style={{ backgroundColor: r.author.color }}
                     />
-                    <span className="text-[11px] font-medium text-app-fg">{r.author.name}</span>
-                    <span className="text-[10px] text-app-subtle">
+                    <span className="text-ui font-medium text-app-fg">{r.author.name}</span>
+                    <span className="text-ui text-app-subtle">
                       {new Date(r.createdAt).toLocaleTimeString(undefined, { timeStyle: "short" })}
                     </span>
                   </div>
-                  <p className="mt-1 whitespace-pre-wrap pl-4 text-[11px] leading-snug text-app-muted">{r.body}</p>
+                  <p className="mt-1 whitespace-pre-wrap pl-4 text-ui leading-snug text-app-muted">{r.body}</p>
                 </li>
               ))}
             </ul>
@@ -219,7 +219,7 @@ export function CommentPopover() {
           {!comment.resolved ? (
             <div className="mt-3 border-t border-app-border-subtle pt-3">
               <textarea
-                className="min-h-[52px] w-full resize-y rounded-md border border-white/10 bg-app-surface px-2 py-1.5 text-[12px] text-app-fg outline-none placeholder:text-[#666] focus:border-[#0d99ff]/60"
+                className="min-h-[52px] w-full resize-y rounded-md border border-white/10 bg-app-surface px-2 py-1.5 text-ui text-app-fg outline-none placeholder:text-[#666] focus:border-[#0d99ff]/60"
                 placeholder="Reply… (⌘↵)"
                 value={replyDraft}
                 onChange={(e) => setReplyDraft(e.target.value)}
@@ -235,7 +235,7 @@ export function CommentPopover() {
               <Button
                 type="button"
                 variant="toolbar"
-                className="h-7 gap-1 px-2 text-[11px]"
+                className="h-7 gap-1 px-2 text-ui"
                 onClick={() => {
                   commitBody();
                   resolveComment(comment.id);
@@ -247,7 +247,7 @@ export function CommentPopover() {
               <Button
                 type="button"
                 variant="toolbar"
-                className="h-7 px-2 text-[11px]"
+                className="h-7 px-2 text-ui"
                 disabled={!isNonEmptyCommentBody(replyDraft)}
                 onClick={submitReply}
               >
@@ -258,7 +258,7 @@ export function CommentPopover() {
             <Button
               type="button"
               variant="toolbar"
-              className="h-7 gap-1 px-2 text-[11px]"
+              className="h-7 gap-1 px-2 text-ui"
               onClick={() => {
                 commitBody();
                 reopenComment(comment.id);
@@ -271,7 +271,7 @@ export function CommentPopover() {
           <Button
             type="button"
             variant="toolbar"
-            className="ml-auto h-7 gap-1 px-2 text-[11px] text-red-300 hover:text-red-200"
+            className="ml-auto h-7 gap-1 px-2 text-ui text-red-300 hover:text-red-200"
             onClick={() => deleteComment(comment.id, { pendingBody: draft })}
           >
             <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />

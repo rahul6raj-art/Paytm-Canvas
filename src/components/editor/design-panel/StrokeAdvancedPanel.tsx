@@ -8,7 +8,9 @@ import {
   StrokeLinejoinControl,
   StrokeWidthProfilePreview,
 } from "./StrokeSettingIcons";
+import { appFieldClassCompact, appFieldRadius } from "@/lib/appFieldStyles";
 import { cn } from "@/lib/utils";
+import { inspectorIconClass, inspectorIconStroke } from "@/lib/inspectorIconStyles";
 import {
   defaultDashGapForStyle,
   resolveStrokeDashGap,
@@ -25,8 +27,7 @@ import {
 } from "@/lib/stroke";
 import type { StrokeStylePatch } from "./StrokeSection";
 
-const field =
-  "h-6 min-h-[24px] w-full rounded border border-app-border bg-app-field px-1.5 text-[12px] text-app-field-fg focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40";
+const field = appFieldClassCompact;
 
 export function StrokeAdvancedPanel({
   instanceKey,
@@ -86,7 +87,7 @@ export function StrokeAdvancedPanel({
 
   return (
     <div className="w-[220px] space-y-2 p-2">
-      <p className="text-[11px] font-semibold text-app-fg">Stroke settings</p>
+      <p className="text-ui font-semibold text-app-fg">Stroke settings</p>
       <InspectorLabelRow label="Style">
         <select
           disabled={locked}
@@ -126,7 +127,7 @@ export function StrokeAdvancedPanel({
             />
           </div>
           <div>
-            <div className="mb-0.5 text-[11px] font-medium text-app-subtle">Dash cap</div>
+            <div className="inspector-field-label">Dash cap</div>
             <StrokeLinecapControl
               value={cap}
               disabled={locked}
@@ -136,11 +137,16 @@ export function StrokeAdvancedPanel({
         </>
       ) : null}
       <div>
-        <div className="mb-0.5 text-[11px] font-medium text-app-subtle">Width profile</div>
+        <div className="inspector-field-label">Width profile</div>
         <div className="flex items-center gap-1">
-          <div className="flex h-6 min-w-0 flex-1 items-center gap-2 rounded border border-app-border bg-app-field px-2">
+          <div
+            className={cn(
+              "flex h-6 min-w-0 flex-1 items-center gap-2 border border-app-border bg-app-field px-2",
+              appFieldRadius,
+            )}
+          >
             <StrokeWidthProfilePreview profile={widthProfile} flipped={strokeWidthProfileFlipped} />
-            <span className="text-[11px] text-app-muted capitalize">{widthProfile}</span>
+            <span className="text-ui text-app-muted capitalize">{widthProfile}</span>
           </div>
           <button
             type="button"
@@ -152,12 +158,12 @@ export function StrokeAdvancedPanel({
               strokeWidthProfileFlipped && "border-accent/40 bg-accent/10 text-accent",
             )}
           >
-            <FlipHorizontal2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+            <FlipHorizontal2 className={inspectorIconClass} strokeWidth={inspectorIconStroke} />
           </button>
         </div>
       </div>
       <div>
-        <div className="mb-0.5 text-[11px] font-medium text-app-subtle">Join</div>
+        <div className="inspector-field-label">Join</div>
         <StrokeLinejoinControl
           value={join}
           disabled={locked}

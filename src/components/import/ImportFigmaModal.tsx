@@ -336,7 +336,7 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
           <h2 className="mt-2 text-lg font-semibold tracking-tight text-app-fg">
             Import from Figma
           </h2>
-          <p className="mt-1 text-[12px] leading-snug text-app-muted">
+          <p className="mt-1 text-ui leading-snug text-app-muted">
             Paste a frame link ({modKeyLabel()}+L in Figma) or a .fig file.
           </p>
         </div>
@@ -344,10 +344,10 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
         <div className="thin-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <div className="mx-4 my-3 overflow-hidden rounded-xl border border-app-border bg-app-inset">
             <section className="px-4 py-3">
-              <h3 className="text-[13px] font-semibold text-app-fg">Figma connection</h3>
+              <h3 className="text-ui-sm font-semibold text-app-fg">Figma connection</h3>
 
               {activeProfile ? (
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-app-fg">
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-ui text-app-fg">
                   <span className="inline-flex items-center gap-1.5">
                     <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden />
                     {verifying ? "Verifying…" : `Connected as ${formatFigmaAccountLabel(activeProfile)}`}
@@ -366,11 +366,11 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
                   ) : null}
                 </div>
               ) : savedTokenInBrowser ? (
-                <p className="mt-1.5 text-[12px] text-app-muted">
+                <p className="mt-1.5 text-ui text-app-muted">
                   Token saved in this browser — paste a design link below and Import.
                 </p>
               ) : (
-                <p className="mt-1.5 text-[12px] text-app-muted">
+                <p className="mt-1.5 text-ui text-app-muted">
                   Paste your token once — it stays saved in this browser.
                 </p>
               )}
@@ -378,7 +378,7 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
               {showTokenField || !savedTokenInBrowser ? (
                 <>
                   <label className="mt-2 block">
-                    <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-app-subtle">
+                    <span className="mb-1 block section-heading">
                       Personal access token
                     </span>
                     <input
@@ -394,7 +394,7 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
                           : "figd_…"
                       }
                       autoComplete="off"
-                      className={cn(fieldClass, "font-mono text-[11px]")}
+                      className={cn(fieldClass, "font-mono text-ui")}
                     />
                   </label>
 
@@ -406,7 +406,7 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
                     }
                     onClick={() => void onVerifyAndConnect()}
                     className={cn(
-                      "mt-2 w-full rounded-lg border border-app-border bg-app-raised px-3 py-1.5 text-[12px] font-medium text-app-fg transition-colors hover:bg-app-hover",
+                      "mt-2 w-full rounded-lg border border-app-border bg-app-raised px-3 py-1.5 text-ui font-medium text-app-fg transition-colors hover:bg-app-hover",
                       (verifying ||
                         (!accessToken.trim() && !serverTokenReady && !savedTokenInBrowser)) &&
                         "cursor-not-allowed opacity-50",
@@ -418,7 +418,7 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
               ) : (
                 <button
                   type="button"
-                  className="mt-2 text-[12px] font-medium text-accent underline-offset-2 hover:underline"
+                  className="mt-2 text-ui font-medium text-accent underline-offset-2 hover:underline"
                   onClick={() => setShowTokenField(true)}
                 >
                   Change token
@@ -427,7 +427,7 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
             </section>
 
             <div className="border-t border-app-border-subtle bg-app-panel px-4 py-3">
-              <p className="mb-2 text-[12px] font-semibold text-app-fg">Design link</p>
+              <p className="mb-2 text-ui font-semibold text-app-fg">Design link</p>
               <input
                 type="url"
                 value={link}
@@ -436,7 +436,7 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
                   setError(null);
                 }}
                 placeholder="https://www.figma.com/design/…"
-                className={cn(fieldClass, "text-[13px]")}
+                className={cn(fieldClass, "text-ui-sm")}
               />
               <input
                 type="text"
@@ -446,13 +446,13 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
                   setError(null);
                 }}
                 placeholder="Or file key (e.g. AbCdEf123456)"
-                className={cn(fieldClass, "mt-1.5 h-8 font-mono text-[12px]")}
+                className={cn(fieldClass, "mt-1.5 h-8 font-mono text-ui")}
               />
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => fileRef.current?.click()}
-                  className="text-[12px] font-medium text-accent underline-offset-2 hover:text-[#0b87e0] hover:underline"
+                  className="text-ui font-medium text-accent underline-offset-2 hover:text-[#0b87e0] hover:underline"
                 >
                   {figFile ? figFile.name : "Choose .fig file instead…"}
                 </button>
@@ -460,7 +460,7 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
                   <button
                     type="button"
                     onClick={() => setFigFile(null)}
-                    className="text-[12px] text-app-subtle hover:text-app-muted"
+                    className="text-ui text-app-subtle hover:text-app-muted"
                   >
                     Clear
                   </button>
@@ -485,7 +485,7 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
         </div>
 
         {error ? (
-          <p className="mx-4 shrink-0 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] leading-snug text-amber-950 dark:text-amber-100">
+          <p className="mx-4 shrink-0 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-ui leading-snug text-amber-950 dark:text-amber-100">
             {error}
           </p>
         ) : null}
@@ -496,7 +496,7 @@ export function ImportFigmaModal({ onImportFigFile }: ImportFigmaModalProps) {
             disabled={figImportInProgress || verifying || !canImport}
             onClick={() => void runImport()}
             className={cn(
-              "h-10 w-full rounded-xl text-[14px] font-semibold shadow-sm transition-colors",
+              "h-10 w-full rounded-xl text-sm font-semibold shadow-sm transition-colors",
               canImport
                 ? "bg-accent text-white hover:bg-[#0b87e0]"
                 : "cursor-not-allowed bg-app-inset text-app-muted",

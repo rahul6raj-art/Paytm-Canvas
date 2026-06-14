@@ -4,6 +4,7 @@ import type { EditorAsset, EditorPersistSlice } from "@/lib/documentPersistence"
 import type { EditorNode } from "@/stores/useEditorStore";
 import type { ImportWebResponse, ImportWebSceneNode } from "@/lib/webImport/types";
 import { buildScreenshotReferenceLayer } from "@/lib/webImport/screenshotReferenceLayer";
+import { finalizeWebImportGraph } from "@/lib/webImport/finalizeWebImportGraph";
 
 function sceneNodeToEditor(
   node: ImportWebSceneNode,
@@ -28,27 +29,48 @@ function sceneNodeToEditor(
     fill: node.fill,
     fillEnabled: node.fillEnabled,
     fillOpacity: node.fillOpacity,
+    fillType: node.fillType,
+    fillGradient: node.fillGradient,
     strokeColor: node.strokeColor,
     strokeWidth: node.strokeWidth,
+    strokeEnabled: node.strokeEnabled,
     cornerRadius: node.cornerRadius,
+    cornerRadii: node.cornerRadii,
     opacity: node.opacity,
+    effects: node.effects,
     content: node.content,
     fontFamily: node.fontFamily,
     fontSize: node.fontSize,
     fontWeight: node.fontWeight,
+    lineHeight: node.lineHeight,
+    letterSpacing: node.letterSpacing,
+    textDecoration: node.textDecoration,
     textAlign: node.textAlign,
+    verticalAlign: node.verticalAlign,
+    textResizeMode: node.textResizeMode,
     textColor: node.fill,
     assetId: node.assetId,
     imageSrc: node.imageSrc,
+    imageFitMode: node.imageFitMode,
+    pathPoints: node.pathPoints,
+    pathClosed: node.pathClosed,
     layoutMode: node.layoutMode,
     layoutGap: node.layoutGap,
+    layoutWrap: node.layoutWrap,
     paddingTop: node.paddingTop,
     paddingRight: node.paddingRight,
     paddingBottom: node.paddingBottom,
     paddingLeft: node.paddingLeft,
     primaryAxisAlign: node.primaryAxisAlign,
     counterAxisAlign: node.counterAxisAlign,
+    layoutPositioning: node.layoutPositioning,
+    layoutSizingHorizontal: node.layoutSizingHorizontal,
+    layoutSizingVertical: node.layoutSizingVertical,
+    layoutGrow: node.layoutGrow,
     clipChildren: node.clipChildren,
+    isComponent: node.isComponent,
+    componentId: node.componentId,
+    sourceComponentId: node.sourceComponentId,
     isImportReference: node.isImportReference,
     codeClassName: node.codeClassName,
     codeJsxTag: node.codeJsxTag,
@@ -78,7 +100,7 @@ export function importWebResponseToPersistSlice(response: ImportWebResponse): Ed
     };
   }
 
-  const rootChildren: ImportWebSceneNode[] = [];
+  let frameId: string;
 
   if (response.mode === "screenshot") {
     if (!response.screenshot) {
@@ -94,60 +116,73 @@ export function importWebResponseToPersistSlice(response: ImportWebResponse): Ed
       width: response.screenshot.width,
       height: response.screenshot.height,
     };
-    rootChildren.push(
-      buildScreenshotReferenceLayer(
+    const pageFrame: ImportWebSceneNode = {
+      id: "web-page-frame",
+      type: "frame",
+      name: response.page.title || "Imported page",
+      x: 80,
+      y: 80,
+      width: response.page.width,
+      height: response.page.height,
+      fillEnabled: false,
+      clipChildren: false,
+      children: [
+        buildScreenshotReferenceLayer(
+          response.screenshot,
+          response.page.width,
+          response.page.height,
+          refAssetId,
+        ),
+      ],
+    };
+    frameId = sceneNodeToEditor(pageFrame, null, nodes, childOrder);
+    childOrder[EDITOR_ROOT_KEY] = [frameId];
+  } else {
+    const sceneAtOrigin: ImportWebSceneNode = {
+      ...response.scene,
+      x: 80,
+      y: 80,
+      clipChildren: response.scene.clipChildren ?? true,
+    };
+    frameId = sceneNodeToEditor(sceneAtOrigin, null, nodes, childOrder);
+    childOrder[EDITOR_ROOT_KEY] = [frameId];
+
+    const finalizedNodes = finalizeWebImportGraph(
+      nodes,
+      childOrder,
+      response.page.width,
+      response.page.height,
+    );
+    for (const [id, n] of Object.entries(finalizedNodes)) {
+      nodes[id] = n;
+    }
+
+    if (response.screenshot && response.mode === "editable_with_reference") {
+      const refAssetId = "asset-screenshot-ref";
+      if (!assets[refAssetId]) {
+        assets[refAssetId] = {
+          id: refAssetId,
+          name: "Screenshot reference",
+          mimeType: "image/png",
+          dataUrl: response.screenshot.dataUrl,
+          createdAt: new Date().toISOString(),
+          width: response.screenshot.width,
+          height: response.screenshot.height,
+        };
+      }
+      const ref = buildScreenshotReferenceLayer(
         response.screenshot,
         response.page.width,
         response.page.height,
         refAssetId,
-      ),
-    );
-  } else {
-    rootChildren.push(response.scene);
-  }
-
-  const pageFrame: ImportWebSceneNode = {
-    id: "web-page-frame",
-    type: "frame",
-    name: response.page.title || "Imported page",
-    x: 80,
-    y: 80,
-    width: response.page.width,
-    height: response.page.height,
-    fillEnabled: false,
-    clipChildren: true,
-    layoutMode: "none",
-    children: rootChildren,
-  };
-
-  const frameId = sceneNodeToEditor(pageFrame, null, nodes, childOrder);
-  childOrder[EDITOR_ROOT_KEY] = [frameId];
-
-  if (response.screenshot && response.mode === "editable_with_reference") {
-    const refAssetId = "asset-screenshot-ref";
-    if (!assets[refAssetId]) {
-      assets[refAssetId] = {
-        id: refAssetId,
-        name: "Screenshot reference",
-        mimeType: "image/png",
-        dataUrl: response.screenshot.dataUrl,
-        createdAt: new Date().toISOString(),
-        width: response.screenshot.width,
-        height: response.screenshot.height,
-      };
+      );
+      const refId = sceneNodeToEditor(ref, frameId, nodes, childOrder);
+      const frameKids = childOrder[frameId] ?? [];
+      childOrder[frameId] = [refId, ...frameKids.filter((id) => id !== refId)];
     }
-    const ref = buildScreenshotReferenceLayer(
-      response.screenshot,
-      response.page.width,
-      response.page.height,
-      refAssetId,
-    );
-    const refId = sceneNodeToEditor(ref, frameId, nodes, childOrder);
-    const frameKids = childOrder[frameId] ?? [];
-    childOrder[frameId] = [refId, ...frameKids.filter((id) => id !== refId)];
   }
 
-  const base = wrapPersistSliceWithPages({
+  return wrapPersistSliceWithPages({
     nodes,
     childOrder,
     assets,
@@ -157,10 +192,8 @@ export function importWebResponseToPersistSlice(response: ImportWebResponse): Ed
     zoom: 0.5,
     pan: { x: 40, y: 24 },
     showGrid: false,
-    showRulers: true,
+    showRulers: false,
     canvasBackgroundColor: "#e5e5e5",
     comments: [],
   });
-
-  return base;
 }

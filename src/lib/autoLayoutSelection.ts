@@ -73,14 +73,23 @@ function directChildIds(
     .sort((a, b) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0));
 }
 
-function syncContainerChildOrder(
+function ensureContainerChildOrder(
   childOrder: Record<string, string[]>,
   containerId: string,
   childIds: string[],
 ): void {
-  if (childIds.length === 0) return;
-  const existing = childOrder[containerId] ?? [];
-  if (existing.length > 0) return;
+  if (childIds.length === 0) {
+    childOrder[containerId] = childOrder[containerId] ?? [];
+    return;
+  }
+  const childSet = new Set(childIds);
+  for (const [key, list] of Object.entries(childOrder)) {
+    if (key === containerId) continue;
+    const filtered = list.filter((id) => !childSet.has(id));
+    if (filtered.length !== list.length) {
+      childOrder[key] = filtered;
+    }
+  }
   childOrder[containerId] = [...childIds];
 }
 
@@ -125,7 +134,6 @@ function layoutFieldsForChildren(
     ...DEFAULT_AUTO_LAYOUT_FIELDS,
     layoutMode: mode,
     layoutGap: gap,
-    layoutGapAuto: childIds.length >= 2,
     ...padding,
     ...(sizing === "fixed"
       ? defaultFixedSizingForContainer()
@@ -166,7 +174,7 @@ function enableAutoLayoutOnContainer(
 
   const nextOrder = { ...childOrder };
   const kids = directChildIds(nodes, nextOrder, containerId);
-  syncContainerChildOrder(nextOrder, containerId, kids);
+  ensureContainerChildOrder(nextOrder, containerId, kids);
 
   const mode =
     (n.layoutMode ?? "none") !== "none"
@@ -178,7 +186,7 @@ function enableAutoLayoutOnContainer(
     const layout = layoutFieldsForChildren(nodes, kids, n.width, n.height, "fixed");
     let next = {
       ...nodes,
-      [containerId]: { ...n, ...layout },
+      [containerId]: { ...n, ...layout, expanded: true },
     };
     next = applyDeepAutoLayout(
       next as Record<string, LayoutNode>,
@@ -195,6 +203,24 @@ function enableAutoLayoutOnContainer(
     containerId,
   ) as Record<string, EditorNode>;
   return { nodes: next, childOrder: nextOrder };
+}
+
+function reconcileOperandsInParentList(
+  childOrder: Record<string, string[]>,
+  parentKey: string,
+  topIds: string[],
+): void {
+  const list = [...(childOrder[parentKey] ?? [])];
+  for (const id of topIds) {
+    if (!list.includes(id)) list.push(id);
+  }
+  childOrder[parentKey] = list;
+  const topSet = new Set(topIds);
+  for (const [key, ids] of Object.entries(childOrder)) {
+    if (key === parentKey) continue;
+    const filtered = ids.filter((id) => !topSet.has(id));
+    if (filtered.length !== ids.length) childOrder[key] = filtered;
+  }
 }
 
 function wrapInAutoLayoutFrame(
@@ -268,10 +294,14 @@ function wrapInAutoLayoutFrame(
     ...layout,
   };
 
-  const list = [...(nextOrder[P] ?? [])];
-  const ixs = topIds.map((id) => list.indexOf(id)).sort((a, b) => a - b);
-  const insertAt = ixs[0] ?? list.length;
-  const newList = list.filter((id) => !topIds.includes(id));
+  reconcileOperandsInParentList(nextOrder, P, topIds);
+  const parentList = [...(nextOrder[P] ?? [])];
+  const ixs = topIds
+    .map((id) => parentList.indexOf(id))
+    .filter((i) => i >= 0)
+    .sort((a, b) => a - b);
+  const insertAt = ixs[0] ?? parentList.length;
+  const newList = parentList.filter((id) => !topIds.includes(id));
   newList.splice(insertAt, 0, fid);
   nextOrder[P] = newList;
   nextOrder[fid] = sortIdsForAutoLayoutFlow(
@@ -350,10 +380,14 @@ function wrapInPlainFrame(
     layoutMode: "none",
   };
 
-  const list = [...(nextOrder[P] ?? [])];
-  const ixs = topIds.map((id) => list.indexOf(id)).sort((a, b) => a - b);
-  const insertAt = ixs[0] ?? list.length;
-  const newList = list.filter((id) => !topIds.includes(id));
+  reconcileOperandsInParentList(nextOrder, P, topIds);
+  const parentList = [...(nextOrder[P] ?? [])];
+  const ixs = topIds
+    .map((id) => parentList.indexOf(id))
+    .filter((i) => i >= 0)
+    .sort((a, b) => a - b);
+  const insertAt = ixs[0] ?? parentList.length;
+  const newList = parentList.filter((id) => !topIds.includes(id));
   newList.splice(insertAt, 0, fid);
   nextOrder[P] = newList;
   nextOrder[fid] = [...topIds];

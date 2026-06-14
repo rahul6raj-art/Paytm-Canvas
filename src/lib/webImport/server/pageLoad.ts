@@ -1,7 +1,7 @@
 import type { Page } from "playwright";
 import { IMPORT_WEB_LIMITS } from "@/lib/webImport/types";
 
-const POST_LOAD_SETTLE_MS = 2_500;
+const POST_LOAD_SETTLE_MS = 4_000;
 const LOAD_STATE_TIMEOUT_MS = 15_000;
 
 /**
@@ -39,16 +39,40 @@ async function pageHasRenderableContent(page: Page): Promise<boolean> {
 }
 
 async function settlePage(page: Page, maxMs: number): Promise<void> {
-  await page.evaluate(async (waitMs) => {
-    if (document.readyState !== "complete") {
-      await new Promise<void>((resolve) => {
-        const done = () => resolve();
-        window.addEventListener("load", done, { once: true });
-        window.setTimeout(done, waitMs);
+  // Use string evaluate — tsx/esbuild inject `__name` into arrow fns which breaks in the browser.
+  await page.evaluate(
+    `async (waitMs) => {
+      document.querySelectorAll('img[loading="lazy"]').forEach((img) => {
+        img.loading = "eager";
       });
-    }
-    await new Promise((r) => window.setTimeout(r, Math.min(waitMs, 3000)));
-  }, maxMs);
+      window.scrollTo(0, document.body.scrollHeight);
+      window.scrollTo(0, 0);
+      if (document.readyState !== "complete") {
+        await new Promise((resolve) => {
+          const done = () => resolve();
+          window.addEventListener("load", done, { once: true });
+          window.setTimeout(done, waitMs);
+        });
+      }
+      if (document.fonts && document.fonts.ready) {
+        await document.fonts.ready.catch(() => undefined);
+      }
+      const imgs = Array.from(document.images);
+      await Promise.all(
+        imgs.map(
+          (img) =>
+            img.complete
+              ? Promise.resolve()
+              : new Promise((resolve) => {
+                  img.addEventListener("load", () => resolve(), { once: true });
+                  img.addEventListener("error", () => resolve(), { once: true });
+                }),
+        ),
+      );
+      await new Promise((r) => window.setTimeout(r, Math.min(waitMs, 3500)));
+    }`,
+    maxMs,
+  );
 }
 
 function formatLoadError(err: unknown, url: string): Error {

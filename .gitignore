@@ -3,5 +3,7 @@ node_modules
 *.tsbuildinfo
 out
 .env*.local
+packages/craft-api/.env
+packages/craft-realtime/.env
 .DS_Store
-*.log
+.craft-mock-api/

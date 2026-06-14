@@ -12,6 +12,7 @@ export {
 } from "./layoutAutoNode";
 export { markLayoutDirty, relayoutDirtyTree, collectDirtyAutoLayoutRoots } from "./dirty";
 export {
+  freezeAutoLayoutGap,
   freezeAutoLayoutGapBeforeChildInsert,
   inferAutoLayoutGap,
   resolveLayoutGap,

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: craft-api
+  namespace: craft
+  labels:
+    app: craft-api
+    app.kubernetes.io/part-of: paytm-craft
+spec:
+  type: ClusterIP
+  selector:
+    app: craft-api
+  ports:
+    - name: http
+      port: 4000
+      targetPort: http

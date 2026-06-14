@@ -38,7 +38,7 @@ export function CommentPinLayer() {
               setActiveCommentId(c.id);
             }}
             className={cn(
-              "pointer-events-auto absolute flex h-[18px] w-[18px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border text-[10px] font-semibold leading-none transition-transform",
+              "pointer-events-auto absolute flex h-[18px] w-[18px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border text-ui font-semibold leading-none transition-transform",
               c.resolved
                 ? "border-[#d4d4d4] bg-white text-[#999] opacity-50 hover:opacity-90"
                 : "border-white bg-[#18a0fb] text-white hover:scale-105",

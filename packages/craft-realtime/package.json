@@ -1,0 +1,22 @@
+{
+  "name": "@paytm-craft/realtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "test": "tsx --test 'src/**/__tests__/*.test.ts'"
+  },
+  "dependencies": {
+    "@paytm-craft/api": "*",
+    "redis": "^4.7.0",
+    "ws": "^8.21.0",
+    "yjs": "^13.6.31"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

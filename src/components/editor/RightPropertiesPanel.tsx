@@ -1,19 +1,22 @@
 "use client";
 
-import { useMemo } from "react";
-import { alignableSelectionIds } from "@/lib/alignSelection";
+import { useMemo, type PointerEvent as ReactPointerEvent } from "react";
+import { activateCanvasForShortcuts, isEditableFieldElement } from "@/lib/editorKeyboardFocus";
 import { canAddAutoLayoutToSelection } from "@/lib/autoLayoutSelection";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { CanvasInspector } from "./CanvasInspector";
 import { DesignInspector } from "./DesignInspector";
 import { VectorInspector } from "./VectorInspector";
-import { InspectorEmptyState } from "./InspectorEmptyState";
+import { MultiSelectionInspector } from "./MultiSelectionInspector";
 import { mergeInstanceOverrides } from "@/lib/componentModel";
 import { PrototypeInspector } from "./PrototypeInspector";
 import { findPrototypeLinkOwner } from "@/lib/prototype";
 import { InspectInspector } from "./InspectInspector";
+import { FigmaFidelityInspector } from "./FigmaFidelityInspector";
 import { ResponsivePreviewPanel } from "./ResponsivePreviewPanel";
 import { CodePanel } from "./CodePanel";
+import { EditorModeTabs } from "./EditorModeTabs";
+import { RightPanelQuickTools } from "./RightPanelQuickTools";
 import { cn } from "@/lib/utils";
 
 export function RightPropertiesPanel() {
@@ -25,10 +28,6 @@ export function RightPropertiesPanel() {
   const addAutoLayoutToSelection = useEditorStore((s) => s.addAutoLayoutToSelection);
   const canAutoLayout = useMemo(
     () => canAddAutoLayoutToSelection(selectedIds, nodes),
-    [selectedIds, nodes],
-  );
-  const alignableCount = useMemo(
-    () => alignableSelectionIds(selectedIds, nodes).length,
     [selectedIds, nodes],
   );
   const selectedPrototypeLinkId = useEditorStore((s) => s.selectedPrototypeLinkId);
@@ -52,37 +51,47 @@ export function RightPropertiesPanel() {
     return node;
   }, [editorMode, node, nodes, selectedPrototypeLinkId]);
 
+  const onPanelPointerDownCapture = (e: ReactPointerEvent) => {
+    if (!isEditableFieldElement(e.target)) {
+      activateCanvasForShortcuts();
+    }
+  };
+
   return (
-    <div className="flex h-full min-h-0 flex-col border-l border-app-border bg-chrome-panel shadow-app-panel">
-      <div className="flex h-8 shrink-0 items-center border-b border-app-border bg-app-inset">
+    <div
+      data-right-properties-panel
+      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-l border-app-panel-edge bg-chrome-panel shadow-app-panel"
+      onPointerDownCapture={onPanelPointerDownCapture}
+    >
+      <div className="shrink-0 bg-app-panel">
+        <EditorModeTabs variant="underline" stretch />
+
         {editorMode === "design" ? (
-          <div className="flex h-full w-full items-stretch px-1">
-            {(
-              [
-                ["design", "Design"],
-                ["code", "Code"],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setRightPanelTab(id)}
-                className={cn(
-                  "flex flex-1 items-center justify-center text-[11px] font-semibold tracking-wide transition-colors",
-                  rightPanelTab === id
-                    ? "text-app-fg after:absolute relative after:bottom-0 after:left-2 after:right-2 after:h-0.5 after:rounded-full after:bg-accent"
-                    : "text-app-subtle hover:text-app-fg",
-                )}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="flex items-center gap-3 px-3 pb-2.5 pt-1">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              {(
+                [
+                  ["design", "Design"],
+                  ["code", "Code"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setRightPanelTab(id)}
+                  className={cn(
+                    "text-ui font-medium transition-colors",
+                    rightPanelTab === id ? "text-app-fg" : "text-app-subtle hover:text-app-fg",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <RightPanelQuickTools />
           </div>
         ) : (
-          <span className="px-3 text-[11px] font-semibold capitalize tracking-wide text-app-muted">
-            {editorMode === "prototype" ? "Prototype" : "Inspect"}
-            <span className="ml-1.5 text-app-subtle">· Properties</span>
-          </span>
+          <div className="px-3 pb-2.5 pt-1 text-ui text-app-subtle">Properties</div>
         )}
       </div>
 
@@ -90,12 +99,10 @@ export function RightPropertiesPanel() {
 
       {editorMode === "design" && rightPanelTab === "design" && (
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="thin-scroll min-h-0 flex-1 overflow-y-auto">
+          <div className="thin-scroll min-h-0 flex-1 overflow-y-auto" data-inspector-panel>
             {!node ? (
               selectedIds.length > 0 ? (
-                <InspectorEmptyState
-                  multi
-                  count={alignableCount}
+                <MultiSelectionInspector
                   selectedCount={selectedIds.length}
                   canAddAutoLayout={canAutoLayout}
                   onAddAutoLayout={() => addAutoLayoutToSelection()}
@@ -114,9 +121,9 @@ export function RightPropertiesPanel() {
       )}
 
       {editorMode === "prototype" && (
-        <div className="thin-scroll min-h-0 flex-1 overflow-y-auto">
+        <div className="thin-scroll min-h-0 flex-1 overflow-y-auto" data-inspector-panel>
           {!prototypeContextNode ? (
-            <div className="p-3 text-[12px] leading-relaxed text-app-subtle">
+            <div className="px-3 py-4 inspector-helper-text">
               Select a layer to edit prototype interactions, or wire from the blue handle on the canvas.
             </div>
           ) : (
@@ -126,13 +133,14 @@ export function RightPropertiesPanel() {
       )}
 
       {editorMode === "inspect" && (
-        <div className="thin-scroll min-h-0 flex-1 overflow-y-auto">
+        <div className="thin-scroll min-h-0 flex-1 overflow-y-auto" data-inspector-panel>
           {!node || selectedIds.length > 1 ? (
-            <div className="p-3 text-[12px] leading-relaxed text-app-subtle">
-              Select a layer to inspect
-            </div>
+            <div className="px-3 py-4 inspector-helper-text">Select a layer to inspect</div>
           ) : (
-            <InspectInspector node={node} />
+            <div className="px-3 py-3 space-y-3">
+              <InspectInspector node={node} />
+              <FigmaFidelityInspector node={node} />
+            </div>
           )}
         </div>
       )}

@@ -7,7 +7,6 @@ import {
   resolveStrokeSideWidths,
   resolveStrokeSides,
   strokeSideWidthsAreUniform,
-  strokeUsesCssIndividualBorders,
   type ResolvedStrokeSides,
   type ResolvedStrokeSideWidths,
 } from "@/lib/strokeAlign";
@@ -28,6 +27,59 @@ export type StrokeSideSegment = {
   width: number;
   taper: StrokeSegmentTaper;
 };
+
+/** Half-diagonal on a 90° corner arc (shared-corner split). */
+const CORNER_ARC_K = 0.7071067811865476;
+
+export type CornerArcPortion = "full" | "first" | "second";
+
+/**
+ * One corner arc on a rounded rect perimeter.
+ * `first` / `second` split the quarter arc when both adjacent sides are active.
+ */
+export function roundedCornerArc(
+  corner: RectCorner,
+  r: number,
+  w: number,
+  h: number,
+  portion: CornerArcPortion,
+): string {
+  if (r <= 0) return "";
+  const flags = "0 0 1";
+
+  switch (corner) {
+    case "tl": {
+      const mx = r - r * CORNER_ARC_K;
+      const my = r - r * CORNER_ARC_K;
+      if (portion === "first") return `M 0 ${r} A ${r} ${r} ${flags} ${mx} ${my}`;
+      if (portion === "second") return `M ${mx} ${my} A ${r} ${r} ${flags} ${r} 0`;
+      return `M 0 ${r} A ${r} ${r} ${flags} ${r} 0`;
+    }
+    case "tr": {
+      const mx = w - r + r * CORNER_ARC_K;
+      const my = r - r * CORNER_ARC_K;
+      if (portion === "first") return `M ${w - r} 0 A ${r} ${r} ${flags} ${mx} ${my}`;
+      if (portion === "second") return `M ${mx} ${my} A ${r} ${r} ${flags} ${w} ${r}`;
+      return `M ${w - r} 0 A ${r} ${r} ${flags} ${w} ${r}`;
+    }
+    case "br": {
+      const mx = w - r + r * CORNER_ARC_K;
+      const my = h - r + r * CORNER_ARC_K;
+      if (portion === "first") return `M ${w} ${h - r} A ${r} ${r} ${flags} ${mx} ${my}`;
+      if (portion === "second") return `M ${mx} ${my} A ${r} ${r} ${flags} ${w - r} ${h}`;
+      return `M ${w} ${h - r} A ${r} ${r} ${flags} ${w - r} ${h}`;
+    }
+    case "bl": {
+      const mx = r - r * CORNER_ARC_K;
+      const my = h - r + r * CORNER_ARC_K;
+      if (portion === "first") return `M ${r} ${h} A ${r} ${r} ${flags} ${mx} ${my}`;
+      if (portion === "second") return `M ${mx} ${my} A ${r} ${r} ${flags} 0 ${h - r}`;
+      return `M ${r} ${h} A ${r} ${r} ${flags} 0 ${h - r}`;
+    }
+    default:
+      return "";
+  }
+}
 
 function prevSide(side: RectStrokeSide): RectStrokeSide {
   const i = SIDE_ORDER.indexOf(side);
@@ -193,51 +245,92 @@ export function traceChainPathD(
   return parts.join(" ");
 }
 
+/**
+ * Open SVG path for one side of a rounded rectangle (Figma individual strokes).
+ * Corner arcs are split when both adjacent sides are active to avoid overlap.
+ */
+export function buildRectSideStrokePath(
+  side: RectStrokeSide,
+  width: number,
+  height: number,
+  radii: CornerRadii,
+  sides: ResolvedStrokeSides,
+): string | null {
+  const [tl, tr, br, bl] = clampCornerRadii(radii, width, height);
+  const w = width;
+  const h = height;
+  const eps = 0.001;
+  const chunks: string[] = [];
+
+  if (side === "top") {
+    if (tl > 0) {
+      chunks.push(roundedCornerArc("tl", tl, w, h, sides.left ? "first" : "full"));
+    }
+    const x0 = tl > 0 ? tl : 0;
+    const x1 = w - tr;
+    if (x1 - x0 > eps) chunks.push(`M ${x0} 0 H ${x1}`);
+    if (tr > 0) {
+      chunks.push(roundedCornerArc("tr", tr, w, h, sides.right ? "first" : "full"));
+    }
+    return chunks.length ? chunks.join(" ") : null;
+  }
+
+  if (side === "right") {
+    if (tr > 0) {
+      chunks.push(roundedCornerArc("tr", tr, w, h, sides.top ? "second" : "full"));
+    } else {
+      chunks.push(`M ${w} 0`);
+    }
+    const y0 = tr > 0 ? tr : 0;
+    const y1 = h - br;
+    if (y1 - y0 > eps) chunks.push(`M ${w} ${y0} V ${y1}`);
+    if (br > 0) {
+      chunks.push(roundedCornerArc("br", br, w, h, sides.bottom ? "first" : "full"));
+    }
+    return chunks.length ? chunks.join(" ") : null;
+  }
+
+  if (side === "bottom") {
+    if (br > 0) {
+      chunks.push(roundedCornerArc("br", br, w, h, sides.right ? "second" : "full"));
+    } else {
+      chunks.push(`M ${w} ${h}`);
+    }
+    const x0 = w - br;
+    const x1 = bl;
+    if (x0 - x1 > eps) chunks.push(`M ${x0} ${h} H ${x1}`);
+    if (bl > 0) {
+      chunks.push(roundedCornerArc("bl", bl, w, h, sides.left ? "first" : "full"));
+    }
+    return chunks.length ? chunks.join(" ") : null;
+  }
+
+  if (side === "left") {
+    if (bl > 0) {
+      chunks.push(roundedCornerArc("bl", bl, w, h, sides.bottom ? "second" : "full"));
+    } else {
+      chunks.push(`M 0 ${h}`);
+    }
+    const y0 = h - bl;
+    const y1 = tl;
+    if (y0 - y1 > eps) chunks.push(`M 0 ${y0} V ${y1}`);
+    if (tl > 0) {
+      chunks.push(roundedCornerArc("tl", tl, w, h, sides.top ? "second" : "full"));
+    }
+    return chunks.length ? chunks.join(" ") : null;
+  }
+
+  return null;
+}
+
 function sidePathChunk(
   side: RectStrokeSide,
   width: number,
   height: number,
   radii: CornerRadii,
+  sides: ResolvedStrokeSides,
 ): string | null {
-  const [tl, tr, br, bl] = clampCornerRadii(radii, width, height);
-
-  if (side === "top") {
-    const seg: string[] = [`M 0 ${tl}`];
-    if (tl > 0) seg.push(`A ${tl} ${tl} 0 0 1 ${tl} 0`);
-    if (width - tl - tr > 0) seg.push(`H ${width - tr}`);
-    else if (tr > 0) seg.push(`H ${width}`);
-    if (tr > 0) seg.push(`A ${tr} ${tr} 0 0 1 ${width} ${tr}`);
-    return seg.join(" ");
-  }
-
-  if (side === "right") {
-    const seg: string[] = [`M ${width - tr} 0`];
-    if (tr > 0) seg.push(`A ${tr} ${tr} 0 0 1 ${width} ${tr}`);
-    if (height - tr - br > 0) seg.push(`V ${height - br}`);
-    else if (br > 0) seg.push(`V ${height}`);
-    if (br > 0) seg.push(`A ${br} ${br} 0 0 1 ${width - br} ${height}`);
-    return seg.join(" ");
-  }
-
-  if (side === "bottom") {
-    const seg: string[] = [`M ${width} ${height - br}`];
-    if (br > 0) seg.push(`A ${br} ${br} 0 0 1 ${width - br} ${height}`);
-    if (width - br - bl > 0) seg.push(`H ${bl}`);
-    else if (bl > 0) seg.push(`H 0`);
-    if (bl > 0) seg.push(`A ${bl} ${bl} 0 0 1 0 ${height - bl}`);
-    return seg.join(" ");
-  }
-
-  if (side === "left") {
-    const seg: string[] = [`M ${bl} ${height}`];
-    if (bl > 0) seg.push(`A ${bl} ${bl} 0 0 1 0 ${height - bl}`);
-    if (height - bl - tl > 0) seg.push(`V ${tl}`);
-    else if (tl > 0) seg.push(`V 0`);
-    if (tl > 0) seg.push(`A ${tl} ${tl} 0 0 1 ${tl} 0`);
-    return seg.join(" ");
-  }
-
-  return null;
+  return buildRectSideStrokePath(side, width, height, radii, sides);
 }
 
 type CornerMeta = {
@@ -354,7 +447,6 @@ export function roundedRectStrokeSegments(
   >,
 ): StrokeSideSegment[] | null {
   if (node.type !== "rectangle" && node.type !== "frame") return null;
-  if (strokeUsesCssIndividualBorders(node)) return null;
   if (!shapeHasCornerRadius(node, node.width, node.height)) return null;
 
   const sideWidths = resolveStrokeSideWidths(node);
@@ -367,7 +459,7 @@ export function roundedRectStrokeSegments(
 
   for (const side of SIDE_ORDER) {
     if (!sides[side] || sideWidths[side] <= 0) continue;
-    const pathD = sidePathChunk(side, node.width, node.height, radii);
+    const pathD = sidePathChunk(side, node.width, node.height, radii, sides);
     if (!pathD) continue;
     segments.push({
       sides: [side],

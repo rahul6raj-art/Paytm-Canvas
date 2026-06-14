@@ -1,9 +1,11 @@
 import type { EditorNode } from "@/stores/useEditorStore";
 import { newPathPointId, type PathPoint } from "@/lib/pathGeometry";
 import { screenPxToWorld } from "@/lib/canvasVisual";
+import { resizeCornerRadiiForCount } from "@/lib/cornerRadius";
 import {
   maxCornerRadiusAtVertex,
   roundedPolygonPathD,
+  roundedPolygonPathDWithRadii,
   type Point2,
 } from "@/lib/shapes/starGeometry";
 
@@ -72,6 +74,35 @@ export function clampPolygonCornerRadius(
   return Math.max(0, Math.min(maxPolygonCornerRadius(sides, width, height), radius));
 }
 
+export function clampPolygonVertexCornerRadii(
+  sides: number,
+  width: number,
+  height: number,
+  radii: readonly number[],
+): number[] {
+  const n = clampPolygonSides(sides);
+  const verts = polygonVertices(n, width, height);
+  return Array.from({ length: n }, (_, i) => {
+    const r = Math.max(0, radii[i] ?? 0);
+    const prev = verts[(i - 1 + n) % n]!;
+    const curr = verts[i]!;
+    const next = verts[(i + 1) % n]!;
+    return Math.max(0, Math.min(r, maxCornerRadiusAtVertex(prev, curr, next)));
+  });
+}
+
+export function getPolygonVertexCornerRadii(
+  node: Pick<EditorNode, "polygonSides" | "cornerRadius" | "cornerRadii" | "width" | "height">,
+): number[] {
+  const sides = clampPolygonSides(node.polygonSides ?? DEFAULT_POLYGON_SIDES);
+  const base = resizeCornerRadiiForCount(
+    node.cornerRadii,
+    sides,
+    node.cornerRadius ?? 0,
+  );
+  return clampPolygonVertexCornerRadii(sides, node.width, node.height, base);
+}
+
 export function polygonPathD(
   width: number,
   height: number,
@@ -104,13 +135,22 @@ export function effectivePolygonParams(
 }
 
 export function polygonPathDForNode(
-  node: Pick<EditorNode, "width" | "height" | "polygonSides" | "cornerRadius">,
+  node: Pick<EditorNode, "width" | "height" | "polygonSides" | "cornerRadius" | "cornerRadii">,
   override?: Partial<PolygonParams>,
 ): string {
-  const base = effectivePolygonParams(node);
-  const sides = override?.sides ?? base.sides;
-  const cornerRadius = override?.cornerRadius ?? base.cornerRadius;
-  return polygonPathD(node.width, node.height, sides, cornerRadius);
+  const sides = clampPolygonSides(override?.sides ?? node.polygonSides ?? DEFAULT_POLYGON_SIDES);
+  const w = Math.max(1, node.width);
+  const h = Math.max(1, node.height);
+  const verts = polygonVertices(sides, w, h);
+  if (override?.cornerRadius != null) {
+    const cr = clampPolygonCornerRadius(sides, w, h, override.cornerRadius);
+    return roundedPolygonPathDWithRadii(
+      verts,
+      Array.from({ length: sides }, () => cr),
+    );
+  }
+  const radii = getPolygonVertexCornerRadii({ ...node, polygonSides: sides });
+  return roundedPolygonPathDWithRadii(verts, radii);
 }
 
 /** Legacy path anchor points (sharp vertices). */
@@ -127,21 +167,49 @@ export function polygonPathPoints(
 }
 
 export function polygonGeometryPatch(
-  node: Pick<EditorNode, "width" | "height" | "polygonSides" | "cornerRadius">,
+  node: Pick<EditorNode, "width" | "height" | "polygonSides" | "cornerRadius" | "cornerRadii">,
   partial: Partial<{ polygonSides: number; cornerRadius: number }>,
-): Pick<EditorNode, "polygonSides" | "cornerRadius" | "pathPoints"> {
+): Pick<EditorNode, "polygonSides" | "cornerRadius" | "cornerRadii" | "pathPoints"> {
   const sides = clampPolygonSides(partial.polygonSides ?? node.polygonSides ?? DEFAULT_POLYGON_SIDES);
+  const base = {
+    polygonSides: sides,
+    pathPoints: polygonPathPoints(sides, node.width, node.height),
+  };
+
+  if (partial.cornerRadius != null) {
+    const cornerRadius = clampPolygonCornerRadius(
+      sides,
+      node.width,
+      node.height,
+      partial.cornerRadius,
+    );
+    return { ...base, cornerRadius, cornerRadii: undefined };
+  }
+
+  if (node.cornerRadii?.length) {
+    const resized = resizeCornerRadiiForCount(
+      node.cornerRadii,
+      sides,
+      node.cornerRadius ?? 0,
+    );
+    const clamped = getPolygonVertexCornerRadii({
+      ...node,
+      polygonSides: sides,
+      cornerRadii: resized,
+    });
+    const allSame = clamped.length > 0 && clamped.every((r) => r === clamped[0]);
+    return allSame
+      ? { ...base, cornerRadius: clamped[0], cornerRadii: undefined }
+      : { ...base, cornerRadius: undefined, cornerRadii: clamped };
+  }
+
   const cornerRadius = clampPolygonCornerRadius(
     sides,
     node.width,
     node.height,
-    partial.cornerRadius ?? node.cornerRadius ?? 0,
+    node.cornerRadius ?? 0,
   );
-  return {
-    polygonSides: sides,
-    cornerRadius,
-    pathPoints: polygonPathPoints(sides, node.width, node.height),
-  };
+  return { ...base, cornerRadius, cornerRadii: undefined };
 }
 
 /** Ray-cast point-in-polygon (local space). */
@@ -202,8 +270,7 @@ export function hitTestPolygonLocal(
   const h = Math.max(1, node.height);
   if (localX < -1 || localY < -1 || localX > w + 1 || localY > h + 1) return false;
 
-  const params = effectivePolygonParams(node);
-  const d = polygonPathD(w, h, params.sides, params.cornerRadius);
+  const d = polygonPathDForNode(node);
   const sw = node.strokeWidth ?? 0;
   const tol = Math.max(sw / 2, screenPxToWorld(8, zoom));
   const fill = node.fillEnabled !== false;
@@ -225,7 +292,7 @@ export function hitTestPolygonLocal(
     }
   }
 
-  const verts = polygonVertices(params.sides, w, h);
+  const verts = polygonVertices(node.polygonSides ?? DEFAULT_POLYGON_SIDES, w, h);
   if (fill && pointInPolygon(localX, localY, verts)) return true;
   if (sw > 0 || !fill) {
     return minDistanceToPolygonEdges(localX, localY, verts) <= tol;

@@ -5,7 +5,6 @@ import {
   type ExtractedDesignTokens,
 } from "@/lib/aiDesignTokens";
 import { extractScreenTitle, type ScreenIntent } from "@/lib/aiScreenIntent";
-import { newGradientStopId } from "@/lib/fillGradient";
 import type { EditorPersistSlice } from "@/lib/documentPersistence";
 import { wrapPersistSliceWithPages } from "@/lib/documentPersistence";
 import type { AIGenerateResult } from "@/lib/aiMockGenerator";
@@ -220,6 +219,7 @@ function rect(
   gradient?: { from: string; to: string; rotation?: number },
 ): string {
   const id = nid(ctx, "r");
+  const resolvedFill = gradient?.from ?? fill;
   ctx.nodes[id] = {
     id,
     parentId,
@@ -233,20 +233,7 @@ function rect(
     visible: true,
     locked: false,
     expanded: true,
-    fill,
-    ...(gradient
-      ? {
-          fillType: "gradient" as const,
-          fillGradient: {
-            kind: "linear" as const,
-            transform: { cx: 0.5, cy: 0.5, width: 1, height: 1, rotation: gradient.rotation ?? 135 },
-            stops: [
-              { id: newGradientStopId(), color: gradient.from, position: 0 },
-              { id: newGradientStopId(), color: gradient.to, position: 100 },
-            ],
-          },
-        }
-      : {}),
+    fill: resolvedFill,
     cornerRadius: radius,
     strokeColor: stroke ?? ctx.tokens.hairline,
     strokeWidth: stroke ? 1 : 0,
@@ -876,7 +863,7 @@ function finalizeRichResult(
     zoom: 0.65,
     pan: { x: 56, y: 40 },
     showGrid: false,
-    showRulers: true,
+    showRulers: false,
     canvasBackgroundColor: DEFAULT_CANVAS_BACKGROUND,
     comments: [],
   });

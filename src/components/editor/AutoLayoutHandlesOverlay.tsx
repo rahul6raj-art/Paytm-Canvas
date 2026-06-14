@@ -252,7 +252,6 @@ export function AutoLayoutHandlesOverlay() {
               y2={b.y}
               stroke={GAP_COLOR}
               strokeWidth={lineW}
-              vectorEffect="non-scaling-stroke"
             />
           );
         })}

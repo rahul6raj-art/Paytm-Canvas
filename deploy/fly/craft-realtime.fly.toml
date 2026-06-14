@@ -1,0 +1,42 @@
+# Fly.io — craft-realtime (WebSocket /yjs)
+# Deploy from repo root:
+#   fly apps create craft-realtime
+#   fly deploy -c deploy/fly/craft-realtime.fly.toml
+#   fly secrets set DATABASE_URL=... REDIS_URL=... -a craft-realtime
+
+app = "craft-realtime"
+primary_region = "bom"
+
+[build]
+  dockerfile = "packages/craft-realtime/Dockerfile"
+  context = "."
+
+[env]
+  CRAFT_SYNC_ENV = "production"
+  CRAFT_SYNC_ALLOW_ANON = "0"
+  CRAFT_SYNC_DEBOUNCE_MS = "3000"
+  CRAFT_SYNC_PORT = "4001"
+
+[http_service]
+  internal_port = 4001
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 500
+    soft_limit = 400
+
+  [[http_service.checks]]
+    grace_period = "15s"
+    interval = "30s"
+    method = "GET"
+    path = "/"
+    timeout = "5s"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

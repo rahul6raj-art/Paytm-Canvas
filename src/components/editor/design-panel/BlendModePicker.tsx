@@ -2,14 +2,21 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Droplet } from "lucide-react";
 import {
   blendModeGroupsForNode,
+  defaultLayerBlendMode,
   effectiveLayerBlendMode,
   LAYER_BLEND_MODE_LABELS,
   type LayerBlendMode,
 } from "@/lib/layerBlendMode";
 import type { EditorNode } from "@/stores/useEditorStore";
+import {
+  inspectorHeaderActionBtnClass,
+  inspectorIconClass,
+  inspectorIconStroke,
+  inspectorLucideProps,
+} from "@/lib/inspectorIconStyles";
 import { cn } from "@/lib/utils";
 import {
   anchoredMenuStyle,
@@ -21,9 +28,11 @@ type BlendModePickerProps = {
   node: Pick<EditorNode, "type" | "blendMode">;
   disabled?: boolean;
   onChange: (mode: LayerBlendMode) => void;
+  /** Icon-only trigger for compact section headers. */
+  variant?: "default" | "icon";
 };
 
-export function BlendModePicker({ node, disabled, onChange }: BlendModePickerProps) {
+export function BlendModePicker({ node, disabled, onChange, variant = "default" }: BlendModePickerProps) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
@@ -31,6 +40,7 @@ export function BlendModePicker({ node, disabled, onChange }: BlendModePickerPro
   const value = effectiveLayerBlendMode(node);
   const label = LAYER_BLEND_MODE_LABELS[value];
   const groups = blendModeGroupsForNode(node);
+  const isDefaultBlend = value === defaultLayerBlendMode(node);
 
   const position = useAnchoredDropdownPosition(anchorRef, open, 4, {
     viewportClamp: true,
@@ -62,8 +72,8 @@ export function BlendModePicker({ node, disabled, onChange }: BlendModePickerPro
                   role="option"
                   aria-selected={selected}
                   className={cn(
-                    "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px] text-app-fg transition-colors hover:bg-app-hover",
-                    selected && "bg-app-hover/80",
+                    "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-ui text-app-fg transition-colors hover:bg-app-hover",
+                    selected && "bg-app-hover",
                   )}
                   onClick={() => {
                     onChange(mode);
@@ -71,7 +81,7 @@ export function BlendModePicker({ node, disabled, onChange }: BlendModePickerPro
                   }}
                 >
                   <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-                    {selected ? <Check className="h-3.5 w-3.5 text-app-fg" strokeWidth={2.5} /> : null}
+                    {selected ? <Check className={inspectorIconClass} strokeWidth={inspectorIconStroke} /> : null}
                   </span>
                   <span>{LAYER_BLEND_MODE_LABELS[mode]}</span>
                 </button>
@@ -82,6 +92,17 @@ export function BlendModePicker({ node, disabled, onChange }: BlendModePickerPro
       </div>
     ) : null;
 
+  const triggerClass =
+    variant === "icon"
+      ? cn(
+          inspectorHeaderActionBtnClass,
+          "inspector-icon-btn",
+          !isDefaultBlend && "text-accent",
+        )
+      : cn(
+          "flex h-6 min-w-[108px] max-w-full items-center justify-between gap-1 rounded border border-app-border bg-app-panel px-1.5 text-ui text-app-fg transition-colors hover:bg-app-hover disabled:opacity-40",
+        );
+
   return (
     <>
       <button
@@ -90,13 +111,19 @@ export function BlendModePicker({ node, disabled, onChange }: BlendModePickerPro
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-label={variant === "icon" ? `Blend mode: ${label}` : undefined}
+        title={variant === "icon" ? `Blend: ${label}` : undefined}
         onClick={() => setOpen((v) => !v)}
-        className={cn(
-          "flex h-6 min-w-[108px] max-w-full items-center justify-between gap-1 rounded border border-app-border bg-app-panel px-1.5 text-[12px] text-app-fg transition-colors hover:bg-app-hover disabled:opacity-40",
-        )}
+        className={triggerClass}
       >
-        <span className="truncate">{label}</span>
-        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-app-muted" strokeWidth={2} />
+        {variant === "icon" ? (
+          <Droplet {...inspectorLucideProps()} />
+        ) : (
+          <>
+            <span className="truncate">{label}</span>
+            <ChevronDown className={cn(inspectorIconClass, "text-app-muted")} strokeWidth={inspectorIconStroke} />
+          </>
+        )}
       </button>
       {mounted && menu ? createPortal(menu, document.body) : null}
     </>

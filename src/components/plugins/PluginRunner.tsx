@@ -109,9 +109,9 @@ export function PluginRunner() {
       >
         <header className="flex items-start justify-between gap-3 border-b border-app-border-subtle px-5 py-4">
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-app-subtle">Plugin</p>
-            <h2 className="text-[16px] font-semibold text-white">{meta.name}</h2>
-            <p className="mt-0.5 text-[12px] text-app-muted">{meta.description}</p>
+            <p className="section-heading">Plugin</p>
+            <h2 className="text-base font-semibold text-white">{meta.name}</h2>
+            <p className="mt-0.5 text-ui text-app-muted">{meta.description}</p>
           </div>
           <button
             type="button"
@@ -125,10 +125,10 @@ export function PluginRunner() {
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           <section className="mb-4 rounded-xl border border-app-border-subtle bg-black/30 p-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-app-subtle">Selection</p>
+            <p className="section-heading">Selection</p>
             <ul className="mt-2 space-y-1">
               {selectionLines.map((l, i) => (
-                <li key={`${i}-${l.label}`} className="flex justify-between gap-3 text-[12px]">
+                <li key={`${i}-${l.label}`} className="flex justify-between gap-3 text-ui">
                   <span className="truncate font-medium text-app-fg">{l.label}</span>
                   <span className="shrink-0 text-app-subtle">{l.value}</span>
                 </li>
@@ -138,8 +138,8 @@ export function PluginRunner() {
 
           {activeId === "contrast-checker" && contrast ? (
             <section className="space-y-2 rounded-xl border border-app-border-subtle bg-black/30 p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-app-subtle">Contrast (mock)</p>
-              <div className="flex flex-wrap items-center gap-3 text-[12px]">
+              <p className="section-heading">Contrast (mock)</p>
+              <div className="flex flex-wrap items-center gap-3 text-ui">
                 <span className="inline-flex items-center gap-1.5">
                   <span className="h-5 w-5 rounded border border-white/10" style={{ background: contrast.foreground }} />
                   <span className="text-[#a3a3a3]">Text</span>
@@ -150,11 +150,11 @@ export function PluginRunner() {
                   <span className="text-[#a3a3a3]">Surface</span>
                 </span>
               </div>
-              <p className="text-[22px] font-semibold tabular-nums text-white">
+              <p className="text-xl font-semibold tabular-nums text-white">
                 {contrast.ratio != null ? `${contrast.ratio.toFixed(2)} : 1` : "—"}
               </p>
               {contrast.wcag ? (
-                <div className="flex flex-wrap gap-2 text-[11px]">
+                <div className="flex flex-wrap gap-2 text-ui">
                   <span
                     className={cn(
                       "rounded-full px-2 py-0.5 font-medium",
@@ -181,15 +181,15 @@ export function PluginRunner() {
                   </span>
                 </div>
               ) : null}
-              <p className="text-[12px] leading-relaxed text-[#a3a3a3]">{contrast.note}</p>
+              <p className="text-ui leading-relaxed text-[#a3a3a3]">{contrast.note}</p>
             </section>
           ) : null}
 
           {activeId === "token-extractor" ? (
             <section className="rounded-xl border border-app-border-subtle bg-black/30 p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-app-subtle">Tokens (document)</p>
+              <p className="section-heading">Tokens (document)</p>
               <div className="mt-2 max-h-52 overflow-y-auto">
-                <table className="w-full text-left text-[11px]">
+                <table className="w-full text-left text-ui">
                   <thead className="sticky top-0 bg-[#161618] text-app-subtle">
                     <tr>
                       <th className="py-1 pr-2 font-medium">Kind</th>
@@ -201,21 +201,21 @@ export function PluginRunner() {
                     {tokens.map((t) => (
                       <tr key={`${t.kind}-${t.value}`} className="border-t border-white/[0.04]">
                         <td className="py-1 pr-2 capitalize text-app-subtle">{t.kind}</td>
-                        <td className="py-1 pr-2 font-mono text-[11px]">{t.value}</td>
+                        <td className="py-1 pr-2 font-mono text-ui">{t.value}</td>
                         <td className="py-1 tabular-nums text-app-subtle">{t.count}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-                {tokens.length === 0 ? <p className="py-4 text-center text-[12px] text-app-subtle">No tokens found.</p> : null}
+                {tokens.length === 0 ? <p className="py-4 text-center text-ui text-app-subtle">No tokens found.</p> : null}
               </div>
             </section>
           ) : null}
 
           {activeId === "export-react" ? (
             <section className="rounded-xl border border-app-border-subtle bg-black/30 p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-app-subtle">JSX preview</p>
-              <pre className="thin-scroll mt-2 max-h-52 overflow-auto rounded-lg bg-black/50 p-3 text-[11px] leading-relaxed text-emerald-100/90">
+              <p className="section-heading">JSX preview</p>
+              <pre className="thin-scroll mt-2 max-h-52 overflow-auto rounded-lg bg-black/50 p-3 text-ui leading-relaxed text-emerald-100/90">
                 {jsxPreview}
               </pre>
             </section>
@@ -223,20 +223,20 @@ export function PluginRunner() {
 
           {activeId === "accessibility-audit" ? (
             <section className="space-y-2 rounded-xl border border-app-border-subtle bg-black/30 p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-app-subtle">Checklist (mock)</p>
+              <p className="section-heading">Checklist (mock)</p>
               <ul className="space-y-2">
                 {audit.map((a, i) => (
                   <li
                     key={`${a.title}-${i}`}
                     className={cn(
-                      "rounded-lg border px-3 py-2 text-[12px]",
+                      "rounded-lg border px-3 py-2 text-ui",
                       a.severity === "pass" && "border-emerald-500/20 bg-emerald-500/5 text-emerald-50",
                       a.severity === "warn" && "border-amber-500/25 bg-amber-500/5 text-amber-50",
                       a.severity === "info" && "border-app-border-subtle bg-white/[0.03] text-app-fg",
                     )}
                   >
                     <p className="font-semibold">{a.title}</p>
-                    <p className="mt-0.5 text-[11px] leading-snug text-[#a3a3a3]">{a.detail}</p>
+                    <p className="mt-0.5 text-ui leading-snug text-[#a3a3a3]">{a.detail}</p>
                   </li>
                 ))}
               </ul>
@@ -244,28 +244,28 @@ export function PluginRunner() {
           ) : null}
 
           {activeId === "lorem-ipsum" ? (
-            <section className="rounded-xl border border-app-border-subtle bg-black/30 p-3 text-[12px] text-[#a3a3a3]">
+            <section className="rounded-xl border border-app-border-subtle bg-black/30 p-3 text-ui text-[#a3a3a3]">
               Replaces <span className="font-medium text-white">directly selected</span> text layers with deterministic
               lorem ipsum. Choose text on the canvas, then apply.
             </section>
           ) : null}
 
           {activeId === "rename-layers" ? (
-            <section className="rounded-xl border border-app-border-subtle bg-black/30 p-3 text-[12px] text-[#a3a3a3]">
+            <section className="rounded-xl border border-app-border-subtle bg-black/30 p-3 text-ui text-[#a3a3a3]">
               Renames <span className="font-medium text-white">top-level selected</span> layers using short type-based
               names (Screen, Card, Label, …).
             </section>
           ) : null}
 
           {activeId === "icon-generator" ? (
-            <section className="rounded-xl border border-app-border-subtle bg-black/30 p-3 text-[12px] text-[#a3a3a3]">
+            <section className="rounded-xl border border-app-border-subtle bg-black/30 p-3 text-ui text-[#a3a3a3]">
               Adds a small <span className="font-medium text-white">vector group</span> with a path mark into the
               resolved target frame (selected frame, ancestor frame, or first artboard).
             </section>
           ) : null}
 
           {toast ? (
-            <p className="mt-3 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-[12px] text-emerald-100">
+            <p className="mt-3 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-ui text-emerald-100">
               {toast}
             </p>
           ) : null}
@@ -275,7 +275,7 @@ export function PluginRunner() {
           <button
             type="button"
             onClick={() => setTick((x) => x + 1)}
-            className="text-[12px] font-medium text-app-subtle hover:text-white"
+            className="text-ui font-medium text-app-subtle hover:text-white"
           >
             Refresh scan
           </button>
@@ -286,7 +286,7 @@ export function PluginRunner() {
                   <button
                     type="button"
                     onClick={() => onApply("lorem")}
-                    className="rounded-lg bg-gradient-to-r from-sky-600 to-violet-600 px-4 py-2 text-[12px] font-semibold text-white shadow-sm hover:opacity-95"
+                    className="rounded-lg bg-gradient-to-r from-sky-600 to-violet-600 px-4 py-2 text-ui font-semibold text-white shadow-sm hover:opacity-95"
                   >
                     Apply to text
                   </button>
@@ -295,7 +295,7 @@ export function PluginRunner() {
                   <button
                     type="button"
                     onClick={() => onApply("rename")}
-                    className="rounded-lg bg-gradient-to-r from-sky-600 to-violet-600 px-4 py-2 text-[12px] font-semibold text-white shadow-sm hover:opacity-95"
+                    className="rounded-lg bg-gradient-to-r from-sky-600 to-violet-600 px-4 py-2 text-ui font-semibold text-white shadow-sm hover:opacity-95"
                   >
                     Rename selection
                   </button>
@@ -304,7 +304,7 @@ export function PluginRunner() {
                   <button
                     type="button"
                     onClick={() => onApply("icon")}
-                    className="rounded-lg bg-gradient-to-r from-sky-600 to-violet-600 px-4 py-2 text-[12px] font-semibold text-white shadow-sm hover:opacity-95"
+                    className="rounded-lg bg-gradient-to-r from-sky-600 to-violet-600 px-4 py-2 text-ui font-semibold text-white shadow-sm hover:opacity-95"
                   >
                     Insert icon mark
                   </button>
@@ -314,7 +314,7 @@ export function PluginRunner() {
             <button
               type="button"
               onClick={close}
-              className="rounded-lg border border-app-border bg-white/[0.05] px-4 py-2 text-[12px] font-medium text-white hover:bg-white/[0.09]"
+              className="rounded-lg border border-app-border bg-white/[0.05] px-4 py-2 text-ui font-medium text-white hover:bg-white/[0.09]"
             >
               Done
             </button>

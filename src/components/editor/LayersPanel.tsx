@@ -19,21 +19,28 @@ import {
   Lock,
   Minus,
   MoveUpRight,
-  PenLine,
   Square,
   Type,
   Unlock,
   Layers2,
 } from "lucide-react";
+import { FIG_IMPORT_DEFER_LAYERS_PANEL_NODE_CAP } from "@/lib/figImport/figImportConstants";
 import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
 import { ROOT, useEditorStore, type EditorNode } from "@/stores/useEditorStore";
 import { findInstanceRoot } from "@/lib/componentModel";
-import { isAncestorOf } from "@/lib/editorGraph";
+import { isAncestorOf, layerPanelChildIds } from "@/lib/editorGraph";
 import { BOOLEAN_OPERATION_LABELS, isMaskGroup } from "@/lib/booleanGeometry";
 import { didPointerExitElement } from "@/lib/domPointer";
-import { isAutoLayoutContainerNode } from "@/lib/autoLayoutArrowReorder";
+import { isAutoLayoutContainer, type LayoutMode } from "@/lib/layoutEngine/types";
 import { AutoLayoutFrameLayerIcon } from "@/components/editor/AutoLayoutFrameLayerIcon";
+import { PathLayerIcon } from "@/components/editor/PathLayerIcon";
+
+function autoLayoutLayerIconMode(
+  node: Pick<EditorNode, "layoutMode">,
+): Exclude<LayoutMode, "none"> {
+  return node.layoutMode === "vertical" ? "vertical" : "horizontal";
+}
 
 function KindIcon({ node }: { node: EditorNode }) {
   const c = "h-3.5 w-3.5 shrink-0 text-app-subtle";
@@ -41,16 +48,18 @@ function KindIcon({ node }: { node: EditorNode }) {
   if (isMaskGroup(node)) return <Layers2 className={c} strokeWidth={1.75} />;
   if (node.isMask) return <Circle className={c} strokeWidth={1.75} strokeDasharray="3 2" />;
   if (node.type === "frame") {
-    if (isAutoLayoutContainerNode(node)) {
-      const mode = node.layoutMode === "vertical" ? "vertical" : "horizontal";
-      return <AutoLayoutFrameLayerIcon mode={mode} className={c} />;
+    if (isAutoLayoutContainer(node)) {
+      return (
+        <AutoLayoutFrameLayerIcon mode={autoLayoutLayerIconMode(node)} className={c} />
+      );
     }
     return <Frame className={c} strokeWidth={1.75} />;
   }
   if (node.type === "group") {
-    if (isAutoLayoutContainerNode(node)) {
-      const mode = node.layoutMode === "vertical" ? "vertical" : "horizontal";
-      return <AutoLayoutFrameLayerIcon mode={mode} className={c} />;
+    if (isAutoLayoutContainer(node)) {
+      return (
+        <AutoLayoutFrameLayerIcon mode={autoLayoutLayerIconMode(node)} className={c} />
+      );
     }
     return <Group className={c} strokeWidth={1.75} />;
   }
@@ -60,7 +69,7 @@ function KindIcon({ node }: { node: EditorNode }) {
   if (node.type === "line") return <Minus className={c} strokeWidth={1.75} />;
   if (node.type === "arrow") return <MoveUpRight className={c} strokeWidth={1.75} />;
   if (node.type === "polygon") return <Hexagon className={c} strokeWidth={1.75} />;
-  if (node.type === "path") return <PenLine className={c} strokeWidth={1.75} />;
+  if (node.type === "path") return <PathLayerIcon node={node} className={c} />;
   return <Square className={c} strokeWidth={1.75} />;
 }
 
@@ -94,17 +103,18 @@ function Tree({
 }) {
   const childOrder = useEditorStore((s) => s.childOrder);
   const nodes = useEditorStore((s) => s.nodes);
-  const ids = childOrder[parentId] ?? [];
+  const ids = layerPanelChildIds(parentId, nodes, childOrder);
 
   return (
     <>
       {ids.map((id, index) => {
         const node = nodes[id];
         if (!node) return null;
+        const childIds = layerPanelChildIds(node.id, nodes, childOrder);
         const showChildren =
           (node.type === "frame" || node.type === "group") &&
-          node.expanded &&
-          (childOrder[node.id]?.length ?? 0) > 0;
+          node.expanded !== false &&
+          childIds.length > 0;
         return (
           <LayerRow
             key={id}
@@ -181,7 +191,8 @@ function LayerRow({
   }, [layerRenameId, node.id, node.name]);
 
   const hasKids =
-    (node.type === "frame" || node.type === "group") && (childOrder[node.id]?.length ?? 0) > 0;
+    (node.type === "frame" || node.type === "group") &&
+    layerPanelChildIds(node.id, nodes, childOrder).length > 0;
   const active = selectedIds.includes(node.id);
   const nestHighlight = indicator?.kind === "nest" && indicator.targetId === node.id;
   const isRenaming = layerRenameId === node.id;
@@ -269,16 +280,13 @@ function LayerRow({
             type="button"
             className={cn(
               "flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-subtle transition-opacity hover:bg-app-hover hover:text-app-fg",
-              panelHovered
-                ? active
-                  ? "opacity-100"
-                  : "opacity-0 group-hover:opacity-100"
-                : "pointer-events-none opacity-0",
+              panelHovered ? "opacity-100" : "pointer-events-none opacity-0",
             )}
             onClick={(e) => {
               e.stopPropagation();
               toggleExpanded(node.id);
             }}
+            title={node.expanded ? "Collapse" : "Expand"}
           >
             {node.expanded ? (
               <ChevronDown className="h-3.5 w-3.5" strokeWidth={2} />
@@ -321,7 +329,7 @@ function LayerRow({
           ) : null}
           {isRenaming ? (
             <input
-              className="min-w-0 flex-1 rounded border border-accent/50 bg-app-field px-1 py-0 text-[12px] font-medium text-app-field-fg outline-none"
+              className="min-w-0 flex-1 rounded border border-accent/50 bg-app-field px-1 py-0 text-ui font-medium text-app-field-fg outline-none"
               value={draftName}
               autoFocus
               onChange={(e) => setDraftName(e.target.value)}
@@ -347,7 +355,7 @@ function LayerRow({
           ) : (
             <span
               className={cn(
-                "min-w-0 truncate font-medium",
+                "min-w-0 flex-1 truncate font-medium",
                 active
                   ? node.type === "frame"
                     ? "text-[#18a0fb]"
@@ -366,7 +374,7 @@ function LayerRow({
                 ? BOOLEAN_OPERATION_LABELS[node.booleanOperation]
                 : node.name}
               {node.isMask ? (
-                <span className="ml-1 shrink-0 text-[9px] font-normal uppercase text-purple-300/90">
+                <span className="ml-1 shrink-0 text-ui font-normal uppercase text-purple-300/90">
                   Mask
                 </span>
               ) : null}
@@ -429,6 +437,26 @@ export function LayersPanel() {
   const nodes = useEditorStore((s) => s.nodes);
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const moveNodeToParent = useEditorStore((s) => s.moveNodeToParent);
+  const [layersTreeReady, setLayersTreeReady] = useState(true);
+
+  useEffect(() => {
+    if (figImportBusy) {
+      setLayersTreeReady(false);
+      return;
+    }
+    const nodeCount = Object.keys(nodes).length;
+    if (nodeCount <= FIG_IMPORT_DEFER_LAYERS_PANEL_NODE_CAP) {
+      setLayersTreeReady(true);
+      return;
+    }
+    const reveal = () => setLayersTreeReady(true);
+    if (typeof requestIdleCallback === "function") {
+      const idleId = requestIdleCallback(reveal, { timeout: 2500 });
+      return () => cancelIdleCallback(idleId);
+    }
+    const timerId = window.setTimeout(reveal, 120);
+    return () => window.clearTimeout(timerId);
+  }, [figImportBusy, nodes]);
 
   useLayoutEffect(() => {
     const id = selectedIds[0];
@@ -535,7 +563,7 @@ export function LayersPanel() {
       onPointerEnter={() => setPanelHovered(true)}
       onPointerLeave={() => setPanelHovered(false)}
     >
-      <div className="flex h-7 shrink-0 items-center gap-1.5 border-b border-app-border px-2 text-[11px] font-semibold uppercase tracking-wide text-app-subtle">
+      <div className="section-heading flex h-8 shrink-0 items-center gap-1.5 border-b border-app-panel-edge px-3">
         <Layers className="h-3.5 w-3.5 text-app-subtle" strokeWidth={2} />
         Layers
       </div>
@@ -553,10 +581,17 @@ export function LayersPanel() {
         ) : null}
         {figImportBusy ? (
           <div className="mx-2 mt-6 px-3 py-4 text-center">
-            <p className="text-[12px] font-medium text-app-muted">Importing layers…</p>
+            <p className="text-ui font-medium text-app-muted">Importing layers…</p>
             {figImportStatus ? (
-              <p className="mt-1 text-[11px] leading-relaxed text-app-subtle">{figImportStatus}</p>
+              <p className="mt-1 text-ui leading-relaxed text-app-subtle">{figImportStatus}</p>
             ) : null}
+          </div>
+        ) : !layersTreeReady ? (
+          <div className="mx-2 mt-6 px-3 py-4 text-center">
+            <p className="text-ui font-medium text-app-muted">Loading layer list…</p>
+            <p className="mt-1 text-ui leading-relaxed text-app-subtle">
+              Canvas is ready — layers appear in a moment.
+            </p>
           </div>
         ) : (
           <Tree
@@ -569,11 +604,11 @@ export function LayersPanel() {
             panelHovered={panelHovered}
           />
         )}
-        {!figImportBusy && (childOrder[ROOT] ?? []).length === 0 ? (
+        {!figImportBusy && layersTreeReady && (childOrder[ROOT] ?? []).length === 0 ? (
           <div className="mx-2 mt-4 rounded-lg border border-dashed border-app-border bg-white/[0.02] px-3 py-6 text-center">
             <Layers className="mx-auto mb-2 h-8 w-8 text-[#4a4a4a]" strokeWidth={1.25} />
-            <p className="text-[12px] font-medium text-app-muted">No layers yet</p>
-            <p className="mt-1 text-[11px] leading-relaxed text-app-subtle">
+            <p className="text-ui font-medium text-app-muted">No layers yet</p>
+            <p className="mt-1 text-ui leading-relaxed text-app-subtle">
               Press <span className="font-medium text-app-subtle">F</span> for a frame or use the toolbar to add shapes and text.
             </p>
           </div>

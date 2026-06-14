@@ -1,4 +1,5 @@
 import { createSyncProvider, type SyncProvider } from "@/lib/syncProvider";
+import { setActiveApiFileId, setActiveApiRevision } from "@/lib/apiSyncProvider";
 
 let provider: SyncProvider | null = null;
 
@@ -13,4 +14,6 @@ export function getSyncProvider(): SyncProvider {
 /** Reset cached provider (unit tests only). */
 export function resetSyncProviderForTests(): void {
   provider = null;
+  setActiveApiFileId(null);
+  setActiveApiRevision(null);
 }

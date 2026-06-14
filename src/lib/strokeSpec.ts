@@ -1,4 +1,5 @@
 import { effectColorToRgba } from "@/lib/nodeEffects";
+import { DEFAULT_SHAPE_STROKE } from "@/lib/shapes/shapeModel";
 import type { EditorNode, StrokePosition } from "@/stores/useEditorStore";
 import type { StrokeLinecap, StrokeLinejoin } from "@/lib/stroke";
 
@@ -18,7 +19,7 @@ export type StrokeSpec = {
 
 export const DEFAULT_STROKE_SPEC: StrokeSpec = {
   enabled: true,
-  color: "#0f172a",
+  color: DEFAULT_SHAPE_STROKE,
   width: 1,
   opacity: 1,
   align: "center",
@@ -67,15 +68,25 @@ function legacyCap(node: StrokeSpecNode): StrokeLinecap {
 export function resolveStrokeSpec(node: StrokeSpecNode): StrokeSpec {
   const nested = node.stroke;
   if (nested) {
+    const legacyWidth = Math.max(0, node.strokeWidth ?? 0);
+    const width =
+      nested.width != null ? Math.max(0, nested.width) : legacyWidth;
+    const enabled =
+      nested.enabled != null
+        ? nested.enabled
+        : node.strokeEnabled !== false && width > 0;
     return {
-      enabled: nested.enabled,
-      color: nested.color ?? DEFAULT_STROKE_SPEC.color,
-      width: Math.max(0, nested.width ?? 0),
-      opacity: nested.opacity ?? 1,
-      align: nested.align ?? "center",
-      join: nested.join ?? "miter",
-      cap: nested.cap ?? "butt",
-      dashPattern: Array.isArray(nested.dashPattern) ? [...nested.dashPattern] : [],
+      enabled,
+      color: nested.color ?? node.strokeColor ?? DEFAULT_STROKE_SPEC.color,
+      width,
+      opacity: nested.opacity ?? node.strokeOpacity ?? 1,
+      align: (nested.align ?? node.strokePosition ?? "center") as StrokeAlign,
+      join: nested.join ?? node.strokeLinejoin ?? "miter",
+      cap: nested.cap ?? legacyCap(node),
+      dashPattern:
+        Array.isArray(nested.dashPattern) && nested.dashPattern.length > 0
+          ? [...nested.dashPattern]
+          : legacyDashPattern(node),
     };
   }
 

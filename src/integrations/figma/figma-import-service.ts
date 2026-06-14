@@ -53,7 +53,12 @@ export async function importFigmaFromRestApi(
     imageUrlByRef = await embedFigmaImageUrls(imageUrlByRef);
   }
 
-  const result = convertFigmaApiToPaytmCraft(fetched.root, fetched.fileName, imageUrlByRef);
+  const result = convertFigmaApiToPaytmCraft(
+    fetched.root,
+    fetched.fileName,
+    imageUrlByRef,
+    fetched.variablesMeta,
+  );
   if (!result.ok) return result;
 
   const roots = result.document.childOrder[EDITOR_ROOT_KEY] ?? [];

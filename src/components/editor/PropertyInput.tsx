@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { appFieldClass } from "@/lib/appFieldStyles";
+import { useEffect, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from "react";
+import { appFieldClass, appFieldRadius, inspectorControlHeightClass } from "@/lib/appFieldStyles";
+import { inspectorFieldIconSlotClass } from "@/lib/inspectorIconStyles";
 import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
+import { useInspectorValueScrub } from "@/lib/useInspectorValueScrub";
 import { cn } from "@/lib/utils";
 
 const baseField = appFieldClass;
@@ -20,6 +22,8 @@ type PropertyNumberInputProps = {
   decimals?: number;
   /** Base step for ArrowUp/ArrowDown (default: 1, or 10^-decimals when decimals > 0). */
   step?: number;
+  /** Leading icon inside the field (hides the text label, uses aria-label). */
+  leadingIcon?: ReactNode;
 };
 
 function parseDraftNumber(raw: string, fallback: number): number {
@@ -47,6 +51,7 @@ export function PropertyNumberInput({
   instanceKey = "",
   decimals = 0,
   step: stepProp,
+  leadingIcon,
 }: PropertyNumberInputProps) {
   const format = (n: number) => {
     if (!Number.isFinite(n)) return "0";
@@ -56,10 +61,7 @@ export function PropertyNumberInput({
   const baseStep = stepProp ?? (decimals > 0 ? 10 ** -decimals : 1);
 
   const [text, setText] = useState(() => format(value));
-
-  useEffect(() => {
-    setText(format(value));
-  }, [value, instanceKey, decimals]);
+  const [focused, setFocused] = useState(false);
 
   const commitValue = (v: number) => {
     const next = clampAndRound(v, min, max, decimals);
@@ -85,34 +87,88 @@ export function PropertyNumberInput({
     commitValue(current + delta);
   };
 
+  const { scrubbing, scrubActiveRef, bindScrubInput } = useInspectorValueScrub({
+    disabled,
+    value,
+    decimals,
+    step: baseStep,
+    min,
+    max,
+    onChange: commitValue,
+  });
+
+  useEffect(() => {
+    if (!focused && !scrubbing && !scrubActiveRef.current) setText(format(value));
+  }, [value, instanceKey, decimals, focused, scrubbing, scrubActiveRef]);
+
   const onBlur = () => {
+    if (scrubActiveRef.current) return;
+    setFocused(false);
     if (!apply(text)) setText(format(value));
   };
 
+  const inputProps = {
+    type: "text" as const,
+    inputMode: "decimal" as const,
+    disabled,
+    value: text,
+    onFocus: () => setFocused(true),
+    onChange: (e: ChangeEvent<HTMLInputElement>) => {
+      const next = e.target.value;
+      setText(next);
+      if (commitOnInput) apply(next);
+    },
+    onBlur,
+    onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => {
+      handlePanelFieldKeyDown(e, {
+        onEnter: () => {
+          if (!apply(text)) setText(format(value));
+          e.currentTarget.blur();
+        },
+        onArrowNudge: nudge,
+      });
+    },
+  };
+
+  if (leadingIcon) {
+    return (
+      <div>
+        <div className="sr-only">{label}</div>
+        <div
+          className={cn(
+            "flex min-w-0 items-center overflow-hidden border border-app-border bg-app-field",
+            inspectorControlHeightClass,
+            appFieldRadius,
+            "shadow-[inset_0_1px_0_0_hsl(var(--app-inset-highlight)/var(--app-inset-highlight-opacity))]",
+            disabled && "opacity-45",
+          )}
+        >
+          <span className={inspectorFieldIconSlotClass} aria-hidden>
+            {leadingIcon}
+          </span>
+          <input
+            {...inputProps}
+            aria-label={label}
+            {...bindScrubInput(
+              cn(
+                baseField,
+                "flex-1 rounded-none border-0 bg-transparent px-1.5 py-0 shadow-none",
+                "font-mono tabular-nums focus-visible:ring-0",
+              ),
+              focused,
+            )}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
-      <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">{label}</div>
+      <div className="inspector-field-label">{label}</div>
       <input
-        type="text"
-        inputMode="decimal"
-        disabled={disabled}
-        className={cn(baseField, "font-mono tabular-nums")}
-        value={text}
-        onChange={(e) => {
-          const next = e.target.value;
-          setText(next);
-          if (commitOnInput) apply(next);
-        }}
-        onBlur={onBlur}
-        onKeyDown={(e) => {
-          handlePanelFieldKeyDown(e, {
-            onEnter: () => {
-              if (!apply(text)) setText(format(value));
-              e.currentTarget.blur();
-            },
-            onArrowNudge: nudge,
-          });
-        }}
+        {...inputProps}
+        {...bindScrubInput(cn(baseField, "font-mono tabular-nums"), focused)}
       />
     </div>
   );
@@ -138,16 +194,27 @@ export function OpacityPercentInput({
   const percent = Math.round(Math.min(1, Math.max(0, value)) * 100);
 
   const [text, setText] = useState(() => String(percent));
-
-  useEffect(() => {
-    setText(String(Math.round(Math.min(1, Math.max(0, value)) * 100)));
-  }, [value, instanceKey]);
+  const [focused, setFocused] = useState(false);
 
   const commitPercent = (n: number) => {
     const clamped = Math.min(100, Math.max(0, Math.round(n)));
     onCommit(clamped / 100);
     setText(String(clamped));
   };
+
+  const { scrubbing, scrubActiveRef, bindScrubInput } = useInspectorValueScrub({
+    disabled,
+    value: percent,
+    min: 0,
+    max: 100,
+    onChange: commitPercent,
+  });
+
+  useEffect(() => {
+    if (!focused && !scrubbing && !scrubActiveRef.current) {
+      setText(String(Math.round(Math.min(1, Math.max(0, value)) * 100)));
+    }
+  }, [value, instanceKey, focused, scrubbing, scrubActiveRef]);
 
   const applyDraft = (raw: string) => {
     const digits = raw.replace(/%/g, "").trim();
@@ -170,12 +237,19 @@ export function OpacityPercentInput({
       type="text"
       inputMode="numeric"
       disabled={disabled}
-      className={cn(
-        baseField,
-        "min-w-0 flex-1 text-right tabular-nums",
-        className,
+      {...bindScrubInput(
+        cn(
+          baseField,
+          "min-w-0 flex-1 text-right tabular-nums",
+          className,
+        ),
+        focused,
       )}
-      value={`${text}%`}
+      value={focused ? text : `${text}%`}
+      onFocus={() => {
+        setFocused(true);
+        setText(String(percent));
+      }}
       onChange={(e) => {
         const digits = e.target.value.replace(/%/g, "").replace(/[^\d]/g, "");
         setText(digits);
@@ -185,6 +259,8 @@ export function OpacityPercentInput({
         }
       }}
       onBlur={() => {
+        if (scrubActiveRef.current) return;
+        setFocused(false);
         if (!applyDraft(text)) setText(String(percent));
       }}
       onKeyDown={(e) => {
@@ -231,7 +307,7 @@ export function PropertyTextInput({
 
   return (
     <div>
-      <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">{label}</div>
+      <div className="inspector-field-label">{label}</div>
       <input
         type="text"
         disabled={disabled}

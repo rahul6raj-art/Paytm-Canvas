@@ -22,7 +22,10 @@ export function PageTabsBar() {
   const [renameId, setRenameId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
   const [contextPageId, setContextPageId] = useState<string | null>(null);
-  const [contextPos, setContextPos] = useState({ x: 0, y: 0 });
+  const [contextAnchor, setContextAnchor] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -95,7 +98,7 @@ export function PageTabsBar() {
               key={pageId}
               className={cn(
                 "group relative flex h-full shrink-0 items-stretch border-r border-app-border-subtle",
-                active ? "bg-app-inset" : "bg-app-panel hover:bg-[#333333]",
+                active ? "bg-app-inset" : "bg-app-panel hover:bg-app-hover",
               )}
             >
               {renaming ? (
@@ -110,7 +113,7 @@ export function PageTabsBar() {
                       onEscape: () => setRenameId(null),
                     });
                   }}
-                  className="h-full w-[min(140px,28vw)] min-w-[72px] border-0 bg-app-field px-2.5 text-[11px] font-medium text-white outline-none ring-1 ring-inset ring-accent"
+                  className="h-full w-[min(140px,28vw)] min-w-[72px] border-0 bg-app-field px-2.5 text-ui font-medium text-white outline-none ring-1 ring-inset ring-accent"
                 />
               ) : (
                 <button
@@ -130,11 +133,16 @@ export function PageTabsBar() {
                   }}
                   onContextMenu={(e) => {
                     e.preventDefault();
+                    const tab = tabRefs.current.get(pageId);
+                    const rect = tab?.getBoundingClientRect();
                     setContextPageId(pageId);
-                    setContextPos({ x: e.clientX, y: e.clientY });
+                    setContextAnchor({
+                      left: rect?.left ?? e.clientX,
+                      top: rect?.top ?? e.clientY,
+                    });
                   }}
                   className={cn(
-                    "flex h-full max-w-[180px] items-center px-2.5 text-[11px] font-medium transition-colors",
+                    "flex h-full max-w-[180px] items-center px-2.5 text-ui font-medium transition-colors",
                     active ? "text-white" : "text-[#a3a3a3] group-hover:text-app-fg",
                   )}
                 >
@@ -151,7 +159,7 @@ export function PageTabsBar() {
         title="Add page"
         aria-label="Add page"
         onClick={() => addPage()}
-        className="flex h-full shrink-0 items-center gap-1 border-l border-app-border-subtle px-2 text-[11px] font-medium text-app-subtle transition-colors hover:bg-app-hover hover:text-app-fg"
+        className="flex h-full shrink-0 items-center gap-1 border-l border-app-border-subtle px-2 text-ui font-medium text-app-subtle transition-colors hover:bg-app-hover hover:text-app-fg"
       >
         <Plus className="h-3.5 w-3.5" strokeWidth={2.25} />
       </button>
@@ -166,15 +174,21 @@ export function PageTabsBar() {
         <ChevronRight className="h-3.5 w-3.5" strokeWidth={2} />
       </button>
 
-      {contextPageId && pages[contextPageId] ? (
+      {contextPageId && pages[contextPageId] && contextAnchor ? (
         <div
           className="fixed z-[80] min-w-[160px] rounded-md border border-app-border bg-app-surface py-1 shadow-xl"
-          style={{ left: contextPos.x, top: contextPos.y }}
+          style={{
+            left: Math.max(
+              8,
+              Math.min(contextAnchor.left, window.innerWidth - 168),
+            ),
+            bottom: window.innerHeight - contextAnchor.top + 4,
+          }}
           onPointerDown={(e) => e.stopPropagation()}
         >
           <button
             type="button"
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-app-fg hover:bg-app-hover"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ui text-app-fg hover:bg-app-hover"
             onClick={() => {
               setRenameId(contextPageId);
               setDraftName(pages[contextPageId]!.name);
@@ -185,7 +199,7 @@ export function PageTabsBar() {
           </button>
           <button
             type="button"
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-app-fg hover:bg-app-hover"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ui text-app-fg hover:bg-app-hover"
             onClick={() => {
               duplicatePage(contextPageId);
               setContextPageId(null);
@@ -197,7 +211,7 @@ export function PageTabsBar() {
           {pageOrder.length > 1 ? (
             <button
               type="button"
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-red-300 hover:bg-red-500/15"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ui text-red-300 hover:bg-red-500/15"
               onClick={() => {
                 deletePage(contextPageId);
                 setContextPageId(null);

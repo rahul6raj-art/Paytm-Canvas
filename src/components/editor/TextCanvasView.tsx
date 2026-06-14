@@ -10,6 +10,7 @@ import {
 import { ensureFontFamilyLoaded } from "@/lib/fonts";
 import { textLayoutPatchForNode } from "@/lib/text/textLayout";
 import { textAdvancedStyleFromNode } from "@/lib/text/textAdvancedStyle";
+import { textLayoutForEditorNode } from "@/lib/text/canonicalTextLayout";
 import { renderTextToCanvas } from "@/lib/text/textCanvasRender";
 import { getCursorPositionFromPoint } from "@/lib/text/textCursor";
 import {
@@ -56,6 +57,7 @@ export function TextCanvasView({
 
     void ensureFontFamilyLoaded(typo.fontFamily).then(() => {
       if (!alive || !canvasRef.current) return;
+      const prepared = textLayoutForEditorNode(node);
       renderTextToCanvas(canvasRef.current, {
         typo,
         text: model.text,
@@ -70,6 +72,8 @@ export function TextCanvasView({
         caretIndex: isEditing ? caretIndex : null,
         caretVisible: isEditing && caretVisible,
         style: textAdvancedStyleFromNode(node),
+        gradientNode: node,
+        prepared,
       });
       const fresh = useEditorStore.getState().nodes[node.id];
       if (fresh?.type === "text") {

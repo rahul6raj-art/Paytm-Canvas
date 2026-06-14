@@ -63,3 +63,45 @@ export function layerNameFromTextContent(content: string | undefined | null): st
 export function duplicatedTextLayerName(content: string | undefined | null): string {
   return layerNameFromTextContent(content);
 }
+
+type LayerNameNode = {
+  type: string;
+  content?: string;
+  polygonSides?: number;
+  arrowHead?: boolean;
+  starPoints?: number;
+};
+
+const NODE_TYPE_LABELS: Record<string, string> = {
+  frame: "Frame",
+  group: "Group",
+  rectangle: "Rectangle",
+  ellipse: "Ellipse",
+  line: "Line",
+  arrow: "Arrow",
+  polygon: "Polygon",
+  path: "Vector",
+  text: "Text",
+  image: "Image",
+};
+
+/** Figma-style default when WASM snapshots omit layer names. */
+export function defaultLayerNameForNode(
+  node: LayerNameNode,
+  nodes: Record<string, { name: string }>,
+): string {
+  if (node.type === "text") {
+    return layerNameFromTextContent(node.content);
+  }
+  if (node.type === "polygon" && node.polygonSides === 3) {
+    return nextNumberedLayerName(nodes, "Triangle");
+  }
+  if (node.type === "line" && node.arrowHead) {
+    return nextNumberedLayerName(nodes, "Arrow");
+  }
+  if (node.type === "path" && node.starPoints != null) {
+    return nextNumberedLayerName(nodes, "Star");
+  }
+  const label = NODE_TYPE_LABELS[node.type] ?? node.type;
+  return nextNumberedLayerName(nodes, label);
+}

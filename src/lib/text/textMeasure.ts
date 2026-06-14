@@ -16,6 +16,28 @@ export type TextLine = {
   paragraphStart: boolean;
 };
 
+export type TextCaretStop = {
+  index: number;
+  x: number;
+  y: number;
+};
+
+export type TextGlyphBox = {
+  index: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  glyphId: number;
+};
+
+export type TextFontInfo = {
+  requestedFamily: string;
+  resolvedFamily: string;
+  fallbackUsed: boolean;
+  missing: boolean;
+};
+
 export type TextLayout = {
   lines: TextLine[];
   width: number;
@@ -23,6 +45,12 @@ export type TextLayout = {
   lineHeightPx: number;
   paragraphSpacing: number;
   verticalTrimTop: number;
+  /** `wasm` when shaped by craft-engine; `fallback` before engine/fonts load. */
+  source?: "wasm" | "fallback";
+  caretStops?: TextCaretStop[];
+  linePositions?: Array<{ x: number; y: number }>;
+  glyphs?: TextGlyphBox[];
+  font?: TextFontInfo;
 };
 
 let measureCanvas: HTMLCanvasElement | null = null;
@@ -235,6 +263,20 @@ export function getCaretRect(
   boxWidth: number,
   align: TextAlign,
 ): { x: number; y: number; height: number } {
+  if (layout.caretStops && layout.caretStops.length > 0) {
+    let best = layout.caretStops[0]!;
+    let bestDist = Math.abs(best.index - index);
+    for (const stop of layout.caretStops) {
+      const dist = Math.abs(stop.index - index);
+      if (dist <= bestDist) {
+        best = stop;
+        bestDist = dist;
+      }
+      if (stop.index > index) break;
+    }
+    return { x: best.x, y: best.y, height: layout.lineHeightPx };
+  }
+
   const ctx = getTextMeasureContext();
   configureMeasureCtx(ctx, typo);
 

@@ -95,11 +95,12 @@ export function layoutFromLineEndpoints(
   x2: number,
   y2: number,
   strokeWidth = 2,
+  minLength = MIN_LEN,
 ): Pick<EditorNode, "x" | "y" | "width" | "height" | "rotation" | "lineX1" | "lineY1" | "lineX2" | "lineY2"> {
   const h = linePadding(strokeWidth);
   const dx = x2 - x1;
   const dy = y2 - y1;
-  const length = Math.max(MIN_LEN, Math.hypot(dx, dy));
+  const length = Math.max(minLength, Math.hypot(dx, dy));
   const rotation = (Math.atan2(dy, dx) * 180) / Math.PI;
   return {
     lineX1: x1,
@@ -121,8 +122,9 @@ export function linePatchFromEndpoints(
   x2: number,
   y2: number,
   node: Pick<EditorNode, "strokeWidth">,
+  minLength = MIN_LEN,
 ): Pick<EditorNode, "x" | "y" | "width" | "height" | "rotation" | "lineX1" | "lineY1" | "lineX2" | "lineY2"> {
-  return layoutFromLineEndpoints(x1, y1, x2, y2, node.strokeWidth ?? 2);
+  return layoutFromLineEndpoints(x1, y1, x2, y2, node.strokeWidth ?? 2, minLength);
 }
 
 /** Keep stored endpoints aligned with box after move / rotate / resize. */

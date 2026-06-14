@@ -42,7 +42,12 @@ function lightRepairForImport(
 }
 
 /** Light hierarchy reconcile only — avoids geometry repair that freezes the UI on import. */
-export function prepareDocumentForEditorImport(doc: PaytmCraftDocument): PaytmCraftDocument {
+export function prepareDocumentForEditorImport(
+  doc: PaytmCraftDocument,
+  opts?: { skipRepair?: boolean },
+): PaytmCraftDocument {
+  if (opts?.skipRepair) return doc;
+
   if (doc.pages && doc.pages.length > 0) {
     const pages = doc.pages.map((page) => {
       const repaired = lightRepairForImport(page.nodes, page.childOrder);
@@ -87,6 +92,17 @@ export interface EditorAsset {
   height?: number;
 }
 
+/** User-uploaded TTF/OTF for custom typography (persisted in document). */
+export interface EditorFontAsset {
+  id: string;
+  family: string;
+  weight: number;
+  fileName: string;
+  mimeType: string;
+  dataUrl: string;
+  createdAt: string;
+}
+
 export interface PaytmCraftDocument {
   version: 1;
   name: string;
@@ -98,6 +114,8 @@ export interface PaytmCraftDocument {
   activePageId?: string;
   /** Embedded library images (data URLs). */
   assets?: Record<string, EditorAsset>;
+  /** User-uploaded font files (TTF/OTF data URLs). */
+  fontAssets?: Record<string, EditorFontAsset>;
   /** Reusable color, typography, spacing, and effect styles. */
   designTokens?: Record<string, DesignToken>;
   selectedIds?: string[];
@@ -116,6 +134,8 @@ export interface EditorPersistSlice {
   nodes: Record<string, EditorNode>;
   childOrder: Record<string, string[]>;
   assets: Record<string, EditorAsset>;
+  /** Omitted on older documents; treated as `{}`. */
+  fontAssets?: Record<string, EditorFontAsset>;
   designTokens: Record<string, DesignToken>;
   fileName: string;
   selectedIds: string[];
@@ -184,6 +204,7 @@ export function serializePersistStable(slice: EditorPersistSlice): string {
     nodes: synced.nodes,
     childOrder: synced.childOrder,
     assets: synced.assets,
+    fontAssets: synced.fontAssets ?? {},
     designTokens: synced.designTokens,
     selectedIds: synced.selectedIds,
     zoom: synced.zoom,
@@ -207,6 +228,7 @@ export function editorStateToDocument(slice: EditorPersistSlice): PaytmCraftDocu
     pages: synced.pageOrder.map((id) => pageToSnapshot(synced.pages[id]!)),
     activePageId: synced.activePageId,
     assets: synced.assets,
+    fontAssets: synced.fontAssets ?? {},
     designTokens: synced.designTokens,
     selectedIds: active.selectedIds,
     comments: synced.comments,
@@ -232,6 +254,7 @@ export function documentToEditorPatch(
 ): EditorPersistSlice {
   const base = {
     assets: doc.assets ?? {},
+    fontAssets: doc.fontAssets ?? {},
     designTokens: doc.designTokens ?? {},
     fileName: doc.name,
     comments: parseCommentsArray(doc.comments),
@@ -266,8 +289,8 @@ export function documentToEditorPatch(
   const pageMeta = initialPagesFromCanvas(repaired.nodes, repaired.childOrder, {
     zoom: doc.canvas?.zoom ?? DEFAULT_CANVAS_ZOOM,
     pan: { x: doc.canvas?.panX ?? 40, y: doc.canvas?.panY ?? 24 },
-    showGrid: doc.canvas?.showGrid ?? true,
-    showRulers: doc.canvas?.showRulers ?? true,
+    showGrid: doc.canvas?.showGrid ?? false,
+    showRulers: doc.canvas?.showRulers ?? false,
     canvasBackgroundColor: doc.canvas?.backgroundColor ?? DEFAULT_CANVAS_BACKGROUND,
   });
   const legacyPage: EditorPage = {
@@ -284,11 +307,15 @@ export function documentToEditorPatch(
     selectedIds: doc.selectedIds ?? [],
     zoom: doc.canvas?.zoom ?? DEFAULT_CANVAS_ZOOM,
     pan: { x: doc.canvas?.panX ?? 40, y: doc.canvas?.panY ?? 24 },
-    showGrid: doc.canvas?.showGrid ?? true,
-    showRulers: doc.canvas?.showRulers ?? true,
+    showGrid: doc.canvas?.showGrid ?? false,
+    showRulers: doc.canvas?.showRulers ?? false,
     canvasBackgroundColor: doc.canvas?.backgroundColor ?? DEFAULT_CANVAS_BACKGROUND,
     layoutGuides: legacyPage.layoutGuides ?? [],
   };
+}
+
+function isAssetDataRef(url: string): boolean {
+  return url.startsWith("data:") || url.startsWith("http://") || url.startsWith("https://");
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -334,7 +361,7 @@ export function validatePaytmCraftDocument(v: unknown): v is PaytmCraftDocument 
       if (typeof a.id !== "string") return false;
       if (typeof a.name !== "string") return false;
       if (typeof a.mimeType !== "string") return false;
-      if (typeof a.dataUrl !== "string" || !a.dataUrl.startsWith("data:")) return false;
+      if (typeof a.dataUrl !== "string" || !isAssetDataRef(a.dataUrl)) return false;
       if (typeof a.createdAt !== "string") return false;
       if (a.width !== undefined && typeof a.width !== "number") return false;
       if (a.height !== undefined && typeof a.height !== "number") return false;

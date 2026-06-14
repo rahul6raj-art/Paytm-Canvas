@@ -87,6 +87,10 @@ export interface FigmaApiNode {
   style?: FigmaTypeStyle;
   componentId?: string;
   overrides?: FigmaOverride[];
+  boundVariables?: {
+    fills?: Array<string | { type?: string; id?: string }>;
+    strokes?: Array<string | { type?: string; id?: string }>;
+  };
   children?: FigmaApiNode[];
   clipsContent?: boolean;
   fillGeometry?: { path: string }[];

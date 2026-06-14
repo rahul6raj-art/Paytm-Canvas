@@ -31,6 +31,7 @@ import {
   type LayoutEngineNode,
 } from "@/lib/layoutEngine/types";
 import { shouldClipChildren } from "@/lib/clipChildren";
+import { expandLayoutModePatch } from "@/lib/autoLayout/layoutModeChange";
 
 export interface LayoutFields {
   layoutMode?: LayoutMode;
@@ -287,8 +288,9 @@ export function applyLayoutPatchWithAutoLayout(
 ): Record<string, LayoutNode> {
   const parent = nodes[containerId];
   if (!parent) return nodes;
-  const merged = { ...nodes, [containerId]: { ...parent, ...patch } };
-  if (patchTouchesGap(patch)) {
+  const expandedPatch = expandLayoutModePatch(parent, patch) as LayoutPatch;
+  const merged = { ...nodes, [containerId]: { ...parent, ...expandedPatch, layoutDirty: true } };
+  if (patchTouchesGap(expandedPatch)) {
     return applyGapResponsivePrimarySize(merged, childOrder, containerId);
   }
   return applyDeepAutoLayout(merged, childOrder, containerId);

@@ -168,7 +168,7 @@ export function AIStyleGuideSelect({
             <button
               type="button"
               className={cn(
-                "flex-1 rounded-full px-2 py-1 text-[11px] font-medium transition-colors",
+                "flex-1 rounded-full px-2 py-1 text-ui font-medium transition-colors",
                 mode === "design-md"
                   ? "border border-app-border bg-app-panel text-accent shadow-sm"
                   : "text-app-muted hover:text-app-fg",
@@ -180,7 +180,7 @@ export function AIStyleGuideSelect({
             <button
               type="button"
               className={cn(
-                "flex-1 rounded-full px-2 py-1 text-[11px] font-medium transition-colors",
+                "flex-1 rounded-full px-2 py-1 text-ui font-medium transition-colors",
                 mode === "style-guide"
                   ? "border border-app-border bg-app-panel text-accent shadow-sm"
                   : "text-app-muted hover:text-app-fg",
@@ -203,7 +203,7 @@ export function AIStyleGuideSelect({
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="Search companies"
-                    className="min-w-0 flex-1 bg-transparent text-[12px] text-app-fg outline-none placeholder:text-app-muted"
+                    className="min-w-0 flex-1 bg-transparent text-ui text-app-fg outline-none placeholder:text-app-muted"
                   />
                 </div>
                 <button
@@ -212,7 +212,7 @@ export function AIStyleGuideSelect({
                   title="Add Design.md"
                   aria-label="Add Design.md"
                   onClick={() => mdInputRef.current?.click()}
-                  className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-dashed border-app-border px-2 text-[11px] font-medium text-app-muted transition-colors hover:border-accent/40 hover:bg-app-hover hover:text-app-fg disabled:opacity-40"
+                  className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-dashed border-app-border px-2 text-ui font-medium text-app-muted transition-colors hover:border-accent/40 hover:bg-app-hover hover:text-app-fg disabled:opacity-40"
                 >
                   {reading ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
@@ -227,7 +227,7 @@ export function AIStyleGuideSelect({
             <button
               type="button"
               className={cn(
-                "flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[12px] transition-colors",
+                "flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-ui transition-colors",
                 selectedDesignMdId === null ? "bg-accent/10 text-app-fg" : "hover:bg-app-hover",
               )}
               onClick={() => onSelectedDesignMdIdChange(null)}
@@ -243,7 +243,7 @@ export function AIStyleGuideSelect({
 
             {builtinGroups.map((group) => (
               <div key={group.category}>
-                <p className="px-3 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wide text-app-subtle">
+                <p className="px-3 pb-0.5 pt-2 section-heading">
                   {group.category}
                 </p>
                 {group.entries.map((entry) => {
@@ -254,7 +254,7 @@ export function AIStyleGuideSelect({
                       key={entry.id}
                       type="button"
                       className={cn(
-                        "flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] transition-colors",
+                        "flex w-full items-center gap-2.5 px-3 py-2 text-left text-ui transition-colors",
                         selected ? "bg-accent/10 text-app-fg" : "hover:bg-app-hover",
                       )}
                       onClick={() => onSelectedDesignMdIdChange(id)}
@@ -271,7 +271,7 @@ export function AIStyleGuideSelect({
             ))}
 
             {filteredRefs.length > 0 ? (
-              <p className="border-t border-app-border-subtle px-3 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wide text-app-subtle">
+              <p className="border-t border-app-border-subtle px-3 pb-0.5 pt-2 section-heading">
                 Your uploads
               </p>
             ) : null}
@@ -286,7 +286,7 @@ export function AIStyleGuideSelect({
               >
                 <button
                   type="button"
-                  className="flex min-w-0 flex-1 items-center gap-2.5 text-left text-[12px]"
+                  className="flex min-w-0 flex-1 items-center gap-2.5 text-left text-ui"
                   onClick={() => onSelectedDesignMdIdChange(ref.id)}
                 >
                   <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-app-border bg-app-inset">
@@ -300,7 +300,7 @@ export function AIStyleGuideSelect({
                 {!isBuiltinDesignMdId(ref.id) ? (
                   <button
                     type="button"
-                    className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-app-muted hover:bg-app-hover hover:text-app-fg"
+                    className="shrink-0 rounded px-1.5 py-0.5 text-ui text-app-muted hover:bg-app-hover hover:text-app-fg"
                     onClick={() => removeDesignMd(ref.id)}
                   >
                     Remove
@@ -316,7 +316,7 @@ export function AIStyleGuideSelect({
                 type="button"
                 disabled={reading || disabled}
                 onClick={() => styleInputRef.current?.click()}
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-accent/15 px-3 py-2 text-[12px] font-semibold text-accent transition-colors hover:bg-accent/25 disabled:opacity-40"
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-accent/15 px-3 py-2 text-ui font-semibold text-accent transition-colors hover:bg-accent/25 disabled:opacity-40"
               >
                 <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
                 Create New Style
@@ -328,7 +328,7 @@ export function AIStyleGuideSelect({
                 key={opt.id}
                 type="button"
                 className={cn(
-                  "flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[12px] transition-colors",
+                  "flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-ui transition-colors",
                   theme === opt.id ? "bg-accent/10" : "hover:bg-app-hover",
                 )}
                 onClick={() => onThemeChange(opt.id)}
@@ -348,7 +348,7 @@ export function AIStyleGuideSelect({
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium text-app-fg">{opt.label}</span>
                   {opt.hint ? (
-                    <span className="block truncate text-[10px] text-app-subtle">{opt.hint}</span>
+                    <span className="block truncate text-ui text-app-subtle">{opt.hint}</span>
                   ) : null}
                 </span>
                 {theme === opt.id ? (
@@ -357,7 +357,7 @@ export function AIStyleGuideSelect({
               </button>
             ))}
 
-            <p className="px-3 py-2 text-[11px] leading-snug text-app-muted">
+            <p className="px-3 py-2 text-ui leading-snug text-app-muted">
               No custom themes yet. Create one from a Design.md file, image, or prompt.
             </p>
 
@@ -366,7 +366,7 @@ export function AIStyleGuideSelect({
                 type="button"
                 disabled={disabled}
                 onClick={() => styleInputRef.current?.click()}
-                className="flex w-full items-center justify-between px-3 py-2.5 text-[12px] font-medium text-app-fg transition-colors hover:bg-app-hover"
+                className="flex w-full items-center justify-between px-3 py-2.5 text-ui font-medium text-app-fg transition-colors hover:bg-app-hover"
               >
                 Create Style
                 <ChevronRight className="h-4 w-4 text-app-muted" strokeWidth={2} />
@@ -407,7 +407,7 @@ export function AIStyleGuideSelect({
         aria-label="Style Guide"
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          "inline-flex min-w-0 items-center gap-1.5 rounded-full border border-app-border bg-app-panel py-1 pl-2.5 pr-1.5 text-[12px] font-medium text-app-fg shadow-sm transition-colors",
+          "inline-flex min-w-0 items-center gap-1.5 rounded-full border border-app-border bg-app-panel py-1 pl-2.5 pr-1.5 text-ui font-medium text-app-fg shadow-sm transition-colors",
           "hover:bg-app-hover disabled:cursor-not-allowed disabled:opacity-50",
           open && "border-accent/40 bg-app-hover",
           className,

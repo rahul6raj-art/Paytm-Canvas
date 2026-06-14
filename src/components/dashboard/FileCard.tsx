@@ -24,7 +24,7 @@ function FileBadge({ kind }: { kind: DashboardFileBadge }) {
         ? { label: "Team", className: "border-sky-200 bg-sky-50 text-sky-900" }
         : { label: "Template", className: "border-violet-200 bg-violet-50 text-violet-900" };
   return (
-    <span className={cn("rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide", cfg.className)}>
+    <span className={cn("rounded-md border px-1.5 py-0.5 text-ui font-medium", cfg.className)}>
       {cfg.label}
     </span>
   );
@@ -64,28 +64,28 @@ export function FileCard({
       </div>
       <div className="flex flex-1 flex-col gap-2 p-3">
         <button type="button" onClick={onOpen} className="text-left">
-          <h3 className="truncate text-[13px] font-semibold text-app-fg">{name}</h3>
-          <p className="mt-0.5 text-[11px] font-medium text-app-muted">{workspaceName}</p>
-          <p className="mt-0.5 text-[12px] text-app-muted">Edited {lastEdited}</p>
+          <h3 className="truncate text-ui-sm font-semibold text-app-fg">{name}</h3>
+          <p className="mt-0.5 text-ui font-medium text-app-muted">{workspaceName}</p>
+          <p className="mt-0.5 text-ui text-app-muted">Edited {lastEdited}</p>
         </button>
         <div className="mt-auto flex items-center justify-between gap-2">
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <span
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-app-border bg-app-inset text-[10px] font-bold text-app-fg"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-app-border bg-app-inset text-ui font-bold text-app-fg"
               title={ownerName}
             >
               {ownerInitials}
             </span>
             <div className="min-w-0">
-              <p className="truncate text-[12px] font-medium text-app-fg">{ownerName}</p>
-              <p className="text-[10px] text-app-muted">Owner</p>
+              <p className="truncate text-ui font-medium text-app-fg">{ownerName}</p>
+              <p className="text-ui text-app-muted">Owner</p>
             </div>
             {stack.length > 0 ? (
               <div className="ml-1 flex shrink-0 -space-x-2" title={`Shared with ${stack.join(", ")}`}>
                 {stack.map((ini) => (
                   <span
                     key={ini}
-                    className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-app-card bg-indigo-100 text-[9px] font-bold text-indigo-900 shadow-sm dark:bg-indigo-950/80 dark:text-indigo-200"
+                    className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-app-card bg-indigo-100 text-ui font-bold text-indigo-900 shadow-sm dark:bg-indigo-950/80 dark:text-indigo-200"
                   >
                     {ini}
                   </span>
@@ -96,7 +96,7 @@ export function FileCard({
           <button
             type="button"
             onClick={onOpen}
-            className="shrink-0 rounded-lg border border-app-border-subtle bg-app-card px-2.5 py-1 text-[12px] font-medium text-app-fg transition-colors hover:border-app-border hover:bg-app-raised"
+            className="shrink-0 rounded-lg border border-app-border-subtle bg-app-card px-2.5 py-1 text-ui font-medium text-app-fg transition-colors hover:border-app-border hover:bg-app-raised"
           >
             Open
           </button>

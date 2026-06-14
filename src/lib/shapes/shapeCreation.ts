@@ -19,6 +19,9 @@ export type ShapeModifiers = {
   altKey: boolean;
 };
 
+/** Live drag grows from 0px; commit enforces editor minimum size. */
+export type ShapeDragPhase = "live" | "commit";
+
 const MIN = RESIZE_MIN_DIMENSION;
 const SNAP_45_RAD = Math.PI / 4;
 
@@ -73,7 +76,8 @@ export function boundsFromDrag(
   let x1 = end.x;
   let y1 = end.y;
 
-  if (modifiers.shiftKey || opts?.preserveAspect) {
+  // preserveAspect alone is for corner-anchored ellipse; skip when Alt draws from center.
+  if (modifiers.shiftKey || (opts?.preserveAspect && !modifiers.altKey)) {
     const dx = x1 - x0;
     const dy = y1 - y0;
     const size = Math.max(Math.abs(dx), Math.abs(dy), minSize);
@@ -119,13 +123,20 @@ export function boundsFromDrag(
   return { x, y, width, height };
 }
 
+function minSizeForPhase(phase: ShapeDragPhase): number {
+  return phase === "live" ? 0 : MIN;
+}
+
 /** Round bounds to whole world pixels for crisp rendering at 100% zoom. */
-function roundBounds(b: { x: number; y: number; width: number; height: number }): typeof b {
+function roundBounds(
+  b: { x: number; y: number; width: number; height: number },
+  minSize = MIN,
+): typeof b {
   return {
     x: Math.round(b.x),
     y: Math.round(b.y),
-    width: Math.max(MIN, Math.round(b.width)),
-    height: Math.max(MIN, Math.round(b.height)),
+    width: Math.max(minSize, Math.round(b.width)),
+    height: Math.max(minSize, Math.round(b.height)),
   };
 }
 
@@ -134,11 +145,12 @@ export function lineGeometryFromDrag(
   start: Point,
   end: Point,
   modifiers: ShapeModifiers,
+  minSize = MIN,
 ): { x: number; y: number; width: number; height: number; rotation: number } {
   const { start: s, end: e } = resolveLineEndpoints(start, end, modifiers);
   const dx = e.x - s.x;
   const dy = e.y - s.y;
-  const length = Math.max(MIN, Math.hypot(dx, dy));
+  const length = Math.max(minSize, Math.hypot(dx, dy));
   const rotation = (Math.atan2(dy, dx) * 180) / Math.PI;
   const height = 8;
   return {
@@ -160,7 +172,9 @@ export function createShapeNode(
   endPoint: Point,
   modifiers: ShapeModifiers,
   style?: Partial<Pick<EditorNode, "fill" | "strokeColor" | "strokeWidth" | "cornerRadius" | "polygonSides" | "starPoints" | "starInnerRadius">>,
+  phase: ShapeDragPhase = "commit",
 ): EditorNode {
+  const minSize = minSizeForPhase(phase);
   const base = {
     id: "",
     parentId: null as string | null,
@@ -179,16 +193,15 @@ export function createShapeNode(
   };
 
   if (shapeType === "line" || shapeType === "arrow") {
-    const raw = lineGeometryFromDrag(startPoint, endPoint, modifiers);
-    const geom = { ...roundBounds(raw), rotation: raw.rotation };
     const { start: ls, end: le } = resolveLineEndpoints(startPoint, endPoint, modifiers);
     const sw = style?.strokeWidth ?? 3;
+    const layout = layoutFromLineEndpoints(ls.x, ls.y, le.x, le.y, sw, minSize);
     if (shapeType === "arrow") {
       return {
         ...base,
         type: "arrow",
         name: shapeTypeLabel("arrow"),
-        ...layoutFromLineEndpoints(ls.x, ls.y, le.x, le.y, sw),
+        ...layout,
         ...arrowEndpointStylePatch({
           startArrow: "none",
           endArrow: DEFAULT_ARROW_END,
@@ -205,7 +218,7 @@ export function createShapeNode(
       ...base,
       type: "line",
       name: shapeTypeLabel("line"),
-      ...layoutFromLineEndpoints(ls.x, ls.y, le.x, le.y, sw),
+      ...layout,
       fillEnabled: false,
       fill: "transparent",
       fillOpacity: 0,
@@ -218,7 +231,9 @@ export function createShapeNode(
   const bounds = roundBounds(
     boundsFromDrag(startPoint, endPoint, modifiers, {
       preserveAspect: shapeType === "ellipse",
+      minSize,
     }),
+    minSize,
   );
 
   if (shapeType === "rectangle") {
@@ -274,6 +289,47 @@ export function createShapeNode(
   };
   node = normalizePathNode(node);
   return node;
+}
+
+/** Geometry patch while live-dragging a new shape (excludes identity / chrome fields). */
+export function shapeGeometryPatchFromDrag(
+  shapeType: ShapeType,
+  startPoint: Point,
+  endPoint: Point,
+  modifiers: ShapeModifiers,
+  style?: Partial<Pick<EditorNode, "polygonSides" | "starPoints" | "starInnerRadius">>,
+  phase: ShapeDragPhase = "commit",
+): Partial<EditorNode> {
+  const draft = createShapeNode(shapeType, startPoint, endPoint, modifiers, style, phase);
+  const patch: Partial<EditorNode> = {
+    x: draft.x,
+    y: draft.y,
+    width: draft.width,
+    height: draft.height,
+    rotation: draft.rotation ?? 0,
+  };
+  if (draft.lineX1 != null) {
+    patch.lineX1 = draft.lineX1;
+    patch.lineY1 = draft.lineY1;
+    patch.lineX2 = draft.lineX2;
+    patch.lineY2 = draft.lineY2;
+  }
+  if (draft.pathPoints) {
+    patch.pathPoints = draft.pathPoints;
+    patch.pathClosed = draft.pathClosed;
+  }
+  if (draft.startArrow != null) {
+    patch.startArrow = draft.startArrow;
+    patch.endArrow = draft.endArrow;
+  }
+  if (draft.polygonSides != null) {
+    patch.polygonSides = draft.polygonSides;
+  }
+  if (draft.starPoints != null) {
+    patch.starPoints = draft.starPoints;
+    patch.starInnerRadius = draft.starInnerRadius;
+  }
+  return patch;
 }
 
 /** Map active canvas tool id to shape type (null if not a shape tool). */

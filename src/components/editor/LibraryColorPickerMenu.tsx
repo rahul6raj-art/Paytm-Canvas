@@ -15,24 +15,31 @@ export function getColorDesignTokens(tokens: Record<string, DesignToken>): Desig
 type LibraryColorPickerMenuProps = {
   activeTokenId?: string | null;
   onPick: (tokenId: string) => void;
+  variant?: "full" | "compact";
+  /** When true, render nothing instead of the empty-library message (e.g. gradient stop picker). */
+  hideWhenEmpty?: boolean;
 };
 
-export function LibraryColorPickerMenu({ activeTokenId, onPick }: LibraryColorPickerMenuProps) {
+export function LibraryColorPickerMenu({
+  activeTokenId,
+  onPick,
+  variant = "full",
+  hideWhenEmpty = false,
+}: LibraryColorPickerMenuProps) {
   const designTokens = useEditorStore((s) => s.designTokens);
   const colors = useMemo(() => getColorDesignTokens(designTokens), [designTokens]);
 
   if (colors.length === 0) {
+    if (hideWhenEmpty) return null;
     return (
-      <p className="px-3 py-4 text-center text-[11px] leading-snug text-app-subtle">
+      <p className="px-3 py-4 text-center text-ui leading-snug text-app-subtle">
         No colors in the library yet. Open the Library panel to add a palette or create colors.
       </p>
     );
   }
 
-  return (
-    <div className="p-2">
-      <p className="mb-2 px-0.5 text-[11px] font-medium text-app-subtle">Choose library color</p>
-      <div className="grid grid-cols-5 gap-1.5">
+  const grid = (
+    <div className={variant === "compact" ? "grid grid-cols-6 gap-1" : "grid grid-cols-5 gap-1.5"}>
         {colors.map((token) => {
           const v = token.value;
           if (!isColorValue(v)) return null;
@@ -58,7 +65,17 @@ export function LibraryColorPickerMenu({ activeTokenId, onPick }: LibraryColorPi
             </button>
           );
         })}
-      </div>
+    </div>
+  );
+
+  if (variant === "compact") {
+    return <div className="px-0.5">{grid}</div>;
+  }
+
+  return (
+    <div className="p-2">
+      <p className="mb-2 px-0.5 text-ui font-medium text-app-subtle">Choose library color</p>
+      {grid}
       <ul className="thin-scroll mt-2 max-h-48 space-y-0.5 overflow-y-auto border-t border-app-border-subtle pt-2">
         {colors.map((token) => {
           const v = token.value;
@@ -70,7 +87,7 @@ export function LibraryColorPickerMenu({ activeTokenId, onPick }: LibraryColorPi
                 type="button"
                 onClick={() => onPick(token.id)}
                 className={cn(
-                  "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors hover:bg-app-hover",
+                  "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui transition-colors hover:bg-app-hover",
                   active && "bg-accent/10 text-accent",
                 )}
               >
@@ -80,7 +97,7 @@ export function LibraryColorPickerMenu({ activeTokenId, onPick }: LibraryColorPi
                   aria-hidden
                 />
                 <span className="min-w-0 flex-1 truncate font-medium">{token.name}</span>
-                <span className="shrink-0 font-mono text-[10px] text-[#737373]">{v.hex}</span>
+                <span className="shrink-0 font-mono text-ui text-[#737373]">{v.hex}</span>
               </button>
             </li>
           );

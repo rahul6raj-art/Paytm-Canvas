@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: craft-api
+  namespace: craft
+  labels:
+    app: craft-api
+    app.kubernetes.io/part-of: paytm-craft
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: craft-api
+  template:
+    metadata:
+      labels:
+        app: craft-api
+    spec:
+      containers:
+        - name: craft-api
+          image: REGISTRY/craft-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 4000
+          envFrom:
+            - configMapRef:
+                name: craft-backend
+            - secretRef:
+                name: craft-backend
+          env:
+            - name: CRAFT_API_PORT
+              value: "4000"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi

@@ -95,8 +95,8 @@ export function PluginMarketplace() {
               <Plug2 className="h-5 w-5" strokeWidth={1.75} />
             </span>
             <div>
-              <h2 className="text-[16px] font-semibold text-white">Plugins</h2>
-              <p className="text-[12px] text-app-muted">Mock marketplace — no network, no third-party scripts.</p>
+              <h2 className="text-base font-semibold text-white">Plugins</h2>
+              <p className="text-ui text-app-muted">Mock marketplace — no network, no third-party scripts.</p>
             </div>
           </div>
           <button
@@ -116,7 +116,7 @@ export function PluginMarketplace() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search plugins…"
-              className="h-9 border-app-border bg-black/35 pl-8 text-[13px]"
+              className="h-9 border-app-border bg-black/35 pl-8 text-ui-sm"
             />
           </div>
           <div className="mt-2.5 flex flex-wrap gap-1">
@@ -126,7 +126,7 @@ export function PluginMarketplace() {
                 type="button"
                 onClick={() => setCat(c)}
                 className={cn(
-                  "rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors",
+                  "rounded-full border px-2.5 py-0.5 text-ui font-medium transition-colors",
                   cat === c
                     ? "border-sky-500/45 bg-sky-500/15 text-sky-100"
                     : "border-app-border bg-app-hover text-app-muted hover:border-white/[0.14]",
@@ -140,7 +140,7 @@ export function PluginMarketplace() {
 
         <div className="max-h-[min(70vh,560px)] overflow-y-auto px-5 py-4">
           {filtered.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-app-border bg-black/20 py-10 text-center text-[13px] text-app-subtle">
+            <p className="rounded-xl border border-dashed border-app-border bg-black/20 py-10 text-center text-ui-sm text-app-subtle">
               No plugins match your filters.
             </p>
           ) : (
@@ -152,36 +152,36 @@ export function PluginMarketplace() {
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-2">
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-app-hover text-[18px] leading-none">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-app-hover text-lg leading-none">
                         {p.icon}
                       </span>
                       <div className="min-w-0">
-                        <h3 className="truncate text-[13px] font-semibold text-white">{p.name}</h3>
-                        <p className="text-[10px] font-medium uppercase tracking-wide text-app-subtle">{p.category}</p>
+                        <h3 className="truncate text-ui-sm font-semibold text-white">{p.name}</h3>
+                        <p className="section-heading">{p.category}</p>
                       </div>
                     </div>
                     {p.installed ? (
-                      <span className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-200">
+                      <span className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-ui font-semibold text-emerald-200">
                         Installed
                       </span>
                     ) : null}
                   </div>
-                  <p className="mt-2 line-clamp-3 text-[12px] leading-snug text-[#a3a3a3]">{p.description}</p>
-                  <p className="mt-1 text-[11px] text-app-subtle">by {p.author}</p>
+                  <p className="mt-2 line-clamp-3 text-ui leading-snug text-[#a3a3a3]">{p.description}</p>
+                  <p className="mt-1 text-ui text-app-subtle">by {p.author}</p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {p.installed ? (
                       <>
                         <button
                           type="button"
                           onClick={() => run(p.id)}
-                          className="rounded-lg bg-gradient-to-r from-sky-600 to-violet-600 px-3 py-1.5 text-[12px] font-semibold text-white shadow-sm hover:opacity-95"
+                          className="rounded-lg bg-gradient-to-r from-sky-600 to-violet-600 px-3 py-1.5 text-ui font-semibold text-white shadow-sm hover:opacity-95"
                         >
                           Run
                         </button>
                         <button
                           type="button"
                           onClick={() => uninstall(p.id)}
-                          className="rounded-lg border border-app-border bg-app-hover px-3 py-1.5 text-[12px] font-medium text-app-fg hover:bg-app-hover"
+                          className="rounded-lg border border-app-border bg-app-hover px-3 py-1.5 text-ui font-medium text-app-fg hover:bg-app-hover"
                         >
                           Uninstall
                         </button>
@@ -190,7 +190,7 @@ export function PluginMarketplace() {
                       <button
                         type="button"
                         onClick={() => install(p.id)}
-                        className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-3 py-1.5 text-[12px] font-semibold text-emerald-100 hover:bg-emerald-500/20"
+                        className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-3 py-1.5 text-ui font-semibold text-emerald-100 hover:bg-emerald-500/20"
                       >
                         Install
                       </button>

@@ -22,6 +22,7 @@ export const TEXT_FONT_SIZES = [10, 11, 12, 13, 14, 16, 18, 20, 24, 32, 48, 64, 
 export const DEFAULT_TEXT_FONT_FAMILY =
   "var(--font-inter), Inter, system-ui, sans-serif";
 export const DEFAULT_TEXT_FONT_SIZE = 14;
+export const DEFAULT_TEXT_COLOR = "#ffffff";
 
 export type ResolvedTextTypo = {
   color: string;
@@ -37,7 +38,7 @@ export function resolveTextTypo(node: Pick<
   "textColor" | "fill" | "fontFamily" | "fontSize" | "fontWeight" | "lineHeight" | "letterSpacing"
 >): ResolvedTextTypo {
   return {
-    color: node.textColor ?? node.fill ?? "#111111",
+    color: node.textColor ?? node.fill ?? DEFAULT_TEXT_COLOR,
     fontFamily: node.fontFamily ?? DEFAULT_TEXT_FONT_FAMILY,
     fontSize: node.fontSize ?? DEFAULT_TEXT_FONT_SIZE,
     fontWeight: node.fontWeight ?? 500,

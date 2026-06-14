@@ -1,7 +1,21 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { supportsCornerRadiusHandles } from "@/lib/cornerRadius";
+import {
+  shouldShowCornerRadiusHandlesOnCanvas,
+  supportsCornerRadiusHandles,
+} from "@/lib/cornerRadius";
 import { cornerRadiusHandlePosition } from "@/lib/shapes/shapeToPath";
+
+const baseGate = {
+  editorMode: "design" as const,
+  tool: "move" as const,
+  penDrawingNodeId: null,
+  pencilDrawingNodeId: null,
+  isPlacingComment: false,
+  selectedIds: ["r1"],
+  transformInteractionMode: "none" as const,
+  dragActive: false,
+};
 
 describe("corner radius handles", () => {
   it("supports rectangle and frame only", () => {
@@ -10,9 +24,48 @@ describe("corner radius handles", () => {
     assert.equal(supportsCornerRadiusHandles({ type: "ellipse", visible: true, locked: false }), false);
   });
 
-  it("handle sits on top-left arc start when radius is set", () => {
+  it("shows on single-selected rectangle in move tool without edit mode", () => {
+    assert.equal(
+      shouldShowCornerRadiusHandlesOnCanvas(baseGate, {
+        type: "rectangle",
+        visible: true,
+        locked: false,
+      }),
+      true,
+    );
+  });
+
+  it("hides during resize, rotate, and move drag", () => {
+    const node = { type: "rectangle" as const, visible: true, locked: false };
+    assert.equal(
+      shouldShowCornerRadiusHandlesOnCanvas(
+        { ...baseGate, transformInteractionMode: "resize" },
+        node,
+      ),
+      false,
+    );
+    assert.equal(
+      shouldShowCornerRadiusHandlesOnCanvas(
+        { ...baseGate, transformInteractionMode: "rotate" },
+        node,
+      ),
+      false,
+    );
+    assert.equal(
+      shouldShowCornerRadiusHandlesOnCanvas({ ...baseGate, dragActive: true }, node),
+      false,
+    );
+  });
+
+  it("handle sits inside top-left corner on bisector when radius is set", () => {
     const p = cornerRadiusHandlePosition(100, 100, [20, 0, 0, 0], 0);
     assert.equal(p.x, 20);
-    assert.equal(p.y, 0);
+    assert.equal(p.y, 20);
+  });
+
+  it("handle uses min inset inside corner when radius is zero", () => {
+    const p = cornerRadiusHandlePosition(100, 100, [0, 0, 0, 0], 0, 12);
+    assert.equal(p.x, 12);
+    assert.equal(p.y, 12);
   });
 });

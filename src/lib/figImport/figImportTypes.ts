@@ -4,6 +4,8 @@ import type { EditorNode } from "@/stores/useEditorStore";
 import type { FigColor } from "@/lib/figImport/figPaintCore";
 import type { FigImportProgress } from "@/lib/figImport/figImportRuntime";
 
+import type { FigImportFidelityCapture } from "@/lib/figImport/figFidelityTypes";
+
 export type ImportCtx = {
   nodes: Record<string, EditorNode>;
   childOrder: Record<string, string[]>;
@@ -17,6 +19,10 @@ export type ImportCtx = {
   hydratedSymbols: Set<string>;
   /** Figma variable guid → design token id */
   tokensByVariableKey: Map<string, string>;
+  /** Figma text style guid → typography token id */
+  styleKeyToTokenId?: Map<string, string>;
+  /** Editor node id → captured Figma source snapshot for fidelity inspection. */
+  fidelityCaptures?: Map<string, FigImportFidelityCapture>;
   seq: number;
   onProgress?: FigImportProgress;
   importNodesProcessed?: number;

@@ -1,6 +1,8 @@
-# Paytm Craft — Postgres schema (planned)
+# Paytm Craft — Postgres schema
 
-Logical schema for **workspaces, files, versions, comments, assets, teams, and permissions**. Types are illustrative; Prisma (or SQL migrations) will refine nullability, indexes, and enums.
+**Status:** reference — canonical schema in [`packages/craft-api/prisma/schema.prisma`](../packages/craft-api/prisma/schema.prisma) (Tracks 4–12, 19–23).
+
+Logical schema for **workspaces, files, versions, comments, assets, teams, and permissions**. Types below are illustrative; Prisma migrations are the source of truth.
 
 ## Core identity
 

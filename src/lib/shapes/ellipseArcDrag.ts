@@ -1,4 +1,5 @@
 import { useEditorStore } from "@/stores/useEditorStore";
+import { mergeInstanceOverrides } from "@/lib/componentModel";
 import {
   arcInnerRadiusRatioFromPointer,
   arcInnerRadiusRatioFromRelativeDrag,
@@ -8,6 +9,7 @@ import {
   ellipseEndAngleUnwrapped,
   ellipseRatioHandleLocal,
   isFullEllipseArc,
+  parametricDegreesFromLocalPoint,
   startDegAndSweepFromStartHandleDrag,
   sweepDegFromEndHandleDrag,
   type EllipseArcPreview,
@@ -103,10 +105,27 @@ function flushStoreUpdate(): void {
   if (!d || !pendingPatch) return;
   const patch = pendingPatch;
   pendingPatch = null;
+  commitArcPatch(d, patch);
+}
+
+function commitArcPatch(
+  session: ArcDragSession,
+  patch: Partial<{
+    arcSweepDeg: number;
+    arcStartDeg: number;
+    arcInnerRadiusRatio: number;
+  }>,
+  opts?: { skipHistory?: boolean },
+): void {
   const state = useEditorStore.getState();
-  const n = state.nodes[d.nodeId];
+  const n = state.nodes[session.nodeId];
   if (!n || n.type !== "ellipse") return;
-  state.updateNode(d.nodeId, patch, { skipHistory: true });
+  const full = {
+    arcStartDeg: patch.arcStartDeg ?? session.startDeg,
+    arcSweepDeg: patch.arcSweepDeg ?? session.sweepDeg,
+    arcInnerRadiusRatio: patch.arcInnerRadiusRatio ?? session.innerRadiusRatio,
+  };
+  state.updateNodeStyle(session.nodeId, full, opts);
 }
 
 function scheduleStoreUpdate(patch: NonNullable<typeof pendingPatch>): void {
@@ -140,7 +159,14 @@ function applyPointer(
   let innerRadiusRatio = session.innerRadiusRatio;
 
   if (session.kind === "sweep") {
-    const moveAngle = degreesFromLocalPoint(session.cx, session.cy, local.x, local.y);
+    const moveAngle = parametricDegreesFromLocalPoint(
+      session.cx,
+      session.cy,
+      session.width / 2,
+      session.height / 2,
+      local.x,
+      local.y,
+    );
     sweepDeg = sweepDegFromEndHandleDrag(
       session.startDeg,
       session.grabEndUnwrapped,
@@ -153,7 +179,14 @@ function applyPointer(
     session.sweepDeg = sweepDeg;
     scheduleStoreUpdate({ arcSweepDeg: sweepDeg, arcStartDeg: startDeg });
   } else if (session.kind === "start") {
-    const moveAngle = degreesFromLocalPoint(session.cx, session.cy, local.x, local.y);
+    const moveAngle = parametricDegreesFromLocalPoint(
+      session.cx,
+      session.cy,
+      session.width / 2,
+      session.height / 2,
+      local.x,
+      local.y,
+    );
     const next = startDegAndSweepFromStartHandleDrag(
       session.fixedEndUnwrapped,
       moveAngle,
@@ -209,8 +242,9 @@ function beginArcDrag(
   },
 ): boolean {
   const st = useEditorStore.getState();
-  const node = st.nodes[opts.nodeId];
-  if (!node || node.type !== "ellipse" || node.locked) return false;
+  const raw = st.nodes[opts.nodeId];
+  if (!raw || raw.type !== "ellipse" || raw.locked) return false;
+  const node = mergeInstanceOverrides(raw, st.nodes);
 
   const arc = effectiveEllipseArc(node);
   const cx = node.width / 2;
@@ -223,7 +257,7 @@ function beginArcDrag(
     st.nodes,
     st.childOrder,
   );
-  const grabAngle = degreesFromLocalPoint(cx, cy, local0.x, local0.y);
+  const grabAngle = parametricDegreesFromLocalPoint(cx, cy, node.width / 2, node.height / 2, local0.x, local0.y);
   const grabEndUnwrapped = ellipseEndAngleUnwrapped(arc.startDeg, arc.sweepDeg, grabAngle);
   const fixedEndUnwrapped = grabEndUnwrapped;
 
@@ -296,10 +330,10 @@ function beginArcDrag(
     for (const pe of pointerEvents(ev)) {
       applyPointer(d, pe.clientX, pe.clientY, opts.clientToWorld, pe.shiftKey);
     }
-    if (pendingPatch) {
-      if (rafId) cancelAnimationFrame(rafId);
-      flushStoreUpdate();
-    }
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = 0;
+    commitArcPatch(d, pendingPatch ?? {}, { skipHistory: true });
+    pendingPatch = null;
     activeDrag = null;
     clearPreview();
     window.removeEventListener("pointermove", onMove);

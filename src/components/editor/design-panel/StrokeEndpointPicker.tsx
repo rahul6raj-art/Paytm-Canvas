@@ -9,6 +9,7 @@ import {
   strokeEndpointLabel,
   type StrokeEndpoint,
 } from "@/lib/strokeEndpoints";
+import { appFieldRadius } from "@/lib/appFieldStyles";
 import { cn } from "@/lib/utils";
 import {
   anchoredMenuStyle,
@@ -79,14 +80,15 @@ export function StrokeEndpointPicker({
 
   return (
     <div className="min-w-0 flex-1">
-      <div className="mb-0.5 text-[11px] font-medium text-app-subtle">{label}</div>
+      <div className="inspector-field-label">{label}</div>
       <button
         ref={anchorRef}
         type="button"
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          "flex h-6 w-full items-center gap-2 rounded border border-app-border bg-app-field px-1.5 text-left text-[11px] text-app-fg hover:bg-app-hover disabled:opacity-40",
+          "flex h-6 w-full items-center gap-2 border border-app-border bg-app-field px-1.5 text-left text-ui text-app-fg hover:bg-app-hover disabled:opacity-40",
+          appFieldRadius,
           open && "border-accent ring-1 ring-accent",
         )}
         aria-expanded={open}
@@ -119,7 +121,7 @@ function EndpointMenuItem({
       disabled={disabled}
       onClick={onPick}
       className={cn(
-        "flex w-full items-center gap-2 px-2 py-1.5 text-left text-[12px] text-app-fg hover:bg-accent/15 disabled:opacity-40",
+        "flex w-full items-center gap-2 px-2 py-1.5 text-left text-ui text-app-fg hover:bg-accent/15 disabled:opacity-40",
         selected && "bg-accent/10",
       )}
     >

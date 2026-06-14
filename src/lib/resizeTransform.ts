@@ -1,3 +1,4 @@
+import { getNodeWorldMatrixFromChildOrder } from "@/lib/editorGraph";
 import type { EditorNode } from "@/stores/useEditorStore";
 import {
   applyMatrixToPoint,
@@ -6,6 +7,7 @@ import {
   getNodeWorldMatrix,
   hasRotation,
   invertMatrix,
+  matrixHasRotation,
   multiplyMatrix,
   resolveParentId,
 } from "@/lib/transformMath";
@@ -59,6 +61,20 @@ export function anchorWorldAtBounds(
   return applyMatrixToPoint(wm, anchorLocal);
 }
 
+/** Same anchor as anchorWorldAtBounds but uses the childOrder render tree. */
+export function anchorWorldAtBoundsFromChildOrder(
+  nodeId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  handle: ResizeHandle,
+  bounds: Bounds,
+): { x: number; y: number } | null {
+  const wm = getNodeWorldMatrixFromChildOrder(nodeId, nodes, childOrder);
+  if (!wm) return anchorWorldAtBounds(nodeId, nodes, handle, bounds);
+  const anchorLocal = getResizeAnchorLocal(handle, bounds.width, bounds.height);
+  return applyMatrixToPoint(wm, anchorLocal);
+}
+
 function localPointToWorld(
   node: EditorNode,
   nodes: Record<string, EditorNode>,
@@ -84,12 +100,13 @@ export function solveNodeXYForAnchorWorld(
   anchorWorld: { x: number; y: number },
   seedXY: { x: number; y: number },
 ): { x: number; y: number } {
-  if (!hasRotation(node.rotation)) return seedXY;
+  const parentId = resolveParentId(node.parentId);
+  const parentWorld = parentId && nodes[parentId] ? getNodeWorldMatrix(parentId, nodes) : null;
+  const parentRotated = parentWorld ? matrixHasRotation(parentWorld) : false;
+  if (!hasRotation(node.rotation) && !parentRotated) return seedXY;
 
   let x = seedXY.x;
   let y = seedXY.y;
-  const parentId = resolveParentId(node.parentId);
-  const parentWorld = parentId && nodes[parentId] ? getNodeWorldMatrix(parentId, nodes) : null;
   const parentInv = parentWorld ? invertMatrix(parentWorld) : null;
 
   for (let i = 0; i < 24; i++) {

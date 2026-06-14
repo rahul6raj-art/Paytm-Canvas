@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
 import { PropertiesSection } from "../PropertiesSection";
 import { PropertyNumberInput } from "../PropertyInput";
 import { useEditorStore, type EditorNode } from "@/stores/useEditorStore";
-import { TransformActions } from "./TransformSettingIcons";
+import { RotationTransformRow } from "./TransformSettingIcons";
 
 export function PositionSection({
   node,
@@ -24,41 +23,20 @@ export function PositionSection({
   onResizeFrame: (width: number, height: number) => void;
 }) {
   const transformMode = useEditorStore((s) => s.transformInteractionMode);
-  const geomSnapshotRef = useRef<{
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  } | null>(null);
+  const rotateGeomSnapshot = useEditorStore((s) => s.rotateGeomSnapshot);
 
-  useEffect(() => {
-    if (transformMode === "rotate") {
-      if (!geomSnapshotRef.current) {
-        geomSnapshotRef.current = {
-          x: node.x,
-          y: node.y,
-          width: node.width,
-          height: node.height,
-        };
-      }
-      return;
-    }
-    geomSnapshotRef.current = null;
-  }, [transformMode, node.x, node.y, node.width, node.height]);
-
-  useEffect(() => {
-    geomSnapshotRef.current = null;
-  }, [instanceKey]);
-
-  const freezeGeom = transformMode === "rotate" && geomSnapshotRef.current != null;
-  const displayX = freezeGeom ? geomSnapshotRef.current!.x : node.x;
-  const displayY = freezeGeom ? geomSnapshotRef.current!.y : node.y;
-  const displayW = freezeGeom ? geomSnapshotRef.current!.width : node.width;
-  const displayH = freezeGeom ? geomSnapshotRef.current!.height : node.height;
+  const freezeGeom =
+    transformMode === "rotate" &&
+    rotateGeomSnapshot != null &&
+    rotateGeomSnapshot.nodeId === node.id;
+  const displayX = freezeGeom ? rotateGeomSnapshot.x : node.x;
+  const displayY = freezeGeom ? rotateGeomSnapshot.y : node.y;
+  const displayW = freezeGeom ? rotateGeomSnapshot.width : node.width;
+  const displayH = freezeGeom ? rotateGeomSnapshot.height : node.height;
 
   return (
     <PropertiesSection title="Position" defaultOpen>
-      <div className="grid grid-cols-3 gap-1">
+      <div className="grid grid-cols-2 gap-2">
         <PropertyNumberInput
           commitOnInput={false}
           label="X"
@@ -76,14 +54,6 @@ export function PositionSection({
           disabled={locked || parentAutoLayout}
           decimals={2}
           onCommit={(v) => onPatch({ y: v })}
-        />
-        <PropertyNumberInput
-          commitOnInput={false}
-          label="R"
-          value={node.rotation}
-          instanceKey={`${instanceKey}-rot`}
-          disabled={locked}
-          onCommit={(v) => onPatch({ rotation: ((v % 360) + 360) % 360 })}
         />
       </div>
       <div className="mt-1.5 grid grid-cols-2 gap-1">
@@ -111,10 +81,13 @@ export function PositionSection({
         />
       </div>
       <div className="mt-1.5">
-        <TransformActions
+        <RotationTransformRow
+          rotation={node.rotation}
           flipHorizontal={node.flipHorizontal}
           flipVertical={node.flipVertical}
           disabled={locked}
+          instanceKey={`${instanceKey}-rot`}
+          onRotationCommit={(deg) => onPatch({ rotation: deg })}
           onRotate90={() =>
             onPatch({ rotation: ((node.rotation + 90) % 360 + 360) % 360 })
           }

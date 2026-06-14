@@ -1,4 +1,21 @@
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
+import {
+  computeMockApiTokenExpiresAt,
+  hashMockApiToken,
+  mockApiTokenDisplayPrefix,
+  mockApiTokenToDto,
+  newMockApiTokenSecret,
+  parseMockApiTokenExpiresInDays,
+  type MockApiTokenRow,
+} from "@/lib/mockApiToken";
+import type { MockApiTokenResourceScope, MockApiTokenScope } from "@/lib/mockApiTokenScope";
+import {
+  deserializeMockApiStore,
+  isMockApiStorePersistenceEnabled,
+  loadMockApiStoreFromDisk,
+  saveMockApiStoreToDisk,
+  serializeMockApiStore,
+} from "@/lib/mockApiStorePersistence";
 
 const STORE_KEY = "__paytmCraftMockApiStore_v1__" as const;
 
@@ -10,8 +27,41 @@ export interface MockApiUserRow {
 
 export interface MockApiWorkspaceRow {
   id: string;
+  teamId: string;
   name: string;
   slug: string;
+}
+
+export interface MockApiTeamRow {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+export type MockApiTeamRole = MockApiWorkspaceRole;
+
+export interface MockApiTeamMemberRow {
+  teamId: string;
+  userId: string;
+  role: MockApiTeamRole;
+}
+
+export type MockApiWorkspaceRole = "owner" | "admin" | "member" | "guest";
+
+export interface MockApiMemberRow {
+  workspaceId: string;
+  userId: string;
+  role: MockApiWorkspaceRole;
+}
+
+export interface MockApiInviteRow {
+  id: string;
+  workspaceId: string;
+  email: string;
+  role: MockApiWorkspaceRole;
+  invitedByUserId: string;
+  createdAt: string;
+  acceptedAt?: string | null;
 }
 
 export interface MockApiFileRow {
@@ -21,6 +71,8 @@ export interface MockApiFileRow {
   documentJson: unknown | null;
   createdAt: string;
   updatedAt: string;
+  /** Optimistic concurrency token; bumped on every successful PUT. */
+  revision: string;
 }
 
 /** Snapshot row; `documentJson` matches {@link PaytmCraftDocument} once validated at HTTP boundaries. */
@@ -47,7 +99,12 @@ export interface MockApiCommentRow {
 
 interface MockApiStoreState {
   users: MockApiUserRow[];
+  teams: MockApiTeamRow[];
+  teamMembers: MockApiTeamMemberRow[];
   workspaces: MockApiWorkspaceRow[];
+  members: MockApiMemberRow[];
+  invites: MockApiInviteRow[];
+  apiTokens: MockApiTokenRow[];
   files: Map<string, MockApiFileRow>;
   comments: Map<string, MockApiCommentRow>;
   versions: Map<string, MockApiVersionRow>;
@@ -71,13 +128,40 @@ function seedStore(): MockApiStoreState {
     { id: "user-you", email: "rahul.verma@paytm.com", displayName: "Rahul Verma" },
     { id: "u2", email: "aisha.khan@paytm.com", displayName: "Aisha Khan" },
     { id: "u3", email: "dev.sharma@paytm.com", displayName: "Dev Sharma" },
+    { id: "u4", email: "meera@paytm.com", displayName: "Meera N." },
   ];
 
   const workspaces: MockApiWorkspaceRow[] = [
-    { id: "ws-personal", name: "Personal", slug: "personal" },
-    { id: "ws-paytm-design", name: "Paytm Design", slug: "paytm-design" },
-    { id: "ws-product", name: "Product Team", slug: "product-team" },
-    { id: "ws-experiments", name: "Experiments", slug: "experiments" },
+    { id: "ws-personal", teamId: "team-paytm", name: "Personal", slug: "personal" },
+    { id: "ws-paytm-design", teamId: "team-paytm", name: "Paytm Design", slug: "paytm-design" },
+    { id: "ws-product", teamId: "team-paytm", name: "Product Team", slug: "product-team" },
+    { id: "ws-experiments", teamId: "team-paytm", name: "Experiments", slug: "experiments" },
+    { id: "ws-labs", teamId: "team-labs", name: "Labs", slug: "labs" },
+  ];
+
+  const teams: MockApiTeamRow[] = [
+    { id: "team-paytm", name: "Paytm", slug: "paytm" },
+    { id: "team-labs", name: "Craft Labs", slug: "craft-labs" },
+  ];
+
+  const teamMembers: MockApiTeamMemberRow[] = [
+    { teamId: "team-paytm", userId: "user-you", role: "owner" },
+    { teamId: "team-paytm", userId: "u2", role: "member" },
+    { teamId: "team-paytm", userId: "u3", role: "member" },
+    { teamId: "team-paytm", userId: "u4", role: "guest" },
+    { teamId: "team-labs", userId: "user-you", role: "owner" },
+  ];
+
+  const members: MockApiMemberRow[] = [
+    { workspaceId: "ws-personal", userId: "user-you", role: "owner" },
+    { workspaceId: "ws-paytm-design", userId: "user-you", role: "owner" },
+    { workspaceId: "ws-product", userId: "user-you", role: "owner" },
+    { workspaceId: "ws-experiments", userId: "user-you", role: "owner" },
+    { workspaceId: "ws-labs", userId: "user-you", role: "owner" },
+    { workspaceId: "ws-paytm-design", userId: "u2", role: "member" },
+    { workspaceId: "ws-paytm-design", userId: "u3", role: "member" },
+    { workspaceId: "ws-paytm-design", userId: "u4", role: "guest" },
+    { workspaceId: "ws-product", userId: "u2", role: "member" },
   ];
 
   const now = new Date().toISOString();
@@ -90,6 +174,7 @@ function seedStore(): MockApiStoreState {
       documentJson: emptyDocument("Mobile App Flow"),
       createdAt: now,
       updatedAt: now,
+      revision: "1",
     },
     {
       id: "api-file-paytm-2",
@@ -98,6 +183,7 @@ function seedStore(): MockApiStoreState {
       documentJson: emptyDocument("Marketing landing"),
       createdAt: now,
       updatedAt: now,
+      revision: "1",
     },
     {
       id: "api-file-product-1",
@@ -106,6 +192,7 @@ function seedStore(): MockApiStoreState {
       documentJson: emptyDocument("Checkout v2"),
       createdAt: now,
       updatedAt: now,
+      revision: "1",
     },
     {
       id: "api-file-personal-1",
@@ -114,6 +201,16 @@ function seedStore(): MockApiStoreState {
       documentJson: null,
       createdAt: now,
       updatedAt: now,
+      revision: "1",
+    },
+    {
+      id: "api-file-labs-1",
+      workspaceId: "ws-labs",
+      name: "Prototype sandbox",
+      documentJson: emptyDocument("Prototype sandbox"),
+      createdAt: now,
+      updatedAt: now,
+      revision: "1",
     },
   ];
   for (const f of seedFiles) {
@@ -136,15 +233,126 @@ function seedStore(): MockApiStoreState {
     resolved: true,
   });
 
-  return { users, workspaces, files, comments, versions: new Map(), nextSeq: 100 };
+  return { users, teams, teamMembers, workspaces, members, invites: [], apiTokens: [], files, comments, versions: new Map(), nextSeq: 100 };
 }
 
 function getState(): MockApiStoreState {
   const g = globalThis as unknown as Record<string, MockApiStoreState | undefined>;
   if (!g[STORE_KEY]) {
-    g[STORE_KEY] = seedStore();
+    const loaded = loadMockApiStoreFromDisk();
+    if (loaded) {
+      const state = deserializeMockApiStore(loaded);
+      if (state.members.length === 0) {
+        state.members = seedStore().members;
+      }
+      if (!state.invites) {
+        state.invites = [];
+      }
+      if (!state.teams?.length) {
+        state.teams = seedStore().teams;
+      }
+      if (!state.teamMembers?.length) {
+        state.teamMembers = seedStore().teamMembers;
+      }
+      if (!state.apiTokens) {
+        state.apiTokens = [];
+      }
+      for (const ws of state.workspaces) {
+        if (!ws.teamId) ws.teamId = "team-paytm";
+      }
+      g[STORE_KEY] = state;
+    } else {
+      g[STORE_KEY] = seedStore();
+    }
   }
   return g[STORE_KEY]!;
+}
+
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleMockApiStorePersist(): void {
+  if (!isMockApiStorePersistenceEnabled()) return;
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    saveMockApiStoreToDisk(serializeMockApiStore(getState()));
+  }, 40);
+}
+
+/** Clear in-memory mock API state (unit tests only). */
+export function resetMockApiStoreForTests(): void {
+  const g = globalThis as unknown as Record<string, MockApiStoreState | undefined>;
+  delete g[STORE_KEY];
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+}
+
+export function memberToDto(row: MockApiMemberRow): {
+  userId: string;
+  email: string;
+  displayName: string;
+  initials: string;
+  role: MockApiWorkspaceRole;
+} {
+  const s = getState();
+  const user = s.users.find((u) => u.id === row.userId);
+  const displayName = user?.displayName ?? row.userId;
+  const parts = displayName.trim().split(/\s+/).filter(Boolean);
+  const initials =
+    parts.length >= 2
+      ? `${parts[0]![0]!}${parts[parts.length - 1]![0]!}`.toUpperCase()
+      : (parts[0]?.slice(0, 2).toUpperCase() ?? "??");
+  return {
+    userId: row.userId,
+    email: user?.email ?? "",
+    displayName,
+    initials,
+    role: row.role,
+  };
+}
+
+export function teamMemberToDto(row: MockApiTeamMemberRow): {
+  userId: string;
+  email: string;
+  displayName: string;
+  initials: string;
+  role: MockApiTeamRole;
+} {
+  const s = getState();
+  const user = s.users.find((u) => u.id === row.userId);
+  const displayName = user?.displayName ?? row.userId;
+  const parts = displayName.trim().split(/\s+/).filter(Boolean);
+  const initials =
+    parts.length >= 2
+      ? `${parts[0]![0]!}${parts[parts.length - 1]![0]!}`.toUpperCase()
+      : (parts[0]?.slice(0, 2).toUpperCase() ?? "??");
+  return {
+    userId: row.userId,
+    email: user?.email ?? "",
+    displayName,
+    initials,
+    role: row.role,
+  };
+}
+
+export function inviteToDto(row: MockApiInviteRow): {
+  id: string;
+  workspaceId: string;
+  email: string;
+  role: MockApiWorkspaceRole;
+  invitedByUserId: string;
+  createdAt: string;
+} {
+  return {
+    id: row.id,
+    workspaceId: row.workspaceId,
+    email: row.email,
+    role: row.role,
+    invitedByUserId: row.invitedByUserId,
+    createdAt: row.createdAt,
+  };
 }
 
 export function fileToSummary(row: MockApiFileRow): {
@@ -152,12 +360,14 @@ export function fileToSummary(row: MockApiFileRow): {
   workspaceId: string;
   name: string;
   updatedAt: string;
+  revision: string;
 } {
   return {
     id: row.id,
     workspaceId: row.workspaceId,
     name: row.name,
     updatedAt: row.updatedAt,
+    revision: row.revision,
   };
 }
 
@@ -222,12 +432,161 @@ export const mockApiStore = {
     return getState().users[0]!;
   },
 
+  getUserById(userId: string): MockApiUserRow | undefined {
+    return getState().users.find((u) => u.id === userId);
+  },
+
+  listApiTokens(userId?: string): ReturnType<typeof mockApiTokenToDto>[] {
+    const uid = userId ?? getState().users[0]!.id;
+    return getState()
+      .apiTokens.filter((t) => t.userId === uid && !t.revokedAt)
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+      .map(mockApiTokenToDto);
+  },
+
+  createApiToken(input: {
+    userId?: string;
+    name: string;
+    scope?: MockApiTokenScope;
+    resourceScopes?: MockApiTokenResourceScope[];
+    expiresInDays?: number | null;
+  }): { row: ReturnType<typeof mockApiTokenToDto>; token: string } {
+    const s = getState();
+    const userId = input.userId ?? s.users[0]!.id;
+    const name = input.name.trim();
+    if (!name) throw new Error("token name required");
+    const scope = input.scope ?? "write";
+    const resourceScopes = input.resourceScopes ?? [];
+    const parsedDays =
+      input.expiresInDays == null ? null : parseMockApiTokenExpiresInDays(input.expiresInDays);
+    if (input.expiresInDays != null && parsedDays === undefined) {
+      throw new Error("expiresInDays must be 1–365");
+    }
+    const token = newMockApiTokenSecret();
+    const row: MockApiTokenRow = {
+      id: `pat-mock-${++s.nextSeq}`,
+      userId,
+      name,
+      tokenHash: hashMockApiToken(token),
+      tokenPrefix: mockApiTokenDisplayPrefix(token),
+      scope,
+      resourceScopes,
+      expiresAt: computeMockApiTokenExpiresAt(parsedDays ?? null),
+      lastUsedAt: null,
+      revokedAt: null,
+      createdAt: new Date().toISOString(),
+    };
+    s.apiTokens.push(row);
+    scheduleMockApiStorePersist();
+    return { row: mockApiTokenToDto(row), token };
+  },
+
+  revokeApiToken(userId: string, tokenId: string): boolean {
+    const s = getState();
+    const row = s.apiTokens.find((t) => t.id === tokenId && t.userId === userId && !t.revokedAt);
+    if (!row) return false;
+    row.revokedAt = new Date().toISOString();
+    scheduleMockApiStorePersist();
+    return true;
+  },
+
+  findApiTokenBySecret(token: string): MockApiTokenRow | null {
+    const row = getState().apiTokens.find((t) => t.tokenHash === hashMockApiToken(token));
+    if (!row || row.revokedAt) return null;
+    if (row.expiresAt && Date.parse(row.expiresAt) <= Date.now()) return null;
+    return row;
+  },
+
+  touchApiToken(tokenId: string): void {
+    const s = getState();
+    const row = s.apiTokens.find((t) => t.id === tokenId);
+    if (!row) return;
+    row.lastUsedAt = new Date().toISOString();
+    scheduleMockApiStorePersist();
+  },
+
   listWorkspaces(): MockApiWorkspaceRow[] {
     return [...getState().workspaces];
   },
 
+  listTeams(): MockApiTeamRow[] {
+    return [...getState().teams];
+  },
+
+  listTeamMembers(teamId: string): ReturnType<typeof teamMemberToDto>[] {
+    const s = getState();
+    return s.teamMembers.filter((m) => m.teamId === teamId).map(teamMemberToDto);
+  },
+
   workspaceExists(workspaceId: string): boolean {
     return getState().workspaces.some((w) => w.id === workspaceId);
+  },
+
+  listWorkspaceMembers(workspaceId: string): ReturnType<typeof memberToDto>[] {
+    const s = getState();
+    return s.members
+      .filter((m) => m.workspaceId === workspaceId)
+      .map(memberToDto);
+  },
+
+  inviteWorkspaceMember(
+    workspaceId: string,
+    input: { email: string; role?: MockApiWorkspaceRole },
+  ): ReturnType<typeof memberToDto> | { code: "NOT_FOUND" } | { code: "VALIDATION" } {
+    const outcome = mockApiStore.inviteToWorkspace(workspaceId, input);
+    if ("code" in outcome) return outcome;
+    if (outcome.kind === "invite") return { code: "NOT_FOUND" };
+    return outcome.member;
+  },
+
+  listWorkspaceInvites(workspaceId: string): ReturnType<typeof inviteToDto>[] {
+    const s = getState();
+    return s.invites
+      .filter((i) => i.workspaceId === workspaceId && !i.acceptedAt)
+      .map(inviteToDto);
+  },
+
+  inviteToWorkspace(
+    workspaceId: string,
+    input: { email: string; role?: MockApiWorkspaceRole },
+  ):
+    | { kind: "member"; member: ReturnType<typeof memberToDto> }
+    | { kind: "invite"; invite: ReturnType<typeof inviteToDto> }
+    | { code: "VALIDATION" }
+    | { code: "CONFLICT" } {
+    const s = getState();
+    if (!s.workspaces.some((w) => w.id === workspaceId)) return { code: "VALIDATION" };
+    const email = input.email.trim().toLowerCase();
+    if (!email || !email.includes("@")) return { code: "VALIDATION" };
+    const role = input.role ?? "member";
+    const user = s.users.find((u) => u.email.toLowerCase() === email);
+    if (user) {
+      const existing = s.members.find((m) => m.workspaceId === workspaceId && m.userId === user.id);
+      if (existing) return { code: "CONFLICT" };
+      const row: MockApiMemberRow = { workspaceId, userId: user.id, role };
+      s.members.push(row);
+      const pendingIdx = s.invites.findIndex((i) => i.workspaceId === workspaceId && i.email === email);
+      if (pendingIdx >= 0) s.invites[pendingIdx] = { ...s.invites[pendingIdx]!, acceptedAt: new Date().toISOString() };
+      scheduleMockApiStorePersist();
+      return { kind: "member", member: memberToDto(row) };
+    }
+    const inviter = s.users[0];
+    if (!inviter) return { code: "VALIDATION" };
+    const now = new Date().toISOString();
+    const idx = s.invites.findIndex((i) => i.workspaceId === workspaceId && i.email === email && !i.acceptedAt);
+    const inviteRow: MockApiInviteRow = {
+      id: idx >= 0 ? s.invites[idx]!.id : `api-inv-${Date.now()}-${s.nextSeq++}`,
+      workspaceId,
+      email,
+      role,
+      invitedByUserId: inviter.id,
+      createdAt: idx >= 0 ? s.invites[idx]!.createdAt : now,
+      acceptedAt: null,
+    };
+    if (idx >= 0) s.invites[idx] = inviteRow;
+    else s.invites.push(inviteRow);
+    scheduleMockApiStorePersist();
+    return { kind: "invite", invite: inviteToDto(inviteRow) };
   },
 
   listFiles(workspaceId?: string): MockApiFileRow[] {
@@ -257,27 +616,39 @@ export const mockApiStore = {
       documentJson: doc,
       createdAt: now,
       updatedAt: now,
+      revision: "1",
     };
     s.files.set(id, row);
+    scheduleMockApiStorePersist();
     return row;
   },
 
   updateFile(
     fileId: string,
     patch: { name?: string; documentJson?: unknown | null },
-  ): MockApiFileRow | undefined {
+    opts?: { ifMatch?: string },
+  ):
+    | { ok: true; row: MockApiFileRow }
+    | { ok: false; code: "NOT_FOUND" }
+    | { ok: false; code: "CONFLICT"; currentRevision: string } {
     const s = getState();
     const cur = s.files.get(fileId);
-    if (!cur) return undefined;
+    if (!cur) return { ok: false, code: "NOT_FOUND" };
+    if (opts?.ifMatch !== undefined && opts.ifMatch !== cur.revision) {
+      return { ok: false, code: "CONFLICT", currentRevision: cur.revision };
+    }
     const now = new Date().toISOString();
+    const nextRevision = String(Number(cur.revision) + 1);
     const next: MockApiFileRow = {
       ...cur,
       name: patch.name !== undefined ? patch.name.trim() : cur.name,
       documentJson: patch.documentJson !== undefined ? patch.documentJson : cur.documentJson,
       updatedAt: now,
+      revision: nextRevision,
     };
     s.files.set(fileId, next);
-    return next;
+    scheduleMockApiStorePersist();
+    return { ok: true, row: next };
   },
 
   listFileVersions(fileId: string): MockApiVersionRow[] {
@@ -318,6 +689,7 @@ export const mockApiStore = {
       documentJson: input.documentJson,
     };
     s.versions.set(id, row);
+    scheduleMockApiStorePersist();
     return row;
   },
 
@@ -332,8 +704,10 @@ export const mockApiStore = {
       ...cur,
       documentJson: v.documentJson,
       updatedAt: now,
+      revision: String(Number(cur.revision) + 1),
     };
     s.files.set(fileId, next);
+    scheduleMockApiStorePersist();
     return next;
   },
 
@@ -367,6 +741,7 @@ export const mockApiStore = {
       ...(input.frameId ? { frameId: input.frameId } : {}),
     };
     s.comments.set(id, row);
+    scheduleMockApiStorePersist();
     return row;
   },
 
@@ -383,10 +758,13 @@ export const mockApiStore = {
       resolved: patch.resolved !== undefined ? patch.resolved : cur.resolved,
     };
     s.comments.set(commentId, next);
+    scheduleMockApiStorePersist();
     return next;
   },
 
   deleteComment(commentId: string): boolean {
-    return getState().comments.delete(commentId);
+    const deleted = getState().comments.delete(commentId);
+    if (deleted) scheduleMockApiStorePersist();
+    return deleted;
   },
 };

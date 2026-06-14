@@ -346,13 +346,13 @@ export function AIGenerateModal() {
             )}
             style={{ ...anchoredMenuStyle(toolsMenuPosition), zIndex: 500 }}
           >
-            <p className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-app-subtle">
+            <p className="px-3 pb-1 pt-2 section-heading">
               Prompt
             </p>
             <button
               type="button"
               role="menuitem"
-              className="block w-full px-3 py-2 text-left text-[12px] text-app-fg hover:bg-app-hover"
+              className="block w-full px-3 py-2 text-left text-ui text-app-fg hover:bg-app-hover"
               onClick={() => {
                 setPrompt(
                   "A fintech dashboard with balance card, spending chart, and recent transactions",
@@ -366,7 +366,7 @@ export function AIGenerateModal() {
               type="button"
               role="menuitem"
               disabled={!prompt.trim()}
-              className="block w-full px-3 py-2 text-left text-[12px] text-app-fg hover:bg-app-hover disabled:opacity-40"
+              className="block w-full px-3 py-2 text-left text-ui text-app-fg hover:bg-app-hover disabled:opacity-40"
               onClick={() => {
                 setPrompt("");
                 setToolsOpen(false);
@@ -375,13 +375,13 @@ export function AIGenerateModal() {
               Clear prompt
             </button>
             <div className="my-1 border-t border-app-border-subtle" role="separator" />
-            <p className="px-3 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wide text-app-subtle">
+            <p className="px-3 pb-1 pt-1 section-heading">
               Import
             </p>
             <button
               type="button"
               role="menuitem"
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-app-fg hover:bg-app-hover"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-ui text-app-fg hover:bg-app-hover"
               onClick={() => {
                 setToolsOpen(false);
                 openImportFigmaModal();
@@ -393,7 +393,7 @@ export function AIGenerateModal() {
             <button
               type="button"
               role="menuitem"
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-app-fg hover:bg-app-hover"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-ui text-app-fg hover:bg-app-hover"
               onClick={() => {
                 setToolsOpen(false);
                 openCodeRoundTrip("import");
@@ -446,7 +446,7 @@ export function AIGenerateModal() {
                   runGenerate();
                 }
               }}
-              className="min-h-[108px] w-full resize-none border-0 bg-transparent px-5 pb-2 pt-5 pr-12 text-[15px] leading-relaxed text-app-fg outline-none ring-0 placeholder:text-app-muted disabled:opacity-50"
+              className="min-h-[108px] w-full resize-none border-0 bg-transparent px-5 pb-2 pt-5 pr-12 text-base leading-relaxed text-app-fg outline-none ring-0 placeholder:text-app-muted disabled:opacity-50"
             />
 
             <AIContextAttachments
@@ -477,7 +477,7 @@ export function AIGenerateModal() {
                   aria-expanded={toolsOpen}
                   onClick={() => setToolsOpen((v) => !v)}
                   className={cn(
-                    "inline-flex h-8 items-center gap-1.5 rounded-full border border-app-border bg-app-panel px-3 text-[12px] font-medium text-app-muted transition-colors",
+                    "inline-flex h-8 items-center gap-1.5 rounded-full border border-app-border bg-app-panel px-3 text-ui font-medium text-app-muted transition-colors",
                     "hover:bg-app-hover hover:text-app-fg",
                     toolsOpen && "border-accent/40 bg-app-hover text-app-fg",
                   )}
@@ -549,17 +549,17 @@ export function AIGenerateModal() {
             </div>
 
             {loading ? (
-              <p className="border-t border-app-border-subtle px-4 py-2 text-center text-[11px] text-app-muted">
+              <p className="border-t border-app-border-subtle px-4 py-2 text-center text-ui text-app-muted">
                 {LOADING_STEPS[loadStep] ?? LOADING_STEPS[0]} · {selectedModel?.label ?? modelId}
               </p>
             ) : null}
             {styleGuideMode === "design-md" && contextCount === 0 && !loading ? (
-              <p className="border-t border-amber-500/30 bg-amber-500/10 px-4 py-2 text-center text-[11px] text-amber-100">
+              <p className="border-t border-amber-500/30 bg-amber-500/10 px-4 py-2 text-center text-ui text-amber-100">
                 Add or select a Design.md file in Style Guide so generation uses your brand tokens and typography.
               </p>
             ) : null}
             {generateError ? (
-              <p className="border-t border-rose-500/30 bg-rose-500/10 px-4 py-2 text-center text-[11px] text-rose-200">
+              <p className="border-t border-rose-500/30 bg-rose-500/10 px-4 py-2 text-center text-ui text-rose-200">
                 {generateError}
               </p>
             ) : null}
@@ -582,7 +582,7 @@ export function AIGenerateModal() {
                 <button
                   type="button"
                   onClick={openInEditor}
-                  className="w-full rounded-full bg-accent py-2.5 text-[13px] font-semibold text-white hover:brightness-110"
+                  className="w-full rounded-full bg-accent py-2.5 text-ui-sm font-semibold text-white hover:brightness-110"
                 >
                   Open in editor
                 </button>
@@ -591,14 +591,14 @@ export function AIGenerateModal() {
                   <button
                     type="button"
                     onClick={applyReplace}
-                    className="flex-1 rounded-full border border-app-border bg-app-panel py-2 text-[12px] font-semibold text-app-fg transition-colors hover:bg-app-hover"
+                    className="flex-1 rounded-full border border-app-border bg-app-panel py-2 text-ui font-semibold text-app-fg transition-colors hover:bg-app-hover"
                   >
                     Replace file
                   </button>
                   <button
                     type="button"
                     onClick={applyAppend}
-                    className="flex-1 rounded-full border border-accent/40 bg-accent/10 py-2 text-[12px] font-semibold text-accent transition-colors hover:bg-accent/20"
+                    className="flex-1 rounded-full border border-accent/40 bg-accent/10 py-2 text-ui font-semibold text-accent transition-colors hover:bg-accent/20"
                   >
                     Add to file
                   </button>
@@ -607,7 +607,7 @@ export function AIGenerateModal() {
               <button
                 type="button"
                 onClick={() => setResult(null)}
-                className="text-center text-[12px] font-medium text-app-muted hover:text-app-fg"
+                className="text-center text-ui font-medium text-app-muted hover:text-app-fg"
               >
                 ← Edit prompt
               </button>
@@ -623,13 +623,13 @@ export function AIGenerateModal() {
 function PreviewPanel({ preview }: { preview: AIGeneratePreview }) {
   return (
     <div className="rounded-xl border border-app-border bg-app-inset p-4">
-      <p className="text-[14px] font-semibold text-app-fg">{preview.fileName}</p>
-      <p className="mt-1 text-[12px] text-app-muted">{preview.flowLabel}</p>
+      <p className="text-sm font-semibold text-app-fg">{preview.fileName}</p>
+      <p className="mt-1 text-ui text-app-muted">{preview.flowLabel}</p>
       {preview.detectedIntent ? (
-        <p className="mt-1 text-[11px] text-violet-300">Detected: {preview.detectedIntent}</p>
+        <p className="mt-1 text-ui text-violet-300">Detected: {preview.detectedIntent}</p>
       ) : null}
       {preview.modelLabel ? (
-        <p className="mt-1 text-[11px] text-app-subtle">
+        <p className="mt-1 text-ui text-app-subtle">
           {preview.modelLabel}
           {preview.generationSource === "llm" ? " · from your prompt" : ""}
           {preview.contextAttachmentCount
@@ -638,12 +638,12 @@ function PreviewPanel({ preview }: { preview: AIGeneratePreview }) {
         </p>
       ) : null}
       {preview.warning ? (
-        <p className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-snug text-amber-100/90">
+        <p className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-ui leading-snug text-amber-100/90">
           {preview.warning}
         </p>
       ) : null}
       <div className="mt-3 flex flex-wrap items-center gap-3">
-        <span className="text-[12px] text-app-muted">
+        <span className="text-ui text-app-muted">
           <span className="font-medium text-app-fg">{preview.frameCount}</span> frames
         </span>
         <div className="flex items-center gap-1">

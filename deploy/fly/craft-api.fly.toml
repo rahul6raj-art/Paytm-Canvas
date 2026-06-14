@@ -1,0 +1,46 @@
+# Fly.io — craft-api
+# Deploy from repo root:
+#   fly apps create craft-api
+#   fly deploy -c deploy/fly/craft-api.fly.toml
+#   fly secrets set DATABASE_URL=... REDIS_URL=... S3_ACCESS_KEY=... S3_SECRET_KEY=... -a craft-api
+
+app = "craft-api"
+primary_region = "bom"
+
+[build]
+  dockerfile = "packages/craft-api/Dockerfile"
+  context = "."
+
+[env]
+  CRAFT_API_ENV = "production"
+  CRAFT_API_ALLOW_ANON = "0"
+  CRAFT_API_COOKIE_SECURE = "1"
+  CRAFT_API_TRUST_PROXY = "1"
+  CRAFT_API_RBAC = "1"
+  CRAFT_API_PORT = "4000"
+  # Set via fly secrets or fly.toml after first deploy:
+  # CRAFT_API_CORS_ORIGIN, CRAFT_APP_URL, S3_*, CRAFT_SMTP_*
+
+[http_service]
+  internal_port = 4000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 250
+    soft_limit = 200
+
+  [[http_service.checks]]
+    grace_period = "15s"
+    interval = "30s"
+    method = "GET"
+    path = "/health"
+    timeout = "5s"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

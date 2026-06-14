@@ -5,6 +5,7 @@ import {
   effectiveLayerBlendMode,
   figmaBlendModeToLayer,
   layerBlendModeToCss,
+  svgLayerBlendStyleAttr,
 } from "@/lib/layerBlendMode";
 
 describe("layerBlendMode", () => {
@@ -41,5 +42,21 @@ describe("layerBlendMode", () => {
       effectiveLayerBlendMode({ type: "rectangle", blendMode: "pass-through" }),
       "normal",
     );
+  });
+
+  it("emits SVG style attr for blend modes", () => {
+    assert.match(
+      svgLayerBlendStyleAttr({ type: "rectangle", blendMode: "multiply" }),
+      /mix-blend-mode:multiply/,
+    );
+    assert.match(
+      svgLayerBlendStyleAttr({ type: "rectangle", blendMode: "screen" }),
+      /mix-blend-mode:screen/,
+    );
+    assert.match(
+      svgLayerBlendStyleAttr({ type: "frame", blendMode: "normal" }),
+      /isolation:isolate/,
+    );
+    assert.equal(svgLayerBlendStyleAttr({ type: "frame", blendMode: "pass-through" }), "");
   });
 });

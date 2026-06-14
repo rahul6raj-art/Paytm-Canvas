@@ -34,7 +34,7 @@ export type ShapeModel = {
 export const DEFAULT_SHAPE_FILL = "#cfcfcf";
 /** Default fill for frame / device screen nodes. */
 export const DEFAULT_FRAME_FILL = "#ffffff";
-export const DEFAULT_SHAPE_STROKE = "#0f172a";
+export const DEFAULT_SHAPE_STROKE = "#ffffff";
 /** Filled shapes start with no stroke; lines/arrows set width explicitly at creation. */
 export const DEFAULT_STROKE_WIDTH = 0;
 

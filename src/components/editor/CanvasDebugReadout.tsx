@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { isPaytmCraftDebugCanvas } from "@/lib/env";
+import { isNativeRendererEnabled } from "@/lib/craftPublicConfig";
+import { readCraftEngineDiagnostics, type CraftEngineDiagnostics } from "@/engine/craftEngineDiagnostics";
 import { worldRect } from "@/lib/tree";
 import { CANVAS_VIEWPORT_SELECTOR } from "@/lib/viewportZoom";
 import { clientToWorldFromDocument } from "@/lib/canvasCoordinates";
@@ -18,6 +20,26 @@ export function CanvasDebugReadout() {
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const nodes = useEditorStore((s) => s.nodes);
   const [cursor, setCursor] = useState({ x: 0, y: 0 });
+  const [engine, setEngine] = useState<CraftEngineDiagnostics | null>(null);
+
+  useEffect(() => {
+    if (!enabled || !isNativeRendererEnabled()) {
+      setEngine(null);
+      return;
+    }
+    let cancelled = false;
+    const poll = () => {
+      void readCraftEngineDiagnostics().then((d) => {
+        if (!cancelled) setEngine(d);
+      });
+    };
+    poll();
+    const id = window.setInterval(poll, 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [enabled]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -55,7 +77,7 @@ export function CanvasDebugReadout() {
 
   return (
     <div
-      className="hidden min-w-0 flex-1 items-center justify-center gap-3 truncate font-mono text-[10px] text-app-subtle md:flex"
+      className="hidden min-w-0 flex-1 items-center justify-center gap-3 truncate font-mono text-ui text-app-subtle md:flex"
       title="Canvas debug (NEXT_PUBLIC_PAYTM_CRAFT_DEBUG_CANVAS=true)"
     >
       <span>zoom {fmt(zoom * 100, 0)}%</span>
@@ -63,6 +85,16 @@ export function CanvasDebugReadout() {
       <span>cursor {fmt(cursor.x)},{fmt(cursor.y)}</span>
       <span>sel {selRect}</span>
       {!hasViewport ? <span className="text-amber-600">no viewport</span> : null}
+      {engine?.ready ? (
+        <>
+          <span>gpu {engine.backend}</span>
+          <span>v{engine.version ?? "?"}</span>
+          <span>tiles {engine.tileCacheLen ?? 0}</span>
+          <span>atlas {engine.atlasImageCount ?? 0}</span>
+        </>
+      ) : isNativeRendererEnabled() ? (
+        <span className="text-amber-600">wasm pending</span>
+      ) : null}
     </div>
   );
 }

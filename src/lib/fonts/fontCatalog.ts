@@ -1,7 +1,7 @@
 import { GOOGLE_FONTS, cssFamilyForGoogleFont } from "./googleFonts";
 import { SYSTEM_FONT_OPTIONS } from "./systemFonts";
 
-export type FontSource = "google" | "system" | "installed";
+export type FontSource = "google" | "system" | "installed" | "uploaded";
 
 export type FontFamilyOption = {
   id: string;
@@ -28,18 +28,31 @@ const googleOptions: FontFamilyOption[] = GOOGLE_FONTS.map((entry) => ({
 
 let cachedCatalog: FontCatalogGroup[] | null = null;
 let installedFontsCache: FontFamilyOption[] = [];
+let uploadedFontsCache: FontFamilyOption[] = [];
 
 export function setInstalledFontOptions(fonts: FontFamilyOption[]): void {
   installedFontsCache = fonts;
   cachedCatalog = null;
 }
 
-export function buildFontCatalog(installed: FontFamilyOption[] = installedFontsCache): FontCatalogGroup[] {
-  if (cachedCatalog && installed === installedFontsCache) return cachedCatalog;
+export function setUploadedFontOptions(fonts: FontFamilyOption[]): void {
+  uploadedFontsCache = fonts;
+  cachedCatalog = null;
+}
+
+export function buildFontCatalog(
+  installed: FontFamilyOption[] = installedFontsCache,
+  uploaded: FontFamilyOption[] = uploadedFontsCache,
+): FontCatalogGroup[] {
+  if (cachedCatalog && installed === installedFontsCache && uploaded === uploadedFontsCache) {
+    return cachedCatalog;
+  }
 
   const installedSorted = [...installed].sort((a, b) => a.label.localeCompare(b.label));
+  const uploadedSorted = [...uploaded].sort((a, b) => a.label.localeCompare(b.label));
 
   cachedCatalog = [
+    { id: "uploaded", label: "Uploaded fonts", fonts: uploadedSorted },
     { id: "installed", label: "Installed on this device", fonts: installedSorted },
     { id: "google", label: "Open source (Google Fonts)", fonts: googleOptions },
     { id: "system", label: "System & generic", fonts: SYSTEM_FONT_OPTIONS },

@@ -19,22 +19,22 @@ import { cn } from "@/lib/utils";
 function Section({ title, rows }: { title: string; rows: ShortcutRow[] }) {
   return (
     <section className="mb-4 last:mb-0">
-      <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-app-subtle">
+      <h3 className="mb-1.5 section-heading">
         {title}
       </h3>
       <ul className="space-y-0.5">
         {rows.map((r) => (
           <li
             key={`${title}-${r.keys}-${r.label}`}
-            className="flex items-baseline justify-between gap-4 text-[12px] leading-snug"
+            className="flex items-baseline justify-between gap-4 text-ui leading-snug"
           >
             <span className="min-w-0 text-app-muted">
               {r.label}
               {r.note ? (
-                <span className="block text-[10px] text-app-subtle">{r.note}</span>
+                <span className="block text-ui text-app-subtle">{r.note}</span>
               ) : null}
             </span>
-            <span className="shrink-0 text-right text-[11px] tabular-nums text-app-subtle">
+            <span className="shrink-0 text-right text-ui tabular-nums text-app-subtle">
               {r.keys ? formatShortcutLabel(r.keys) : "—"}
             </span>
           </li>
@@ -78,8 +78,8 @@ export function ShortcutOverlay() {
       >
         <div className="mb-3 flex items-start justify-between gap-2">
           <div>
-            <h2 className="text-[14px] font-semibold text-white">Keyboard shortcuts</h2>
-            <p className="mt-0.5 text-[11px] text-app-subtle">
+            <h2 className="text-sm font-semibold text-white">Keyboard shortcuts</h2>
+            <p className="mt-0.5 text-ui text-app-subtle">
               Figma-style bindings · ⌘ = Ctrl on Windows / Linux
             </p>
           </div>
@@ -87,7 +87,7 @@ export function ShortcutOverlay() {
             type="button"
             onClick={() => setOpen(false)}
             className={cn(
-              "rounded-md border border-app-border px-2 py-1 text-[11px] font-medium text-app-muted",
+              "rounded-md border border-app-border px-2 py-1 text-ui font-medium text-app-muted",
               "hover:bg-app-hover hover:text-app-fg",
             )}
           >

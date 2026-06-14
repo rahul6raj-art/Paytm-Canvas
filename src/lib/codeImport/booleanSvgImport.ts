@@ -72,10 +72,29 @@ function collectPathRows(el: HtmlImportElement): SvgPathRow[] {
   return [];
 }
 
+function splitPathDContours(d: string): string[] {
+  const parts = d.match(/M[^M]*/gi)?.map((s) => s.trim()).filter(Boolean) ?? [];
+  return parts.map((p) => (/[zZ]\s*$/.test(p) ? p : `${p} Z`));
+}
+
 function operandsFromPathRows(
   all: SvgPathRow[],
   operation: BooleanOperation,
 ): { operandDs: string[]; fill: string } | null {
+
+  /** Clipper2 canonical export: single filled path, possibly multi-contour. */
+  const clipperComposite = all.filter(
+    (p) => isHexFill(p.fill) && p.d && !p.mask,
+  );
+  if (clipperComposite.length === 1 && clipperComposite[0]!.d) {
+    const contours = splitPathDContours(clipperComposite[0]!.d);
+    if (contours.length > 0) {
+      return {
+        operandDs: contours,
+        fill: clipperComposite[0]!.fill ?? DEFAULT_SHAPE_FILL,
+      };
+    }
+  }
 
   if (operation === "subtract") {
     const base = all.find((p) => p.fill?.toLowerCase() === "white" && p.d);

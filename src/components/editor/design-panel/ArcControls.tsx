@@ -6,9 +6,10 @@ import {
   sweepDegToPercent,
   sweepPercentToDeg,
 } from "@/lib/shapes/ellipseArc";
-import { appFieldClass } from "@/lib/appFieldStyles";
+import { appFieldClass, appFieldRadius } from "@/lib/appFieldStyles";
 import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
+import { inspectorInlineSvgClass } from "@/lib/inspectorIconStyles";
 import type { EditorNode, NodeStylePatch } from "@/stores/useEditorStore";
 
 function ArcStartIcon({ className }: { className?: string }) {
@@ -16,20 +17,21 @@ function ArcStartIcon({ className }: { className?: string }) {
     <svg
       viewBox="0 0 16 16"
       aria-hidden
-      className={cn("h-3.5 w-3.5 shrink-0 text-app-subtle", className)}
+      className={inspectorInlineSvgClass(className)}
+      shapeRendering="geometricPrecision"
     >
       <path
         d="M8 2.5a5.5 5.5 0 1 1-4.2 9.1"
         fill="none"
         stroke="currentColor"
-        strokeWidth="1.35"
+        strokeWidth="1.5"
         strokeLinecap="round"
       />
       <path
         d="M3.8 11.6 L3.2 8.8 M3.8 11.6 L6.4 10.8"
         fill="none"
         stroke="currentColor"
-        strokeWidth="1.35"
+        strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -68,7 +70,7 @@ function ArcSegmentInput({
         className={cn(
           appFieldClass,
           "h-full min-h-0 flex-1 border-0 bg-transparent px-1.5 shadow-none ring-0 focus-visible:ring-0",
-          "text-[11px] tabular-nums",
+          "text-ui tabular-nums",
           inputClassName,
         )}
         value={value}
@@ -183,10 +185,11 @@ export function ArcControls({
 
   return (
     <div>
-      <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">Arc</div>
+      <div className="inspector-field-label">Arc</div>
       <div
         className={cn(
-          "flex h-6 divide-x divide-app-border overflow-hidden rounded border border-app-border bg-app-field",
+          "flex h-6 divide-x divide-app-border overflow-hidden border border-app-border bg-app-field",
+          appFieldRadius,
           locked && "opacity-45",
         )}
       >

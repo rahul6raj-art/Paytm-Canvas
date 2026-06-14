@@ -150,6 +150,10 @@ export function finalizeImportedGraph(
 
   next = hugFrameHeights(next, childOrder);
 
+  layoutMap = editorNodesToLayoutMap(next);
+  layoutMap = applyDeepAutoLayoutAll(layoutMap, childOrder);
+  next = mergeLayoutIntoEditorNodes(next, layoutMap);
+
   for (const rootId of childOrder[EDITOR_ROOT_KEY] ?? []) {
     const root = next[rootId];
     if (!root) continue;

@@ -23,8 +23,8 @@ export function PresenceActivityFeed() {
 
   return (
     <div className="flex max-w-[min(52vw,420px)] min-w-0 flex-1 flex-col items-end justify-center text-right">
-      <span className="mb-0.5 text-[9px] font-semibold uppercase tracking-wide text-app-subtle">Activity</span>
-      <ul className="max-h-[52px] w-full space-y-0.5 overflow-hidden text-[10px] leading-snug text-[#b5b5b5]">
+      <span className="section-heading mb-0.5">Activity</span>
+      <ul className="max-h-[52px] w-full space-y-0.5 overflow-hidden text-ui leading-snug text-app-subtle">
         {slice.length === 0 ? (
           <li className="text-app-subtle">Collaborators will appear here.</li>
         ) : (

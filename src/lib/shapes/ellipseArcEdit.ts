@@ -1,10 +1,10 @@
 import type { EditorNode } from "@/stores/useEditorStore";
 import {
   arcInnerRadiusRatioFromPointer,
-  degreesFromLocalPoint,
   effectiveEllipseArc,
   ellipseEndAngleUnwrapped,
   isFullEllipseArc,
+  parametricDegreesFromLocalPoint,
   startDegAndSweepFromStartHandleDrag,
   sweepDegFromEndHandleDrag,
 } from "@/lib/shapes/ellipseArc";
@@ -21,6 +21,8 @@ export function ellipseArcPatchFromDrag(
   const arc = effectiveEllipseArc(node);
   const cx = node.width / 2;
   const cy = node.height / 2;
+  const rx = node.width / 2;
+  const ry = node.height / 2;
 
   if (kind === "ellipseArcRatio") {
     const ratio = arcInnerRadiusRatioFromPointer(node.width, node.height, localX, localY, opts);
@@ -28,14 +30,14 @@ export function ellipseArcPatchFromDrag(
   }
 
   if (kind === "ellipseArcStart") {
-    const moveAngle = degreesFromLocalPoint(cx, cy, localX, localY);
+    const moveAngle = parametricDegreesFromLocalPoint(cx, cy, rx, ry, localX, localY);
     const fixedEnd = ellipseEndAngleUnwrapped(arc.startDeg, arc.sweepDeg, moveAngle);
     const next = startDegAndSweepFromStartHandleDrag(fixedEnd, moveAngle, opts);
     return { arcStartDeg: next.startDeg, arcSweepDeg: next.sweepDeg };
   }
 
   if (kind === "ellipseArcEnd" || kind === "ellipseArcSweep") {
-    const moveAngle = degreesFromLocalPoint(cx, cy, localX, localY);
+    const moveAngle = parametricDegreesFromLocalPoint(cx, cy, rx, ry, localX, localY);
     const fixedEnd = ellipseEndAngleUnwrapped(arc.startDeg, arc.sweepDeg, moveAngle);
     const sweepDeg = sweepDegFromEndHandleDrag(arc.startDeg, fixedEnd, moveAngle, {
       shiftKey: opts?.shiftKey,

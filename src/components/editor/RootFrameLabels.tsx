@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { cancelCanvasMarqueeSession } from "@/lib/canvasMarqueeSession";
 import { useCanvasChromeForeground } from "@/hooks/useCanvasChromeForeground";
 import type { CanvasChromeForeground } from "@/lib/canvasForeground";
@@ -10,40 +10,71 @@ import {
   canCanvasObjectDrag,
   isCanvasSelectTool,
 } from "@/lib/canvasInteractionGuards";
-import { CANVAS_VISUAL, screenPxToWorld } from "@/lib/canvasVisual";
+import { screenPxToOverlay, worldPointToOverlay } from "@/lib/canvasOverlaySpace";
+import {
+  CANVAS_FRAME_LABEL_FONT_SCREEN_PX,
+  CANVAS_FRAME_LABEL_OFFSET_SCREEN_PX,
+  CANVAS_VISUAL,
+} from "@/lib/canvasVisual";
+import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
+import {
+  getDragPreviewOffsetForIds,
+  getDragPreviewSnapshot,
+  subscribeDragPreview,
+} from "@/lib/canvasEphemeralTransform";
 import { getRenderedWorldTopLeft } from "@/lib/editorGraph";
 import { applyMoveToolPointerSelection, isAdditiveSelectionClick } from "@/lib/containerSelection";
 import { releaseFieldFocusForCanvas } from "@/lib/editorKeyboardFocus";
 import { cn } from "@/lib/utils";
-import { useEditorStore } from "@/stores/useEditorStore";
+import { useEditorStore, type EditorNode } from "@/stores/useEditorStore";
 import { useCanvasToWorld } from "./CanvasToWorldContext";
+import { useCanvasOverlaySpace } from "./useCanvasOverlaySpace";
 
 type RootFrameLabelsProps = {
   rootIds: string[];
 };
 
-/** Every visible frame gets a canvas title (root + nested auto-layout frames, etc.). */
+/** Canvas titles for page roots and top-level artboards only (not every nested auto-layout frame). */
 function frameLabelIds(
-  nodes: Record<string, { id: string; type: string; visible: boolean }>,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
 ): string[] {
+  const canvasRoots = new Set(childOrder[EDITOR_ROOT_KEY] ?? []);
+  const artboardIds = new Set<string>();
+  for (const rootId of canvasRoots) {
+    for (const childId of childOrder[rootId] ?? []) {
+      artboardIds.add(childId);
+    }
+  }
+
   return Object.values(nodes)
-    .filter((n) => n.type === "frame" && n.visible)
+    .filter((n) => {
+      if (n.type !== "frame" || !n.visible) return false;
+      if (canvasRoots.has(n.id)) return true;
+      if (artboardIds.has(n.id)) {
+        if (n.codeJsxTag || n.codeClassName) return false;
+        return n.width >= 200 && n.height >= 120;
+      }
+      return false;
+    })
     .map((n) => n.id);
 }
 
 export function RootFrameLabels({ rootIds }: RootFrameLabelsProps) {
   const nodes = useEditorStore((s) => s.nodes);
   const childOrder = useEditorStore((s) => s.childOrder);
-  const zoom = useEditorStore((s) => s.zoom);
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const layerRenameId = useEditorStore((s) => s.layerRenameId);
   const setLayerRenameId = useEditorStore((s) => s.setLayerRenameId);
   const renameNode = useEditorStore((s) => s.renameNode);
   const chrome = useCanvasChromeForeground();
+  const overlay = useCanvasOverlaySpace();
+  const dragPreview = useSyncExternalStore(subscribeDragPreview, getDragPreviewSnapshot, () => null);
+  void dragPreview;
 
-  const labelOffset = screenPxToWorld(18, zoom);
-  const labelFontSize = screenPxToWorld(11, zoom);
-  const labelIds = useMemo(() => frameLabelIds(nodes), [nodes]);
+  const labelOffset = screenPxToOverlay(CANVAS_FRAME_LABEL_OFFSET_SCREEN_PX, overlay);
+  const labelFontSize = screenPxToOverlay(CANVAS_FRAME_LABEL_FONT_SCREEN_PX, overlay);
+  const labelIds = useMemo(() => frameLabelIds(nodes, childOrder), [nodes, childOrder]);
   const orderedLabelIds = useMemo(() => {
     const rootSet = new Set(rootIds);
     const roots = rootIds.filter((id) => nodes[id]?.type === "frame" && nodes[id]?.visible);
@@ -61,14 +92,20 @@ export function RootFrameLabels({ rootIds }: RootFrameLabelsProps) {
         const renaming = layerRenameId === rid;
 
         const origin = getRenderedWorldTopLeft(rid, nodes, childOrder);
+        const dragOffset = getDragPreviewOffsetForIds([rid]);
+        const labelPos = worldPointToOverlay(
+          origin.x + dragOffset.dx,
+          origin.y + dragOffset.dy,
+          overlay,
+        );
 
         return (
           <FrameLabel
             key={rid}
             frameId={rid}
             name={node.name}
-            left={origin.x}
-            top={origin.y - labelOffset}
+            left={labelPos.x}
+            top={labelPos.y - labelOffset}
             fontSize={labelFontSize}
             selected={selected}
             locked={node.locked}
@@ -191,6 +228,7 @@ function FrameLabel({
         clientY: e.clientY,
         clientToWorld,
         captureTarget: e.currentTarget,
+        fromAltDragDuplicate: e.altKey,
       });
     },
     [
@@ -227,7 +265,7 @@ function FrameLabel({
 
   return (
     <div
-      className="pointer-events-auto absolute z-20 max-w-[min(100%,320px)]"
+      className="pointer-events-auto absolute z-[8] max-w-[320px]"
       style={{ left, top }}
       data-frame-label={frameId}
       onDoubleClick={(e) => e.stopPropagation()}

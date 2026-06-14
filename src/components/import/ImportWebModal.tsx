@@ -143,8 +143,8 @@ export function ImportWebModal() {
               <Globe className="h-5 w-5" strokeWidth={1.75} />
             </span>
             <div>
-              <h2 className="text-[15px] font-semibold text-white">Import from Web</h2>
-              <p className="text-[12px] text-app-muted">Capture a live site or HTML into the canvas.</p>
+              <h2 className="text-base font-semibold text-white">Import from Web</h2>
+              <p className="text-ui text-app-muted">Capture a live site or HTML into the canvas.</p>
             </div>
           </div>
           <button
@@ -161,7 +161,7 @@ export function ImportWebModal() {
         <div className="max-h-[min(72vh,640px)] overflow-y-auto px-5 py-4">
           {loading ? (
             <div className="space-y-4 py-4">
-              <div className="flex items-center gap-2 text-[13px] text-white">
+              <div className="flex items-center gap-2 text-ui-sm text-white">
                 <Loader2 className="h-4 w-4 animate-spin text-sky-400" />
                 Importing…
               </div>
@@ -173,7 +173,7 @@ export function ImportWebModal() {
                     <li
                       key={step.id}
                       className={cn(
-                        "flex items-center gap-2 rounded-lg px-3 py-2 text-[12px]",
+                        "flex items-center gap-2 rounded-lg px-3 py-2 text-ui",
                         active && "bg-app-hover text-white",
                         done && !active && "text-emerald-400",
                         !done && !active && "text-app-subtle",
@@ -181,7 +181,7 @@ export function ImportWebModal() {
                     >
                       <span
                         className={cn(
-                          "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold",
+                          "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-ui font-semibold",
                           done ? "bg-emerald-500/20 text-emerald-400" : active ? "bg-sky-500/30 text-sky-300" : "bg-app-hover",
                         )}
                       >
@@ -196,7 +196,7 @@ export function ImportWebModal() {
           ) : (
             <div className="space-y-4">
               <label className="block">
-                <span className="mb-1.5 block text-[11px] font-medium uppercase tracking-wide text-app-muted">
+                <span className="mb-1.5 block section-heading text-app-muted">
                   Website URL
                 </span>
                 <input
@@ -204,12 +204,12 @@ export function ImportWebModal() {
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   placeholder="https://example.com"
-                  className="h-10 w-full rounded-lg border border-app-border bg-app-hover px-3 text-[13px] text-white outline-none ring-sky-500/30 placeholder:text-app-subtle focus:border-sky-500/50 focus:ring-2"
+                  className="h-10 w-full rounded-lg border border-app-border bg-app-hover px-3 text-ui-sm text-white outline-none ring-sky-500/30 placeholder:text-app-subtle focus:border-sky-500/50 focus:ring-2"
                 />
               </label>
 
               <label className="block">
-                <span className="mb-1.5 block text-[11px] font-medium uppercase tracking-wide text-app-muted">
+                <span className="mb-1.5 block section-heading text-app-muted">
                   Raw HTML (optional)
                 </span>
                 <textarea
@@ -217,12 +217,12 @@ export function ImportWebModal() {
                   onChange={(e) => setHtml(e.target.value)}
                   rows={4}
                   placeholder="<html>…</html>"
-                  className="w-full resize-y rounded-lg border border-app-border bg-app-hover px-3 py-2 font-mono text-[12px] text-white outline-none ring-sky-500/30 placeholder:text-app-subtle focus:border-sky-500/50 focus:ring-2"
+                  className="w-full resize-y rounded-lg border border-app-border bg-app-hover px-3 py-2 font-mono text-ui text-white outline-none ring-sky-500/30 placeholder:text-app-subtle focus:border-sky-500/50 focus:ring-2"
                 />
               </label>
 
               <fieldset>
-                <legend className="mb-2 text-[11px] font-medium uppercase tracking-wide text-app-muted">
+                <legend className="mb-2 section-heading text-app-muted">
                   Import mode
                 </legend>
                 <div className="space-y-2">
@@ -244,8 +244,8 @@ export function ImportWebModal() {
                         className="mt-1"
                       />
                       <span>
-                        <span className="block text-[13px] font-medium text-white">{m.label}</span>
-                        <span className="text-[11px] text-app-muted">{m.hint}</span>
+                        <span className="block text-ui-sm font-medium text-white">{m.label}</span>
+                        <span className="text-ui text-app-muted">{m.hint}</span>
                       </span>
                     </label>
                   ))}
@@ -253,7 +253,7 @@ export function ImportWebModal() {
               </fieldset>
 
               <fieldset>
-                <legend className="mb-2 text-[11px] font-medium uppercase tracking-wide text-app-muted">
+                <legend className="mb-2 section-heading text-app-muted">
                   Viewport
                 </legend>
                 <div className="flex flex-wrap gap-2">
@@ -270,7 +270,7 @@ export function ImportWebModal() {
                       type="button"
                       onClick={() => setViewportPreset(id)}
                       className={cn(
-                        "rounded-lg border px-2.5 py-1.5 text-[11px] font-medium transition-colors",
+                        "rounded-lg border px-2.5 py-1.5 text-ui font-medium transition-colors",
                         viewportPreset === id
                           ? "border-sky-500/50 bg-sky-500/15 text-sky-200"
                           : "border-app-border text-app-muted hover:border-white/[0.2]",
@@ -288,7 +288,7 @@ export function ImportWebModal() {
                       max={4096}
                       value={customW}
                       onChange={(e) => setCustomW(Number(e.target.value))}
-                      className="h-9 w-24 rounded-lg border border-app-border bg-app-hover px-2 text-[12px] text-white"
+                      className="h-9 w-24 rounded-lg border border-app-border bg-app-hover px-2 text-ui text-white"
                       aria-label="Viewport width"
                     />
                     <span className="self-center text-app-subtle">×</span>
@@ -298,7 +298,7 @@ export function ImportWebModal() {
                       max={4096}
                       value={customH}
                       onChange={(e) => setCustomH(Number(e.target.value))}
-                      className="h-9 w-24 rounded-lg border border-app-border bg-app-hover px-2 text-[12px] text-white"
+                      className="h-9 w-24 rounded-lg border border-app-border bg-app-hover px-2 text-ui text-white"
                       aria-label="Viewport height"
                     />
                   </div>
@@ -306,7 +306,7 @@ export function ImportWebModal() {
               </fieldset>
 
               {error ? (
-                <pre className="whitespace-pre-wrap rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 font-sans text-[12px] leading-relaxed text-red-300">
+                <pre className="whitespace-pre-wrap rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 font-sans text-ui leading-relaxed text-red-300">
                   {error}
                 </pre>
               ) : null}
@@ -319,7 +319,7 @@ export function ImportWebModal() {
             type="button"
             disabled={loading}
             onClick={() => closeImportWebModal()}
-            className="rounded-lg px-4 py-2 text-[13px] font-medium text-app-muted hover:bg-app-hover hover:text-white disabled:opacity-40"
+            className="rounded-lg px-4 py-2 text-ui-sm font-medium text-app-muted hover:bg-app-hover hover:text-white disabled:opacity-40"
           >
             Cancel
           </button>
@@ -327,7 +327,7 @@ export function ImportWebModal() {
             type="button"
             disabled={loading}
             onClick={() => void runImport()}
-            className="rounded-lg bg-sky-600 px-4 py-2 text-[13px] font-semibold text-white hover:bg-sky-500 disabled:opacity-50"
+            className="rounded-lg bg-sky-600 px-4 py-2 text-ui-sm font-semibold text-white hover:bg-sky-500 disabled:opacity-50"
           >
             {loading ? "Importing…" : "Import to canvas"}
           </button>

@@ -52,7 +52,7 @@ export function TextEditPortal({ nodeId }: TextEditPortalProps) {
   const applyContent = useCallback(
     (content: string, anchor: number, focus: number) => {
       if (!nodeRaw || nodeRaw.type !== "text") return;
-      const layoutPatch = textLayoutPatchForNode(nodeRaw, content);
+      const layoutPatch = textLayoutPatchForNode({ ...nodeRaw, content }, content);
       updateNodeStyle(nodeId, { content, ...layoutPatch }, { skipHistory: true });
       setTextEditSelection(anchor, focus);
       syncTextareaSelection(anchor, focus);

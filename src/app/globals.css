@@ -3,6 +3,26 @@
 @tailwind utilities;
 
 :root {
+  /* Global UI scale — fonts, icons, and rem-based spacing */
+  --ui-scale: 1;
+  --ui-font-ui: calc(12px * var(--ui-scale));
+  --ui-leading-ui: calc(17px * var(--ui-scale));
+  /* Single chrome type scale — legacy tokens alias to ui for minimal rhythm */
+  --ui-font-nano: var(--ui-font-ui);
+  --ui-leading-nano: var(--ui-leading-ui);
+  --ui-font-micro: var(--ui-font-ui);
+  --ui-leading-micro: var(--ui-leading-ui);
+  --ui-font-caption: var(--ui-font-ui);
+  --ui-leading-caption: var(--ui-leading-ui);
+  --ui-font-inspector: var(--ui-font-ui);
+  --ui-leading-inspector: var(--ui-leading-ui);
+  --ui-font-2xs: var(--ui-font-ui);
+  --ui-leading-2xs: var(--ui-leading-ui);
+  --ui-font-ui-sm: var(--ui-font-ui);
+  --ui-leading-ui-sm: var(--ui-leading-ui);
+  --ui-icon-toolbar: calc(15px * var(--ui-scale));
+  --ui-icon-canvas-rail: calc(18px * var(--ui-scale));
+
   --app-bg: 0 0% 96%;
   --app-fg: 0 0% 9%;
   --app-muted: 0 0% 40%;
@@ -15,6 +35,7 @@
   --app-border: 0 0% 0%;
   --app-border-opacity: 0.1;
   --app-border-subtle-opacity: 0.06;
+  --app-panel-edge-opacity: 0.14;
   --app-hover: 0 0% 0%;
   --app-hover-opacity: 0.05;
   --app-overlay: 0 0% 0%;
@@ -38,33 +59,36 @@
   --pc-canvas-group-outline: rgba(15, 23, 42, 0.1);
   --pc-canvas-boolean-outline: rgba(24, 160, 251, 0.35);
   --pc-canvas-mask-outline: rgba(168, 85, 247, 0.35);
+  /* Pasteboard workspace — follows app chrome (see displayCanvasBackground) */
+  --pc-canvas-workspace: 0 0% 91%;
   color-scheme: light;
 }
 
 .dark {
-  --app-bg: 0 0% 17%;
+  --app-bg: 0 0% 10%;
   --app-fg: 0 0% 90%;
-  --app-muted: 0 0% 62%;
-  --app-subtle: 0 0% 48%;
-  --app-panel: 0 0% 20%;
-  --app-surface: 0 0% 12%;
-  --app-raised: 0 0% 22%;
-  --app-card: 0 0% 20%;
-  --app-inset: 0 0% 14%;
+  --app-muted: 0 0% 58%;
+  --app-subtle: 0 0% 44%;
+  --app-panel: 0 0% 11%;
+  --app-surface: 0 0% 8%;
+  --app-raised: 0 0% 13%;
+  --app-card: 0 0% 11%;
+  --app-inset: 0 0% 15%;
   --app-border: 0 0% 100%;
-  --app-border-opacity: 0.08;
-  --app-border-subtle-opacity: 0.045;
+  --app-border-opacity: 0.07;
+  --app-border-subtle-opacity: 0.04;
+  --app-panel-edge-opacity: 0.095;
   --app-hover: 0 0% 100%;
-  --app-hover-opacity: 0.05;
+  --app-hover-opacity: 0.055;
   --app-overlay: 0 0% 100%;
-  --app-overlay-opacity: 0.035;
+  --app-overlay-opacity: 0.036;
   --app-toolbar-well: 0 0% 0%;
-  --app-toolbar-well-opacity: 0.28;
+  --app-toolbar-well-opacity: 0.34;
   --app-inset-highlight: 0 0% 100%;
-  --app-inset-highlight-opacity: 0.025;
+  --app-inset-highlight-opacity: 0.05;
   --app-scrollbar: 0 0% 100%;
-  --app-scrollbar-opacity: 0.16;
-  --app-field-bg: 0 0% 14%;
+  --app-scrollbar-opacity: 0.14;
+  --app-field-bg: 0 0% 17%;
   --app-field-fg: 0 0% 96%;
   --pc-canvas-selection: rgba(138, 188, 255, 0.68);
   --pc-canvas-selection-fill: rgba(138, 188, 255, 0.05);
@@ -76,7 +100,13 @@
   --pc-canvas-group-outline: rgba(255, 255, 255, 0.09);
   --pc-canvas-boolean-outline: rgba(138, 188, 255, 0.28);
   --pc-canvas-mask-outline: rgba(196, 150, 255, 0.32);
+  /* Pasteboard — a touch lighter than chrome, without the washed-out grey of the old theme */
+  --pc-canvas-workspace: 0 0% 13%;
   color-scheme: dark;
+}
+
+html {
+  font-size: calc(16px * var(--ui-scale));
 }
 
 html,
@@ -88,10 +118,102 @@ body {
   margin: 0;
   background: hsl(var(--app-bg));
   color: hsl(var(--app-fg));
+  font-size: var(--ui-font-ui);
+  line-height: var(--ui-leading-ui);
   -webkit-font-smoothing: antialiased;
 }
 
+@layer components {
+  .section-heading {
+    @apply text-ui font-medium text-app-subtle;
+  }
+
+  .chrome-tab {
+    @apply relative flex h-full w-full min-w-0 items-center justify-center overflow-hidden px-1 text-center text-ui font-medium transition-colors;
+  }
+
+  .chrome-tab-label {
+    @apply block min-w-0 max-w-full truncate;
+  }
+
+  .chrome-tab-active {
+    @apply text-app-fg after:absolute after:bottom-0 after:inset-x-2 after:h-px after:rounded-full after:bg-accent;
+  }
+
+  .chrome-menu-item {
+    @apply rounded px-2.5 py-1 text-ui font-medium transition-colors;
+  }
+
+  .chrome-menu-dropdown-item {
+    @apply text-ui text-app-fg hover:bg-app-hover;
+  }
+
+  .panel-list-row {
+    @apply flex min-h-7 items-center gap-2 rounded px-2 text-ui transition-colors;
+  }
+
+  .inspector-field-label {
+    @apply mb-1 text-ui font-medium text-app-subtle;
+  }
+
+  .inspector-helper-text {
+    @apply text-ui leading-relaxed text-app-subtle;
+  }
+
+  .inspector-section-action {
+    @apply flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-app-border bg-app-panel text-ui font-medium text-app-fg transition-colors hover:bg-app-hover disabled:opacity-40;
+  }
+}
+
 @layer utilities {
+  .size-icon-ui {
+    width: var(--ui-icon-toolbar);
+    height: var(--ui-icon-toolbar);
+  }
+
+  .size-icon-canvas-rail {
+    width: var(--ui-icon-canvas-rail);
+    height: var(--ui-icon-canvas-rail);
+    flex-shrink: 0;
+  }
+
+  [data-canvas-workspace] {
+    overflow: visible;
+  }
+
+  [data-canvas-tool-rail] {
+    margin-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  [data-canvas-tool-rail] svg {
+    display: block;
+    flex-shrink: 0;
+    shape-rendering: geometricPrecision;
+  }
+
+  [data-canvas-scene] svg,
+  [data-canvas-scene-transform] svg {
+    shape-rendering: geometricPrecision;
+  }
+
+  [data-canvas-scene-transform] {
+    -webkit-font-smoothing: subpixel-antialiased;
+  }
+
+  [data-right-properties-panel] .inspector-icon,
+  [data-right-properties-panel] svg.lucide {
+    display: block;
+    shape-rendering: geometricPrecision;
+  }
+
+  [data-right-properties-panel] .inspector-icon-btn {
+    -webkit-font-smoothing: auto;
+  }
+
+  [data-canvas-tool-rail] button {
+    -webkit-font-smoothing: auto;
+  }
+
   .thin-scroll {
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--app-scrollbar) / var(--app-scrollbar-opacity)) transparent;

@@ -6,9 +6,16 @@ const config: Config = {
   theme: {
     extend: {
       fontSize: {
-        "2xs": ["11px", { lineHeight: "14px" }],
-        ui: ["12px", { lineHeight: "16px" }],
-        "ui-sm": ["13px", { lineHeight: "18px" }],
+        nano: ["var(--ui-font-nano)", { lineHeight: "var(--ui-leading-nano)" }],
+        micro: ["var(--ui-font-micro)", { lineHeight: "var(--ui-leading-micro)" }],
+        caption: ["var(--ui-font-caption)", { lineHeight: "var(--ui-leading-caption)" }],
+        inspector: ["var(--ui-font-inspector)", { lineHeight: "var(--ui-leading-inspector)" }],
+        "2xs": ["var(--ui-font-2xs)", { lineHeight: "var(--ui-leading-2xs)" }],
+        ui: ["var(--ui-font-ui)", { lineHeight: "var(--ui-leading-ui)" }],
+        "ui-sm": ["var(--ui-font-ui-sm)", { lineHeight: "var(--ui-leading-ui-sm)" }],
+        xs: ["0.75rem", { lineHeight: "1.125rem" }],
+        sm: ["0.875rem", { lineHeight: "1.25rem" }],
+        base: ["1rem", { lineHeight: "1.5rem" }],
       },
       colors: {
         app: {
@@ -23,6 +30,7 @@ const config: Config = {
           inset: "hsl(var(--app-inset))",
           border: "hsl(var(--app-border) / var(--app-border-opacity))",
           "border-subtle": "hsl(var(--app-border) / var(--app-border-subtle-opacity))",
+          "panel-edge": "hsl(var(--app-border) / var(--app-panel-edge-opacity))",
           hover: "hsl(var(--app-hover) / var(--app-hover-opacity))",
           overlay: "hsl(var(--app-overlay) / var(--app-overlay-opacity))",
           "toolbar-well": "hsl(var(--app-toolbar-well) / var(--app-toolbar-well-opacity))",

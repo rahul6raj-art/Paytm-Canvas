@@ -8,7 +8,7 @@ function readOptionalString(name: string): string {
 /**
  * Public (browser-safe) environment for API / sync / storage wiring.
  * - **local** (default): no HTTP API; editor uses `LocalSyncProvider` and `localStorage`.
- * - **api**: same local editor sync; `apiClient` calls this app’s `/api/v1/*` Route Handlers (in-memory mock store).
+ * - **api**: `ApiSyncProvider` — local cache + `/api/v1/files/:id` when a file session is active.
  * - **remote**: `apiClient` calls `NEXT_PUBLIC_PAYTM_CRAFT_API_URL` when set; otherwise mutations throw.
  */
 export function getPaytmCraftPublicEnv(): {
@@ -32,6 +32,21 @@ export function getPaytmCraftPublicEnv(): {
 
 export function isPaytmCraftApiMode(): boolean {
   return getPaytmCraftPublicEnv().mode === "api";
+}
+
+/** True when the app uses HTTP file persistence (`api` mock routes or `remote` API URL). */
+export function isPaytmCraftHttpApiMode(): boolean {
+  const mode = getPaytmCraftPublicEnv().mode;
+  return mode === "api" || mode === "remote";
+}
+
+export function isPaytmCraftRemoteMode(): boolean {
+  return getPaytmCraftPublicEnv().mode === "remote";
+}
+
+/** True when `NEXT_PUBLIC_PAYTM_CRAFT_SYNC_URL` is configured for Yjs/WebSocket sync. */
+export function isPaytmCraftRealtimeEnabled(): boolean {
+  return getPaytmCraftPublicEnv().syncUrl.length > 0;
 }
 
 /** Dev-only canvas debug readout + geometry warnings in the footer. */

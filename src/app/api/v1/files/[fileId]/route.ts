@@ -1,10 +1,13 @@
 import { jsonV1Data, jsonV1Error } from "@/lib/apiV1Responses";
 import { parseJsonBody } from "@/lib/apiV1Validation";
+import { mockApiTokenGuard } from "@/lib/mockApiRequestAuth";
 import { fileToSummary, mockApiStore } from "@/lib/mockApiStore";
 
 type RouteContext = { params: Promise<{ fileId: string }> };
 
-export async function GET(_request: Request, context: RouteContext) {
+export async function GET(request: Request, context: RouteContext) {
+  const denied = mockApiTokenGuard(request, "GET", { read: "files:read", write: "files:write" });
+  if (denied) return denied;
   const { fileId } = await context.params;
   const row = mockApiStore.getFile(fileId);
   if (!row) {
@@ -14,10 +17,13 @@ export async function GET(_request: Request, context: RouteContext) {
     ...fileToSummary(row),
     createdAt: row.createdAt,
     documentJson: row.documentJson,
+    revision: row.revision,
   });
 }
 
 export async function PUT(request: Request, context: RouteContext) {
+  const denied = mockApiTokenGuard(request, "PUT", { read: "files:read", write: "files:write" });
+  if (denied) return denied;
   const { fileId } = await context.params;
   let body: unknown;
   try {
@@ -37,16 +43,30 @@ export async function PUT(request: Request, context: RouteContext) {
   if (hasName && (typeof o.name !== "string" || !o.name.trim())) {
     return jsonV1Error("VALIDATION_ERROR", "name must be a non-empty string when provided", 400);
   }
-  const updated = mockApiStore.updateFile(fileId, {
-    name: hasName ? (o.name as string) : undefined,
-    documentJson: hasDoc ? o.documentJson : undefined,
-  });
-  if (!updated) {
-    return jsonV1Error("NOT_FOUND", "File not found", 404);
+  const ifMatch = request.headers.get("If-Match")?.trim() || undefined;
+  const updated = mockApiStore.updateFile(
+    fileId,
+    {
+      name: hasName ? (o.name as string) : undefined,
+      documentJson: hasDoc ? o.documentJson : undefined,
+    },
+    ifMatch !== undefined ? { ifMatch } : undefined,
+  );
+  if (!updated.ok) {
+    if (updated.code === "NOT_FOUND") {
+      return jsonV1Error("NOT_FOUND", "File not found", 404);
+    }
+    return jsonV1Error(
+      "CONFLICT",
+      `Revision mismatch (server has revision ${updated.currentRevision})`,
+      409,
+    );
   }
+  const row = updated.row;
   return jsonV1Data({
-    ...fileToSummary(updated),
-    createdAt: updated.createdAt,
-    documentJson: updated.documentJson,
+    ...fileToSummary(row),
+    createdAt: row.createdAt,
+    documentJson: row.documentJson,
+    revision: row.revision,
   });
 }

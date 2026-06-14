@@ -253,7 +253,7 @@ function makeSlice(
     zoom: 0.52,
     pan: { x: 48, y: 36 },
     showGrid: true,
-    showRulers: true,
+    showRulers: false,
     canvasBackgroundColor: "#e5e5e5",
     comments: [],
   });

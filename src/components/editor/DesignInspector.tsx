@@ -1,25 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
-  AlignHorizontalJustifyCenter,
-  AlignHorizontalJustifyEnd,
-  AlignHorizontalJustifyStart,
-  AlignHorizontalSpaceBetween,
-  AlignVerticalJustifyCenter,
-  AlignVerticalJustifyEnd,
-  AlignVerticalJustifyStart,
-  AlignVerticalSpaceBetween,
   Boxes,
   Component,
   Copy,
   LayoutTemplate,
   Link2,
   Monitor,
-  StretchHorizontal,
-  StretchVertical,
   Unlink,
 } from "lucide-react";
+import { canAlignSelection } from "@/lib/alignSelection";
+import { AlignControls } from "./AlignControls";
 import { PropertiesSection } from "./PropertiesSection";
 import { FontSizeInput } from "./design-panel/FontSizeInput";
 import { TextStyleSection } from "./design-panel/TextStyleSection";
@@ -29,31 +21,22 @@ import { ColorInput } from "./ColorInput";
 import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { shouldClipChildren } from "@/lib/clipChildren";
 import { cn } from "@/lib/utils";
+import { appFieldRadius } from "@/lib/appFieldStyles";
 import {
   useEditorStore,
   type EditorNode,
   type NodeStylePatch,
   type StrokePosition,
-  type PrimaryAxisAlign,
-  type CrossAxisAlign,
   type ConstraintHorizontal,
   type ConstraintVertical,
 } from "@/stores/useEditorStore";
-import { canCreateComponentFromSelection, findInstanceRoot } from "@/lib/componentModel";
+import { findInstanceRoot } from "@/lib/componentModel";
 import {
-  isGradientValue,
   isTypographyValue,
   resolveNodeWithDesignTokens,
   type TypographyTokenValue,
   type EffectTokenValue,
 } from "@/lib/designTokens";
-import {
-  effectiveFillType,
-  effectiveStrokeType,
-  normalizeFillGradient,
-  normalizeStrokeGradient,
-  type FillGradient,
-} from "@/lib/fillGradient";
 import { inferAutoLayoutGap, type LayoutNode } from "@/lib/autoLayout";
 import {
   LAYOUT_GAP_MAX,
@@ -62,7 +45,7 @@ import {
 } from "@/lib/autoLayout/spacingPaddingDrag";
 import { computeMinLayoutGap } from "@/lib/layoutEngine/minLayoutGap";
 import type { LayoutEngineNode } from "@/lib/layoutEngine/types";
-import { maxStarCornerRadius, starGeometryPatch } from "@/lib/shapes/starGeometry";
+import { isStarNode, starGeometryPatch } from "@/lib/shapes/starGeometry";
 import {
   lineAngleDegrees,
   lineEndpointsFromNode,
@@ -77,15 +60,19 @@ import {
   resolveArrowStartKind,
   strokeEndpointToArrowHead,
 } from "@/lib/shapes/arrowGeometry";
+import { isPolygonNode, polygonGeometryPatch } from "@/lib/shapes/polygonGeometry";
 import {
-  isPolygonNode,
-  maxPolygonCornerRadius,
-  polygonGeometryPatch,
-} from "@/lib/shapes/polygonGeometry";
+  cornerRadiiStylePatch,
+  pathSupportsCornerRadius,
+} from "@/lib/shapes/shapeToPath";
 import {
-  BOOLEAN_OPERATION_LABELS,
+  getShapeVertexCornerRadii,
+  polygonCornerRadiusLabels,
+  shapeSupportsIndividualCornerRadius,
+  starCornerRadiusLabels,
+} from "@/lib/shapes/parametricCornerRadii";
+import {
   isMaskGroup,
-  type BooleanOperation,
 } from "@/lib/booleanGeometry";
 import { LayoutSizingControls } from "./LayoutSizingControls";
 import { AppearanceSection } from "./design-panel/AppearanceSection";
@@ -94,10 +81,20 @@ import { EffectsSection } from "./design-panel/EffectsSection";
 import { FillSection } from "./design-panel/FillSection";
 import { InspectorSegmented } from "./design-panel/InspectorPrimitives";
 import { PositionSection } from "./design-panel/PositionSection";
+import { InspectorLayerHeaderActions } from "./design-panel/InspectorLayerHeaderActions";
+import { InspectorExportSection } from "./design-panel/InspectorExportSection";
+import { AutoLayoutInspectorPanel } from "./design-panel/AutoLayoutInspectorPanel";
 import { resolveStrokeEndPoint } from "@/lib/strokeEndpoints";
+import {
+  downloadNodePdf,
+  downloadNodePng,
+  saveTextWithDialog,
+  nodeToSvg,
+  pngExportFilename,
+} from "@/lib/inspectExport";
 
 const field =
-  "h-6 min-h-[24px] px-1.5 py-0 text-[12px] leading-4";
+  "h-6 min-h-[24px] px-1.5 py-0 text-ui leading-4";
 
 function typeLabel(t: EditorNode["type"]): string {
   switch (t) {
@@ -132,7 +129,6 @@ export function DesignInspector({ node }: { node: EditorNode }) {
   const parent = useEditorStore((s) => (node.parentId ? s.nodes[node.parentId!] : null));
   const nodesAll = useEditorStore((s) => s.nodes);
   const childOrder = useEditorStore((s) => s.childOrder);
-  const createComponentFromSelection = useEditorStore((s) => s.createComponentFromSelection);
   const createVariantFromComponent = useEditorStore((s) => s.createVariantFromComponent);
   const updateVariantProperties = useEditorStore((s) => s.updateVariantProperties);
   const detachInstance = useEditorStore((s) => s.detachInstance);
@@ -145,9 +141,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
   const updateDesignToken = useEditorStore((s) => s.updateDesignToken);
   const pushHistory = useEditorStore((s) => s.pushHistory);
   const createColorTokenFromSelection = useEditorStore((s) => s.createColorTokenFromSelection);
-  const createGradientTokenFromSelection = useEditorStore((s) => s.createGradientTokenFromSelection);
   const createTypographyTokenFromSelection = useEditorStore((s) => s.createTypographyTokenFromSelection);
-  const createEffectTokenFromSelection = useEditorStore((s) => s.createEffectTokenFromSelection);
   const detachTokenFromSelection = useEditorStore((s) => s.detachTokenFromSelection);
   const detachEffectTokenFromSelection = useEditorStore((s) => s.detachEffectTokenFromSelection);
   const addEffect = useEditorStore((s) => s.addEffect);
@@ -157,13 +151,11 @@ export function DesignInspector({ node }: { node: EditorNode }) {
   const resizeFrameWithConstraints = useEditorStore((s) => s.resizeFrameWithConstraints);
   const openResponsivePreview = useEditorStore((s) => s.openResponsivePreview);
   const responsivePreview = useEditorStore((s) => s.responsivePreview);
-  const updateBooleanOperation = useEditorStore((s) => s.updateBooleanOperation);
-  const flattenSelection = useEditorStore((s) => s.flattenSelection);
-  const enterObjectEditMode = useEditorStore((s) => s.enterObjectEditMode);
   const exitObjectEditMode = useEditorStore((s) => s.exitObjectEditMode);
   const useSelectionAsMask = useEditorStore((s) => s.useSelectionAsMask);
   const releaseMask = useEditorStore((s) => s.releaseMask);
   const objectEditModeNodeId = useEditorStore((s) => s.objectEditModeNodeId);
+  const toggleVisible = useEditorStore((s) => s.toggleVisible);
 
   const display = useMemo(() => resolveNodeWithDesignTokens(node, designTokens), [node, designTokens]);
 
@@ -171,19 +163,85 @@ export function DesignInspector({ node }: { node: EditorNode }) {
   const id = node.id;
   const key = id;
 
+  const [exportBusy, setExportBusy] = useState<"png" | "svg" | "pdf" | null>(null);
+  const [pngScale, setPngScale] = useState(1);
+  const exportSafeName = useMemo(
+    () => (node.name || "layer").replace(/[^\w-]+/g, "-").slice(0, 48),
+    [node.name],
+  );
+  const exportSvg = useMemo(
+    () => nodeToSvg(node, nodesAll, childOrder, assets, designTokens),
+    [node, nodesAll, childOrder, assets, designTokens],
+  );
+
+  const onExportPng = useCallback(async () => {
+    setExportBusy("png");
+    try {
+      await downloadNodePng(
+        node,
+        nodesAll,
+        childOrder,
+        pngExportFilename(`${exportSafeName}.png`, pngScale),
+        assets,
+        designTokens,
+        pngScale,
+      );
+    } finally {
+      setExportBusy(null);
+    }
+  }, [assets, childOrder, designTokens, exportSafeName, node, nodesAll, pngScale]);
+
+  const onExportSvg = useCallback(async () => {
+    setExportBusy("svg");
+    try {
+      await saveTextWithDialog(`${exportSafeName}.svg`, exportSvg, "image/svg+xml;charset=utf-8", {
+        description: "SVG image",
+        mimeType: "image/svg+xml",
+        extension: ".svg",
+      });
+    } finally {
+      setExportBusy(null);
+    }
+  }, [exportSafeName, exportSvg]);
+
+  const onExportPdf = useCallback(async () => {
+    setExportBusy("pdf");
+    try {
+      await downloadNodePdf(
+        node,
+        nodesAll,
+        childOrder,
+        `${exportSafeName}.pdf`,
+        assets,
+        designTokens,
+      );
+    } finally {
+      setExportBusy(null);
+    }
+  }, [assets, childOrder, designTokens, exportSafeName, node, nodesAll]);
+
   const canFillStroke =
     node.type === "rectangle" ||
     node.type === "frame" ||
     node.type === "ellipse" ||
     node.type === "polygon" ||
     node.type === "path" ||
+    node.type === "text" ||
     Boolean(node.isBooleanGroup);
   const showStrokeSides = node.type === "rectangle" || node.type === "frame";
   const isLine = node.type === "line";
   const isArrow = node.type === "arrow";
   const isPath = node.type === "path";
   const isImage = node.type === "image";
-  const canRadius = node.type === "rectangle" || node.type === "frame";
+  const canRadius = shapeSupportsIndividualCornerRadius(node);
+  const cornerRadiusLabels = useMemo(() => {
+    if (isStarNode(node)) return starCornerRadiusLabels(node.starPoints ?? 5);
+    if (isPolygonNode(node)) return polygonCornerRadiusLabels(node.polygonSides ?? 6);
+    if (node.type === "path" && pathSupportsCornerRadius(node)) {
+      return (node.pathPoints ?? []).map((_, i) => String(i + 1));
+    }
+    return undefined;
+  }, [node]);
   const isText = node.type === "text";
 
   const isContainer = node.type === "frame" || node.type === "group";
@@ -206,62 +264,72 @@ export function DesignInspector({ node }: { node: EditorNode }) {
 
   const patch = (p: Partial<EditorNode>) => updateNode(id, p);
   const style = (p: NodeStylePatch, opts?: { skipHistory?: boolean }) => updateNodeStyle(id, p, opts);
+  const applyCornerStyle = (p: NodeStylePatch) => {
+    if (!canRadius) {
+      style(p);
+      return;
+    }
+    if (p.cornerRadii != null) {
+      const patched = cornerRadiiStylePatch(node, p.cornerRadii);
+      const explicitPerCorner =
+        p.cornerRadius === undefined &&
+        p.cornerRadii.length > 0 &&
+        patched.cornerRadii == null;
+      if (explicitPerCorner) {
+        style({
+          cornerRadius: undefined,
+          cornerRadii: p.cornerRadii.map((r) => Math.max(0, r ?? 0)),
+        });
+        return;
+      }
+      style({ ...p, ...patched });
+      return;
+    }
+    if (p.cornerRadius != null) {
+      const count = getShapeVertexCornerRadii(node).length;
+      const radii = Array.from({ length: count }, () => p.cornerRadius ?? 0);
+      style({ ...p, ...cornerRadiiStylePatch(node, radii) });
+      return;
+    }
+    style(p);
+  };
 
   const fillOpacity = display.fillOpacity ?? 1;
   const fillEnabled = node.fillEnabled !== false;
-  const fillType = effectiveFillType(display);
-  const fillGradient = normalizeFillGradient(
-    display.fillGradient ?? node.fillGradient,
-    display.fill ?? node.fill,
-  );
   const fillToken = node.fillTokenId ? designTokens[node.fillTokenId] : undefined;
-  const linkedFillTokenType = fillToken?.type;
-
-  const applyFillGradient = (next: FillGradient, opts?: { skipHistory?: boolean }) => {
-    const normalized = normalizeFillGradient(next, display.fill ?? node.fill);
-    if (node.fillTokenId && fillToken?.type === "gradient") {
-      updateDesignToken(node.fillTokenId, { value: normalized });
-      return;
-    }
-    updateNodeStyle(
-      id,
-      { fillType: "gradient", fillGradient: normalized },
-      { skipHistory: opts?.skipHistory },
-    );
-  };
   const strokePos: StrokePosition = node.strokePosition ?? "center";
-  const strokeType = effectiveStrokeType(node);
-  const strokeGradient = normalizeStrokeGradient(node.strokeGradient, node.strokeColor);
 
-  const applyStrokeGradient = (next: FillGradient, opts?: { skipHistory?: boolean }) => {
-    style(
-      {
-        strokeType: "gradient",
-        strokeGradient: normalizeStrokeGradient(next, node.strokeColor),
-      },
-      opts,
-    );
-  };
+  const canAlignLayer = useMemo(
+    () => canAlignSelection(selectedIds, nodesAll, childOrder),
+    [selectedIds, nodesAll, childOrder],
+  );
+
+  const showMakeComponent =
+    !node.isComponent && !instRootId && selectedIds.length >= 1 && selectedIds[0] === id;
 
   return (
     <>
-      <div className="border-b border-app-border-subtle px-2 py-2">
-        <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-          <span className="rounded border border-app-border bg-app-hover px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-app-muted">
+      <div className="border-b border-app-panel-edge px-3 py-3">
+        <div className="mb-2.5 flex flex-wrap items-center gap-1.5">
+          <span className="rounded-md border border-app-border bg-app-hover px-2 py-0.5 text-ui font-medium text-app-muted">
             {typeLabel(node.type)}
           </span>
           {node.isComponent ? (
-            <span className="inline-flex items-center gap-0.5 rounded border border-violet-500/35 bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-200">
+            <span className="inline-flex items-center gap-1 rounded-md border border-violet-500/35 bg-violet-500/15 px-2 py-0.5 text-ui font-medium text-violet-200">
               <Component className="h-3 w-3" strokeWidth={1.75} />
               Component
             </span>
           ) : null}
           {instRootId ? (
-            <span className="inline-flex items-center gap-0.5 rounded border border-violet-400/30 bg-violet-400/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-100">
+            <span className="inline-flex items-center gap-1 rounded-md border border-violet-400/30 bg-violet-400/10 px-2 py-0.5 text-ui font-medium text-violet-100">
               <Boxes className="h-3 w-3" strokeWidth={1.75} />
               Instance
             </span>
           ) : null}
+          <InspectorLayerHeaderActions
+            locked={locked}
+            showMakeComponent={showMakeComponent}
+          />
         </div>
         <PropertyTextInput
           label="Name"
@@ -271,6 +339,12 @@ export function DesignInspector({ node }: { node: EditorNode }) {
         />
       </div>
 
+      {canAlignLayer ? (
+        <PropertiesSection title="Alignment" defaultOpen>
+          <AlignControls variant="panel" className="!space-y-1.5" />
+        </PropertiesSection>
+      ) : null}
+
       {node.isComponent && isContainer && (
         <PropertiesSection title="Component" defaultOpen>
           <div className="flex flex-col gap-1.5">
@@ -278,7 +352,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               type="button"
               disabled={locked}
               onClick={() => setPlacingComponentMasterId(node.id)}
-              className="flex h-6 items-center justify-center gap-1.5 rounded border border-app-border bg-app-panel text-[11px] font-medium text-app-fg transition-colors hover:bg-app-hover disabled:opacity-40"
+              className="inspector-section-action"
             >
               <Copy className="h-3.5 w-3.5" strokeWidth={1.75} />
               Create instance
@@ -287,7 +361,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               type="button"
               disabled={locked}
               onClick={() => createVariantFromComponent(node.componentId ?? node.id)}
-              className="flex h-6 items-center justify-center gap-1.5 rounded border border-app-border bg-app-panel text-[11px] font-medium text-app-fg transition-colors hover:bg-app-hover disabled:opacity-40"
+              className="inspector-section-action"
             >
               <Link2 className="h-3.5 w-3.5" strokeWidth={1.75} />
               Add variant
@@ -314,7 +388,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
 
       {instRootId && (
         <PropertiesSection title="Instance" defaultOpen>
-          <p className="mb-1.5 text-[11px] leading-snug text-app-muted">
+          <p className="mb-1.5 inspector-helper-text text-app-muted">
             Source:{" "}
             <span className="font-medium text-app-fg">{sourceMaster?.name ?? "Unknown"}</span>
           </p>
@@ -322,35 +396,13 @@ export function DesignInspector({ node }: { node: EditorNode }) {
             type="button"
             disabled={locked}
             onClick={() => detachInstance(instRootId)}
-            className="flex h-6 w-full items-center justify-center gap-1.5 rounded border border-app-border bg-app-panel text-[11px] font-medium text-app-fg transition-colors hover:bg-app-hover disabled:opacity-40"
+            className="inspector-section-action"
           >
             <Unlink className="h-3.5 w-3.5" strokeWidth={1.75} />
             Detach instance
           </button>
-          {instRootId !== id ? (
-            <p className="mt-1.5 text-[10px] leading-relaxed text-app-subtle">
-              Fill, stroke, and text edits are saved as overrides on this instance.
-            </p>
-          ) : null}
         </PropertiesSection>
       )}
-
-      {!node.isComponent && !instRootId && selectedIds.length >= 1 && selectedIds[0] === id ? (
-        <PropertiesSection title="Make component" defaultOpen={false}>
-          <button
-            type="button"
-            disabled={locked || !canCreateComponentFromSelection(selectedIds, nodesAll)}
-            onClick={() => createComponentFromSelection()}
-            className="flex h-6 w-full items-center justify-center gap-1.5 rounded border border-violet-500/35 bg-violet-500/10 text-[11px] font-medium text-violet-100 transition-colors hover:bg-violet-500/15 disabled:opacity-40"
-          >
-            <Component className="h-3.5 w-3.5" strokeWidth={1.75} />
-            Create component
-          </button>
-          <p className="mt-1 text-[10px] leading-relaxed text-app-subtle">
-            Turn this selection into a reusable component. It appears in the Comp panel for drag-and-drop.
-          </p>
-        </PropertiesSection>
-      ) : null}
 
       <PositionSection
         node={node}
@@ -365,13 +417,13 @@ export function DesignInspector({ node }: { node: EditorNode }) {
       {isText && (
         <PropertiesSection title="Typography" defaultOpen>
           {node.textStyleTokenId && designTokens[node.textStyleTokenId]?.type === "typography" ? (
-            <p className="mb-1.5 truncate text-[10px] text-app-muted">
+            <p className="mb-1.5 truncate text-ui text-app-muted">
               Linked typography:{" "}
               <span className="font-medium text-app-fg">{designTokens[node.textStyleTokenId]!.name}</span>
             </p>
           ) : null}
           {node.fillTokenId && designTokens[node.fillTokenId]?.type === "color" ? (
-            <p className="mb-1.5 truncate text-[10px] text-app-muted">
+            <p className="mb-1.5 truncate text-ui text-app-muted">
               Linked color style:{" "}
               <span className="font-medium text-app-fg">{designTokens[node.fillTokenId]!.name}</span>
             </p>
@@ -381,7 +433,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               type="button"
               disabled={locked}
               onClick={() => createTypographyTokenFromSelection()}
-              className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-[10px] font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
+              className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-ui font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
             >
               Create typography style
             </button>
@@ -389,7 +441,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               type="button"
               disabled={locked}
               onClick={() => createColorTokenFromSelection()}
-              className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-[10px] font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
+              className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-ui font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
             >
               Create color style
             </button>
@@ -398,7 +450,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                 type="button"
                 disabled={locked}
                 onClick={() => detachTokenFromSelection("typography")}
-                className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-[10px] font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
+                className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-ui font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
               >
                 Detach typography
               </button>
@@ -408,7 +460,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                 type="button"
                 disabled={locked}
                 onClick={() => detachTokenFromSelection("color")}
-                className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-[10px] font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
+                className="rounded border border-app-border bg-app-panel px-2 py-0.5 text-ui font-medium text-app-fg hover:bg-app-hover disabled:opacity-40"
               >
                 Detach color style
               </button>
@@ -417,8 +469,8 @@ export function DesignInspector({ node }: { node: EditorNode }) {
           <textarea
             disabled={locked}
             className={cn(
-              "min-h-[72px] w-full resize-y rounded border border-app-border bg-app-field p-1.5 text-[12px] leading-snug text-app-field-fg focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-45",
-              field,
+              "min-h-[72px] w-full resize-y border border-app-border bg-app-field p-1.5 text-ui leading-snug text-app-field-fg focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-45",
+              appFieldRadius,
             )}
             value={textContentDraft}
             onChange={(e) => setTextContentDraft(e.target.value)}
@@ -430,27 +482,27 @@ export function DesignInspector({ node }: { node: EditorNode }) {
           />
           <div className="mt-1.5">
             <ColorInput
-              label="Text color"
-              libraryName={
-                node.fillTokenId && designTokens[node.fillTokenId]?.type === "color"
-                  ? designTokens[node.fillTokenId]!.name
-                  : undefined
-              }
-              libraryTokenId={
-                node.fillTokenId && designTokens[node.fillTokenId]?.type === "color"
-                  ? node.fillTokenId
-                  : undefined
-              }
-              hex={display.textColor ?? display.fill ?? "#111111"}
-              instanceKey={`${key}-tc`}
-              disabled={locked}
-              onCommitHex={(hex, opts) => {
-                useEditorStore.getState().setNodeTextColorHex(id, hex, opts);
-              }}
-            />
+                label="Text color"
+                libraryName={
+                  node.fillTokenId && designTokens[node.fillTokenId]?.type === "color"
+                    ? designTokens[node.fillTokenId]!.name
+                    : undefined
+                }
+                libraryTokenId={
+                  node.fillTokenId && designTokens[node.fillTokenId]?.type === "color"
+                    ? node.fillTokenId
+                    : undefined
+                }
+                hex={display.textColor ?? display.fill ?? "#111111"}
+                instanceKey={`${key}-tc`}
+                disabled={locked}
+                onCommitHex={(hex, opts) => {
+                  useEditorStore.getState().setNodeTextColorHex(id, hex, opts);
+                }}
+              />
           </div>
           <div className="mt-1.5">
-            <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">Font</div>
+            <div className="inspector-field-label">Font</div>
             <FontFamilyPicker
               value={
                 display.fontFamily ?? "var(--font-inter), Inter, system-ui, sans-serif"
@@ -491,7 +543,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               }}
             />
             <div>
-              <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">Weight</div>
+              <div className="inspector-field-label">Weight</div>
               <select
                 aria-label="Font weight"
                 disabled={locked}
@@ -567,7 +619,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
             />
           </div>
           <div className="mt-1.5 border-t border-app-border pt-2">
-            <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">Resize</div>
+            <div className="inspector-field-label">Resize</div>
             <select
               disabled={locked}
               className={cn(field, "w-full cursor-pointer")}
@@ -582,7 +634,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
             </select>
           </div>
           <div className="mt-1.5">
-            <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">Vertical</div>
+            <div className="inspector-field-label">Vertical</div>
             <select
               disabled={locked}
               className={cn(field, "w-full cursor-pointer")}
@@ -609,9 +661,6 @@ export function DesignInspector({ node }: { node: EditorNode }) {
 
       {inAutoLayoutParent && layoutMode === "none" ? (
         <PropertiesSection title="Layout" defaultOpen>
-          <p className="mb-2 text-[10px] leading-snug text-app-subtle">
-            Sizing in parent auto-layout frame.
-          </p>
           <LayoutSizingControls node={node} nodes={nodesAll} locked={locked} />
           {(node.layoutSizingHorizontal === "fill" ||
             node.layoutSizingVertical === "fill" ||
@@ -628,9 +677,6 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                 step={0.5}
                 onCommit={(v) => patch({ layoutGrow: Math.max(0, v), layoutDirty: true })}
               />
-              <p className="mt-1 text-[10px] leading-snug text-app-subtle">
-                Fill children split space by grow weight (drag blue dividers on canvas).
-              </p>
             </div>
           )}
           {parent?.id && parentAutoLayout ? (() => {
@@ -645,7 +691,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
             return (
               <div className="mt-3 border-t border-app-border pt-2">
                 <div className="mb-0.5 flex items-center justify-between gap-1">
-                  <span className="text-[11px] font-medium text-app-subtle">Frame gap</span>
+                  <span className="text-ui font-medium text-app-subtle">Frame gap</span>
                   <button
                     type="button"
                     disabled={locked || parent.locked}
@@ -666,7 +712,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                       }
                     }}
                     className={cn(
-                      "rounded border px-2 py-0.5 text-[10px] font-semibold transition-colors disabled:opacity-40",
+                      "rounded border px-2 py-0.5 text-ui font-semibold transition-colors disabled:opacity-40",
                       frame.layoutGapAuto
                         ? "border-accent/40 bg-accent/15 text-accent"
                         : "border-app-border text-app-muted hover:bg-app-hover",
@@ -676,9 +722,9 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                   </button>
                 </div>
                 {frame.layoutGapAuto ? (
-                  <div className="flex h-6 items-center rounded border border-app-border bg-app-panel px-1.5 text-[12px] text-app-fg">
+                  <div className="flex h-6 items-center rounded border border-app-border bg-app-panel px-1.5 text-ui text-app-fg">
                     Auto
-                    <span className="ml-auto text-[10px] tabular-nums text-app-subtle">
+                    <span className="ml-auto text-ui tabular-nums text-app-subtle">
                       {flowKids.length < 2
                         ? "—"
                         : `${inferAutoLayoutGap(
@@ -719,14 +765,11 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                     }
                   />
                 )}
-                <p className="mt-1 text-[10px] leading-snug text-app-subtle">
-                  Drag the ↔ / ↕ handle between siblings on canvas to adjust spacing.
-                </p>
               </div>
             );
           })() : null}
           <div className="mt-2 flex items-center justify-between gap-2">
-            <span className="text-[11px] font-medium text-app-subtle">Absolute position</span>
+            <span className="text-ui font-medium text-app-subtle">Absolute position</span>
             <button
               type="button"
               disabled={locked}
@@ -737,7 +780,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                 )
               }
               className={cn(
-                "rounded border px-2 py-0.5 text-[11px] font-medium transition-colors disabled:opacity-40",
+                "rounded border px-2 py-0.5 text-ui font-medium transition-colors disabled:opacity-40",
                 (node.layoutPositioning ?? "auto") === "absolute"
                   ? "border-accent/40 bg-accent/15 text-accent"
                   : "border-app-border text-app-muted hover:bg-app-hover",
@@ -760,10 +803,10 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                 className="mx-auto max-h-[120px] w-full object-contain"
               />
             ) : (
-              <div className="flex h-[100px] items-center justify-center text-[11px] text-[#737373]">No preview</div>
+              <div className="flex h-[100px] items-center justify-center text-ui text-[#737373]">No preview</div>
             )}
           </div>
-          <p className="mb-1.5 truncate text-[11px] text-app-muted" title={node.imageName ?? node.name}>
+          <p className="mb-1.5 truncate text-ui text-app-muted" title={node.imageName ?? node.name}>
             {node.imageName ?? node.name}
           </p>
           <input
@@ -783,11 +826,11 @@ export function DesignInspector({ node }: { node: EditorNode }) {
             type="button"
             disabled={locked}
             onClick={() => replaceImageInputRef.current?.click()}
-            className="mb-2 flex h-6 w-full items-center justify-center gap-1.5 rounded border border-app-border bg-app-panel text-[11px] font-medium text-app-fg transition-colors hover:bg-app-hover disabled:opacity-40"
+            className="mb-2 inspector-section-action"
           >
             Replace image…
           </button>
-          <div className="mb-1.5 text-[11px] font-medium text-app-subtle">Fit mode</div>
+          <div className="mb-1.5 text-ui font-medium text-app-subtle">Fit mode</div>
           <select
             disabled={locked}
             className={cn(
@@ -817,13 +860,13 @@ export function DesignInspector({ node }: { node: EditorNode }) {
       {isPath && (
         <PropertiesSection title="Path" defaultOpen>
           <div className="mb-1.5 flex items-center justify-between gap-2">
-            <span className="text-[11px] font-medium text-app-subtle">Closed path</span>
+            <span className="text-ui font-medium text-app-subtle">Closed path</span>
             <button
               type="button"
               disabled={locked}
               onClick={() => togglePathClosed(id)}
               className={cn(
-                "rounded border px-2 py-0.5 text-[11px] font-medium transition-colors disabled:opacity-40",
+                "rounded border px-2 py-0.5 text-ui font-medium transition-colors disabled:opacity-40",
                 node.pathClosed
                   ? "border-accent/40 bg-accent/15 text-accent"
                   : "border-app-border text-app-muted hover:bg-app-hover",
@@ -832,10 +875,6 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               {node.pathClosed ? "Closed" : "Open"}
             </button>
           </div>
-          <p className="text-[10px] leading-relaxed text-app-subtle">
-            Double-click the path on the canvas to toggle anchor editing. With anchors shown, Backspace removes the
-            selected point.
-          </p>
         </PropertiesSection>
       )}
 
@@ -863,7 +902,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               disabled={locked}
               onClick={() => addAutoLayoutToSelection()}
               className={cn(
-                "flex h-6 w-full items-center justify-center gap-1.5 rounded border text-[11px] font-medium transition-colors disabled:opacity-40",
+                "inspector-section-action",
                 "border-app-border bg-app-panel text-app-fg hover:bg-app-hover",
               )}
             >
@@ -876,7 +915,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               disabled={locked}
               onClick={() => addAutoLayoutToContainer(id)}
               className={cn(
-                "mb-2 flex h-6 w-full items-center justify-center gap-1.5 rounded border text-[11px] font-medium transition-colors disabled:opacity-40",
+                "mb-2 inspector-section-action",
                 "border-app-border bg-app-panel text-app-fg hover:bg-app-hover",
               )}
             >
@@ -884,323 +923,25 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               Add auto layout
             </button>
           ) : null}
-          {isContainer && layoutMode === "none" ? (
-            <p className="text-[10px] leading-snug text-app-subtle">
-              Stack everything inside this frame automatically (⇧A).
-            </p>
-          ) : null}
           {isContainer && layoutMode !== "none" ? (
-            <>
-              <div className="mb-1 text-[11px] font-medium text-app-subtle">Direction</div>
-              <div className="mb-1.5 flex gap-0.5">
-                {(
-                  [
-                    { mode: "none" as const, label: "Off" },
-                    { mode: "horizontal" as const, label: "H", icon: AlignHorizontalJustifyStart },
-                    { mode: "vertical" as const, label: "V", icon: AlignVerticalJustifyStart },
-                  ] as const
-                ).map((opt) => {
-                  const Icon = "icon" in opt ? opt.icon : null;
-                  const active = layoutMode === opt.mode;
-                  return (
-                    <button
-                      key={opt.mode}
-                      type="button"
-                      disabled={locked}
-                      onClick={() => updateLayout(id, { layoutMode: opt.mode })}
-                      className={cn(
-                        "flex h-6 flex-1 items-center justify-center gap-0.5 rounded border text-[10px] font-semibold transition-colors disabled:opacity-40",
-                        active
-                          ? "border-accent/45 bg-accent/15 text-white"
-                          : "border-app-border text-app-muted hover:bg-app-hover",
-                      )}
-                    >
-                      {Icon ? <Icon className="h-3 w-3" strokeWidth={1.75} /> : null}
-                      {opt.label}
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="mb-1.5">
-                <div className="mb-0.5 flex items-center justify-between gap-1">
-                  <span className="text-[11px] font-medium text-app-subtle">Gap</span>
-                  <button
-                    type="button"
-                    disabled={locked}
-                    title="Use spacing inferred from child positions"
-                    onClick={() => {
-                      const flowKids = (childOrder[id] ?? []).filter((cid) => {
-                        const c = nodesAll[cid];
-                        return c?.visible && !c.locked;
-                      });
-                      const inferred =
-                        flowKids.length >= 2
-                          ? inferAutoLayoutGap(
-                              nodesAll as Record<string, LayoutNode>,
-                              flowKids,
-                              layoutMode,
-                            )
-                          : 0;
-                      if (node.layoutGapAuto) {
-                        updateLayout(id, { layoutGapAuto: false, layoutGap: inferred });
-                      } else {
-                        updateLayout(id, { layoutGapAuto: true, layoutGap: inferred });
-                      }
-                    }}
-                    className={cn(
-                      "rounded border px-2 py-0.5 text-[10px] font-semibold transition-colors disabled:opacity-40",
-                      node.layoutGapAuto
-                        ? "border-accent/40 bg-accent/15 text-accent"
-                        : "border-app-border text-app-muted hover:bg-app-hover",
-                    )}
-                  >
-                    Auto
-                  </button>
-                </div>
-                {node.layoutGapAuto ? (
-                  <div
-                    className={cn(
-                      "flex h-6 items-center rounded border border-app-border bg-app-panel px-1.5",
-                      locked && "opacity-50",
-                    )}
-                    title="Gap is calculated from current child spacing"
-                  >
-                    <span className="text-[12px] font-medium text-app-fg">Auto</span>
-                    <span className="ml-auto text-[10px] tabular-nums text-app-subtle">
-                      {(() => {
-                        const flowKids = (childOrder[id] ?? []).filter((cid) => {
-                          const c = nodesAll[cid];
-                          return c?.visible && !c.locked;
-                        });
-                        if (flowKids.length < 2) return "—";
-                        return `${inferAutoLayoutGap(
-                          nodesAll as Record<string, LayoutNode>,
-                          flowKids,
-                          layoutMode,
-                        )}px`;
-                      })()}
-                    </span>
-                  </div>
-                ) : (
-                  <PropertyNumberInput
-                    commitOnInput={false}
-                    label=""
-                    value={sanitizeLayoutGapForFrame(id, nodesAll, childOrder, node.layoutGap)}
-                    instanceKey={`${key}-gap`}
-                    disabled={locked}
-                    min={computeMinLayoutGap(
-                      id,
-                      nodesAll as Record<string, LayoutEngineNode>,
-                      childOrder,
-                    )}
-                    max={LAYOUT_GAP_MAX}
-                    onCommit={(v) =>
-                      updateLayout(id, {
-                        layoutGap: sanitizeLayoutGapForFrame(id, nodesAll, childOrder, v),
-                        layoutGapAuto: false,
-                      })
-                    }
-                  />
-                )}
-              </div>
-              <div className="mt-2 flex items-center justify-between gap-2">
-                <span className="text-[11px] font-medium text-app-subtle">Wrap</span>
-                <button
-                  type="button"
-                  disabled={locked}
-                  onClick={() => updateLayout(id, { layoutWrap: !node.layoutWrap })}
-                  className={cn(
-                    "rounded border px-2 py-0.5 text-[11px] font-medium transition-colors disabled:opacity-40",
-                    node.layoutWrap
-                      ? "border-accent/40 bg-accent/15 text-accent"
-                      : "border-app-border text-app-muted hover:bg-app-hover",
-                  )}
-                >
-                  {node.layoutWrap ? "On" : "Off"}
-                </button>
-              </div>
-              <div className="mt-1.5 text-[11px] font-medium text-app-subtle">Padding</div>
-              <div className="mt-0.5 grid grid-cols-4 gap-1">
-                <PropertyNumberInput commitOnInput={false}
-                  label="T"
-                  value={node.paddingTop ?? 0}
-                  instanceKey={`${key}-pt`}
-                  disabled={locked}
-                  min={0}
-                  max={999}
-                  onCommit={(v) => updateLayout(id, { paddingTop: Math.max(0, v) })}
-                />
-                <PropertyNumberInput commitOnInput={false}
-                  label="R"
-                  value={node.paddingRight ?? 0}
-                  instanceKey={`${key}-pr`}
-                  disabled={locked}
-                  min={0}
-                  max={999}
-                  onCommit={(v) => updateLayout(id, { paddingRight: Math.max(0, v) })}
-                />
-                <PropertyNumberInput commitOnInput={false}
-                  label="B"
-                  value={node.paddingBottom ?? 0}
-                  instanceKey={`${key}-pb`}
-                  disabled={locked}
-                  min={0}
-                  max={999}
-                  onCommit={(v) => updateLayout(id, { paddingBottom: Math.max(0, v) })}
-                />
-                <PropertyNumberInput commitOnInput={false}
-                  label="L"
-                  value={node.paddingLeft ?? 0}
-                  instanceKey={`${key}-pl`}
-                  disabled={locked}
-                  min={0}
-                  max={999}
-                  onCommit={(v) => updateLayout(id, { paddingLeft: Math.max(0, v) })}
-                />
-              </div>
-              <div className="mt-1.5 text-[11px] font-medium text-app-subtle">Primary axis</div>
-              <div className="mt-0.5 flex flex-wrap gap-0.5">
-                {(layoutMode === "horizontal"
-                  ? ([
-                      { v: "start" as const, Icon: AlignHorizontalJustifyStart, title: "Start" },
-                      { v: "center" as const, Icon: AlignHorizontalJustifyCenter, title: "Center" },
-                      { v: "end" as const, Icon: AlignHorizontalJustifyEnd, title: "End" },
-                      { v: "space-between" as const, Icon: AlignHorizontalSpaceBetween, title: "Space between" },
-                    ] as const)
-                  : ([
-                      { v: "start" as const, Icon: AlignVerticalJustifyStart, title: "Start" },
-                      { v: "center" as const, Icon: AlignVerticalJustifyCenter, title: "Center" },
-                      { v: "end" as const, Icon: AlignVerticalJustifyEnd, title: "End" },
-                      { v: "space-between" as const, Icon: AlignVerticalSpaceBetween, title: "Space between" },
-                    ] as const)
-                ).map(({ v, Icon, title }) => {
-                  const cur = (node.primaryAxisAlign ?? "start") as PrimaryAxisAlign;
-                  const active = cur === v;
-                  return (
-                    <button
-                      key={v}
-                      type="button"
-                      title={title}
-                      disabled={locked}
-                      onClick={() => updateLayout(id, { primaryAxisAlign: v })}
-                      className={cn(
-                        "flex h-6 w-8 items-center justify-center rounded border transition-colors disabled:opacity-40",
-                        active
-                          ? "border-accent/45 bg-accent/15 text-white"
-                          : "border-app-border text-app-muted hover:bg-app-hover",
-                      )}
-                    >
-                      <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="mt-2 border-t border-app-border-subtle pt-2">
-                <div className="mb-1.5 text-[11px] font-medium text-app-subtle">Frame sizing</div>
-                <p className="mb-2 text-[10px] leading-snug text-app-subtle">
-                  Hug shrinks the frame to fit children; fixed keeps your current size on that axis.
-                </p>
-                <LayoutSizingControls node={node} nodes={nodesAll} locked={locked} />
-              </div>
-              <div className="mt-1.5 text-[11px] font-medium text-app-subtle">Counter axis</div>
-              <div className="mt-0.5 flex flex-wrap gap-0.5">
-                {(layoutMode === "horizontal"
-                  ? ([
-                      { v: "start" as const, Icon: AlignVerticalJustifyStart },
-                      { v: "center" as const, Icon: AlignVerticalJustifyCenter },
-                      { v: "end" as const, Icon: AlignVerticalJustifyEnd },
-                      { v: "stretch" as const, Icon: StretchVertical },
-                    ] as const)
-                  : ([
-                      { v: "start" as const, Icon: AlignHorizontalJustifyStart },
-                      { v: "center" as const, Icon: AlignHorizontalJustifyCenter },
-                      { v: "end" as const, Icon: AlignHorizontalJustifyEnd },
-                      { v: "stretch" as const, Icon: StretchHorizontal },
-                    ] as const)
-                ).map(({ v, Icon }) => {
-                  const cur = (node.counterAxisAlign ?? "start") as CrossAxisAlign;
-                  const active = cur === v;
-                  return (
-                    <button
-                      key={v}
-                      type="button"
-                      disabled={locked}
-                      onClick={() => updateLayout(id, { counterAxisAlign: v })}
-                      className={cn(
-                        "flex h-6 w-8 items-center justify-center rounded border transition-colors disabled:opacity-40",
-                        active
-                          ? "border-accent/45 bg-accent/15 text-white"
-                          : "border-app-border text-app-muted hover:bg-app-hover",
-                      )}
-                    >
-                      <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="mt-2 border-t border-app-border-subtle pt-2">
-                <div className="mb-1 text-[11px] font-medium text-app-subtle">Min / max size</div>
-                <div className="grid grid-cols-2 gap-1">
-                  <PropertyNumberInput
-                    commitOnInput={false}
-                    label="Min W"
-                    value={node.minWidth ?? 0}
-                    instanceKey={`${key}-minw`}
-                    disabled={locked}
-                    min={0}
-                    max={99999}
-                    onCommit={(v) =>
-                      updateLayout(id, { minWidth: v > 0 ? v : undefined })
-                    }
-                  />
-                  <PropertyNumberInput
-                    commitOnInput={false}
-                    label="Max W"
-                    value={node.maxWidth ?? 0}
-                    instanceKey={`${key}-maxw`}
-                    disabled={locked}
-                    min={0}
-                    max={99999}
-                    onCommit={(v) =>
-                      updateLayout(id, { maxWidth: v > 0 ? v : undefined })
-                    }
-                  />
-                  <PropertyNumberInput
-                    commitOnInput={false}
-                    label="Min H"
-                    value={node.minHeight ?? 0}
-                    instanceKey={`${key}-minh`}
-                    disabled={locked}
-                    min={0}
-                    max={99999}
-                    onCommit={(v) =>
-                      updateLayout(id, { minHeight: v > 0 ? v : undefined })
-                    }
-                  />
-                  <PropertyNumberInput
-                    commitOnInput={false}
-                    label="Max H"
-                    value={node.maxHeight ?? 0}
-                    instanceKey={`${key}-maxh`}
-                    disabled={locked}
-                    min={0}
-                    max={99999}
-                    onCommit={(v) =>
-                      updateLayout(id, { maxHeight: v > 0 ? v : undefined })
-                    }
-                  />
-                </div>
-              </div>
-            </>
+            <AutoLayoutInspectorPanel
+              node={node}
+              frameId={id}
+              instanceKey={key}
+              locked={locked}
+              layoutMode={layoutMode}
+              nodesAll={nodesAll}
+              childOrder={childOrder}
+              updateLayout={updateLayout}
+            />
           ) : null}
           {isContainer && !node.isBooleanGroup && !node.maskId && (node.type === "frame" || node.type === "group") ? (
-            <div className="mt-2 border-t border-app-border pt-2">
-              <label
-                className={cn(
-                  "flex cursor-pointer items-center gap-2 rounded py-0.5",
-                  locked && "cursor-not-allowed opacity-40",
-                )}
-              >
+            <label
+              className={cn(
+                "mt-2 flex cursor-pointer items-center gap-2 rounded py-0.5",
+                locked && "cursor-not-allowed opacity-40",
+              )}
+            >
                 <input
                   type="checkbox"
                   className="h-3.5 w-3.5 rounded border-white/20 bg-app-panel accent-[#0d99ff]"
@@ -1216,29 +957,20 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                     patch(next);
                   }}
                 />
-                <span className="text-[11px] text-app-fg">Clip content</span>
+                <span className="text-ui text-app-fg">Wrap content</span>
               </label>
-              <p className="mt-1 text-[10px] leading-snug text-app-subtle">
-                Hide layers outside the {node.type === "group" ? "group" : "frame"} bounds. With auto layout,
-                use Fixed width/height to clip overflow.
-              </p>
-            </div>
           ) : null}
         </PropertiesSection>
       )}
 
       {isContainer && (
         <PropertiesSection title="Responsive preview" defaultOpen={false}>
-          <p className="mb-1.5 text-[10px] leading-relaxed text-app-subtle">
-            Try viewport sizes with live constraint behavior. Changes stay temporary until you apply from the panel
-            below.
-          </p>
           <button
             type="button"
             disabled={locked}
             onClick={() => openResponsivePreview(id)}
             className={cn(
-              "flex h-7 w-full items-center justify-center gap-1.5 rounded border text-[11px] font-medium transition-colors disabled:opacity-40",
+              "flex h-7 w-full items-center justify-center gap-1.5 rounded border text-ui font-medium transition-colors disabled:opacity-40",
               "border-app-border bg-app-panel text-app-fg hover:bg-app-hover",
             )}
           >
@@ -1246,7 +978,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
             Open responsive preview
           </button>
           {responsivePreview?.frameId === id ? (
-            <p className="mt-1.5 text-[10px] font-medium text-sky-300/95">
+            <p className="mt-1.5 text-ui font-medium text-sky-300/95">
               Preview active — use width/height sliders in the bottom panel.
             </p>
           ) : null}
@@ -1255,7 +987,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
 
       {node.parentId && (
         <PropertiesSection title="Constraints" defaultOpen={false}>
-          <div className="mb-0.5 text-[11px] font-medium text-app-subtle">Horizontal</div>
+          <div className="mb-0.5 text-ui font-medium text-app-subtle">Horizontal</div>
           <select
             disabled={locked}
             className={cn(
@@ -1273,7 +1005,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               </option>
             ))}
           </select>
-          <div className="mb-0.5 text-[11px] font-medium text-app-subtle">Vertical</div>
+          <div className="mb-0.5 text-ui font-medium text-app-subtle">Vertical</div>
           <select
             disabled={locked}
             className={cn(
@@ -1298,12 +1030,16 @@ export function DesignInspector({ node }: { node: EditorNode }) {
         node={node}
         instanceKey={key}
         locked={locked}
+        visible={node.visible}
         layerOpacity={display.opacity ?? 1}
         canCornerRadius={canRadius}
+        cornerLabels={cornerRadiusLabels}
         showArc={node.type === "ellipse"}
         onOpacityCommit={(opacity) => style({ opacity })}
         onBlendModeChange={(blendMode) => style({ blendMode })}
-        onCornerStyle={style}
+        onToggleVisible={() => toggleVisible(id)}
+        onCornerStyle={applyCornerStyle}
+        onArcStyle={style}
       />
 
       {canFillStroke && (
@@ -1312,20 +1048,13 @@ export function DesignInspector({ node }: { node: EditorNode }) {
           display={display}
           instanceKey={key}
           locked={locked}
-          fillType={fillType}
           fillEnabled={fillEnabled}
           fillOpacity={fillOpacity}
-          fillGradient={fillGradient}
           fillToken={fillToken}
-          linkedFillTokenType={linkedFillTokenType}
           designTokens={designTokens}
           onStyle={style}
-          onApplyGradient={applyFillGradient}
-          onCreateColorToken={() => createColorTokenFromSelection()}
-          onCreateGradientToken={() => createGradientTokenFromSelection()}
           onDetachToken={(kind) => detachTokenFromSelection(kind)}
           onUpdateDesignToken={(tokenId, patch) => updateDesignToken(tokenId, patch)}
-          onBeginDrag={() => pushHistory()}
         />
       )}
 
@@ -1395,19 +1124,22 @@ export function DesignInspector({ node }: { node: EditorNode }) {
 
       {(canFillStroke || isLine || isArrow) && (
         <StrokeSection
+          nodeId={node.id}
           instanceKey={key}
           locked={locked}
           strokeWidth={node.strokeWidth ?? 0}
           strokeColor={node.strokeColor ?? "#000000"}
-          strokeType={strokeType}
-          strokeGradient={strokeGradient}
+          strokeType={node.strokeType}
+          strokeGradient={node.strokeGradient}
+          strokeImageAssetId={node.strokeImageAssetId}
+          strokeVideoAssetId={node.strokeVideoAssetId}
           strokeOpacity={node.strokeOpacity ?? 1}
-          onApplyStrokeGradient={applyStrokeGradient}
           strokeEnabled={node.strokeEnabled !== false}
           strokeStyle={node.strokeStyle ?? "solid"}
           strokePosition={strokePos}
           strokeSides={node.strokeSides ?? "all"}
           strokeSidesCustom={node.strokeSidesCustom}
+          strokeSidesCustomColors={node.strokeSidesCustomColors}
           showSides={showStrokeSides}
           strokeDashLength={node.strokeDashLength}
           strokeDashGap={node.strokeDashGap}
@@ -1431,7 +1163,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
             node.type === "arrow" ||
             (node.type === "path" && !node.pathClosed)
           }
-          onStyle={(patch) => {
+          onStyle={(patch, opts) => {
             if (isArrow && (patch.strokeStartPoint != null || patch.strokeEndPoint != null)) {
               style({
                 ...patch,
@@ -1443,10 +1175,10 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                     ? { endArrow: strokeEndpointToArrowHead(patch.strokeEndPoint) }
                     : {}),
                 }),
-              });
+              }, opts);
               return;
             }
-            style(patch);
+            style(patch, opts);
           }}
         />
       )}
@@ -1462,7 +1194,6 @@ export function DesignInspector({ node }: { node: EditorNode }) {
         }
         hasEffectToken={Boolean(node.effectTokenId)}
         onAddEffect={(type) => addEffect(id, type)}
-        onCreateEffectToken={() => createEffectTokenFromSelection()}
         onDetachEffectToken={() => detachEffectTokenFromSelection()}
         onToggleEffect={(effectId) => toggleEffect(id, effectId)}
         onDeleteEffect={(effectId) => deleteEffect(id, effectId)}
@@ -1471,7 +1202,10 @@ export function DesignInspector({ node }: { node: EditorNode }) {
       />
 
       {isPolygonNode(node) ? (
-        <PropertiesSection title="Polygon" defaultOpen>
+        <PropertiesSection
+          title={(node.polygonSides ?? 6) === 3 ? "Triangle" : "Polygon"}
+          defaultOpen
+        >
           <PropertyNumberInput
             commitOnInput={false}
             label="Sides"
@@ -1484,26 +1218,6 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               patch(polygonGeometryPatch(node, { polygonSides: v }));
             }}
           />
-          <div className="mt-1.5">
-            <PropertyNumberInput
-              commitOnInput={false}
-              label="Corner radius"
-              value={Math.round(node.cornerRadius ?? 0)}
-              instanceKey={`${key}-poly-corner`}
-              disabled={locked}
-              min={0}
-              max={Math.round(
-                maxPolygonCornerRadius(
-                  node.polygonSides ?? 6,
-                  node.width,
-                  node.height,
-                ),
-              )}
-              onCommit={(v) => {
-                patch(polygonGeometryPatch(node, { cornerRadius: v }));
-              }}
-            />
-          </div>
         </PropertiesSection>
       ) : null}
 
@@ -1535,97 +1249,57 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               }}
             />
           </div>
-          <div className="mt-1.5">
-            <PropertyNumberInput
-              commitOnInput={false}
-              label="Corner radius"
-              value={Math.round(node.cornerRadius ?? 0)}
-              instanceKey={`${key}-star-corner`}
-              disabled={locked}
-              min={0}
-              max={Math.round(
-                maxStarCornerRadius(
-                  node.starPoints ?? 5,
-                  node.starInnerRadius ?? 0.4,
-                  node.width,
-                  node.height,
-                ),
-              )}
-              onCommit={(v) => {
-                style(starGeometryPatch(node, { cornerRadius: v }));
-              }}
-            />
-          </div>
         </PropertiesSection>
       ) : null}
 
-      {node.isBooleanGroup ? (
+      {node.isBooleanGroup && objectEditModeNodeId === id ? (
         <PropertiesSection title="Boolean" defaultOpen>
-          <p className="mb-2 text-[10px] leading-snug text-[#737373]">
-            Operation: {BOOLEAN_OPERATION_LABELS[node.booleanOperation ?? "union"]}
-          </p>
-          <div className="mb-2 flex flex-wrap gap-1">
-            {(["union", "subtract", "intersect", "exclude"] as BooleanOperation[]).map((op) => (
-              <button
-                key={op}
-                type="button"
-                disabled={locked}
-                onClick={() => updateBooleanOperation(id, op)}
-                className={cn(
-                  "rounded border px-2 py-0.5 text-[10px] font-medium capitalize",
-                  (node.booleanOperation ?? "union") === op
-                    ? "border-[#18a0fb] bg-[#18a0fb]/15 text-white"
-                    : "border-app-border text-app-muted hover:bg-app-hover",
-                )}
-              >
-                {BOOLEAN_OPERATION_LABELS[op]}
-              </button>
-            ))}
-          </div>
-          <div className="flex gap-1.5">
-            <button
-              type="button"
-              disabled={locked}
-              className="flex-1 rounded border border-app-border py-1.5 text-[11px] font-medium text-app-muted hover:bg-white/[0.05] hover:text-app-fg disabled:opacity-40"
-              onClick={() => flattenSelection()}
-            >
-              Flatten
-            </button>
-            <button
-              type="button"
-              disabled={locked}
-              className="flex-1 rounded border border-app-border py-1.5 text-[11px] font-medium text-app-muted hover:bg-white/[0.05] hover:text-app-fg disabled:opacity-40"
-              onClick={() => enterObjectEditMode(id)}
-            >
-              Edit object
-            </button>
-          </div>
-          {objectEditModeNodeId === id ? (
-            <button
-              type="button"
-              className="mt-1.5 w-full rounded border border-[#18a0fb]/40 py-1 text-[11px] text-[#18a0fb]"
-              onClick={() => exitObjectEditMode()}
-            >
-              Exit object edit
-            </button>
-          ) : null}
+          <button
+            type="button"
+            className="w-full rounded border border-accent/40 py-1.5 text-ui text-accent"
+            onClick={() => exitObjectEditMode()}
+          >
+            Exit object edit
+          </button>
         </PropertiesSection>
       ) : null}
 
       {isMaskGroup(node) ? (
         <PropertiesSection title="Mask" defaultOpen>
-          <p className="mb-2 text-[10px] leading-snug text-[#737373]">
+          <p className="mb-2 inspector-helper-text text-[#737373]">
             Mask layer: {node.maskId ? nodesAll[node.maskId]?.name ?? "Mask" : "—"}
           </p>
-          {node.figMaskType === "LUMINANCE" ? (
-            <p className="mb-2 text-[10px] leading-snug text-app-subtle">
-              Figma luminance mask — shown as vector outline clip in this editor.
-            </p>
-          ) : null}
+          <div className="mb-3">
+            <p className="mb-1.5 text-ui text-app-muted">Mask type</p>
+            <InspectorSegmented
+              options={[
+                { value: "OUTLINE" as const, label: "Outline" },
+                { value: "LUMINANCE" as const, label: "Luminance" },
+                { value: "ALPHA" as const, label: "Alpha" },
+              ]}
+              value={
+                node.figMaskType === "LUMINANCE" || node.figMaskType === "ALPHA"
+                  ? node.figMaskType
+                  : "OUTLINE"
+              }
+              disabled={locked}
+              onChange={(v) => patch({ figMaskType: v })}
+            />
+          </div>
+          <label className="mb-3 flex cursor-pointer items-center gap-2 text-ui text-app-muted">
+            <input
+              type="checkbox"
+              className="rounded border-app-border"
+              checked={Boolean(node.maskVisible)}
+              disabled={locked}
+              onChange={(e) => patch({ maskVisible: e.target.checked })}
+            />
+            Show mask layer
+          </label>
           <button
             type="button"
             disabled={locked}
-            className="w-full rounded border border-app-border py-1.5 text-[11px] font-medium text-app-muted hover:bg-white/[0.05] hover:text-app-fg disabled:opacity-40"
+            className="w-full rounded border border-app-border py-1.5 text-ui font-medium text-app-muted hover:bg-white/[0.05] hover:text-app-fg disabled:opacity-40"
             onClick={() => releaseMask(id)}
           >
             Release mask
@@ -1635,12 +1309,9 @@ export function DesignInspector({ node }: { node: EditorNode }) {
 
       {selectedIds.length >= 2 && !node.isBooleanGroup && !isMaskGroup(node) ? (
         <PropertiesSection title="Mask" defaultOpen={false}>
-          <p className="mb-2 text-[10px] leading-snug text-[#737373]">
-            Select content and mask shape, then use as mask. Topmost shape becomes the mask.
-          </p>
           <button
             type="button"
-            className="w-full rounded border border-app-border py-1.5 text-[11px] font-medium text-app-muted hover:bg-white/[0.05] hover:text-app-fg"
+            className="w-full rounded border border-app-border py-1.5 text-ui font-medium text-app-muted hover:bg-white/[0.05] hover:text-app-fg"
             onClick={() => useSelectionAsMask()}
           >
             Use as mask
@@ -1649,20 +1320,14 @@ export function DesignInspector({ node }: { node: EditorNode }) {
       ) : null}
 
       <PropertiesSection title="Export" defaultOpen={false}>
-        <div className="flex gap-1.5">
-          <button
-            type="button"
-            className="flex-1 rounded border border-app-border py-1.5 text-[11px] font-medium text-app-muted transition-colors hover:bg-white/[0.05] hover:text-app-fg"
-          >
-            PNG
-          </button>
-          <button
-            type="button"
-            className="flex-1 rounded border border-app-border py-1.5 text-[11px] font-medium text-app-muted transition-colors hover:bg-white/[0.05] hover:text-app-fg"
-          >
-            SVG
-          </button>
-        </div>
+        <InspectorExportSection
+          exportBusy={exportBusy}
+          pngScale={pngScale}
+          onPngScaleChange={setPngScale}
+          onExportPng={onExportPng}
+          onExportSvg={onExportSvg}
+          onExportPdf={onExportPdf}
+        />
       </PropertiesSection>
     </>
   );

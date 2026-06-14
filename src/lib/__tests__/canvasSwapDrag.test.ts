@@ -4,7 +4,9 @@ import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import {
   canSwapNodes,
   findSwapTargetAtPoint,
+  multiSelectSwapHandleIds,
   resolveSwapDropTarget,
+  swapCandidatesForMultiSelect,
   swapPartnerForMultiSelect,
   swapNodeWorldPositions,
 } from "@/lib/canvasSwapDrag";
@@ -46,18 +48,37 @@ describe("canvasSwapDrag", () => {
     assert.equal(canSwapNodes("a", "b", nodes, childOrder), false);
   });
 
-  it("findSwapTargetAtPoint uses partner when two are selected", () => {
-    const nodes = { a: rect("a", 0, 0), b: rect("b", 200, 0) };
-    const childOrder = { [EDITOR_ROOT_KEY]: ["a", "b"] };
-    const hit = findSwapTargetAtPoint("a", 250, 40, nodes, childOrder, "b");
+  it("swapCandidatesForMultiSelect returns other tops for N-way selection", () => {
+    const nodes = {
+      a: rect("a", 0, 0),
+      b: rect("b", 200, 0),
+      c: rect("c", 400, 0),
+    };
+    const childOrder = { [EDITOR_ROOT_KEY]: ["a", "b", "c"] };
+    assert.deepEqual(
+      swapCandidatesForMultiSelect("a", ["a", "b", "c"], nodes, childOrder).sort(),
+      ["b", "c"],
+    );
+    assert.deepEqual(
+      multiSelectSwapHandleIds(["a", "b", "c"], nodes, childOrder).sort(),
+      ["a", "b", "c"],
+    );
+  });
+
+  it("findSwapTargetAtPoint uses candidates when multi-selected", () => {
+    const nodes = { a: rect("a", 0, 0), b: rect("b", 200, 0), c: rect("c", 400, 0) };
+    const childOrder = { [EDITOR_ROOT_KEY]: ["a", "b", "c"] };
+    const hit = findSwapTargetAtPoint("a", 250, 40, nodes, childOrder, ["b", "c"]);
     assert.equal(hit, "b");
+    const hitC = findSwapTargetAtPoint("a", 450, 40, nodes, childOrder, ["b", "c"]);
+    assert.equal(hitC, "c");
   });
 
   it("resolveSwapDropTarget swaps on overlap when pointer misses", () => {
     const nodes = { a: rect("a", 0, 0), b: rect("b", 200, 0) };
     const childOrder = { [EDITOR_ROOT_KEY]: ["a", "b"] };
     nodes.a = { ...nodes.a!, x: 200, y: 0 };
-    const hit = resolveSwapDropTarget("a", "b", "b", 5, 5, nodes, childOrder);
+    const hit = resolveSwapDropTarget("a", ["b"], "b", 5, 5, nodes, childOrder);
     assert.equal(hit, "b");
   });
 

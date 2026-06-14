@@ -19,4 +19,6 @@ export type SceneRendererProps = {
   /** For SVG artboard labels (screen-sized at current zoom). */
   selectedIds?: string[];
   zoom?: number;
+  /** Hide from vector/tile scene while inline text edit overlay is active. */
+  editingTextId?: string | null;
 };

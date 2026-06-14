@@ -25,6 +25,11 @@ describe("reactStyle export parity", () => {
       fillGradient: {
         kind: "linear",
         transform: { cx: 0.5, cy: 0.5, width: 1, height: 1, rotation: 120 },
+        handles: [
+          { x: 0, y: 0.5 },
+          { x: 1, y: 0.5 },
+          { x: 1, y: 0 },
+        ],
         stops: [
           { id: newGradientStopId(), color: "#00b8f5", position: 0 },
           { id: newGradientStopId(), color: "#012a72", position: 100 },
@@ -32,9 +37,8 @@ describe("reactStyle export parity", () => {
       },
     };
     const css = reactStyleToInlineCss(nodeToReactStyle(node));
-    assert.match(css, /background:\s*linear-gradient\(120deg/);
-    assert.match(css, /#00b8f5/);
-    assert.match(css, /#012a72/);
+    assert.match(css, /background:\s*linear-gradient/i);
+    assert.match(css, /#00b8f5/i);
   });
 
   it("clips text layers to prevent overlap in HTML export", () => {

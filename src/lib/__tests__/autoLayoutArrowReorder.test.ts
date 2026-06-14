@@ -7,7 +7,7 @@ import {
   getAutoLayoutArrowReorderContext,
   swapAutoLayoutSiblingOrder,
 } from "@/lib/autoLayoutArrowReorder";
-import type { EditorNode } from "@/stores/useEditorStore";
+import { useEditorStore, type EditorNode } from "@/stores/useEditorStore";
 
 function alFrame(id: string): EditorNode {
   return {
@@ -77,5 +77,41 @@ describe("autoLayoutArrowReorder", () => {
     const nodes = { f: alFrame("f"), a: rect("a", "f", 0), b: rect("b", "f", 48) };
     assert.equal(canSwapAutoLayoutSiblings("a", "b", nodes), true);
     assert.equal(canSwapAutoLayoutSiblings("a", "a", nodes), false);
+  });
+
+  it("shift+arrow jumps to flow ends", () => {
+    const nodes = {
+      f: alFrame("f"),
+      a: rect("a", "f", 0),
+      b: rect("b", "f", 48),
+      c: rect("c", "f", 96),
+    };
+    const childOrder = { f: ["a", "b", "c"] };
+    const ctx = { parentId: "f", childId: "c", mode: "horizontal" as const };
+    assert.equal(
+      computeAutoLayoutArrowReorderIndex(ctx, "ArrowLeft", nodes, childOrder, true),
+      0,
+    );
+    const ctxA = { parentId: "f", childId: "a", mode: "horizontal" as const };
+    assert.equal(
+      computeAutoLayoutArrowReorderIndex(ctxA, "ArrowRight", nodes, childOrder, true),
+      3,
+    );
+  });
+
+  it("nudgeSelection detaches auto-layout flow child for manual offset", () => {
+    const nodes = { f: alFrame("f"), a: rect("a", "f", 0), b: rect("b", "f", 48) };
+    const childOrder = { f: ["a", "b"] };
+    useEditorStore.setState({
+      editorMode: "design",
+      nodes,
+      childOrder,
+      selectedIds: ["b"],
+    });
+    const beforeY = useEditorStore.getState().nodes.b!.y;
+    useEditorStore.getState().nudgeSelection(0, -4);
+    const after = useEditorStore.getState().nodes.b!;
+    assert.equal(after.layoutPositioning, "absolute");
+    assert.equal(after.y, beforeY - 4);
   });
 });

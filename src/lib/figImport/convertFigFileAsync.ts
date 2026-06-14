@@ -1,19 +1,33 @@
 import type { FigImportResult } from "./figToPaytmCraft";
-import { convertFigBytesToPaytmCraftAsync } from "./figToPaytmCraft";
-import { waitForNextPaint, type FigImportProgress } from "./figImportRuntime";
+import { convertFigBytesToPaytmCraft } from "./figToPaytmCraft";
+import { convertFigBytesInWorker } from "./runFigImportWorker";
+import type { FigImportProgress } from "./figImportRuntime";
 
 export type { FigImportProgress };
 
 /**
- * Parse and convert a .fig file on the main thread with periodic yields.
- * (Web Workers were hanging in Next.js for large files — cooperative import is more reliable.)
+ * Fast .fig import: worker thread when available, otherwise a single main-thread pass.
+ * (Per-node cooperative yields were removed — they made large imports 10–50× slower.)
  */
 export async function convertFigFileAsync(
   bytes: Uint8Array,
   fileName: string,
   onProgress?: FigImportProgress,
 ): Promise<FigImportResult> {
-  await waitForNextPaint();
   onProgress?.("Unpacking Figma archive…");
-  return convertFigBytesToPaytmCraftAsync(bytes, fileName, onProgress);
+
+  const workerResult = await convertFigBytesInWorker(bytes, fileName);
+  if (workerResult) {
+    if (workerResult.ok) {
+      onProgress?.("Finalizing canvas…");
+    }
+    return workerResult;
+  }
+
+  onProgress?.("Converting layers…");
+  const result = convertFigBytesToPaytmCraft(bytes, fileName);
+  if (result.ok) {
+    onProgress?.("Finalizing canvas…");
+  }
+  return result;
 }

@@ -4,6 +4,7 @@ import {
   writeLocalDocument,
   type PaytmCraftDocument,
 } from "@/lib/documentPersistence";
+import { ApiSyncProvider } from "@/lib/apiSyncProvider";
 import { getPaytmCraftPublicEnv } from "@/lib/env";
 
 /** Future: Yjs update, JSON Patch, or opaque server envelope. */
@@ -12,7 +13,7 @@ export type DocumentPatch = Uint8Array | Record<string, unknown>;
 export type PresencePayload = Record<string, unknown>;
 
 export interface SyncProvider {
-  readonly kind: "local" | "remote";
+  readonly kind: "local" | "api" | "remote";
 
   loadDocument(): Promise<PaytmCraftDocument | null>;
 
@@ -86,39 +87,42 @@ export class LocalSyncProvider implements SyncProvider {
 }
 
 /**
- * Placeholder for Hocuspocus / Yjs websocket sync. Operations are no-ops or reject until implemented.
+ * HTTP + optional Yjs realtime for `remote` mode.
  */
 export class RemoteSyncProvider implements SyncProvider {
   readonly kind = "remote" as const;
 
+  private readonly http = new ApiSyncProvider("remote");
+
   loadDocument(): Promise<PaytmCraftDocument | null> {
-    return Promise.reject(new Error("Remote sync not connected yet"));
+    return this.http.loadDocument();
   }
 
-  saveDocument(_document: PaytmCraftDocument): Promise<void> {
-    void _document;
-    return Promise.reject(new Error("Remote sync not connected yet"));
+  saveDocument(document: PaytmCraftDocument): Promise<void> {
+    return this.http.saveDocument(document);
   }
 
-  subscribeToDocument(_onChange: (document: PaytmCraftDocument | null) => void): () => void {
-    void _onChange;
-    return () => {};
+  subscribeToDocument(onChange: (document: PaytmCraftDocument | null) => void): () => void {
+    return this.http.subscribeToDocument(onChange);
   }
 
-  publishPatch(_patch: DocumentPatch): Promise<void> {
-    void _patch;
-    return Promise.reject(new Error("Remote sync not connected yet"));
+  async publishPatch(patch: DocumentPatch): Promise<void> {
+    return this.http.publishPatch(patch);
   }
 
-  connectPresence(_fileId: string): Promise<void> {
-    void _fileId;
-    return Promise.reject(new Error("Remote sync not connected yet"));
+  connectPresence(fileId: string): Promise<void> {
+    return this.http.connectPresence(fileId);
   }
 
-  async disconnectPresence(): Promise<void> {}
+  async disconnectPresence(): Promise<void> {
+    return this.http.disconnectPresence();
+  }
 }
 
 /** Factory for future wiring (`NEXT_PUBLIC_PAYTM_CRAFT_MODE`). */
 export function createSyncProvider(): SyncProvider {
-  return getPaytmCraftPublicEnv().mode === "remote" ? new RemoteSyncProvider() : new LocalSyncProvider();
+  const mode = getPaytmCraftPublicEnv().mode;
+  if (mode === "remote") return new RemoteSyncProvider();
+  if (mode === "api") return new ApiSyncProvider("api");
+  return new LocalSyncProvider();
 }

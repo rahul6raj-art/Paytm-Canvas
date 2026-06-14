@@ -48,6 +48,7 @@ type Sim = {
 
 export function EditorMockPresence() {
   const showPresence = useEditorStore((s) => s.showPresence);
+  const realtimeSyncStatus = useEditorStore((s) => s.realtimeSyncStatus);
   const prototypePreview = useEditorStore((s) => s.prototypePreview);
   const documentHydrationRevision = useEditorStore((s) => s.documentHydrationRevision);
 
@@ -64,6 +65,7 @@ export function EditorMockPresence() {
 
   useEffect(() => {
     if (!showPresence || prototypePreview) return;
+    if (realtimeSyncStatus === "connected") return;
 
     const count = 2 + Math.floor(Math.random() * 3);
     templateCountRef.current = Math.min(count, MOCK_PRESENCE_TEMPLATES.length);
@@ -165,7 +167,7 @@ export function EditorMockPresence() {
     }, TICK_MS);
 
     return () => window.clearInterval(id);
-  }, [showPresence, prototypePreview, documentHydrationRevision]);
+  }, [showPresence, prototypePreview, documentHydrationRevision, realtimeSyncStatus]);
 
   return null;
 }

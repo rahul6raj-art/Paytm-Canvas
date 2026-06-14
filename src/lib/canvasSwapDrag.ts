@@ -38,7 +38,49 @@ export function canSwapNodes(
   return parentAllowsSwap(a.parentId, nodes);
 }
 
-/** When two top-level layers are selected, return the partner of the clicked node. */
+/** Other selected top-level layers the node can swap with. */
+export function swapCandidatesForMultiSelect(
+  nodeId: string,
+  selectedIds: string[],
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): string[] {
+  const tops = topLevelSelectedIds(selectedIds, nodes);
+  if (tops.length < 2 || !tops.includes(nodeId)) return [];
+  return tops.filter(
+    (id) => id !== nodeId && canSwapNodes(nodeId, id, nodes, childOrder),
+  );
+}
+
+/** Top-level selected layers that show a swap handle (2+ selection with at least one partner). */
+export function multiSelectSwapHandleIds(
+  selectedIds: string[],
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): string[] {
+  const tops = topLevelSelectedIds(selectedIds, nodes).filter((id) => {
+    const n = nodes[id];
+    return n && n.visible && !n.locked;
+  });
+  if (tops.length < 2) return [];
+  return tops.filter(
+    (id) => swapCandidatesForMultiSelect(id, selectedIds, nodes, childOrder).length > 0,
+  );
+}
+
+export function swapHandleWorldCenter(
+  nodeId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): { x: number; y: number } {
+  const bounds = getRenderedWorldBounds(nodeId, nodes, childOrder);
+  return {
+    x: bounds.x + bounds.width / 2,
+    y: bounds.y + bounds.height / 2,
+  };
+}
+
+/** When exactly two top-level layers are selected, return the partner of the clicked node. */
 export function swapPartnerForMultiSelect(
   nodeId: string,
   selectedIds: string[],
@@ -67,14 +109,25 @@ export function findSwapTargetAtPoint(
   worldY: number,
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
-  swapPartnerId?: string,
+  swapCandidateIds?: readonly string[],
 ): string | null {
-  if (swapPartnerId) {
+  if (swapCandidateIds?.length) {
+    const hit = pickDeepestVisibleNodeAtWorldPoint(worldX, worldY, nodes, childOrder);
     if (
-      canSwapNodes(movingId, swapPartnerId, nodes, childOrder) &&
-      pointInNodeRenderedWorldBounds(worldX, worldY, swapPartnerId, nodes, childOrder)
+      hit &&
+      hit !== movingId &&
+      swapCandidateIds.includes(hit) &&
+      canSwapNodes(movingId, hit, nodes, childOrder)
     ) {
-      return swapPartnerId;
+      return hit;
+    }
+    for (const candidateId of swapCandidateIds) {
+      if (
+        canSwapNodes(movingId, candidateId, nodes, childOrder) &&
+        pointInNodeRenderedWorldBounds(worldX, worldY, candidateId, nodes, childOrder)
+      ) {
+        return candidateId;
+      }
     }
     return null;
   }
@@ -133,20 +186,19 @@ export function worldCenterAtCapturedOrigin(
 /** Resolve swap partner on drop (pointer over partner or sufficient overlap). */
 export function resolveSwapDropTarget(
   movingId: string,
-  swapPartnerId: string | undefined,
+  swapCandidateIds: readonly string[] | undefined,
   lastSwapTargetId: string | null | undefined,
   worldX: number,
   worldY: number,
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
 ): string | null {
-  if (!swapPartnerId) {
+  if (!swapCandidateIds?.length) {
     if (lastSwapTargetId && canSwapNodes(movingId, lastSwapTargetId, nodes, childOrder)) {
       return lastSwapTargetId;
     }
     return null;
   }
-  if (!canSwapNodes(movingId, swapPartnerId, nodes, childOrder)) return null;
 
   const atPoint = findSwapTargetAtPoint(
     movingId,
@@ -154,17 +206,26 @@ export function resolveSwapDropTarget(
     worldY,
     nodes,
     childOrder,
-    swapPartnerId,
+    swapCandidateIds,
   );
   if (atPoint) return atPoint;
 
   const a = getRenderedWorldBounds(movingId, nodes, childOrder);
-  const b = getRenderedWorldBounds(swapPartnerId, nodes, childOrder);
-  const overlap = rectOverlapArea(a, b);
-  const minArea = Math.min(a.width * a.height, b.width * b.height);
-  if (minArea > 0 && overlap / minArea >= 0.3) return swapPartnerId;
+  let best: { id: string; overlap: number } | null = null;
+  for (const candidateId of swapCandidateIds) {
+    if (!canSwapNodes(movingId, candidateId, nodes, childOrder)) continue;
+    const b = getRenderedWorldBounds(candidateId, nodes, childOrder);
+    const overlap = rectOverlapArea(a, b);
+    const minArea = Math.min(a.width * a.height, b.width * b.height);
+    if (minArea > 0 && overlap / minArea >= 0.3) {
+      if (!best || overlap > best.overlap) best = { id: candidateId, overlap };
+    }
+  }
+  if (best) return best.id;
 
-  if (lastSwapTargetId === swapPartnerId) return swapPartnerId;
+  if (lastSwapTargetId && swapCandidateIds.includes(lastSwapTargetId)) {
+    return lastSwapTargetId;
+  }
   return null;
 }
 

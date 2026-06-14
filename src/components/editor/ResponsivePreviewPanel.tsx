@@ -51,23 +51,23 @@ export function ResponsivePreviewPanel() {
     <div className="shrink-0 border-t border-app-border bg-app-panel p-2 shadow-[0_-4px_12px_rgba(0,0,0,0.25)]">
       <div className="mb-1.5 flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-app-muted">Responsive preview</p>
-          <p className="truncate text-[12px] font-medium text-white" title={frameName}>
+          <p className="section-heading text-app-muted">Responsive preview</p>
+          <p className="truncate text-ui font-medium text-white" title={frameName}>
             {frameName}
           </p>
         </div>
-        <span className="shrink-0 rounded border border-amber-500/35 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-100">
+        <span className="shrink-0 rounded border border-amber-500/35 bg-amber-500/10 px-1.5 py-0.5 text-ui font-medium text-amber-100">
           Draft
         </span>
       </div>
 
-      <p className="mb-2 text-[10px] leading-relaxed text-[#737373]">
+      <p className="mb-2 text-ui leading-relaxed text-[#737373]">
         Canvas updates live. Apply saves with one undo step; Cancel reverts without history.
       </p>
 
       <div className="mb-2 grid grid-cols-2 gap-2">
         <label className="block">
-          <span className="mb-0.5 block text-[10px] font-medium text-app-subtle">Width</span>
+          <span className="mb-0.5 block text-ui font-medium text-app-subtle">Width</span>
           <input
             type="range"
             min={RESIZE_MIN_DIMENSION}
@@ -76,10 +76,10 @@ export function ResponsivePreviewPanel() {
             onChange={(e) => onWidthInput(Number(e.target.value))}
             className="w-full accent-sky-500"
           />
-          <span className="mt-0.5 block text-right font-mono text-[10px] text-app-muted">{Math.round(dw)}</span>
+          <span className="mt-0.5 block text-right font-mono text-ui text-app-muted">{Math.round(dw)}</span>
         </label>
         <label className="block">
-          <span className="mb-0.5 block text-[10px] font-medium text-app-subtle">Height</span>
+          <span className="mb-0.5 block text-ui font-medium text-app-subtle">Height</span>
           <input
             type="range"
             min={RESIZE_MIN_DIMENSION}
@@ -88,12 +88,12 @@ export function ResponsivePreviewPanel() {
             onChange={(e) => onHeightInput(Number(e.target.value))}
             className="w-full accent-sky-500"
           />
-          <span className="mt-0.5 block text-right font-mono text-[10px] text-app-muted">{Math.round(dh)}</span>
+          <span className="mt-0.5 block text-right font-mono text-ui text-app-muted">{Math.round(dh)}</span>
         </label>
       </div>
 
       <div className="mb-2">
-        <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-app-subtle">Presets</p>
+        <p className="mb-1 section-heading">Presets</p>
         <div className="flex flex-wrap gap-1">
           {RESPONSIVE_DEVICE_PRESETS.map((p) => (
             <button
@@ -101,7 +101,7 @@ export function ResponsivePreviewPanel() {
               type="button"
               onClick={() => updateResponsivePreviewBounds(p.width, p.height)}
               className={cn(
-                "rounded border px-2 py-1 text-[10px] font-medium transition-colors",
+                "rounded border px-2 py-1 text-ui font-medium transition-colors",
                 "border-app-border bg-[#333] text-app-fg hover:border-sky-500/40 hover:bg-sky-500/10",
               )}
             >
@@ -115,21 +115,21 @@ export function ResponsivePreviewPanel() {
         <button
           type="button"
           onClick={() => resetResponsivePreview()}
-          className="rounded border border-app-border bg-app-hover px-2 py-1.5 text-[11px] font-medium text-app-fg hover:bg-white/[0.1]"
+          className="rounded border border-app-border bg-app-hover px-2 py-1.5 text-ui font-medium text-app-fg hover:bg-white/[0.1]"
         >
           Reset
         </button>
         <button
           type="button"
           onClick={() => cancelResponsivePreview()}
-          className="rounded border border-app-border px-2 py-1.5 text-[11px] font-medium text-app-muted hover:bg-white/[0.05]"
+          className="rounded border border-app-border px-2 py-1.5 text-ui font-medium text-app-muted hover:bg-white/[0.05]"
         >
           Cancel
         </button>
         <button
           type="button"
           onClick={() => applyResponsivePreview()}
-          className="ml-auto rounded border border-sky-500/45 bg-sky-500/20 px-3 py-1.5 text-[11px] font-semibold text-sky-100 hover:bg-sky-500/30"
+          className="ml-auto rounded border border-sky-500/45 bg-sky-500/20 px-3 py-1.5 text-ui font-semibold text-sky-100 hover:bg-sky-500/30"
         >
           Apply
         </button>

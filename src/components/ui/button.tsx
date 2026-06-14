@@ -19,8 +19,8 @@ export function Button({
         variant === "toolbar" &&
           "border border-transparent text-app-muted hover:border-app-border hover:bg-app-hover hover:text-app-fg data-[active=true]:border-app-border data-[active=true]:bg-app-hover data-[active=true]:text-app-fg",
         variant === "primary" && "bg-accent text-white hover:bg-[#0b87e0]",
-        size === "sm" && "h-7 px-2",
-        size === "icon" && "h-7 w-7",
+        size === "sm" && "h-8 px-2.5",
+        size === "icon" && "h-8 w-8",
         className,
       )}
       {...props}

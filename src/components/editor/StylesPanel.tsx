@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
-import { Library, Palette, Ruler, Sparkles, Type, Wand2 } from "lucide-react";
+import { Library, Palette, Ruler, Type, Wand2 } from "lucide-react";
 import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
 import { useEditorStore } from "@/stores/useEditorStore";
 import {
@@ -33,32 +33,29 @@ function EmptyStyleHint({
   return (
     <div className="mx-1 rounded-lg border border-dashed border-app-border bg-white/[0.02] px-3 py-5 text-center">
       <Icon className="mx-auto mb-2 h-7 w-7 text-[#4a4a4a]" strokeWidth={1.25} />
-      <p className="text-[12px] font-medium text-app-muted">{title}</p>
-      <p className="mt-1 text-[11px] leading-relaxed text-app-subtle">{body}</p>
+      <p className="text-ui font-medium text-app-muted">{title}</p>
+      <p className="mt-1 text-ui leading-relaxed text-app-subtle">{body}</p>
     </div>
   );
 }
 
 function groupByType(tokens: DesignToken[]) {
   const colors: DesignToken[] = [];
-  const gradients: DesignToken[] = [];
   const typo: DesignToken[] = [];
   const spacing: DesignToken[] = [];
   const effects: DesignToken[] = [];
   for (const t of tokens) {
-    if (t.type === "color") colors.push(t);
-    else if (t.type === "gradient") gradients.push(t);
+    if (t.type === "color" || t.type === "gradient") colors.push(t);
     else if (t.type === "typography") typo.push(t);
     else if (t.type === "spacing") spacing.push(t);
     else if (t.type === "effect") effects.push(t);
   }
   const byName = (a: DesignToken, b: DesignToken) => a.name.localeCompare(b.name);
   colors.sort(byName);
-  gradients.sort(byName);
   typo.sort(byName);
   spacing.sort(byName);
   effects.sort(byName);
-  return { colors, gradients, typo, spacing, effects };
+  return { colors, typo, spacing, effects };
 }
 
 function TokenPreview({ token }: { token: DesignToken }) {
@@ -97,7 +94,7 @@ function TokenPreview({ token }: { token: DesignToken }) {
         title={tokenValueSummary(token)}
       >
         <span
-          className="truncate text-[11px] text-app-fg"
+          className="truncate text-ui text-app-fg"
           style={{
             fontFamily: v.fontFamily,
             fontSize: Math.min(v.fontSize, 14),
@@ -116,7 +113,7 @@ function TokenPreview({ token }: { token: DesignToken }) {
     return (
       <div className="flex h-8 w-full items-center justify-center rounded border border-app-border bg-app-surface px-2">
         <div className="h-2 flex-1 rounded bg-accent/40" style={{ width: `${Math.min(px, 72)}px`, maxWidth: "100%" }} />
-        <span className="ml-2 shrink-0 font-mono text-[10px] text-app-muted">{px}px</span>
+        <span className="ml-2 shrink-0 font-mono text-ui text-app-muted">{px}px</span>
       </div>
     );
   }
@@ -149,10 +146,10 @@ function TokenRow({ token }: { token: DesignToken }) {
   return (
     <li className="rounded-md border border-app-border bg-app-panel p-2">
       <TokenPreview token={token} />
-      <p className="mt-1.5 truncate text-[12px] font-medium text-app-fg" title={token.name}>
+      <p className="mt-1.5 truncate text-ui font-medium text-app-fg" title={token.name}>
         {token.name}
       </p>
-      <p className="truncate font-mono text-[10px] text-[#737373]" title={tokenValueSummary(token)}>
+      <p className="truncate font-mono text-ui text-[#737373]" title={tokenValueSummary(token)}>
         {tokenValueSummary(token)}
       </p>
       <div className="mt-1.5 flex gap-1">
@@ -161,7 +158,7 @@ function TokenRow({ token }: { token: DesignToken }) {
           disabled={!canApply}
           onClick={() => applyTokenToSelection(token.id)}
           className={cn(
-            "flex-1 rounded border py-1 text-[10px] font-semibold uppercase tracking-wide transition-colors",
+            "flex-1 rounded border py-1 text-ui font-medium transition-colors",
             canApply
               ? "border-sky-500/40 bg-sky-500/15 text-sky-100 hover:bg-sky-500/25"
               : "cursor-not-allowed border-app-border-subtle text-app-subtle",
@@ -172,7 +169,7 @@ function TokenRow({ token }: { token: DesignToken }) {
         <button
           type="button"
           onClick={() => deleteDesignToken(token.id)}
-          className="rounded border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-rose-100 hover:bg-rose-500/20"
+          className="rounded border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-ui font-medium text-rose-100 hover:bg-rose-500/20"
         >
           Delete
         </button>
@@ -184,7 +181,7 @@ function TokenRow({ token }: { token: DesignToken }) {
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="mb-3">
-      <h3 className="mb-1.5 px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-app-subtle">
+      <h3 className="mb-1.5 px-1 section-heading">
         {title}
       </h3>
       {children}
@@ -224,8 +221,8 @@ export function StylesPanel() {
         <div className="flex items-center gap-2">
           <Library className="h-4 w-4 text-accent" strokeWidth={1.75} />
           <div>
-            <p className="text-[12px] font-semibold text-app-fg">Design system</p>
-            <p className="text-[10px] text-app-subtle">Reusable colors, type, and effects</p>
+            <p className="text-ui font-semibold text-app-fg">Design system</p>
+            <p className="text-ui text-app-subtle">Reusable colors, type, and effects</p>
           </div>
         </div>
       </div>
@@ -241,7 +238,7 @@ export function StylesPanel() {
             <button
               type="button"
               onClick={() => seedDesignSystemColorPalette()}
-              className="w-full rounded-lg border border-accent/40 bg-accent/15 py-2 text-[12px] font-semibold text-accent hover:bg-accent/25"
+              className="w-full rounded-lg border border-accent/40 bg-accent/15 py-2 text-ui font-semibold text-accent hover:bg-accent/25"
             >
               Add starter color palette
             </button>
@@ -251,16 +248,16 @@ export function StylesPanel() {
         )}
 
         <div className="flex flex-col gap-2 rounded-md border border-app-border bg-app-field p-2">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-app-subtle">
+          <p className="section-heading">
             Create color
           </p>
-          <label className="text-[10px] font-medium text-app-subtle">
+          <label className="text-ui font-medium text-app-subtle">
             Name
             <input
               value={colorName}
               onChange={(e) => setColorName(e.target.value)}
               onKeyDown={(e) => handlePanelFieldKeyDown(e)}
-              className="mt-0.5 w-full rounded border border-app-border bg-app-surface px-1.5 py-1 text-[12px] text-app-fg"
+              className="mt-0.5 w-full rounded border border-app-border bg-app-surface px-1.5 py-1 text-ui text-app-fg"
             />
           </label>
           <ColorInput hex={colorHex} onCommitHex={setColorHex} />
@@ -268,7 +265,7 @@ export function StylesPanel() {
             <button
               type="button"
               onClick={addColor}
-              className="flex-1 rounded border border-app-border bg-app-hover py-1.5 text-[11px] font-medium text-white hover:bg-white/[0.1]"
+              className="flex-1 rounded border border-app-border bg-app-hover py-1.5 text-ui font-medium text-white hover:bg-white/[0.1]"
             >
               Add to library
             </button>
@@ -276,7 +273,7 @@ export function StylesPanel() {
               type="button"
               disabled={selectedIds.length === 0}
               onClick={() => createColorTokenFromSelection(colorName.trim() || undefined)}
-              className="flex-1 rounded border border-app-border bg-app-hover py-1.5 text-[11px] font-medium text-white hover:bg-white/[0.1] disabled:opacity-40"
+              className="flex-1 rounded border border-app-border bg-app-hover py-1.5 text-ui font-medium text-white hover:bg-white/[0.1] disabled:opacity-40"
               title="Save the selected layer's fill as a library color"
             >
               From selection
@@ -286,7 +283,7 @@ export function StylesPanel() {
             <button
               type="button"
               onClick={() => seedDesignSystemColorPalette()}
-              className="text-[10px] font-medium text-app-subtle underline-offset-2 hover:text-app-fg hover:underline"
+              className="text-ui font-medium text-app-subtle underline-offset-2 hover:text-app-fg hover:underline"
             >
               + Add more starter colors
             </button>
@@ -304,16 +301,16 @@ export function StylesPanel() {
 
       <Section title="New spacing token">
         <div className="flex flex-col gap-1.5 rounded-md border border-app-border bg-app-field p-2">
-          <label className="text-[10px] font-medium text-app-subtle">
+          <label className="text-ui font-medium text-app-subtle">
             Name
             <input
               value={spaceName}
               onChange={(e) => setSpaceName(e.target.value)}
               onKeyDown={(e) => handlePanelFieldKeyDown(e)}
-              className="mt-0.5 w-full rounded border border-app-border bg-app-surface px-1.5 py-1 text-[12px] text-app-fg"
+              className="mt-0.5 w-full rounded border border-app-border bg-app-surface px-1.5 py-1 text-ui text-app-fg"
             />
           </label>
-          <label className="text-[10px] font-medium text-app-subtle">
+          <label className="text-ui font-medium text-app-subtle">
             Value (px)
             <input
               type="number"
@@ -330,33 +327,17 @@ export function StylesPanel() {
                   },
                 });
               }}
-              className="mt-0.5 w-full rounded border border-app-border bg-app-surface px-1.5 py-1 text-[12px] text-app-fg"
+              className="mt-0.5 w-full rounded border border-app-border bg-app-surface px-1.5 py-1 text-ui text-app-fg"
             />
           </label>
           <button
             type="button"
             onClick={addSpacing}
-            className="rounded border border-app-border bg-app-hover py-1.5 text-[11px] font-medium text-white hover:bg-white/[0.1]"
+            className="rounded border border-app-border bg-app-hover py-1.5 text-ui font-medium text-white hover:bg-white/[0.1]"
           >
             Add spacing token
           </button>
         </div>
-      </Section>
-
-      <Section title="Gradients">
-        {grouped.gradients.length === 0 ? (
-          <EmptyStyleHint
-            icon={Sparkles}
-            title="No gradient styles"
-            body="Select a shape with a gradient fill, then use Create gradient style in the Design inspector."
-          />
-        ) : (
-          <ul className="space-y-1.5">
-            {grouped.gradients.map((t) => (
-              <TokenRow key={t.id} token={t} />
-            ))}
-          </ul>
-        )}
       </Section>
 
       <Section title="Typography">

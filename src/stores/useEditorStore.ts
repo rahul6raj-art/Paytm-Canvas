@@ -14,12 +14,13 @@ import {
 } from "@/lib/tree";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import { clampCanvasZoom, DEFAULT_CANVAS_ZOOM, viewportForRootNodes } from "@/lib/canvasZoom";
-import { deferFigImportSave, waitForNextPaint } from "@/lib/figImport/figImportRuntime";
+import { deferFigImportSave } from "@/lib/figImport/figImportRuntime";
 import { fitCanvasToImportedDocument } from "@/lib/viewportZoom";
 import { normalizeHex } from "@/lib/color";
 import type { StrokeSpec } from "@/lib/strokeSpec";
 import { mergeStrokeIntoNode } from "@/lib/strokeSpec";
 import { canvasChromeForeground } from "@/lib/canvasForeground";
+import { isShapeTool, type ShapeTool } from "@/lib/canvasToolRail";
 import {
   createEmptyDocumentFields,
   isWorkspaceEmpty,
@@ -42,6 +43,7 @@ import {
   type LayoutNode,
   type LayoutPatch,
   type LayoutPositioning,
+  type LayoutSizingMode,
   type PrimaryAxisAlign,
 } from "@/lib/autoLayout";
 import {
@@ -49,14 +51,17 @@ import {
   applyAutoLayoutToSelection,
   applyWrapSelectionInFrame,
   canAddAutoLayoutToSelection,
+  type ApplyAutoLayoutSelectionResult,
 } from "@/lib/autoLayoutSelection";
 import { freezeAutoLayoutGapBeforeChildInsert } from "@/lib/layoutEngine/inferGap";
+import { idsToDetachForAutoLayoutDrag } from "@/lib/autoLayoutDrag";
 import {
   computeAutoLayoutArrowReorderIndex,
   getAutoLayoutArrowReorderContext,
   swapAutoLayoutSiblingOrder,
 } from "@/lib/autoLayoutArrowReorder";
 import {
+  centerProportionalScaleFromWorld,
   computeResizedBounds,
   isProportionalResize,
   RESIZE_MIN_DIMENSION,
@@ -68,6 +73,12 @@ import {
 import { clearPostCreationPointerSuppress } from "@/lib/canvasCreationGuard";
 import { isCanvasBgCreationTool } from "@/lib/canvasInteractionGuards";
 import { warnInvalidNodeGeometry } from "@/lib/canvasGeometryDev";
+import {
+  clampNodeDimensions,
+  clampNodePosition,
+  clampResizePointerLocal,
+  sanitizeNodeGeometry,
+} from "@/lib/nodeGeometryClamp";
 import type { CornerRadii } from "@/lib/cornerRadius";
 import {
   canEnterParametricShapeEdit,
@@ -75,7 +86,9 @@ import {
 } from "@/lib/editMode/shapeEditGate";
 import {
   alignNodesInDocument,
+  alignNodesInDocumentToGrid,
   alignableSelectionIds,
+  canAlignSelection,
   distributeNodesInDocument,
   relayoutParentKeysAfterManualPosition,
 } from "@/lib/alignSelection";
@@ -84,6 +97,16 @@ import {
   DEFAULT_PENCIL_STROKE_WIDTH,
   nodeSupportsStrokeWidth,
 } from "@/lib/strokeAdjust";
+import { nodeSupportsFillColor } from "@/lib/fillAdjust";
+import type { CloneWorldOffset } from "@/lib/editorGraph";
+import {
+  getDuplicateStepOffset,
+  recordDuplicateCreated,
+  refreshDuplicateStepAfterMove,
+  resetDuplicateRepeatOffset,
+  selectionMatchesDuplicateChain,
+  syncDuplicateRepeatSelection,
+} from "@/lib/duplicateRepeatOffset";
 import {
   clonedNodePosition,
   parentUsesAutoLayout,
@@ -94,6 +117,7 @@ import {
   buildParentMapFromChildOrder,
   syncParentIdsFromChildOrder,
   worldPointToParentLocalFromChildOrder,
+  worldDragPairInParentSpace,
   isAncestorOf,
   nextFrameName,
   repairNodeHierarchy,
@@ -123,13 +147,19 @@ import {
   newPrototypeLinkId,
   type PrototypeLink,
 } from "@/lib/prototype";
-import type { EditorAsset, EditorPersistSlice, PaytmCraftDocument } from "@/lib/documentPersistence";
+import type {
+  EditorAsset,
+  EditorFontAsset,
+  EditorPersistSlice,
+  PaytmCraftDocument,
+} from "@/lib/documentPersistence";
 import type { DesignToken, DetachableTokenKind, EffectTokenValue } from "@/lib/designTokens";
 import {
   newDesignTokenId,
   designTokenTimestamp,
   resolveNodeWithDesignTokens,
   isColorValue,
+  isGradientValue,
   isTypographyValue,
   isSpacingValue,
   isEffectValue,
@@ -164,14 +194,26 @@ import {
   textLayoutPatchForNode,
   withTextLayoutPatch,
 } from "@/lib/text/textLayout";
-import { createPointTextAt, createTextBoxFromDrag } from "@/lib/text/textCreation";
-import { EMPTY_TEXT_PLACEHOLDER_WIDTH, MIN_TEXT_BOX, textResizePatch } from "@/lib/text/textNodeModel";
 import {
+  createPointTextAt,
+  createTextBoxFromDrag,
+  createTextDraftNodeFromDrag,
+  textGeometryPatchFromDrag,
+} from "@/lib/text/textCreation";
+import { createFrameNodeFromDrag, frameGeometryPatchFromDrag } from "@/lib/frameDrawing";
+import { MIN_TEXT_BOX, textResizePatch } from "@/lib/text/textNodeModel";
+import {
+  DEFAULT_TEXT_COLOR,
   DEFAULT_TEXT_FONT_FAMILY,
   DEFAULT_TEXT_FONT_SIZE,
   resolveTextTypo,
 } from "@/lib/textTypography";
-import { createShapeNode } from "@/lib/shapes/shapeCreation";
+import {
+  createShapeNode,
+  shapeGeometryPatchFromDrag,
+  toolToShapeType,
+} from "@/lib/shapes/shapeCreation";
+import { isZeroAreaDraftNode } from "@/lib/shapes/shapeDraft";
 import {
   duplicatedTextLayerName,
   layerNameFromTextContent,
@@ -208,14 +250,22 @@ import {
   convertStrokeToVector,
 } from "@/lib/outlineStroke";
 import { expandBooleanFillStylePatches } from "@/lib/booleanGroupFill";
-import { getResizeAnchorLocal, solveNodeXYForAnchorWorld } from "@/lib/resizeTransform";
+import {
+  getResizeAnchorLocal,
+  isCornerHandle,
+  solveNodeXYForAnchorWorld,
+} from "@/lib/resizeTransform";
 import {
   finiteCoord,
   finiteDimension,
   hasRotation,
   getNodeWorldOrigin,
 } from "@/lib/transformMath";
-import { buildEditorAssetFromFile, validateImageImportFile } from "@/lib/editorAssets";
+import { validateImageImportFile, validateVideoImportFile, buildEditorVideoAssetFromFile } from "@/lib/editorAssets";
+import { resolveImageAssetFromFile } from "@/lib/resolveImageAssetImport";
+import { buildEditorFontAssetFromFile } from "@/lib/editorFontAssets";
+import { importSvgFileToEditorGraph, isSvgLayerImportFile } from "@/lib/svgFileImport";
+import { insertImportedNodes } from "@/lib/svgImportInsert";
 import {
   clearLocalDocument,
   documentToEditorPatch,
@@ -229,8 +279,16 @@ import {
   serializePersistStable,
   validatePaytmCraftDocument,
 } from "@/lib/documentPersistence";
+import {
+  getActiveApiRevision,
+  isApiSaveConflictError,
+  setActiveApiFileId,
+  setActiveApiRevision,
+} from "@/lib/apiSyncProvider";
+import { persistSliceFromApiFileDetail } from "@/lib/apiFileHydration";
 import { getSyncProvider } from "@/lib/syncProviderSingleton";
-import { getPaytmCraftPublicEnv } from "@/lib/env";
+import { isPaytmCraftHttpApiMode } from "@/lib/env";
+import type { RealtimeSyncStatus } from "@/lib/realtimeSyncProtocol";
 import { apiClient, type CraftFileVersionSummary } from "@/lib/apiClient";
 import { getActiveMockWorkspace } from "@/lib/mockAuth";
 
@@ -240,6 +298,27 @@ import {
   historySnapshotToEditorPatch,
   type PersistedEditorSnapshot,
 } from "@/lib/editorHistory";
+import { isWasmDocumentAuthority } from "@/engine/craftEngineAuthority";
+import { bumpResizePreview } from "@/lib/canvasEphemeralTransform";
+import {
+  craftEngineAuthorityCanRedo,
+  craftEngineAuthorityCanUndo,
+  craftEngineAuthorityPushSnapshot,
+  craftEngineAuthorityRedo,
+  craftEngineAuthorityUndo,
+} from "@/engine/craftEngineAuthorityBridge";
+import { mirrorGeometryPatchesToWasm, mirrorNodeGeometryToWasm } from "@/engine/craftEngineAuthorityGeometry";
+import { flushDeferredWasmReconcile } from "@/engine/craftEngineAuthorityMirror";
+import type { WasmSnapshotStorePatch } from "@/engine/craftEngineSnapshotApply";
+import { mergeWasmSnapshotWithStore } from "@/engine/craftEngineSnapshotApply";
+import {
+  commitDocumentMutation,
+  syncWasmDocumentAfterStoreUpdate,
+} from "@/engine/craftEngineWasmFirstMutation";
+import {
+  getActiveCraftEngine,
+  requestCraftEngineWasmBootstrap,
+} from "@/engine/craftEngineRegistry";
 
 export type { PersistedEditorSnapshot };
 
@@ -263,6 +342,7 @@ import { mergePathPointHandles } from "@/lib/pathHandles";
 import {
   convertNodeToPath,
   ensureRoundedRectPathPoints,
+  isVectorEditableShape,
   shapeToPathPoints,
 } from "@/lib/shapes/shapeToPath";
 import { getPluginById, readInstalledPluginIds, writeInstalledPluginIds } from "@/lib/plugins";
@@ -323,7 +403,13 @@ export type EditorMode = "design" | "prototype" | "inspect";
 /** @deprecated Use EditorMode */
 export type RightTab = EditorMode;
 
-export type DocumentSaveStatus = "saved" | "unsaved" | "saving" | "saved-api" | "api-save-failed";
+export type DocumentSaveStatus =
+  | "saved"
+  | "unsaved"
+  | "saving"
+  | "saved-api"
+  | "api-save-failed"
+  | "api-conflict";
 
 export type LeftTab = "layers" | "components" | "assets" | "styles";
 
@@ -391,6 +477,8 @@ export interface EditorNode {
   /** Solid or gradient stroke paint */
   strokeType?: import("@/lib/fillGradient").FillType;
   strokeGradient?: import("@/lib/fillGradient").FillGradient;
+  strokeImageAssetId?: string;
+  strokeVideoAssetId?: string;
   strokeWidth?: number;
   /** 0–1 stroke color opacity */
   strokeOpacity?: number;
@@ -400,13 +488,15 @@ export interface EditorNode {
   /** Which edges receive stroke (rectangles / frames). */
   strokeSides?: import("@/lib/strokeAlign").StrokeSidesMode;
   strokeSidesCustom?: import("@/lib/strokeAlign").StrokeSidesCustom;
+  strokeSidesCustomColors?: import("@/lib/strokeAlign").StrokeSidesCustomColors;
   /** Line / open path start cap or arrow */
   strokeStartPoint?: import("@/lib/strokeEndpoints").StrokeEndpoint;
   /** Line / open path end cap or arrow */
   strokeEndPoint?: import("@/lib/strokeEndpoints").StrokeEndpoint;
   cornerRadius?: number;
   /** Per-corner radii [top-left, top-right, bottom-right, bottom-left]. */
-  cornerRadii?: CornerRadii;
+  /** Per-corner radii (4 for rects; one per path vertex for vectors). */
+  cornerRadii?: number[];
   /** Text color; falls back to `fill` when unset */
   textColor?: string;
   fontFamily?: string;
@@ -444,6 +534,10 @@ export interface EditorNode {
   starPoints?: number;
   /** Star inner radius ratio 0–1 (path nodes) */
   starInnerRadius?: number;
+  /** Star outer spike corner radius (falls back to cornerRadius). */
+  starOuterCornerRadius?: number;
+  /** Star inner valley corner radius (falls back to cornerRadius). */
+  starInnerCornerRadius?: number;
   /** Line with arrowhead (line nodes) */
   arrowHead?: boolean;
   /** Arrow layer start cap (arrow nodes). */
@@ -487,6 +581,12 @@ export interface EditorNode {
 
   /** Embedded image layer; pixels come from `imageSrc` (and optionally `assets[assetId]`). */
   assetId?: string;
+  /** Image paint fill (shape/frame) — references `assets`. */
+  fillImageAssetId?: string;
+  /** Video paint fill — references `assets` (video/* data URLs). */
+  fillVideoAssetId?: string;
+  /** Tiled pattern fill from SVG `url(#pattern)` import or pattern mode. */
+  fillPatternAssetId?: string;
   imageSrc?: string;
   imageName?: string;
   imageMimeType?: string;
@@ -563,8 +663,10 @@ export interface EditorNode {
   maskId?: string;
   /** Content node clipped by a mask group */
   maskedBy?: string;
-  /** Figma mask mode (OUTLINE ≈ vector clip; LUMINANCE rendered as outline in v1). */
-  figMaskType?: string;
+  /** Figma mask mode (OUTLINE | LUMINANCE | ALPHA). */
+  figMaskType?: "OUTLINE" | "LUMINANCE" | "ALPHA" | string;
+  /** When true, show mask layer while editing (Figma "show mask"). */
+  maskVisible?: boolean;
   /** Frame clips children to bounds when true (Figma `frameMaskDisabled` inverse). */
   clipChildren?: boolean;
   /** Locked screenshot reference from web import (non-interactive). */
@@ -590,16 +692,22 @@ export type NodeStylePatch = Partial<
     | "fillGradient"
     | "fillOpacity"
     | "fillEnabled"
+    | "fillImageAssetId"
+    | "fillVideoAssetId"
+    | "fillPatternAssetId"
     | "stroke"
     | "strokeColor"
     | "strokeType"
     | "strokeGradient"
+    | "strokeImageAssetId"
+    | "strokeVideoAssetId"
     | "strokeWidth"
     | "strokeOpacity"
     | "strokeEnabled"
     | "strokePosition"
     | "strokeSides"
     | "strokeSidesCustom"
+    | "strokeSidesCustomColors"
     | "strokeStartPoint"
     | "strokeEndPoint"
     | "arrowHead"
@@ -671,6 +779,8 @@ export interface DragMeasurementLine {
 
 export interface EditorState {
   tool: Tool;
+  /** Last shape tool picked on the canvas rail — shown when another tool is active. */
+  lastShapeTool: ShapeTool;
   /** Selected device preset for the frame tool (see `lib/framePresets`). */
   framePresetId: string;
   editorMode: EditorMode;
@@ -684,6 +794,7 @@ export interface EditorState {
   nodes: Record<string, EditorNode>;
   childOrder: Record<string, string[]>;
   assets: Record<string, EditorAsset>;
+  fontAssets: Record<string, EditorFontAsset>;
   designTokens: Record<string, DesignToken>;
   guides: GuideLine[];
   dragMeasurements: DragMeasurementLine[];
@@ -722,6 +833,23 @@ export interface EditorState {
   penDrawingNodeId: string | null;
   /** In-progress freehand (pencil) path node id, or null. */
   pencilDrawingNodeId: string | null;
+  /** Live shape drag (rect, ellipse, line, etc.) — real node updates while drawing. */
+  shapeDrawingSession: {
+    nodeId: string;
+    shapeType: ShapeType;
+    start: { x: number; y: number };
+    style?: Partial<Pick<EditorNode, "polygonSides" | "starPoints" | "starInnerRadius">>;
+  } | null;
+  /** Live frame drag — real frame updates while drawing. */
+  frameDrawingSession: {
+    nodeId: string;
+    start: { x: number; y: number };
+  } | null;
+  /** Live text box drag — real text layer updates while drawing. */
+  textDrawingSession: {
+    nodeId: string;
+    start: { x: number; y: number };
+  } | null;
   /** Brush size for the next freehand stroke (and toolbar preset). */
   pencilStrokeWidth: number;
   /** Point-edit mode for a finished path (Backspace deletes selected anchor). */
@@ -730,6 +858,14 @@ export interface EditorState {
   shapeEditModeNodeId: string | null;
   /** Transient mode while resizing or rotating via selection handles. */
   transformInteractionMode: "none" | "resize" | "rotate";
+  /** Frozen local geometry at rotate-drag start (inspector + stable chrome). */
+  rotateGeomSnapshot: {
+    nodeId: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null;
   /** True while dragging selected object(s) on canvas. */
   isMovingSelection: boolean;
   /** Pointer over a rotate-from-corner hit target. */
@@ -738,7 +874,7 @@ export interface EditorState {
   rotateHandleHoverHandle: import("@/lib/resize").ResizeHandle | "top" | null;
   /** Edit children inside a boolean group (Figma-style). */
   objectEditModeNodeId: string | null;
-  selectedPathPointId: string | null;
+  selectedPathPointIds: string[];
   editingTextId: string | null;
   textEditSelection: { anchor: number; focus: number } | null;
 
@@ -764,6 +900,8 @@ export interface EditorState {
   };
 
   documentSaveStatus: DocumentSaveStatus;
+  /** Yjs/WebSocket session status when `NEXT_PUBLIC_PAYTM_CRAFT_SYNC_URL` is set. */
+  realtimeSyncStatus: RealtimeSyncStatus;
   /** True until the first local/API document load finishes in the editor shell. */
   documentHydrating: boolean;
   documentHydrationRevision: number;
@@ -771,6 +909,8 @@ export interface EditorState {
   /** When set (api mode), document is also saved to `/api/v1/files/:id`. Not serialized in `.paytmcraft.json`. */
   apiFileId: string | undefined;
   apiWorkspaceId: string | undefined;
+  /** Last known server revision for `If-Match` optimistic concurrency. */
+  apiFileRevision: string | undefined;
   isApiBackedFile: boolean;
   /** Mock API comment sync; not persisted in `.paytmcraft.json`. */
   apiCommentsStatus: ApiCommentsStatus;
@@ -782,7 +922,13 @@ export interface EditorState {
 
   historyPast: PersistedEditorSnapshot[];
   historyFuture: PersistedEditorSnapshot[];
+  /** WASM undo stack UI state (native + WASM authority mode). */
+  wasmHistoryCanUndo: boolean;
+  wasmHistoryCanRedo: boolean;
   isApplyingHistory: boolean;
+  /** True while applying a WASM snapshot patch to the document slice (UI mirror mode). */
+  isApplyingWasmMirror: boolean;
+  applyWasmDocumentPatch: (patch: WasmSnapshotStorePatch) => void;
   pushHistory: (label?: string) => void;
   undo: () => void;
   redo: () => void;
@@ -815,13 +961,19 @@ export interface EditorState {
   setZoom: (z: number) => void;
   setPan: (p: { x: number; y: number }) => void;
   patchPan: (d: { x: number; y: number }) => void;
-  updateNode: (id: string, patch: Partial<EditorNode>, opts?: { skipHistory?: boolean }) => void;
+  updateNode: (
+    id: string,
+    patch: Partial<EditorNode>,
+    opts?: { skipHistory?: boolean; allowZeroGeometry?: boolean },
+  ) => void;
   updateNodes: (patches: Record<string, Partial<EditorNode>>, opts?: { skipHistory?: boolean }) => void;
   updateNodeStyle: (id: string, patch: NodeStylePatch, opts?: { skipHistory?: boolean }) => void;
   /** Apply a solid fill hex on one layer (clears linked fill color token, handles instances/booleans). */
   setNodeFillHex: (nodeId: string, hex: string, opts?: { skipHistory?: boolean }) => void;
   /** Apply text color hex (clears linked color token when used for text). */
   setNodeTextColorHex: (nodeId: string, hex: string, opts?: { skipHistory?: boolean }) => void;
+  /** Apply solid fill / text color to all fill-capable layers in the current selection. */
+  setSelectionFillHex: (hex: string, opts?: { skipHistory?: boolean }) => void;
   toggleVisible: (id: string) => void;
   toggleLock: (id: string) => void;
   setNodeVisible: (id: string, visible: boolean) => void;
@@ -841,6 +993,41 @@ export interface EditorState {
     modifiers: { shiftKey: boolean; altKey: boolean },
     style?: Partial<Pick<EditorNode, "polygonSides" | "starPoints" | "starInnerRadius">>,
   ) => void;
+  startShapeFromDrag: (
+    shapeType: ShapeType,
+    start: { x: number; y: number },
+    modifiers: { shiftKey: boolean; altKey: boolean },
+    style?: Partial<Pick<EditorNode, "polygonSides" | "starPoints" | "starInnerRadius">>,
+  ) => void;
+  updateShapeFromDrag: (
+    end: { x: number; y: number },
+    modifiers: { shiftKey: boolean; altKey: boolean },
+  ) => void;
+  finishShapeFromDrag: (
+    end: { x: number; y: number },
+    modifiers: { shiftKey: boolean; altKey: boolean },
+  ) => void;
+  cancelShapeFromDrag: () => void;
+  startFrameFromDrag: (start: { x: number; y: number }) => void;
+  updateFrameFromDrag: (
+    end: { x: number; y: number },
+    modifiers: { shiftKey: boolean; altKey: boolean },
+  ) => void;
+  finishFrameFromDrag: (
+    end: { x: number; y: number },
+    modifiers: { shiftKey: boolean; altKey: boolean },
+  ) => void;
+  cancelFrameFromDrag: () => void;
+  startTextFromDrag: (start: { x: number; y: number }) => void;
+  updateTextFromDrag: (
+    end: { x: number; y: number },
+    modifiers: { shiftKey: boolean; altKey: boolean },
+  ) => void;
+  finishTextFromDrag: (
+    end: { x: number; y: number },
+    modifiers: { shiftKey: boolean; altKey: boolean },
+  ) => void;
+  cancelTextFromDrag: () => void;
   booleanUnionSelection: () => void;
   createBooleanGroup: (operation: BooleanOperation) => void;
   updateBooleanOperation: (groupId: string, operation: BooleanOperation) => void;
@@ -859,9 +1046,15 @@ export interface EditorState {
   ) => void;
   /** Reads file into `assets`, returns new asset id or null on validation/read error (alerts user). */
   importImageAsset: (file: File) => Promise<string | null>;
+  importVideoAsset: (file: File) => Promise<string | null>;
+  /** Reads TTF/OTF into `fontAssets`, returns new font asset id or null on error. */
+  importFontFile: (file: File) => Promise<string | null>;
   /** Places an image node for `assetId`. Uses frame center when `worldX` / `worldY` omitted. */
   addImageNodeAt: (assetId: string, worldX?: number, worldY?: number) => void;
+  /** Import files and place image nodes at a world point (single undo step). Returns count placed. */
+  placeImageFilesOnCanvas: (files: File[], worldX: number, worldY: number) => Promise<number>;
   replaceImageAsset: (nodeId: string, file: File) => Promise<void>;
+  replaceAsset: (assetId: string, file: File) => Promise<void>;
   deleteAsset: (assetId: string) => void;
   createColorTokenFromSelection: (name?: string) => void;
   createGradientTokenFromSelection: (name?: string) => void;
@@ -899,6 +1092,7 @@ export interface EditorState {
   cloneSelectionInPlace: () => string[];
   deleteSelection: (opts?: { skipHistory?: boolean }) => void;
   alignSelection: (direction: AlignDirection) => void;
+  alignSelectionToGrid: (row: number, col: number) => void;
   distributeSelection: (axis: "horizontal" | "vertical") => void;
   selectAllEditable: () => void;
   toggleLockSelection: () => void;
@@ -916,7 +1110,7 @@ export interface EditorState {
   setSelectionStrokeWidth: (width: number) => void;
   nudgeSelectionStrokeWidth: (delta: number) => void;
   /** Reorder a flow child along the auto-layout primary axis (arrow keys). */
-  reorderAutoLayoutChildByArrow: (arrowCode: string) => boolean;
+  reorderAutoLayoutChildByArrow: (arrowCode: string, shiftKey?: boolean) => boolean;
   /** Swap two flow siblings inside the same auto-layout parent. */
   swapAutoLayoutSiblings: (idA: string, idB: string, opts?: { skipHistory?: boolean }) => void;
   groupSelection: () => void;
@@ -997,6 +1191,22 @@ export interface EditorState {
   exitAllEditModes: () => void;
   toggleEditMode: (nodeId?: string) => void;
   setTransformInteractionMode: (mode: "none" | "resize" | "rotate") => void;
+  setRotateGeomSnapshot: (
+    snapshot: {
+      nodeId: string;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    } | null,
+  ) => void;
+  /** Atomically start rotate drag with frozen local geometry. */
+  beginRotateInteraction: (
+    nodeId: string,
+    snapshot: { x: number; y: number; width: number; height: number },
+  ) => void;
+  /** Restore frozen geometry + final rotation, then end rotate mode. */
+  endRotateInteraction: (nodeId: string, rotation: number) => void;
   setIsMovingSelection: (active: boolean) => void;
   setRotateHandleHovered: (
     hovered: boolean,
@@ -1004,14 +1214,26 @@ export interface EditorState {
   ) => void;
   enterVectorEditMode: (nodeId?: string) => void;
   setPathHandleMirroring: (mode: import("@/lib/pathHandles").PathHandleMirroring) => void;
-  setSelectedPathPointId: (id: string | null) => void;
+  setSelectedPathPointIds: (ids: string[]) => void;
+  togglePathPointSelection: (pointId: string, additive: boolean) => void;
+  updatePathPoints: (
+    nodeId: string,
+    patches: Record<string, Partial<Pick<PathPoint, "x" | "y" | "handleIn" | "handleOut">>>,
+    opts?: { skipHistory?: boolean },
+  ) => void;
+  deletePathPoints: (nodeId: string, pointIds: string[]) => void;
   resizeNode: (
     id: string,
     handle: ResizeHandle,
     startBounds: Bounds,
     currentPoint: { x: number; y: number },
     modifiers: ResizeModifiers,
-    opts?: { skipHistory?: boolean; fixedWorld?: { x: number; y: number } | null },
+    opts?: {
+      skipHistory?: boolean;
+      fixedWorld?: { x: number; y: number } | null;
+      pointerWorld?: { x: number; y: number };
+      startPointerWorld?: { x: number; y: number };
+    },
   ) => void;
   resizeFrameWithConstraints: (
     frameId: string,
@@ -1051,6 +1273,8 @@ export interface EditorState {
   setApiFileSession: (fileId: string, workspaceId?: string) => void;
   clearApiFileSession: () => void;
   saveCurrentDocumentAsApiFile: () => Promise<void>;
+  /** Discard local edits and reload the API file from the server (after revision conflict). */
+  reloadApiFileFromServer: () => Promise<void>;
   loadApiComments: () => Promise<void>;
   syncCommentToApi: (commentId: string) => void;
   deleteApiComment: (commentId: string) => void;
@@ -1093,7 +1317,7 @@ export interface EditorState {
   /** Replace editor document from a persist slice (dashboard templates, imports, blank). Writes localStorage. */
   loadWorkspaceFromPersist: (
     slice: EditorPersistSlice,
-    apiSession?: { apiFileId: string; apiWorkspaceId?: string },
+    apiSession?: { apiFileId: string; apiWorkspaceId?: string; apiRevision?: string },
   ) => Promise<void>;
 
   duplicateSingle: (id: string) => void;
@@ -1145,6 +1369,16 @@ export interface EditorState {
   /** Brief success/warning message after import completes (cleared automatically). */
   figImportToast: string | null;
   setFigImportToast: (message: string | null) => void;
+  /** Figma fidelity inspector — source snapshots from last .fig import. */
+  figFidelityCaptures: Record<string, import("@/lib/figImport/figFidelityTypes").FigImportFidelityCapture> | null;
+  figFidelityReport: import("@/lib/figImport/figFidelityTypes").FigmaFidelityProjectReport | null;
+  figFidelityOverlayEnabled: boolean;
+  setFigFidelityOverlayEnabled: (enabled: boolean) => void;
+  refreshFigFidelityReport: () => void;
+  /** SVG layer import warnings shown in a dismissible toast. */
+  svgImportNotice: { title: string; details: string[] } | null;
+  setSvgImportNotice: (notice: { title: string; details: string[] } | null) => void;
+  clearSvgImportNotice: () => void;
   codeRoundTripOpen: boolean;
   codeRoundTripTab: "export" | "import";
   /** Import lines preserved from uploaded React for 1:1 export */
@@ -1799,9 +2033,4506 @@ function editableTopLevelSelection(
   });
 }
 
+type StructuralDocumentResult = {
+  nodes: Record<string, EditorNode>;
+  childOrder: Record<string, string[]>;
+  ui: Record<string, unknown>;
+  assets?: Record<string, EditorAsset>;
+  designTokens?: Record<string, DesignToken>;
+  fontAssets?: Record<string, EditorFontAsset>;
+};
+
+const PAGE_SCOPED_UI_KEYS = [
+  "layoutGuides",
+  "layoutGuideDraft",
+  "showGrid",
+  "showRulers",
+  "canvasBackgroundColor",
+  "fileName",
+  "comments",
+] as const;
+
+function buildDeleteSelectionResult(
+  s: Pick<EditorState, "selectedIds" | "nodes" | "childOrder">,
+): StructuralDocumentResult | null {
+  const tops = editableTopLevelSelection(s);
+  if (tops.length === 0) return null;
+
+  const parentsToRelayout = new Set<string>();
+  for (const root of tops) {
+    parentsToRelayout.add(parentListKey(s.nodes[root]!.parentId));
+  }
+  const toRemove = new Set<string>();
+  for (const root of tops) {
+    for (const id of collectSubtreeIds(root, s.childOrder)) {
+      toRemove.add(id);
+    }
+  }
+  let nodes = { ...s.nodes };
+  const childOrder: Record<string, string[]> = {};
+  for (const [k, arr] of Object.entries(s.childOrder)) {
+    childOrder[k] = arr.filter((id) => !toRemove.has(id));
+  }
+  for (const id of toRemove) {
+    delete nodes[id];
+    delete childOrder[id];
+  }
+  nodes = relayoutParentsWithAutoLayout(nodes, childOrder, parentsToRelayout);
+  return {
+    nodes,
+    childOrder,
+    ui: {
+      selectedIds: [],
+      editingTextId: null,
+      pathEditModeNodeId: null,
+      selectedPathPointIds: [],
+    },
+  };
+}
+
+type ZOrderMode = "forward" | "backward" | "front" | "back";
+
+function buildZOrderResult(
+  s: Pick<EditorState, "selectedIds" | "nodes" | "childOrder">,
+  mode: ZOrderMode,
+): StructuralDocumentResult | null {
+  const tops = editableTopLevelSelection(s);
+  if (tops.length === 0) return null;
+
+  const childOrder = { ...s.childOrder };
+  const byParent = new Map<string, string[]>();
+  for (const id of tops) {
+    const P = parentListKey(s.nodes[id]!.parentId);
+    if (!byParent.has(P)) byParent.set(P, []);
+    byParent.get(P)!.push(id);
+  }
+
+  for (const [P, ids] of byParent) {
+    const list = [...(childOrder[P] ?? [])];
+    if (mode === "forward") {
+      const idxs = ids
+        .map((id) => list.indexOf(id))
+        .filter((i) => i >= 0)
+        .sort((a, b) => b - a);
+      for (const i of idxs) {
+        if (i < list.length - 1) {
+          const t = list[i + 1];
+          list[i + 1] = list[i]!;
+          list[i] = t!;
+        }
+      }
+    } else if (mode === "backward") {
+      const idxs = ids
+        .map((id) => list.indexOf(id))
+        .filter((i) => i >= 0)
+        .sort((a, b) => a - b);
+      for (const i of idxs) {
+        if (i > 0) {
+          const t = list[i - 1];
+          list[i - 1] = list[i]!;
+          list[i] = t!;
+        }
+      }
+    } else if (mode === "front") {
+      const set = new Set(ids);
+      const rest = list.filter((id) => !set.has(id));
+      const stable = [...ids].sort((a, b) => list.indexOf(a) - list.indexOf(b));
+      childOrder[P] = [...rest, ...stable];
+      continue;
+    } else {
+      const set = new Set(ids);
+      const rest = list.filter((id) => !set.has(id));
+      const stable = [...ids].sort((a, b) => list.indexOf(a) - list.indexOf(b));
+      childOrder[P] = [...stable, ...rest];
+      continue;
+    }
+    childOrder[P] = list;
+  }
+
+  let nodes = { ...s.nodes };
+  nodes = relayoutParentsWithAutoLayout(nodes, childOrder, byParent.keys());
+  return { nodes, childOrder, ui: {} };
+}
+
+function buildReorderNodeResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  id: string,
+  targetParentId: string,
+  targetIndex: number,
+): StructuralDocumentResult | null {
+  const n = s.nodes[id];
+  if (!n || n.locked) return null;
+  if ((n.parentId ?? ROOT) !== targetParentId) return null;
+  const res = applyMoveNodeToParent(s, id, targetParentId, targetIndex);
+  if (!res) return null;
+  let { nodes, childOrder } = res;
+  nodes = relayoutParentsWithAutoLayout(nodes, childOrder, [targetParentId]);
+  return { nodes, childOrder, ui: {} };
+}
+
+function buildMoveNodeToParentResult(
+  s: EditorState,
+  id: string,
+  newParentId: string | null,
+  index: number,
+): StructuralDocumentResult | null {
+  const n = s.nodes[id];
+  if (!n || n.locked) return null;
+  const newKey = newParentId === ROOT ? ROOT : newParentId!;
+  const oldKey = parentListKey(n.parentId);
+
+  let stateForMove: EditorState = s;
+  if (newKey !== ROOT) {
+    const parent = s.nodes[newKey];
+    const gapPatch = freezeAutoLayoutGapBeforeChildInsert(parent, s.nodes, s.childOrder, id);
+    if (gapPatch && parent) {
+      stateForMove = {
+        ...s,
+        nodes: {
+          ...s.nodes,
+          [newKey]: { ...parent, ...gapPatch, layoutDirty: true },
+        },
+      };
+    }
+  }
+
+  const res = applyMoveNodeToParent(stateForMove, id, newKey, index);
+  if (!res) return null;
+  let { nodes, childOrder } = res;
+  const refresh = new Set<string>();
+  if (oldKey !== newKey) {
+    if (oldKey !== ROOT) refresh.add(oldKey);
+    if (newKey !== ROOT) refresh.add(newKey);
+  } else {
+    refresh.add(oldKey);
+  }
+  nodes = relayoutParentsWithAutoLayout(nodes, childOrder, refresh);
+  return { nodes, childOrder, ui: {} };
+}
+
+function buildAddRectangleResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds">,
+  worldX: number,
+  worldY: number,
+): StructuralDocumentResult {
+  const w = 120;
+  const h = 80;
+  const { x, y } = worldCenteredRootPoint(worldX, worldY, w, h);
+  const id = `rect-${Date.now()}`;
+  const node: EditorNode = {
+    id,
+    parentId: null,
+    type: "rectangle",
+    name: nextNumberedLayerName(s.nodes, "Rectangle"),
+    x,
+    y,
+    width: w,
+    height: h,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    fill: DEFAULT_SHAPE_FILL,
+    cornerRadius: 8,
+    fillEnabled: true,
+    fillOpacity: 1,
+    strokePosition: "center",
+  };
+  const inserted = insertNodeWithFrameParenting(
+    node,
+    { x, y, width: w, height: h },
+    s.nodes,
+    s.childOrder,
+    s.selectedIds,
+  );
+  return {
+    nodes: inserted.nodes,
+    childOrder: inserted.childOrder,
+    ui: { selectedIds: [id], tool: "move" as Tool, editingTextId: null },
+  };
+}
+
+function buildAddTextAtResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds" | "canvasBackgroundColor">,
+  worldX: number,
+  worldY: number,
+): StructuralDocumentResult {
+  const ts = textStyleFromSelection(s);
+  const typo = resolveTextTypo(ts);
+  const { width: tw, height: th } = computeTextBoxSize("", typo, "auto-width", 0, 0);
+  const x = Math.round(worldX);
+  const y = Math.round(worldY);
+  const id = `text-${Date.now()}`;
+  const { node: base } = createPointTextAt(x, y, tw, th, ts);
+  const node: EditorNode = {
+    ...base,
+    id,
+    parentId: null,
+    name: layerNameFromTextContent(base.content),
+    ...textResizePatch("auto-width"),
+  };
+  const inserted = insertNodeWithFrameParenting(
+    node,
+    { x, y, width: node.width, height: node.height },
+    s.nodes,
+    s.childOrder,
+    s.selectedIds,
+  );
+  return {
+    nodes: inserted.nodes,
+    childOrder: inserted.childOrder,
+    ui: {
+      selectedIds: [id],
+      tool: "move" as Tool,
+      editingTextId: id,
+      textEditSelection: { anchor: 0, focus: 0 },
+    },
+  };
+}
+
+function buildCreateTextBoxFromDragResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds" | "canvasBackgroundColor">,
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  modifiers: { shiftKey: boolean; altKey: boolean },
+): StructuralDocumentResult {
+  const ts = textStyleFromSelection(s);
+  const { x, y, width, height, node: base } = createTextBoxFromDrag(start, end, modifiers, ts);
+  const id = `text-${Date.now()}`;
+  const node: EditorNode = {
+    ...base,
+    id,
+    parentId: null,
+    name: layerNameFromTextContent(base.content),
+    ...textResizePatch(base.textResizeMode ?? "auto-height"),
+  };
+  const inserted = insertNodeWithFrameParenting(
+    node,
+    { x, y, width, height },
+    s.nodes,
+    s.childOrder,
+    s.selectedIds,
+  );
+  return {
+    nodes: inserted.nodes,
+    childOrder: inserted.childOrder,
+    ui: {
+      selectedIds: [id],
+      tool: "move" as Tool,
+      editingTextId: id,
+      textEditSelection: { anchor: 0, focus: 0 },
+    },
+  };
+}
+
+function commitStructuralResult(result: StructuralDocumentResult | null): void {
+  if (!result) return;
+  commitDocumentMutation(result, (built) => {
+    const st = useEditorStore.getState();
+    const pageFields: Partial<EditorState> = {};
+    for (const key of PAGE_SCOPED_UI_KEYS) {
+      if (key in built.ui) {
+        (pageFields as Record<string, unknown>)[key] = built.ui[key];
+      }
+    }
+    const mergedForSync = {
+      ...st,
+      nodes: built.nodes,
+      childOrder: built.childOrder,
+      ...pageFields,
+    };
+    const pageSync =
+      Object.keys(pageFields).length > 0 ? syncActivePageRecord(mergedForSync) : {};
+    useEditorStore.setState({
+      nodes: built.nodes,
+      childOrder: built.childOrder,
+      ...(built.assets ? { assets: built.assets } : {}),
+      ...(built.designTokens ? { designTokens: built.designTokens } : {}),
+      ...(built.fontAssets ? { fontAssets: built.fontAssets } : {}),
+      ...built.ui,
+      ...pageSync,
+    });
+    syncWasmDocumentAfterStoreUpdate();
+  });
+}
+
+let resizePreviewRaf = 0;
+let pendingResizePreview: StructuralDocumentResult | null = null;
+
+function flushResizePreviewToStore(): void {
+  resizePreviewRaf = 0;
+  const result = pendingResizePreview;
+  pendingResizePreview = null;
+  if (!result) return;
+  const st = useEditorStore.getState();
+  const merged = { ...st, nodes: result.nodes, childOrder: result.childOrder };
+  useEditorStore.setState({
+    nodes: result.nodes,
+    childOrder: result.childOrder,
+    ...syncActivePageRecord(merged),
+  });
+  bumpResizePreview();
+}
+
+/** Live resize preview — store only, no WASM round-trip per pointer frame. */
+function applyResizePreviewToStore(result: StructuralDocumentResult): void {
+  pendingResizePreview = result;
+  if (resizePreviewRaf) return;
+  resizePreviewRaf = requestAnimationFrame(flushResizePreviewToStore);
+}
+
+export function finalizeResizeWasmSync(): void {
+  if (resizePreviewRaf) {
+    cancelAnimationFrame(resizePreviewRaf);
+    flushResizePreviewToStore();
+  }
+  syncWasmDocumentAfterStoreUpdate();
+}
+
+function buildAddEllipseResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds">,
+  worldX: number,
+  worldY: number,
+): StructuralDocumentResult {
+  const w = 120;
+  const h = 80;
+  const { x, y } = worldCenteredRootPoint(worldX, worldY, w, h);
+  const id = `ellipse-${Date.now()}`;
+  const node: EditorNode = {
+    id,
+    parentId: null,
+    type: "ellipse",
+    name: nextNumberedLayerName(s.nodes, "Ellipse"),
+    x,
+    y,
+    width: w,
+    height: h,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    fill: DEFAULT_SHAPE_FILL,
+    cornerRadius: 0,
+    fillEnabled: true,
+    fillOpacity: 1,
+    strokePosition: "center",
+  };
+  const inserted = insertNodeWithFrameParenting(
+    node,
+    { x, y, width: w, height: h },
+    s.nodes,
+    s.childOrder,
+    s.selectedIds,
+  );
+  return {
+    nodes: inserted.nodes,
+    childOrder: inserted.childOrder,
+    ui: { selectedIds: [id], tool: "move" as Tool },
+  };
+}
+
+function buildAddLineResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds">,
+  worldX: number,
+  worldY: number,
+): StructuralDocumentResult {
+  const w = 120;
+  const h = 8;
+  const { x, y } = worldCenteredRootPoint(worldX, worldY, w, h);
+  const id = `line-${Date.now()}`;
+  const node: EditorNode = {
+    id,
+    parentId: null,
+    type: "line",
+    name: nextNumberedLayerName(s.nodes, "Line"),
+    x,
+    y,
+    width: w,
+    height: h,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    fill: "transparent",
+    fillEnabled: false,
+    fillOpacity: 0,
+    strokeColor: DEFAULT_SHAPE_STROKE,
+    strokeWidth: 3,
+    strokePosition: "center",
+  };
+  const inserted = insertNodeWithFrameParenting(
+    node,
+    { x, y, width: w, height: h },
+    s.nodes,
+    s.childOrder,
+    s.selectedIds,
+  );
+  return {
+    nodes: inserted.nodes,
+    childOrder: inserted.childOrder,
+    ui: { selectedIds: [id], tool: "move" as Tool },
+  };
+}
+
+function buildAddTriangleResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds">,
+  worldX: number,
+  worldY: number,
+): StructuralDocumentResult {
+  const w = 120;
+  const h = 104;
+  const { x, y } = worldCenteredRootPoint(worldX, worldY, w, h);
+  const id = `tri-${Date.now()}`;
+  const pts: PathPoint[] = [
+    { id: newPathPointId(), x: w / 2, y: 0 },
+    { id: newPathPointId(), x: w, y: h },
+    { id: newPathPointId(), x: 0, y: h },
+  ];
+  let node: EditorNode = {
+    id,
+    parentId: null,
+    type: "path",
+    name: nextNumberedLayerName(s.nodes, "Triangle"),
+    x,
+    y,
+    width: w,
+    height: h,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    pathPoints: pts,
+    pathClosed: true,
+    fill: DEFAULT_SHAPE_FILL,
+    fillEnabled: true,
+    fillOpacity: 1,
+    strokeColor: DEFAULT_SHAPE_STROKE,
+    strokeWidth: 0,
+    strokePosition: "center",
+  };
+  node = normalizePathNode(node);
+  const inserted = insertNodeWithFrameParenting(
+    node,
+    { x, y, width: node.width, height: node.height },
+    s.nodes,
+    s.childOrder,
+    s.selectedIds,
+  );
+  return {
+    nodes: inserted.nodes,
+    childOrder: inserted.childOrder,
+    ui: { selectedIds: [id], tool: "move" as Tool },
+  };
+}
+
+function buildCreateShapeFromDragResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds">,
+  shapeType: ShapeType,
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  modifiers: { shiftKey: boolean; altKey: boolean },
+  style?: Partial<Pick<EditorNode, "polygonSides" | "starPoints" | "starInnerRadius">>,
+): StructuralDocumentResult {
+  const draft = createShapeNode(shapeType, start, end, modifiers, style);
+  const id = `${draft.type}-${Date.now()}`;
+  const name = nextNumberedLayerName(s.nodes, draft.name);
+  const node: EditorNode = { ...draft, id, name };
+  const bounds = { x: node.x, y: node.y, width: node.width, height: node.height };
+  const inserted = insertNodeWithFrameParenting(
+    node,
+    bounds,
+    s.nodes,
+    s.childOrder,
+    s.selectedIds,
+  );
+  const frameId = inserted.nodes[id]?.parentId;
+  const nodesOut = frameId
+    ? relayoutParentsWithAutoLayout(inserted.nodes, inserted.childOrder, [frameId])
+    : inserted.nodes;
+  return {
+    nodes: nodesOut,
+    childOrder: inserted.childOrder,
+    ui: { selectedIds: [id], tool: "move" as Tool },
+  };
+}
+
+function buildStartShapeFromDragResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds" | "editorMode">,
+  shapeType: ShapeType,
+  start: { x: number; y: number },
+  style?: Partial<Pick<EditorNode, "polygonSides" | "starPoints" | "starInnerRadius">>,
+): StructuralDocumentResult | null {
+  if (s.editorMode !== "design") return null;
+  const draft = createShapeNode(
+    shapeType,
+    start,
+    start,
+    { shiftKey: false, altKey: false },
+    style,
+    "live",
+  );
+  const id = `${draft.type}-${Date.now()}`;
+  const node: EditorNode = {
+    ...draft,
+    id,
+    name: nextNumberedLayerName(s.nodes, draft.name),
+  };
+  const inserted = insertNodeWithFrameParenting(
+    node,
+    { x: node.x, y: node.y, width: node.width, height: node.height },
+    s.nodes,
+    s.childOrder,
+    s.selectedIds,
+    { minDimension: 0 },
+  );
+  const frameId = inserted.nodes[id]?.parentId;
+  const nodesOut = frameId
+    ? relayoutParentsWithAutoLayout(inserted.nodes, inserted.childOrder, [frameId])
+    : inserted.nodes;
+  return {
+    nodes: nodesOut,
+    childOrder: inserted.childOrder,
+    ui: {
+      shapeDrawingSession: { nodeId: id, shapeType, start, style },
+      selectedIds: [] as string[],
+    },
+  };
+}
+
+function buildCreateFrameWithBoundsResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds">,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  opts?: { name?: string },
+): StructuralDocumentResult {
+  const id = `frame-${Date.now()}`;
+  const name = opts?.name ?? nextFrameName(s.nodes);
+  const W = Math.max(RESIZE_MIN_DIMENSION, Math.round(width));
+  const H = Math.max(RESIZE_MIN_DIMENSION, Math.round(height));
+  const bx = Math.round(x);
+  const by = Math.round(y);
+  const node: EditorNode = {
+    id,
+    parentId: null,
+    type: "frame",
+    name,
+    x: bx,
+    y: by,
+    width: W,
+    height: H,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    fill: DEFAULT_FRAME_FILL,
+    fillEnabled: true,
+    fillOpacity: 1,
+    strokePosition: "center",
+  };
+  const inserted = insertNodeWithFrameParenting(
+    node,
+    { x: bx, y: by, width: W, height: H },
+    s.nodes,
+    s.childOrder,
+    s.selectedIds,
+  );
+  const childOrder = {
+    ...inserted.childOrder,
+    [id]: inserted.childOrder[id] ?? [],
+  };
+  return {
+    nodes: inserted.nodes,
+    childOrder,
+    ui: { selectedIds: [id], tool: "move" as Tool, editingTextId: null },
+  };
+}
+
+function buildStartFrameFromDragResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds" | "editorMode">,
+  start: { x: number; y: number },
+): StructuralDocumentResult | null {
+  if (s.editorMode !== "design") return null;
+  const draft = createFrameNodeFromDrag(
+    start,
+    start,
+    { shiftKey: false, altKey: false },
+    nextFrameName(s.nodes),
+    "live",
+  );
+  const id = `frame-${Date.now()}`;
+  const node: EditorNode = { ...draft, id, parentId: null };
+  const inserted = insertNodeWithFrameParenting(
+    node,
+    { x: node.x, y: node.y, width: node.width, height: node.height },
+    s.nodes,
+    s.childOrder,
+    s.selectedIds,
+    { minDimension: 0 },
+  );
+  const frameId = inserted.nodes[id]?.parentId;
+  const nodesOut = frameId
+    ? relayoutParentsWithAutoLayout(inserted.nodes, inserted.childOrder, [frameId])
+    : inserted.nodes;
+  return {
+    nodes: nodesOut,
+    childOrder: inserted.childOrder,
+    ui: {
+      frameDrawingSession: { nodeId: id, start },
+      selectedIds: [] as string[],
+    },
+  };
+}
+
+function buildStartTextFromDragResult(
+  s: Pick<
+    EditorState,
+    "nodes" | "childOrder" | "selectedIds" | "editorMode" | "canvasBackgroundColor"
+  >,
+  start: { x: number; y: number },
+): StructuralDocumentResult | null {
+  if (s.editorMode !== "design") return null;
+  const ts = textStyleFromSelection(s);
+  const draft = createTextDraftNodeFromDrag(
+    start,
+    start,
+    { shiftKey: false, altKey: false },
+    ts,
+    "live",
+  );
+  const id = `text-${Date.now()}`;
+  const node: EditorNode = {
+    ...draft,
+    id,
+    parentId: null,
+    name: layerNameFromTextContent(draft.content),
+    ...textResizePatch(draft.textResizeMode ?? "auto-height"),
+  };
+  const inserted = insertNodeWithFrameParenting(
+    node,
+    { x: node.x, y: node.y, width: node.width, height: node.height },
+    s.nodes,
+    s.childOrder,
+    s.selectedIds,
+    { minDimension: 0 },
+  );
+  return {
+    nodes: inserted.nodes,
+    childOrder: inserted.childOrder,
+    ui: {
+      textDrawingSession: { nodeId: id, start },
+      selectedIds: [] as string[],
+    },
+  };
+}
+
+function buildAddRectangleToolbarResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+): StructuralDocumentResult {
+  const id = `rect-${Date.now()}`;
+  const roots = [...(s.childOrder[ROOT] ?? [])];
+  roots.push(id);
+  const node: EditorNode = {
+    id,
+    parentId: null,
+    type: "rectangle",
+    name: nextNumberedLayerName(s.nodes, "Rectangle"),
+    x: 120,
+    y: 120,
+    width: 160,
+    height: 100,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    fill: DEFAULT_SHAPE_FILL,
+    cornerRadius: 8,
+    fillEnabled: true,
+    fillOpacity: 1,
+    strokePosition: "center",
+  };
+  return {
+    nodes: { ...s.nodes, [id]: node },
+    childOrder: { ...s.childOrder, [ROOT]: roots },
+    ui: { selectedIds: [id] },
+  };
+}
+
+function buildRemoveDraftNodeResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  nodeId: string,
+  sessionKey: "shapeDrawingSession" | "frameDrawingSession" | "textDrawingSession",
+): StructuralDocumentResult | null {
+  if (!s.nodes[nodeId]) {
+    return { nodes: s.nodes, childOrder: s.childOrder, ui: { [sessionKey]: null } };
+  }
+  const parentRef = s.nodes[nodeId]?.parentId;
+  const { nodes, childOrder } = removeNodeAndDescendants(s, nodeId);
+  const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
+  return {
+    nodes: nodes2,
+    childOrder,
+    ui: { [sessionKey]: null, selectedIds: [] as string[] },
+  };
+}
+
+function buildDuplicateSelectionResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds">,
+  worldOffset: CloneWorldOffset | null,
+): StructuralDocumentResult | null {
+  const cloned = cloneTopLevelSelectionState(s, worldOffset);
+  if (!cloned) return null;
+  return {
+    nodes: cloned.nodes,
+    childOrder: cloned.childOrder,
+    ui: {
+      selectedIds: cloned.selectedIds,
+      tool: cloned.tool,
+      editingTextId: cloned.editingTextId,
+    },
+  };
+}
+
+function buildPasteSelectionResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds" | "assets">,
+  payload: EditorClipboardPayloadV1,
+  offset: number,
+): StructuralDocumentResult | null {
+  if (!payload.rootIds?.length) return null;
+
+  const idMap = new Map<string, string>();
+  const newAssetIds = new Map<string, string>();
+  if (payload.assets) {
+    for (const aid of Object.keys(payload.assets)) {
+      newAssetIds.set(aid, `asset-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
+    }
+  }
+  let nodes: Record<string, EditorNode> = { ...s.nodes };
+  let childOrder: Record<string, string[]> = { ...s.childOrder };
+  const assets: Record<string, EditorAsset> = { ...s.assets };
+  if (payload.assets) {
+    for (const [oldAid, ast] of Object.entries(payload.assets)) {
+      const nid = newAssetIds.get(oldAid)!;
+      assets[nid] = { ...ast, id: nid };
+    }
+  }
+
+  const newRoots: string[] = [];
+  const pasteParentId = resolvePasteParentId(s);
+
+  for (const rootId of payload.rootIds) {
+    const rootOld = payload.nodes[rootId];
+    if (!rootOld) continue;
+    const rootLabel =
+      rootOld.type === "text"
+        ? duplicatedTextLayerName(rootOld.content)
+        : nextDuplicatedLayerName(nodes, rootOld.name);
+
+    const cloneRecursive = (oldId: string, newParent: string | null, treeRootOldId: string): string => {
+      const old = payload.nodes[oldId];
+      if (!old) return "";
+      const newId = `${old.type}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      idMap.set(oldId, newId);
+      const isTreeRoot = oldId === treeRootOldId;
+      const worldR = worldRect(oldId, payload.nodes);
+      const wx = worldR.x;
+      const wy = worldR.y + (isTreeRoot ? -offset : 0);
+      const pos = isTreeRoot
+        ? worldPointToParentLocal(wx, wy, newParent, s.nodes)
+        : { x: old.x, y: old.y };
+
+      let base: EditorNode = {
+        ...JSON.parse(JSON.stringify(old)) as EditorNode,
+        id: newId,
+        parentId: newParent,
+        name:
+          old.type === "text"
+            ? duplicatedTextLayerName(old.content)
+            : oldId === rootId
+              ? rootLabel
+              : old.name,
+        x: pos.x,
+        y: pos.y,
+      };
+      if (base.type === "path" && base.pathPoints?.length) {
+        base = { ...base, pathPoints: rekeyPathPoints(base.pathPoints) };
+      }
+      if (old.effects?.length) {
+        base = { ...base, effects: old.effects.map((e) => ({ ...e, id: newNodeEffectId() })) };
+      }
+      if (base.type === "image" && base.assetId && newAssetIds.has(base.assetId)) {
+        const na = newAssetIds.get(base.assetId)!;
+        const assetRow = assets[na];
+        base = {
+          ...base,
+          assetId: na,
+          imageSrc: assetRow?.dataUrl ?? base.imageSrc,
+        };
+      }
+      nodes[newId] = base;
+      const newKids: string[] = [];
+      for (const k of payload.childOrder[oldId] ?? []) {
+        newKids.push(cloneRecursive(k, newId, treeRootOldId));
+      }
+      childOrder[newId] = newKids;
+      return newId;
+    };
+
+    const newRootId = cloneRecursive(rootId, pasteParentId, rootId);
+    newRoots.push(newRootId);
+    for (const nid of collectSubtreeIds(newRootId, childOrder)) {
+      const n = nodes[nid]!;
+      if (!n.prototypeLinks?.length) continue;
+      nodes[nid] = {
+        ...n,
+        prototypeLinks: n.prototypeLinks.map((l) => ({
+          ...l,
+          id: newPrototypeLinkId(),
+          sourceNodeId: idMap.get(l.sourceNodeId) ?? l.sourceNodeId,
+          targetFrameId:
+            l.targetFrameId && idMap.has(l.targetFrameId) ? idMap.get(l.targetFrameId)! : l.targetFrameId,
+        })),
+      };
+    }
+  }
+
+  for (const newId of idMap.values()) {
+    const n = nodes[newId];
+    if (!n?.instanceOverrides) continue;
+    const io: Record<string, Record<string, unknown>> = {};
+    for (const [k, v] of Object.entries(n.instanceOverrides)) {
+      const nk = idMap.has(k) ? (idMap.get(k) as string) : k;
+      io[nk] = v as Record<string, unknown>;
+    }
+    nodes[newId] = { ...n, instanceOverrides: io };
+  }
+
+  const topsSel = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+    const n = s.nodes[id];
+    return n && !n.locked && n.visible;
+  });
+  const anchor = topsSel.length ? topsSel[topsSel.length - 1]! : null;
+  const byParent = new Map<string, string[]>();
+  for (const newR of newRoots) {
+    const pk = parentListKey(nodes[newR]!.parentId);
+    if (!byParent.has(pk)) byParent.set(pk, []);
+    byParent.get(pk)!.push(newR);
+  }
+  for (const [pk, group] of byParent) {
+    let list = [...(childOrder[pk] ?? [])].filter((id) => !group.includes(id));
+    let ins = list.length;
+    if (anchor) {
+      const apk = parentListKey(s.nodes[anchor]!.parentId);
+      if (apk === pk) {
+        const idx = list.indexOf(anchor);
+        ins = idx >= 0 ? idx + 1 : list.length;
+      }
+    }
+    list = [...list.slice(0, ins), ...group, ...list.slice(ins)];
+    childOrder[pk] = list;
+  }
+
+  let nodesOut = nodes;
+  const relayoutKeys = new Set<string>();
+  for (const nr of newRoots) relayoutKeys.add(parentListKey(nodes[nr]!.parentId));
+  nodesOut = relayoutParentsWithAutoLayout(nodesOut, childOrder, relayoutKeys);
+
+  return {
+    nodes: nodesOut,
+    childOrder,
+    assets,
+    ui: {
+      selectedIds: newRoots,
+      tool: "move" as Tool,
+      editingTextId: null,
+      contextMenu: null,
+    },
+  };
+}
+
+function buildAlignSelectionResult(
+  s: Pick<EditorState, "selectedIds" | "nodes" | "childOrder">,
+  direction: AlignDirection,
+): StructuralDocumentResult | null {
+  if (!canAlignSelection(s.selectedIds, s.nodes, s.childOrder)) return null;
+  const tops = alignableSelectionIds(s.selectedIds, s.nodes);
+  if (!canAlignSelection(s.selectedIds, s.nodes, s.childOrder)) return null;
+  let nodes = alignNodesInDocument(s.nodes, s.childOrder, tops, direction);
+  const relayoutKeys = relayoutParentKeysAfterManualPosition(
+    nodes,
+    s.childOrder,
+    tops,
+    parentListKey,
+  );
+  nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, relayoutKeys);
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+function buildAlignSelectionGridResult(
+  s: Pick<EditorState, "selectedIds" | "nodes" | "childOrder">,
+  row: number,
+  col: number,
+): StructuralDocumentResult | null {
+  if (!canAlignSelection(s.selectedIds, s.nodes, s.childOrder)) return null;
+  const tops = alignableSelectionIds(s.selectedIds, s.nodes);
+  if (!canAlignSelection(s.selectedIds, s.nodes, s.childOrder)) return null;
+  let nodes = alignNodesInDocumentToGrid(s.nodes, s.childOrder, tops, row, col);
+  const relayoutKeys = relayoutParentKeysAfterManualPosition(
+    nodes,
+    s.childOrder,
+    tops,
+    parentListKey,
+  );
+  nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, relayoutKeys);
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+function buildDistributeSelectionResult(
+  s: Pick<EditorState, "selectedIds" | "nodes" | "childOrder">,
+  axis: "horizontal" | "vertical",
+): StructuralDocumentResult | null {
+  const tops = alignableSelectionIds(s.selectedIds, s.nodes);
+  if (tops.length < 3) return null;
+  let nodes = distributeNodesInDocument(s.nodes, s.childOrder, tops, axis);
+  const relayoutKeys = relayoutParentKeysAfterManualPosition(
+    nodes,
+    s.childOrder,
+    tops,
+    parentListKey,
+  );
+  nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, relayoutKeys);
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+function buildCreateBooleanGroupResult(
+  s: Pick<EditorState, "selectedIds" | "nodes" | "childOrder">,
+  operation: BooleanOperation,
+): StructuralDocumentResult | null {
+  const tops = getBooleanEligibleSelection(s.selectedIds, s.nodes);
+  if (tops.length < 2) return null;
+  const parentId = s.nodes[tops[0]!]!.parentId;
+  if (!tops.every((id) => s.nodes[id]!.parentId === parentId)) return null;
+  const P = parentListKey(parentId);
+  const list = s.childOrder[P] ?? [];
+  let ordered = [...tops].sort((a, b) => list.indexOf(a) - list.indexOf(b));
+  const pw = parentId ? worldRect(parentId, s.nodes) : { x: 0, y: 0, width: 0, height: 0 };
+  const visible = boundsForBooleanChildren(operation, ordered, s.nodes, s.childOrder);
+  const minX = visible.x;
+  const minY = visible.y;
+  const gw = visible.width;
+  const gh = visible.height;
+  const gx = minX - pw.x;
+  const gy = minY - pw.y;
+  const gid = `group-bool-${Date.now()}`;
+  const nodes = { ...s.nodes };
+  const childOrder = { ...s.childOrder };
+  const fillSource = nodes[ordered[0]!];
+  nodes[gid] = {
+    id: gid,
+    parentId,
+    type: "group",
+    name: BOOLEAN_OPERATION_LABELS[operation],
+    x: gx,
+    y: gy,
+    width: gw,
+    height: gh,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    isBooleanGroup: true,
+    booleanOperation: operation,
+    fill: fillSource?.fill,
+    fillEnabled: fillSource?.fillEnabled ?? true,
+    fillOpacity: fillSource?.fillOpacity ?? 1,
+    fillType: fillSource?.fillType,
+    fillGradient: fillSource?.fillGradient,
+  };
+  for (const id of ordered) {
+    const o = getNodeWorldOrigin(id, nodes);
+    const n = nodes[id]!;
+    nodes[id] = {
+      ...n,
+      parentId: gid,
+      x: o.x - minX,
+      y: o.y - minY,
+    };
+  }
+  const parentList = [...(childOrder[P] ?? [])];
+  const ixs = ordered.map((id) => parentList.indexOf(id)).sort((a, b) => a - b);
+  const insertAt = ixs[0]!;
+  const newList = parentList.filter((id) => !ordered.includes(id));
+  newList.splice(insertAt, 0, gid);
+  childOrder[P] = newList;
+  childOrder[gid] = ordered;
+  let nodesOut = relayoutParentsWithAutoLayout(nodes, childOrder, [P]);
+  nodesOut = syncGroupFrameToVisible(gid, nodesOut, childOrder);
+  return {
+    nodes: nodesOut,
+    childOrder,
+    ui: {
+      selectedIds: [gid],
+      tool: "move" as Tool,
+      editingTextId: null,
+      objectEditModeNodeId: null,
+    },
+  };
+}
+
+function buildUpdateBooleanOperationResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  groupId: string,
+  operation: BooleanOperation,
+): StructuralDocumentResult | null {
+  const node = s.nodes[groupId];
+  if (!node?.isBooleanGroup) return null;
+  let nodes = {
+    ...s.nodes,
+    [groupId]: {
+      ...node,
+      booleanOperation: operation,
+      name: BOOLEAN_OPERATION_LABELS[operation],
+      flattenedPathData: undefined,
+    },
+  };
+  nodes = syncGroupFrameToVisible(groupId, nodes, s.childOrder);
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+function buildFlattenBooleanGroupResult(
+  s: Pick<EditorState, "selectedIds" | "nodes" | "childOrder">,
+  flattenResult: NonNullable<ReturnType<typeof flattenBooleanGroup>>,
+): StructuralDocumentResult | null {
+  const gid = s.selectedIds[0];
+  if (!gid) return null;
+  const g2 = s.nodes[gid];
+  if (!g2?.isBooleanGroup) return null;
+  const kids = s.childOrder[gid] ?? [];
+  const parentId = g2.parentId;
+  const P = parentListKey(parentId);
+  const pw = parentId ? worldRect(parentId, s.nodes) : { x: 0, y: 0, width: 0, height: 0 };
+  const pathNode = booleanResultToPathNode(flattenResult, g2, parentId);
+  pathNode.x = flattenResult.x - pw.x;
+  pathNode.y = flattenResult.y - pw.y;
+  const nodes = { ...s.nodes, [pathNode.id]: pathNode };
+  const childOrder = { ...s.childOrder };
+  for (const cid of kids) {
+    delete nodes[cid];
+    delete childOrder[cid];
+  }
+  delete nodes[gid];
+  delete childOrder[gid];
+  const list = (childOrder[P] ?? []).filter((id) => id !== gid);
+  const idx = (s.childOrder[P] ?? []).indexOf(gid);
+  list.splice(Math.max(0, idx), 0, pathNode.id);
+  childOrder[P] = list;
+  return {
+    nodes,
+    childOrder,
+    ui: { selectedIds: [pathNode.id], tool: "move" as Tool },
+  };
+}
+
+function buildOutlineStrokeSelectionResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  id: string,
+  converted: EditorNode,
+  removeKids: string[],
+): StructuralDocumentResult | null {
+  const current = s.nodes[id];
+  if (!current) return null;
+  const next = { ...converted, id, name: current.name, parentId: current.parentId };
+  const nodes = { ...s.nodes, [id]: next };
+  const childOrder = { ...s.childOrder };
+  for (const cid of removeKids) {
+    delete nodes[cid];
+    delete childOrder[cid];
+  }
+  if (removeKids.length > 0) {
+    delete childOrder[id];
+  }
+  const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(current.parentId)]);
+  return {
+    nodes: nodes2,
+    childOrder,
+    ui: {
+      pathEditModeNodeId: id,
+      shapeEditModeNodeId: null,
+      objectEditModeNodeId: null,
+      selectedPathPointIds: [] as string[],
+      selectedIds: [id],
+      tool: "move" as Tool,
+    },
+  };
+}
+
+function buildStartPathAtResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds" | "editorMode" | "tool" | "penDrawingNodeId">,
+  worldPoint: { x: number; y: number },
+): StructuralDocumentResult | null {
+  if (s.editorMode !== "design" || s.tool !== "pen" || s.penDrawingNodeId) return null;
+  const id = `path-${Date.now()}`;
+  const pt0: PathPoint = { id: newPathPointId(), x: 0, y: 0 };
+  let node: EditorNode = {
+    id,
+    parentId: null,
+    type: "path",
+    name: nextNumberedLayerName(s.nodes, "Vector"),
+    x: 0,
+    y: 0,
+    width: 1,
+    height: 1,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    pathPoints: [pt0],
+    pathClosed: false,
+    fillEnabled: false,
+    fillOpacity: 1,
+    fill: "transparent",
+    strokeColor: DEFAULT_SHAPE_STROKE,
+    strokeWidth: 2,
+    strokePosition: "center",
+  };
+  node = normalizePathNode(node);
+  const inserted = insertNodeWithFrameParenting(
+    node,
+    { x: worldPoint.x, y: worldPoint.y, width: node.width, height: node.height },
+    s.nodes,
+    s.childOrder,
+    s.selectedIds,
+  );
+  return {
+    nodes: inserted.nodes,
+    childOrder: inserted.childOrder,
+    ui: { penDrawingNodeId: id, selectedIds: [] as string[], tool: "pen" as Tool },
+  };
+}
+
+function buildAddPathPointResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  drawId: string,
+  worldPoint: { x: number; y: number },
+): StructuralDocumentResult | null {
+  const n = s.nodes[drawId];
+  if (!n || n.type !== "path" || !n.pathPoints) return null;
+  const nOrigin = getRenderedWorldTopLeft(drawId, s.nodes, s.childOrder);
+  const plx = worldPoint.x - nOrigin.x;
+  const ply = worldPoint.y - nOrigin.y;
+  const pts = [...n.pathPoints, { id: newPathPointId(), x: plx, y: ply }];
+  let next: EditorNode = { ...n, pathPoints: pts };
+  next = normalizePathNode(next);
+  let nodes = { ...s.nodes, [drawId]: next };
+  nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
+  const repaired = repairNodeHierarchy(nodes, s.childOrder);
+  return { nodes: repaired.nodes, childOrder: repaired.childOrder, ui: {} };
+}
+
+function buildAddPathPointDragResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  drawId: string,
+  anchorWorld: { x: number; y: number },
+  dragWorld: { x: number; y: number },
+): StructuralDocumentResult | null {
+  const n = s.nodes[drawId];
+  if (!n || n.type !== "path" || !n.pathPoints?.length) return null;
+  const nOrigin = getRenderedWorldTopLeft(drawId, s.nodes, s.childOrder);
+  const anchorLocal = { x: anchorWorld.x - nOrigin.x, y: anchorWorld.y - nOrigin.y };
+  const dragLocal = { x: dragWorld.x - nOrigin.x, y: dragWorld.y - nOrigin.y };
+  const hx = dragLocal.x - anchorLocal.x;
+  const hy = dragLocal.y - anchorLocal.y;
+  const pts = [...n.pathPoints];
+  const prevIdx = pts.length - 1;
+  const prev = pts[prevIdx]!;
+  pts[prevIdx] = { ...prev, handleOut: { x: hx, y: hy } };
+  const newPt: PathPoint = {
+    id: newPathPointId(),
+    x: anchorLocal.x,
+    y: anchorLocal.y,
+    handleIn: { x: -hx, y: -hy },
+  };
+  pts.push(newPt);
+  let next: EditorNode = { ...n, pathPoints: pts };
+  next = normalizePathNode(next);
+  let nodes = { ...s.nodes, [drawId]: next };
+  nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
+  const repaired = repairNodeHierarchy(nodes, s.childOrder);
+  return { nodes: repaired.nodes, childOrder: repaired.childOrder, ui: {} };
+}
+
+function buildFinishPathResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "penDrawingNodeId">,
+  pathId: string,
+  asClosed: boolean,
+): StructuralDocumentResult | null {
+  const n = s.nodes[pathId];
+  if (!n || n.type !== "path") {
+    return { nodes: s.nodes, childOrder: s.childOrder, ui: { penDrawingNodeId: null } };
+  }
+  const pts = n.pathPoints ?? [];
+  if (pts.length < 2) {
+    const parentRef = n.parentId;
+    const { nodes, childOrder } = removeNodeAndDescendants(s, pathId);
+    const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
+    return {
+      nodes: nodes2,
+      childOrder,
+      ui: {
+        penDrawingNodeId: null,
+        selectedIds: [] as string[],
+        pathEditModeNodeId: null,
+        objectEditModeNodeId: null,
+        selectedPathPointIds: [] as string[],
+      },
+    };
+  }
+  let next: EditorNode = { ...n, pathClosed: asClosed };
+  next = normalizePathNode(next);
+  let nodes = { ...s.nodes, [pathId]: next };
+  nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
+  const repaired = repairNodeHierarchy(nodes, s.childOrder);
+  return {
+    nodes: repaired.nodes,
+    childOrder: repaired.childOrder,
+    ui: {
+      penDrawingNodeId: null,
+      selectedIds: [pathId],
+      pathEditModeNodeId: null,
+      objectEditModeNodeId: null,
+      selectedPathPointIds: [] as string[],
+    },
+  };
+}
+
+function buildCancelPathResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  pathId: string,
+): StructuralDocumentResult | null {
+  if (!s.nodes[pathId]) {
+    return { nodes: s.nodes, childOrder: s.childOrder, ui: { penDrawingNodeId: null, selectedIds: [] } };
+  }
+  const parentRef = s.nodes[pathId]?.parentId;
+  const { nodes, childOrder } = removeNodeAndDescendants(s, pathId);
+  const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
+  return {
+    nodes: nodes2,
+    childOrder,
+    ui: { penDrawingNodeId: null, selectedIds: [] as string[] },
+  };
+}
+
+function buildFinishShapeDragResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  nodeId: string,
+): StructuralDocumentResult | null {
+  const n = s.nodes[nodeId];
+  if (!n) {
+    return { nodes: s.nodes, childOrder: s.childOrder, ui: { shapeDrawingSession: null } };
+  }
+  const frameId = n.parentId;
+  let nodes = s.nodes;
+  if (frameId) {
+    nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [frameId]);
+  }
+  const repaired = repairNodeHierarchyIfNeeded(nodes, s.childOrder);
+  return {
+    nodes: repaired.nodes,
+    childOrder: repaired.childOrder,
+    ui: { shapeDrawingSession: null, selectedIds: [nodeId], tool: "move" as Tool },
+  };
+}
+
+function buildFinishFrameDragResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  nodeId: string,
+): StructuralDocumentResult | null {
+  const node = s.nodes[nodeId];
+  if (!node) {
+    return { nodes: s.nodes, childOrder: s.childOrder, ui: { frameDrawingSession: null } };
+  }
+  const parentId = node.parentId;
+  let nodes = s.nodes;
+  if (parentId) {
+    nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [parentId]);
+  }
+  const repaired = repairNodeHierarchyIfNeeded(nodes, s.childOrder);
+  return {
+    nodes: repaired.nodes,
+    childOrder: repaired.childOrder,
+    ui: {
+      frameDrawingSession: null,
+      selectedIds: [nodeId],
+      tool: "move" as Tool,
+      editingTextId: null,
+    },
+  };
+}
+
+const finishTextDragUi = (nodeId: string) => ({
+  textDrawingSession: null,
+  selectedIds: [nodeId],
+  tool: "move" as Tool,
+  editingTextId: nodeId,
+  textEditSelection: { anchor: 0, focus: 0 },
+});
+
+function buildFinishTextDragClickResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "canvasBackgroundColor">,
+  nodeId: string,
+  start: { x: number; y: number },
+): StructuralDocumentResult | null {
+  const node = s.nodes[nodeId];
+  if (!node) return null;
+  const ts = textStyleFromSelection(s);
+  const typo = resolveTextTypo(ts);
+  const emptySize = computeTextBoxSize("", typo, "auto-width", 0, 0);
+  const localStart = node.parentId
+    ? worldPointToParentLocalFromChildOrder(start.x, start.y, node.parentId, s.nodes, s.childOrder)
+    : start;
+  const nodes = {
+    ...s.nodes,
+    [nodeId]: {
+      ...node,
+      x: Math.round(localStart.x),
+      y: Math.round(localStart.y),
+      width: emptySize.width,
+      height: emptySize.height,
+      textResizeMode: "auto-width" as const,
+      ...textResizePatch("auto-width"),
+      content: "",
+    },
+  };
+  return { nodes, childOrder: s.childOrder, ui: finishTextDragUi(nodeId) };
+}
+
+function buildFinishTextDragBoxResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "canvasBackgroundColor">,
+  nodeId: string,
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  modifiers: { shiftKey: boolean; altKey: boolean },
+): StructuralDocumentResult | null {
+  const node = s.nodes[nodeId];
+  if (!node) return null;
+  const ts = textStyleFromSelection(s);
+  const drag = worldDragPairInParentSpace(node.parentId, s.nodes, s.childOrder, start, end);
+  const draft = createTextDraftNodeFromDrag(drag.start, drag.end, modifiers, ts, "commit");
+  const next = {
+    ...node,
+    x: draft.x,
+    y: draft.y,
+    width: draft.width,
+    height: draft.height,
+    textResizeMode: "auto-height" as const,
+    ...textResizePatch("auto-height"),
+  };
+  if (isZeroAreaDraftNode(next)) return null;
+  return {
+    nodes: { ...s.nodes, [nodeId]: next },
+    childOrder: s.childOrder,
+    ui: finishTextDragUi(nodeId),
+  };
+}
+
+function buildPlaceImportedFilesResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds" | "assets">,
+  svgImports: Awaited<ReturnType<typeof importSvgFileToEditorGraph>>[],
+  assetsToAdd: EditorAsset[],
+  worldX: number,
+  worldY: number,
+): StructuralDocumentResult {
+  let nodes = { ...s.nodes };
+  let childOrder = { ...s.childOrder };
+  const assets = { ...s.assets };
+  let selectedIds = s.selectedIds;
+  const newIds: string[] = [];
+  let placeIndex = 0;
+
+  for (const imported of svgImports) {
+    if (!imported) continue;
+    const merged = insertImportedNodes(imported, worldX, worldY, {
+      nodes,
+      childOrder,
+      assets,
+      selectedIds,
+    }, { placeIndex });
+    nodes = merged.nodes;
+    childOrder = merged.childOrder;
+    Object.assign(assets, merged.assets);
+    selectedIds = merged.selectedIds;
+    newIds.push(merged.rootId);
+    placeIndex += 1;
+  }
+
+  for (let i = 0; i < assetsToAdd.length; i++) {
+    const asset = assetsToAdd[i]!;
+    assets[asset.id] = asset;
+    const iw = asset.width && asset.width > 0 ? asset.width : 200;
+    const ih = asset.height && asset.height > 0 ? asset.height : 150;
+    const scale = Math.min(1, 480 / iw, 480 / ih);
+    const w = Math.max(16, Math.round(iw * scale));
+    const h = Math.max(16, Math.round(ih * scale));
+    const cx = worldX + placeIndex * 12;
+    const cy = worldY + placeIndex * 12;
+    placeIndex += 1;
+    const { x, y } = worldCenteredRootPoint(cx, cy, w, h);
+    const id = `image-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`;
+    const baseName = (asset.name || "Image").replace(/\.[^.]+$/, "") || "Image";
+    const node: EditorNode = {
+      id,
+      parentId: null,
+      type: "image",
+      name: baseName,
+      x,
+      y,
+      width: w,
+      height: h,
+      rotation: 0,
+      visible: true,
+      locked: false,
+      expanded: true,
+      assetId: asset.id,
+      imageSrc: asset.dataUrl,
+      imageName: asset.name,
+      imageMimeType: asset.mimeType,
+      imageFitMode: "fill",
+      fillOpacity: 1,
+      fillEnabled: true,
+    };
+    const inserted = insertNodeWithFrameParenting(node, { x, y, width: w, height: h }, nodes, childOrder, selectedIds);
+    nodes = inserted.nodes;
+    childOrder = inserted.childOrder;
+    selectedIds = [id];
+    newIds.push(id);
+  }
+
+  return {
+    nodes,
+    childOrder,
+    assets,
+    ui: { selectedIds: newIds, tool: "move" as Tool },
+  };
+}
+
+function buildSetNodeFillHexResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  nodeId: string,
+  hex: string,
+): StructuralDocumentResult | null {
+  const normalized = normalizeHex(hex.trim().startsWith("#") ? hex.trim() : `#${hex.trim()}`);
+  if (!normalized) return null;
+  const n = s.nodes[nodeId];
+  if (!n || n.locked) return null;
+  const stylePatch: NodeStylePatch = { fill: normalized, fillType: "solid" };
+  const instRoot = findInstanceRoot(s.nodes, nodeId);
+  let nodes = { ...s.nodes };
+
+  const applyFill = (targetId: string, base: EditorNode) => {
+    const expanded = expandBooleanFillStylePatches(targetId, stylePatch, nodes, s.childOrder);
+    if (expanded) {
+      for (const [nid, p] of Object.entries(expanded)) {
+        const cur = nodes[nid];
+        if (cur && !cur.locked) {
+          nodes[nid] = { ...cur, ...p, fillTokenId: undefined };
+        }
+      }
+      return;
+    }
+    nodes[targetId] = { ...base, ...stylePatch, fillTokenId: undefined };
+  };
+
+  if (instRoot && instRoot !== nodeId) {
+    nodes[nodeId] = { ...nodes[nodeId]!, fillTokenId: undefined };
+    const rn = nodes[instRoot]!;
+    const io: Record<string, Record<string, unknown>> = { ...(rn.instanceOverrides ?? {}) };
+    const prev =
+      io[nodeId] && typeof io[nodeId] === "object" && !Array.isArray(io[nodeId])
+        ? { ...(io[nodeId] as Record<string, unknown>) }
+        : {};
+    const nextOv: Record<string, unknown> = { ...prev, ...stylePatch };
+    delete nextOv.fillTokenId;
+    io[nodeId] = nextOv;
+    nodes[instRoot] = { ...rn, instanceOverrides: io };
+  } else {
+    applyFill(nodeId, n);
+  }
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+function buildSetSelectionFillHexResult(
+  s: Pick<EditorState, "editorMode" | "selectedIds" | "nodes" | "childOrder">,
+  hex: string,
+): StructuralDocumentResult | null {
+  if (s.editorMode !== "design") return null;
+  const normalized = normalizeHex(hex.trim().startsWith("#") ? hex.trim() : `#${hex.trim()}`);
+  if (!normalized) return null;
+
+  const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+    const n = s.nodes[id];
+    return n && !n.locked && n.visible && nodeSupportsFillColor(n);
+  });
+  if (tops.length === 0) return null;
+
+  let nodes = { ...s.nodes };
+  let changed = false;
+  for (const nodeId of tops) {
+    const n = nodes[nodeId]!;
+    const slice =
+      n.type === "text"
+        ? buildSetNodeTextColorHexResult({ nodes, childOrder: s.childOrder }, nodeId, normalized)
+        : buildSetNodeFillHexResult({ nodes, childOrder: s.childOrder }, nodeId, normalized);
+    if (!slice) continue;
+    nodes = slice.nodes;
+    changed = true;
+  }
+  if (!changed) return null;
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+function buildSetNodeTextColorHexResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  nodeId: string,
+  hex: string,
+): StructuralDocumentResult | null {
+  const normalized = normalizeHex(hex.trim().startsWith("#") ? hex.trim() : `#${hex.trim()}`);
+  if (!normalized) return null;
+  const n = s.nodes[nodeId];
+  if (!n || n.locked) return null;
+  const stylePatch: NodeStylePatch = { textColor: normalized };
+  const instRoot = findInstanceRoot(s.nodes, nodeId);
+  let nodes = { ...s.nodes };
+
+  if (instRoot && instRoot !== nodeId) {
+    nodes[nodeId] = { ...nodes[nodeId]!, fillTokenId: undefined };
+    const rn = nodes[instRoot]!;
+    const io: Record<string, Record<string, unknown>> = { ...(rn.instanceOverrides ?? {}) };
+    const prev =
+      io[nodeId] && typeof io[nodeId] === "object" && !Array.isArray(io[nodeId])
+        ? { ...(io[nodeId] as Record<string, unknown>) }
+        : {};
+    const nextOv: Record<string, unknown> = { ...prev, ...stylePatch };
+    delete nextOv.fillTokenId;
+    io[nodeId] = nextOv;
+    nodes[instRoot] = { ...rn, instanceOverrides: io };
+  } else {
+    nodes[nodeId] = { ...n, ...stylePatch, fillTokenId: undefined };
+  }
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+function buildApplyTokenToSelectionResult(
+  s: Pick<EditorState, "selectedIds" | "nodes" | "childOrder" | "designTokens">,
+  tokenId: string,
+): StructuralDocumentResult | null {
+  const t = s.designTokens[tokenId];
+  if (!t) return null;
+  const nodes = { ...s.nodes };
+  for (const id of s.selectedIds) {
+    const raw = nodes[id];
+    if (!raw || raw.locked) continue;
+    if (t.type === "color") {
+      if (["frame", "rectangle", "ellipse", "path", "text"].includes(raw.type)) {
+        nodes[id] = { ...raw, fillTokenId: tokenId, fillType: "solid", fillEnabled: true };
+      }
+    } else if (t.type === "gradient") {
+      if (["frame", "rectangle", "ellipse", "path"].includes(raw.type)) {
+        nodes[id] = { ...raw, fillTokenId: tokenId, fillType: "gradient", fillEnabled: true };
+      }
+    } else if (t.type === "typography") {
+      if (raw.type === "text") nodes[id] = { ...raw, textStyleTokenId: tokenId };
+    } else if (t.type === "effect") {
+      nodes[id] = { ...raw, effectTokenId: tokenId };
+    } else if (t.type === "spacing" && isSpacingValue(t.value)) {
+      const v = Math.max(0, t.value.value);
+      if (raw.type === "frame" || raw.type === "group") {
+        nodes[id] = {
+          ...raw,
+          paddingTop: v,
+          paddingRight: v,
+          paddingBottom: v,
+          paddingLeft: v,
+          layoutGap: v,
+        };
+      }
+    }
+  }
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+function buildUpdatePathPointResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  nodeId: string,
+  pointId: string,
+  patch: Partial<Pick<PathPoint, "x" | "y" | "handleIn" | "handleOut">>,
+): StructuralDocumentResult | null {
+  const n = s.nodes[nodeId];
+  if (!n || n.type !== "path" || !n.pathPoints) return null;
+  const mirroring = n.pathHandleMirroring ?? "none";
+  const pts = n.pathPoints.map((p) => {
+    if (p.id !== pointId) return p;
+    let merged: PathPoint = { ...p };
+    if (patch.x !== undefined) merged.x = patch.x;
+    if (patch.y !== undefined) merged.y = patch.y;
+    const handlePatch: Partial<PathPoint> = {};
+    if ("handleIn" in patch) handlePatch.handleIn = patch.handleIn;
+    if ("handleOut" in patch) handlePatch.handleOut = patch.handleOut;
+    if ("handleIn" in patch || "handleOut" in patch) {
+      const movedWhich =
+        "handleIn" in patch && !("handleOut" in patch)
+          ? "in"
+          : "handleOut" in patch && !("handleIn" in patch)
+            ? "out"
+            : undefined;
+      merged = mergePathPointHandles(merged, handlePatch, mirroring, movedWhich);
+    }
+    return merged;
+  });
+  let next: EditorNode = { ...n, pathPoints: pts };
+  next = normalizePathNode(next);
+  let nodes = { ...s.nodes, [nodeId]: next };
+  nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+function buildDeletePathPointResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds" | "pathEditModeNodeId" | "selectedPathPointIds">,
+  nodeId: string,
+  pointId: string,
+): StructuralDocumentResult | null {
+  const n = s.nodes[nodeId];
+  if (!n || n.type !== "path" || !n.pathPoints) return null;
+  const nextPts = n.pathPoints.filter((p) => p.id !== pointId);
+  if (nextPts.length < 2) {
+    const parentRef = n.parentId;
+    const { nodes, childOrder } = removeNodeAndDescendants(s, nodeId);
+    const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
+    return {
+      nodes: nodes2,
+      childOrder,
+      ui: {
+        selectedIds: s.selectedIds.filter((x) => x !== nodeId),
+        pathEditModeNodeId: s.pathEditModeNodeId === nodeId ? null : s.pathEditModeNodeId,
+        selectedPathPointIds: [] as string[],
+      },
+    };
+  }
+  let next: EditorNode = { ...n, pathPoints: nextPts };
+  next = normalizePathNode(next);
+  let nodes = { ...s.nodes, [nodeId]: next };
+  nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
+  return {
+    nodes,
+    childOrder: s.childOrder,
+    ui: { selectedPathPointIds: s.selectedPathPointIds.filter((id) => id !== pointId) },
+  };
+}
+
+function applyPathPointPatches(
+  n: EditorNode,
+  patches: Record<string, Partial<Pick<PathPoint, "x" | "y" | "handleIn" | "handleOut">>>,
+): EditorNode {
+  if (!n.pathPoints) return n;
+  const mirroring = n.pathHandleMirroring ?? "none";
+  const pts = n.pathPoints.map((p) => {
+    const patch = patches[p.id];
+    if (!patch) return p;
+    let merged: PathPoint = { ...p };
+    if (patch.x !== undefined) merged.x = patch.x;
+    if (patch.y !== undefined) merged.y = patch.y;
+    const handlePatch: Partial<PathPoint> = {};
+    if ("handleIn" in patch) handlePatch.handleIn = patch.handleIn;
+    if ("handleOut" in patch) handlePatch.handleOut = patch.handleOut;
+    if ("handleIn" in patch || "handleOut" in patch) {
+      const movedWhich =
+        "handleIn" in patch && !("handleOut" in patch)
+          ? "in"
+          : "handleOut" in patch && !("handleIn" in patch)
+            ? "out"
+            : undefined;
+      merged = mergePathPointHandles(merged, handlePatch, mirroring, movedWhich);
+    }
+    return merged;
+  });
+  let next: EditorNode = { ...n, pathPoints: pts };
+  next = normalizePathNode(next);
+  return next;
+}
+
+function buildUpdatePathPointsResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  nodeId: string,
+  patches: Record<string, Partial<Pick<PathPoint, "x" | "y" | "handleIn" | "handleOut">>>,
+): StructuralDocumentResult | null {
+  const n = s.nodes[nodeId];
+  if (!n || n.type !== "path" || !n.pathPoints) return null;
+  let next = applyPathPointPatches(n, patches);
+  let nodes = { ...s.nodes, [nodeId]: next };
+  nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+function buildDeletePathPointsResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds" | "pathEditModeNodeId" | "selectedPathPointIds">,
+  nodeId: string,
+  pointIds: string[],
+): StructuralDocumentResult | null {
+  if (pointIds.length === 0) return null;
+  const n = s.nodes[nodeId];
+  if (!n || n.type !== "path" || !n.pathPoints) return null;
+  const remove = new Set(pointIds);
+  const nextPts = n.pathPoints.filter((p) => !remove.has(p.id));
+  if (nextPts.length < 2) {
+    const parentRef = n.parentId;
+    const { nodes, childOrder } = removeNodeAndDescendants(s, nodeId);
+    const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
+    return {
+      nodes: nodes2,
+      childOrder,
+      ui: {
+        selectedIds: s.selectedIds.filter((x) => x !== nodeId),
+        pathEditModeNodeId: s.pathEditModeNodeId === nodeId ? null : s.pathEditModeNodeId,
+        selectedPathPointIds: [] as string[],
+      },
+    };
+  }
+  let next: EditorNode = { ...n, pathPoints: nextPts };
+  next = normalizePathNode(next);
+  let nodes = { ...s.nodes, [nodeId]: next };
+  nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
+  return {
+    nodes,
+    childOrder: s.childOrder,
+    ui: { selectedPathPointIds: s.selectedPathPointIds.filter((id) => !remove.has(id)) },
+  };
+}
+
+function buildDetachTokenFromSelectionResult(
+  s: Pick<EditorState, "selectedIds" | "nodes" | "childOrder">,
+  tokenType: DetachableTokenKind,
+): StructuralDocumentResult {
+  const nodes = { ...s.nodes };
+  for (const id of s.selectedIds) {
+    const raw = nodes[id];
+    if (!raw) continue;
+    if ((tokenType === "color" || tokenType === "gradient") && raw.fillTokenId) {
+      nodes[id] = { ...raw, fillTokenId: undefined };
+    } else if (tokenType === "typography" && raw.textStyleTokenId) {
+      nodes[id] = { ...raw, textStyleTokenId: undefined };
+    } else if (tokenType === "effect" && raw.effectTokenId) {
+      nodes[id] = { ...raw, effectTokenId: undefined };
+    }
+  }
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+function buildToggleLockSelectionResult(
+  s: Pick<EditorState, "selectedIds" | "nodes" | "childOrder">,
+): StructuralDocumentResult | null {
+  if (s.selectedIds.length === 0) return null;
+  const nodes = { ...s.nodes };
+  for (const id of s.selectedIds) {
+    const n = nodes[id];
+    if (!n) continue;
+    nodes[id] = { ...n, locked: !n.locked };
+  }
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+function buildToggleVisibleSelectionResult(
+  s: Pick<EditorState, "selectedIds" | "nodes" | "childOrder">,
+): StructuralDocumentResult | null {
+  if (s.selectedIds.length === 0) return null;
+  const nodes = { ...s.nodes };
+  for (const id of s.selectedIds) {
+    const n = nodes[id];
+    if (!n) continue;
+    nodes[id] = { ...n, visible: !n.visible };
+  }
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+function buildStartPencilStrokeResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds" | "editorMode" | "tool" | "canvasBackgroundColor" | "pencilStrokeWidth">,
+  worldPoint: { x: number; y: number },
+): StructuralDocumentResult | null {
+  if (s.editorMode !== "design" || s.tool !== "pencil") return null;
+  const id = `path-${Date.now()}`;
+  const { defaultText } = canvasChromeForeground(s.canvasBackgroundColor);
+  const strokeWidth = clampStrokeWidth(s.pencilStrokeWidth || DEFAULT_PENCIL_STROKE_WIDTH);
+  const pt0: PathPoint = { id: newPathPointId(), x: 0, y: 0 };
+  let node: EditorNode = {
+    id,
+    parentId: null,
+    type: "path",
+    name: nextNumberedLayerName(s.nodes, "Freehand"),
+    x: 0,
+    y: 0,
+    width: 1,
+    height: 1,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    pathPoints: [pt0],
+    pathClosed: false,
+    fillEnabled: false,
+    fillOpacity: 1,
+    fill: "transparent",
+    strokeColor: defaultText,
+    strokeEnabled: true,
+    strokeWidth,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    strokePosition: "center",
+    strokeWidthProfile: "uniform",
+  };
+  node = normalizePathNode(node);
+  const inserted = insertNodeWithFrameParenting(
+    node,
+    { x: worldPoint.x, y: worldPoint.y, width: node.width, height: node.height },
+    s.nodes,
+    s.childOrder,
+    s.selectedIds,
+  );
+  return {
+    nodes: inserted.nodes,
+    childOrder: inserted.childOrder,
+    ui: { pencilDrawingNodeId: id, selectedIds: [] as string[], tool: "pencil" as Tool },
+  };
+}
+
+function buildExtendPencilStrokeResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "zoom" | "tool" | "pencilDrawingNodeId">,
+  drawId: string,
+  worldPoints: Array<{ x: number; y: number }>,
+): StructuralDocumentResult | null {
+  if (worldPoints.length === 0 || s.tool !== "pencil") return null;
+  const n = s.nodes[drawId];
+  if (!n || n.type !== "path" || !n.pathPoints?.length) return null;
+  const nOrigin = getRenderedWorldTopLeft(drawId, s.nodes, s.childOrder);
+  let pts = n.pathPoints;
+  let last = pts[pts.length - 1]!;
+  let changed = false;
+  for (const worldPoint of worldPoints) {
+    const lx = worldPoint.x - nOrigin.x;
+    const ly = worldPoint.y - nOrigin.y;
+    const firstSample = pts.length === 1;
+    if (!firstSample && !shouldSampleFreehandPoint(last.x, last.y, lx, ly, s.zoom)) {
+      continue;
+    }
+    pts = [...pts, { id: newPathPointId(), x: lx, y: ly }];
+    last = pts[pts.length - 1]!;
+    changed = true;
+  }
+  if (!changed) return null;
+  let next: EditorNode = { ...n, pathPoints: pts };
+  next = normalizePathNode(next);
+  return {
+    nodes: { ...s.nodes, [drawId]: next },
+    childOrder: s.childOrder,
+    ui: {},
+  };
+}
+
+function buildFinishPencilStrokeResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "zoom" | "pencilDrawingNodeId">,
+  pathId: string,
+): StructuralDocumentResult | null {
+  const n = s.nodes[pathId];
+  if (!n || n.type !== "path" || !n.pathPoints) {
+    return { nodes: s.nodes, childOrder: s.childOrder, ui: { pencilDrawingNodeId: null } };
+  }
+  const epsilon = 1.5 / Math.max(s.zoom, 0.01);
+  const raw = n.pathPoints;
+  let simplified = simplifyPolyline(
+    raw.map((p) => ({ x: p.x, y: p.y })),
+    epsilon,
+  );
+  if (simplified.length < 2 && raw.length >= 2) {
+    simplified = [
+      { x: raw[0]!.x, y: raw[0]!.y },
+      { x: raw[raw.length - 1]!.x, y: raw[raw.length - 1]!.y },
+    ];
+  }
+  if (simplified.length < 2) {
+    if (raw.length >= 1) {
+      const p = raw[0]!;
+      simplified = [
+        { x: p.x, y: p.y },
+        { x: p.x + 0.5, y: p.y + 0.5 },
+      ];
+    } else {
+      const parentRef = n.parentId;
+      const { nodes, childOrder } = removeNodeAndDescendants(s, pathId);
+      const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
+      return {
+        nodes: nodes2,
+        childOrder,
+        ui: { pencilDrawingNodeId: null, selectedIds: [] as string[] },
+      };
+    }
+  }
+  const pts: PathPoint[] = simplified.map((p) => ({
+    id: newPathPointId(),
+    x: p.x,
+    y: p.y,
+  }));
+  let next: EditorNode = { ...n, pathPoints: pts, pathClosed: false };
+  next = normalizePathNode(next);
+  let nodes = { ...s.nodes, [pathId]: next };
+  nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
+  const repaired = repairNodeHierarchy(nodes, s.childOrder);
+  return {
+    nodes: repaired.nodes,
+    childOrder: repaired.childOrder,
+    ui: {
+      pencilDrawingNodeId: null,
+      tool: "move" as Tool,
+      selectedIds: [pathId],
+      pathEditModeNodeId: null,
+      objectEditModeNodeId: null,
+      selectedPathPointIds: [] as string[],
+    },
+  };
+}
+
+function buildCancelPencilStrokeResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  pathId: string,
+): StructuralDocumentResult | null {
+  if (!s.nodes[pathId]) {
+    return { nodes: s.nodes, childOrder: s.childOrder, ui: { pencilDrawingNodeId: null, selectedIds: [] } };
+  }
+  const parentRef = s.nodes[pathId]?.parentId;
+  const { nodes, childOrder } = removeNodeAndDescendants(s, pathId);
+  const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
+  return {
+    nodes: nodes2,
+    childOrder,
+    ui: { pencilDrawingNodeId: null, selectedIds: [] as string[] },
+  };
+}
+
+function buildRenameNodeResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  id: string,
+  name: string,
+): StructuralDocumentResult | null {
+  const n = s.nodes[id];
+  if (!n) return null;
+  return { nodes: { ...s.nodes, [id]: { ...n, name } }, childOrder: s.childOrder, ui: {} };
+}
+
+function buildToggleExpandedResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  id: string,
+): StructuralDocumentResult | null {
+  const n = s.nodes[id];
+  if (!n) return null;
+  return {
+    nodes: { ...s.nodes, [id]: { ...n, expanded: !n.expanded } },
+    childOrder: s.childOrder,
+    ui: {},
+  };
+}
+
+function buildAddEffectResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  nodeId: string,
+  type: NodeEffectType,
+): StructuralDocumentResult | null {
+  const n = s.nodes[nodeId];
+  if (!n || n.locked) return null;
+  const ne = defaultNodeEffect(type);
+  const list = [...(n.effects ?? []), ne];
+  return {
+    nodes: { ...s.nodes, [nodeId]: { ...n, effects: list } },
+    childOrder: s.childOrder,
+    ui: {},
+  };
+}
+
+function buildUpdateEffectResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  nodeId: string,
+  effectId: string,
+  patch: Partial<import("@/lib/nodeEffects").NodeEffect>,
+): StructuralDocumentResult | null {
+  const n = s.nodes[nodeId];
+  if (!n || n.locked) return null;
+  const list = (n.effects ?? []).map((e) =>
+    e.id === effectId ? mergeNodeEffectPatch(e, patch) : e,
+  );
+  return {
+    nodes: { ...s.nodes, [nodeId]: { ...n, effects: list } },
+    childOrder: s.childOrder,
+    ui: {},
+  };
+}
+
+function buildDeleteEffectResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  nodeId: string,
+  effectId: string,
+): StructuralDocumentResult | null {
+  const n = s.nodes[nodeId];
+  if (!n || n.locked) return null;
+  const list = (n.effects ?? []).filter((e) => e.id !== effectId);
+  return {
+    nodes: { ...s.nodes, [nodeId]: { ...n, effects: list.length ? list : undefined } },
+    childOrder: s.childOrder,
+    ui: {},
+  };
+}
+
+function buildToggleEffectResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  nodeId: string,
+  effectId: string,
+): StructuralDocumentResult | null {
+  const n = s.nodes[nodeId];
+  if (!n || n.locked) return null;
+  const list = (n.effects ?? []).map((e) =>
+    e.id === effectId ? { ...e, visible: !e.visible } : e,
+  );
+  return {
+    nodes: { ...s.nodes, [nodeId]: { ...n, effects: list } },
+    childOrder: s.childOrder,
+    ui: {},
+  };
+}
+
+function buildSetPathHandleMirroringResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  id: string,
+  mode: import("@/lib/pathHandles").PathHandleMirroring,
+): StructuralDocumentResult | null {
+  const n = s.nodes[id];
+  if (!n || n.type !== "path") return null;
+  return {
+    nodes: { ...s.nodes, [id]: { ...n, pathHandleMirroring: mode } },
+    childOrder: s.childOrder,
+    ui: {},
+  };
+}
+
+function buildEnterVectorEditModeResult(
+  s: Pick<
+    EditorState,
+    | "nodes"
+    | "childOrder"
+    | "selectedIds"
+    | "editingTextId"
+    | "penDrawingNodeId"
+    | "pencilDrawingNodeId"
+  >,
+  nodeId?: string,
+): StructuralDocumentResult | null {
+  const id = nodeId ?? s.selectedIds[0];
+  if (!id) return null;
+  const current = s.nodes[id];
+  if (!current || !isVectorEditableShape(current)) return null;
+  if (s.editingTextId || s.penDrawingNodeId || s.pencilDrawingNodeId) return null;
+
+  let converted: EditorNode = current;
+  if (current.type === "polygon") {
+    const built = shapeToPathPoints(current);
+    if (!built) return null;
+    converted = {
+      ...current,
+      pathPoints: built.pathPoints,
+      pathClosed: built.pathClosed,
+    };
+  } else if (current.type !== "path") {
+    const c = convertNodeToPath(current);
+    if (!c) return null;
+    converted = ensureRoundedRectPathPoints(c);
+  }
+
+  const nodes =
+    converted !== current ? { ...s.nodes, [id]: converted } : s.nodes;
+  return {
+    nodes,
+    childOrder: s.childOrder,
+    ui: {
+      pathEditModeNodeId: id,
+      shapeEditModeNodeId: null,
+      selectedIds: [id],
+      selectedPathPointIds: [] as string[],
+      objectEditModeNodeId: null,
+    },
+  };
+}
+
+function buildGroupSelectionResult(
+  s: Pick<EditorState, "selectedIds" | "nodes" | "childOrder">,
+): StructuralDocumentResult | null {
+  const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+    const n = s.nodes[id];
+    return n && !n.locked && n.visible;
+  });
+  if (tops.length < 2) return null;
+  const parentId = s.nodes[tops[0]!]!.parentId;
+  if (!tops.every((id) => s.nodes[id]!.parentId === parentId)) return null;
+
+  const P = parentListKey(parentId);
+  const pw = parentId ? worldRect(parentId, s.nodes) : { x: 0, y: 0, width: 0, height: 0 };
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const id of tops) {
+    const w = worldRect(id, s.nodes);
+    minX = Math.min(minX, w.x);
+    minY = Math.min(minY, w.y);
+    maxX = Math.max(maxX, w.x + w.width);
+    maxY = Math.max(maxY, w.y + w.height);
+  }
+  const gw = maxX - minX;
+  const gh = maxY - minY;
+  const gx = minX - pw.x;
+  const gy = minY - pw.y;
+  const gid = `group-${Date.now()}`;
+  const nodes = { ...s.nodes };
+  const childOrder = { ...s.childOrder };
+  nodes[gid] = {
+    id: gid,
+    parentId,
+    type: "group",
+    name: "Group",
+    x: gx,
+    y: gy,
+    width: gw,
+    height: gh,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+  };
+  for (const id of tops) {
+    const w = worldRect(id, s.nodes);
+    const n = nodes[id]!;
+    nodes[id] = {
+      ...n,
+      parentId: gid,
+      x: w.x - minX,
+      y: w.y - minY,
+    };
+  }
+  const list = [...(childOrder[P] ?? [])];
+  const ixs = tops.map((id) => list.indexOf(id)).sort((a, b) => a - b);
+  const insertAt = ixs[0]!;
+  const newList = list.filter((id) => !tops.includes(id));
+  newList.splice(insertAt, 0, gid);
+  childOrder[P] = newList;
+  childOrder[gid] = tops;
+  const nodesOut = relayoutParentsWithAutoLayout(nodes, childOrder, [P]);
+  return {
+    nodes: nodesOut,
+    childOrder,
+    ui: {
+      selectedIds: [gid],
+      tool: "move" as Tool,
+      editingTextId: null,
+    },
+  };
+}
+
+function buildUngroupSelectionResult(
+  s: Pick<EditorState, "selectedIds" | "nodes" | "childOrder">,
+): StructuralDocumentResult | null {
+  if (s.selectedIds.length !== 1) return null;
+  const gid = s.selectedIds[0]!;
+  const g = s.nodes[gid];
+  if (!g || g.type !== "group" || g.locked || !g.visible) return null;
+  const kids = [...(s.childOrder[gid] ?? [])];
+  if (kids.length === 0) return null;
+
+  const parentId = g.parentId;
+  const P = parentListKey(parentId);
+  const pg = worldRect(gid, s.nodes);
+  const pp = parentId ? worldRect(parentId, s.nodes) : { x: 0, y: 0, width: 0, height: 0 };
+  const nodes = { ...s.nodes };
+  const childOrder = { ...s.childOrder };
+  for (const id of kids) {
+    const n = nodes[id]!;
+    nodes[id] = {
+      ...n,
+      parentId: parentId ?? null,
+      x: n.x + (pg.x - pp.x),
+      y: n.y + (pg.y - pp.y),
+    };
+  }
+  const list = [...(childOrder[P] ?? [])];
+  const ix = list.indexOf(gid);
+  const newList = list.filter((id) => id !== gid);
+  newList.splice(ix >= 0 ? ix : newList.length, 0, ...kids);
+  childOrder[P] = newList;
+  delete nodes[gid];
+  delete childOrder[gid];
+  const nodesOut = relayoutParentsWithAutoLayout(nodes, childOrder, [P]);
+  return {
+    nodes: nodesOut,
+    childOrder,
+    ui: {
+      selectedIds: kids,
+      tool: "move" as Tool,
+      editingTextId: null,
+    },
+  };
+}
+
+function buildAutoLayoutMutationResult(
+  result: ApplyAutoLayoutSelectionResult | null,
+): StructuralDocumentResult | null {
+  if (!result) return null;
+  const repaired = repairNodeHierarchy(result.nodes, result.childOrder);
+  return {
+    nodes: repaired.nodes,
+    childOrder: repaired.childOrder,
+    ui: {
+      selectedIds: result.selectedIds,
+      tool: "move" as Tool,
+      editingTextId: null,
+    },
+  };
+}
+
+function buildPatchNodeWithParentRelayoutResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  id: string,
+  patch: Partial<Pick<EditorNode, "visible" | "locked">>,
+): StructuralDocumentResult | null {
+  const n = s.nodes[id];
+  if (!n) return null;
+  let nodes = { ...s.nodes, [id]: { ...n, ...patch } };
+  const par = nodes[id]!.parentId;
+  if (par) {
+    nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [par]);
+  }
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+function buildNudgeSelectionResult(
+  s: Pick<EditorState, "editorMode" | "selectedIds" | "nodes" | "childOrder">,
+  dx: number,
+  dy: number,
+): StructuralDocumentResult | null {
+  if (s.editorMode !== "design" || (dx === 0 && dy === 0)) return null;
+  const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+    const n = s.nodes[id];
+    return n && !n.locked && n.visible;
+  });
+  if (tops.length === 0) return null;
+  let nodes = { ...s.nodes };
+  const detachIds = idsToDetachForAutoLayoutDrag(tops, nodes, nodes);
+  for (const id of detachIds) {
+    const n = nodes[id]!;
+    nodes[id] = { ...n, layoutPositioning: "absolute", layoutDirty: true };
+  }
+  const refresh = new Set<string>();
+  for (const id of tops) {
+    const n = nodes[id]!;
+    nodes[id] = { ...n, x: n.x + dx, y: n.y + dy };
+    if (n.parentId) refresh.add(n.parentId);
+    if ((n.type === "frame" || n.type === "group") && (n.layoutMode ?? "none") !== "none") {
+      refresh.add(id);
+    }
+  }
+  nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+function buildSwapAutoLayoutSiblingsResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  idA: string,
+  idB: string,
+): StructuralDocumentResult | null {
+  const a = s.nodes[idA];
+  const b = s.nodes[idB];
+  if (!a?.parentId || a.parentId !== b?.parentId) return null;
+  const parentId = a.parentId;
+  const nextOrder = swapAutoLayoutSiblingOrder(parentId, idA, idB, s.childOrder);
+  if (!nextOrder) return null;
+  const nodes = relayoutParentsWithAutoLayout(s.nodes, nextOrder, [parentId]);
+  return { nodes, childOrder: nextOrder, ui: {} };
+}
+
+function buildUpdateLayoutResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  id: string,
+  patch: LayoutPatch,
+): StructuralDocumentResult | null {
+  const n = s.nodes[id];
+  if (!n || n.locked || (n.type !== "frame" && n.type !== "group")) return null;
+  const nodes = applyLayoutPatchWithAutoLayout(s.nodes, s.childOrder, id, patch) as EditorState["nodes"];
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+function buildUpdateLayoutSizingResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  id: string,
+  axis: "horizontal" | "vertical",
+  mode: LayoutSizingMode,
+): StructuralDocumentResult | null {
+  const n = s.nodes[id];
+  if (!n || n.locked) return null;
+  const patch =
+    axis === "horizontal"
+      ? { layoutSizingHorizontal: mode }
+      : { layoutSizingVertical: mode };
+  let nodes = { ...s.nodes, [id]: { ...n, ...patch, layoutDirty: true } };
+  const refresh = new Set<string>();
+  if (n.parentId) refresh.add(n.parentId);
+  if ((n.type === "frame" || n.type === "group") && (n.layoutMode ?? "none") !== "none") {
+    refresh.add(id);
+  }
+  nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+function buildUpdateLayoutPositioningResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  id: string,
+  positioning: LayoutPositioning,
+): StructuralDocumentResult | null {
+  const n = s.nodes[id];
+  if (!n || n.locked) return null;
+  let nodes = { ...s.nodes, [id]: { ...n, layoutPositioning: positioning, layoutDirty: true } };
+  const par = n.parentId;
+  if (par) nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [par]);
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+function buildUpdateConstraintsResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  id: string,
+  patch: ConstraintsPatch,
+): StructuralDocumentResult | null {
+  const n = s.nodes[id];
+  if (!n || n.locked) return null;
+  return {
+    nodes: { ...s.nodes, [id]: { ...n, ...patch } },
+    childOrder: s.childOrder,
+    ui: {},
+  };
+}
+
+function buildApplyAutoLayoutResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  parentId: string,
+): StructuralDocumentResult | null {
+  const p = s.nodes[parentId];
+  if (!p || (p.type !== "frame" && p.type !== "group")) return null;
+  const result = applyAutoLayoutToContainer(s.nodes, s.childOrder, parentId);
+  if (!result) return null;
+  return {
+    nodes: result.nodes,
+    childOrder: result.childOrder,
+    ui: {},
+  };
+}
+
+function buildSetSelectionStrokeWidthResult(
+  s: Pick<EditorState, "editorMode" | "selectedIds" | "nodes" | "childOrder" | "pencilStrokeWidth">,
+  width: number,
+): StructuralDocumentResult | null {
+  if (s.editorMode !== "design") return null;
+  const next = clampStrokeWidth(width);
+  const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+    const n = s.nodes[id];
+    return n && !n.locked && n.visible && nodeSupportsStrokeWidth(n);
+  });
+  if (tops.length === 0) return null;
+  let nodes = { ...s.nodes };
+  for (const id of tops) {
+    const n = nodes[id];
+    if (!n || n.locked || !nodeSupportsStrokeWidth(n)) continue;
+    nodes[id] = {
+      ...n,
+      strokeWidth: next,
+      strokeEnabled: next > 0 ? true : n.strokeEnabled,
+    };
+  }
+  return { nodes, childOrder: s.childOrder, ui: { pencilStrokeWidth: next } };
+}
+
+function buildNudgeSelectionStrokeWidthResult(
+  s: Pick<EditorState, "editorMode" | "selectedIds" | "nodes" | "childOrder" | "pencilStrokeWidth">,
+  delta: number,
+): StructuralDocumentResult | null {
+  if (s.editorMode !== "design" || delta === 0) return null;
+  const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+    const n = s.nodes[id];
+    return n && !n.locked && n.visible && nodeSupportsStrokeWidth(n);
+  });
+  if (tops.length === 0) return null;
+  let nodes = { ...s.nodes };
+  let preset = s.pencilStrokeWidth;
+  for (const id of tops) {
+    const n = nodes[id];
+    if (!n || n.locked || !nodeSupportsStrokeWidth(n)) continue;
+    const next = clampStrokeWidth((n.strokeWidth ?? 0) + delta);
+    preset = next;
+    nodes[id] = {
+      ...n,
+      strokeWidth: next,
+      strokeEnabled: next > 0 ? true : n.strokeEnabled,
+    };
+  }
+  return { nodes, childOrder: s.childOrder, ui: { pencilStrokeWidth: preset } };
+}
+
+function buildUseSelectionAsMaskResult(
+  s: Pick<EditorState, "selectedIds" | "nodes" | "childOrder">,
+): StructuralDocumentResult | null {
+  const tops = getBooleanEligibleSelection(s.selectedIds, s.nodes);
+  if (tops.length < 2) return null;
+  const parentId = s.nodes[tops[0]!]!.parentId;
+  if (!tops.every((id) => s.nodes[id]!.parentId === parentId)) return null;
+
+  const P = parentListKey(parentId);
+  const maskId = topmostAmongSiblings(tops, s.nodes, s.childOrder);
+  const contentIds = tops.filter((id) => id !== maskId);
+  const allIds = [...contentIds, maskId];
+  const pw = parentId ? worldRect(parentId, s.nodes) : { x: 0, y: 0, width: 0, height: 0 };
+  const visible = boundsForMaskAndContent(maskId, contentIds, s.nodes, s.childOrder);
+  const minX = visible.x;
+  const minY = visible.y;
+  const maxX = visible.x + visible.width;
+  const maxY = visible.y + visible.height;
+  const gid = `group-mask-${Date.now()}`;
+  const nodes = { ...s.nodes };
+  const childOrder = { ...s.childOrder };
+  nodes[gid] = {
+    id: gid,
+    parentId,
+    type: "group",
+    name: "Mask group",
+    x: minX - pw.x,
+    y: minY - pw.y,
+    width: maxX - minX,
+    height: maxY - minY,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    maskId,
+    figMaskType: "OUTLINE",
+    maskVisible: false,
+  };
+  for (const id of contentIds) {
+    const o = getNodeWorldOrigin(id, nodes);
+    nodes[id] = {
+      ...nodes[id]!,
+      parentId: gid,
+      x: o.x - minX,
+      y: o.y - minY,
+      maskedBy: gid,
+      isMask: false,
+    };
+  }
+  const mo = getNodeWorldOrigin(maskId, nodes);
+  nodes[maskId] = {
+    ...nodes[maskId]!,
+    parentId: gid,
+    x: mo.x - minX,
+    y: mo.y - minY,
+    isMask: true,
+    name: "Mask",
+    maskedBy: undefined,
+  };
+  const parentList = [...(childOrder[P] ?? [])];
+  const insertAt = Math.min(...allIds.map((id) => parentList.indexOf(id)).filter((i) => i >= 0));
+  childOrder[P] = parentList.filter((id) => !allIds.includes(id));
+  childOrder[P]!.splice(Math.max(0, insertAt), 0, gid);
+  childOrder[gid] = [...contentIds, maskId];
+  const firstContent = contentIds[0];
+  return {
+    nodes: relayoutParentsWithAutoLayout(nodes, childOrder, [P]),
+    childOrder,
+    ui: {
+      selectedIds: firstContent ? [firstContent] : [gid],
+      tool: "move" as Tool,
+    },
+  };
+}
+
+function buildReleaseMaskResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  maskGroupId: string,
+): StructuralDocumentResult | null {
+  const g = s.nodes[maskGroupId];
+  if (!g || !isMaskGroup(g) || g.locked) return null;
+  const parentId = g.parentId;
+  const P = parentListKey(parentId);
+  const kids = [...(s.childOrder[maskGroupId] ?? [])];
+  const nodes = { ...s.nodes };
+  const childOrder = { ...s.childOrder };
+  const gw = worldRect(maskGroupId, s.nodes);
+  for (const kid of kids) {
+    const kn = nodes[kid];
+    if (!kn) continue;
+    const kw = worldRect(kid, s.nodes);
+    nodes[kid] = {
+      ...kn,
+      parentId,
+      x: kw.x - (parentId ? worldRect(parentId, s.nodes).x : 0),
+      y: kw.y - (parentId ? worldRect(parentId, s.nodes).y : 0),
+      isMask: undefined,
+      maskedBy: undefined,
+    };
+  }
+  const list = [...(childOrder[P] ?? [])];
+  const gi = list.indexOf(maskGroupId);
+  list.splice(gi, 1, ...kids);
+  childOrder[P] = list;
+  delete nodes[maskGroupId];
+  delete childOrder[maskGroupId];
+  return {
+    nodes,
+    childOrder,
+    ui: { selectedIds: kids, tool: "move" as Tool },
+  };
+}
+
+function buildSetNodeAsMaskResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  nodeId: string,
+  isMask: boolean,
+): StructuralDocumentResult | null {
+  const n = s.nodes[nodeId];
+  if (!n || n.locked) return null;
+  return {
+    nodes: {
+      ...s.nodes,
+      [nodeId]: {
+        ...n,
+        isMask,
+        name: isMask ? "Mask" : n.name,
+      },
+    },
+    childOrder: s.childOrder,
+    ui: {},
+  };
+}
+
+function buildFinishPrototypeConnectionResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "prototypeWireDrag">,
+  targetFrameId: string,
+): StructuralDocumentResult | null {
+  const w = s.prototypeWireDrag;
+  if (!w) return null;
+  const src = s.nodes[w.sourceNodeId];
+  const tgt = s.nodes[targetFrameId];
+  if (!src || !tgt || tgt.type !== "frame") return null;
+  if (isAncestorOf(s.nodes, w.sourceNodeId, targetFrameId)) return null;
+  const link = defaultPrototypeLink(w.sourceNodeId, targetFrameId);
+  const prevLinks = src.prototypeLinks ?? [];
+  return {
+    nodes: {
+      ...s.nodes,
+      [w.sourceNodeId]: { ...src, prototypeLinks: [...prevLinks, link] },
+    },
+    childOrder: s.childOrder,
+    ui: {
+      prototypeWireDrag: null,
+      selectedPrototypeLinkId: link.id,
+      selectedIds: [w.sourceNodeId],
+    },
+  };
+}
+
+function buildUpdatePrototypeLinkResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  linkId: string,
+  patch: Partial<PrototypeLink>,
+): StructuralDocumentResult | null {
+  const own = findPrototypeLinkOwner(s.nodes, linkId);
+  if (!own) return null;
+  const node = s.nodes[own.ownerId]!;
+  const arr = [...(node.prototypeLinks ?? [])];
+  const cur = arr[own.index]!;
+  const next: PrototypeLink = { ...cur, ...patch, id: cur.id, sourceNodeId: cur.sourceNodeId };
+  arr[own.index] = next;
+  return {
+    nodes: { ...s.nodes, [own.ownerId]: { ...node, prototypeLinks: arr } },
+    childOrder: s.childOrder,
+    ui: {},
+  };
+}
+
+function buildDeletePrototypeLinkResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedPrototypeLinkId">,
+  linkId: string,
+): StructuralDocumentResult | null {
+  const own = findPrototypeLinkOwner(s.nodes, linkId);
+  if (!own) return null;
+  const node = s.nodes[own.ownerId]!;
+  const arr = (node.prototypeLinks ?? []).filter((l) => l.id !== linkId);
+  const nextNode: EditorNode = { ...node, prototypeLinks: arr.length ? arr : undefined };
+  return {
+    nodes: { ...s.nodes, [own.ownerId]: nextNode },
+    childOrder: s.childOrder,
+    ui: {
+      selectedPrototypeLinkId: s.selectedPrototypeLinkId === linkId ? null : s.selectedPrototypeLinkId,
+    },
+  };
+}
+
+function buildCreateComponentFromSelectionResult(
+  s: Pick<EditorState, "selectedIds" | "nodes" | "childOrder">,
+): StructuralDocumentResult | null {
+  if (!canCreateComponentFromSelection(s.selectedIds, s.nodes)) return null;
+
+  let nodes = { ...s.nodes };
+  let childOrder = { ...s.childOrder };
+  let tops = topLevelSelectedIds(s.selectedIds, nodes).filter((id) => {
+    const n = nodes[id];
+    return n && !n.locked && n.visible;
+  });
+
+  if (tops.length >= 2) {
+    const grouped = groupNodesForComponent(nodes, childOrder, tops);
+    if (!grouped) return null;
+    nodes = grouped.nodes;
+    childOrder = grouped.childOrder;
+    tops = [grouped.groupId];
+  }
+
+  let rootId = tops[0]!;
+  const wrapped = wrapNodeInFrameForComponent(nodes, childOrder, rootId);
+  if (!wrapped) return null;
+  nodes = wrapped.nodes;
+  childOrder = wrapped.childOrder;
+  rootId = wrapped.frameId;
+
+  const root = nodes[rootId];
+  if (!root || root.isComponent) return null;
+
+  nodes = markNodeAsComponent(nodes, rootId);
+  const parentId = nodes[rootId]!.parentId;
+  if (parentId) {
+    nodes = relayoutParentsWithAutoLayout(nodes, childOrder, [parentId]);
+  }
+
+  return {
+    nodes,
+    childOrder,
+    ui: {
+      selectedIds: [rootId],
+      tool: "move" as Tool,
+    },
+  };
+}
+
+function buildCreateInstanceResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  componentKey: string,
+  worldX: number,
+  worldY: number,
+): StructuralDocumentResult | null {
+  const masterId = resolveMasterRootId(s.nodes, componentKey);
+  if (!masterId) return null;
+  const master = s.nodes[masterId];
+  if (!master?.isComponent || !master.componentId) return null;
+  const pid = frameParentAtWorldPoint(worldX, worldY, s.nodes, s.childOrder);
+  const pos = centeredLocalPointInParent(
+    worldX,
+    worldY,
+    pid,
+    s.nodes,
+    master.width,
+    master.height,
+    s.childOrder,
+  );
+  const parentKey = parentListKey(pid);
+  const res = cloneEditorSubtree(
+    s.nodes,
+    s.childOrder,
+    masterId,
+    pid,
+    parentKey,
+    (root) => ({
+      ...root,
+      x: pos.x,
+      y: pos.y,
+      sourceComponentId: masterId,
+      componentId: master.componentId,
+      instanceOverrides: {},
+    }),
+    (_old, fresh) => stripComponentFields(fresh),
+  );
+  if (!res) return null;
+  let { nodes, childOrder, newRootId } = res;
+  if (pid) nodes = relayoutParentsWithAutoLayout(nodes, childOrder, [pid]);
+  const repaired = repairNodeHierarchy(nodes, childOrder);
+  return {
+    nodes: repaired.nodes,
+    childOrder: repaired.childOrder,
+    ui: {
+      selectedIds: [newRootId],
+      tool: "move" as Tool,
+      placingComponentMasterId: null,
+      editingTextId: null,
+    },
+  };
+}
+
+function buildDetachInstanceResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  instanceRootId: string,
+): StructuralDocumentResult | null {
+  const root = s.nodes[instanceRootId];
+  if (!root?.sourceComponentId || root.locked) return null;
+  const next = detachInstanceTree(s.nodes, s.childOrder, instanceRootId);
+  if (!next) return null;
+  return {
+    nodes: next,
+    childOrder: s.childOrder,
+    ui: { selectedIds: [instanceRootId] },
+  };
+}
+
+function buildUpdateInstanceOverrideResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  instanceRootId: string,
+  targetNodeId: string,
+  patch: InstanceOverridePatch,
+): StructuralDocumentResult | null {
+  const root = s.nodes[instanceRootId];
+  if (!root?.sourceComponentId || root.locked) return null;
+  const io: Record<string, Record<string, unknown>> = { ...(root.instanceOverrides ?? {}) };
+  const prev =
+    io[targetNodeId] && typeof io[targetNodeId] === "object" && !Array.isArray(io[targetNodeId])
+      ? { ...(io[targetNodeId] as Record<string, unknown>) }
+      : {};
+  io[targetNodeId] = { ...prev, ...patch };
+  return {
+    nodes: {
+      ...s.nodes,
+      [instanceRootId]: { ...root, instanceOverrides: io },
+    },
+    childOrder: s.childOrder,
+    ui: {},
+  };
+}
+
+function buildCreateVariantFromComponentResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  componentKey: string,
+): StructuralDocumentResult | null {
+  const masterId = resolveMasterRootId(s.nodes, componentKey);
+  if (!masterId) return null;
+  const m = s.nodes[masterId];
+  if (!m?.isComponent || m.locked) return null;
+
+  const OFFSET = 24;
+  const vg = m.variantGroupId ?? newVariantGroupId();
+  const siblingCount =
+    (m.variantGroupId
+      ? Object.values(s.nodes).filter((x) => x.variantGroupId === vg).length
+      : 0) + 1;
+  const res = cloneEditorSubtree(
+    s.nodes,
+    s.childOrder,
+    masterId,
+    m.parentId,
+    parentListKey(m.parentId),
+    (root) => ({
+      ...root,
+      isComponent: true,
+      componentId: newComponentId(),
+      variantGroupId: vg,
+      variantProperties: {
+        ...(m.variantProperties ?? {}),
+        Variant: `V${siblingCount + 1}`,
+      },
+      name: `${m.name} · variant`,
+    }),
+    (old, fresh) => {
+      let next = stripComponentFields(fresh);
+      if (old.id === masterId) {
+        next = { ...next, x: next.x + OFFSET, y: next.y + OFFSET };
+      }
+      return next;
+    },
+  );
+  if (!res) return null;
+  let nodes = res.nodes;
+  const childOrder = res.childOrder;
+  if (!m.variantGroupId) {
+    nodes = { ...nodes, [masterId]: { ...m, variantGroupId: vg } };
+  }
+  nodes = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(m.parentId)]);
+  return {
+    nodes,
+    childOrder,
+    ui: {
+      selectedIds: [res.newRootId],
+      tool: "move" as Tool,
+      editingTextId: null,
+    },
+  };
+}
+
+function buildUpdateVariantPropertiesResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  componentKey: string,
+  properties: Record<string, string>,
+): StructuralDocumentResult | null {
+  const id = resolveMasterRootId(s.nodes, componentKey);
+  if (!id) return null;
+  const n = s.nodes[id];
+  if (!n?.isComponent || n.locked) return null;
+  return {
+    nodes: {
+      ...s.nodes,
+      [id]: {
+        ...n,
+        variantProperties: { ...(n.variantProperties ?? {}), ...properties },
+      },
+    },
+    childOrder: s.childOrder,
+    ui: {},
+  };
+}
+
+function buildDuplicateSingleResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds">,
+  id: string,
+  worldOffset: CloneWorldOffset | null,
+): StructuralDocumentResult | null {
+  const tops = topLevelSelectedIds([id], s.nodes).filter((tid) => {
+    const nn = s.nodes[tid];
+    return nn && !nn.locked && nn.visible;
+  });
+  if (tops.length === 0 || !s.nodes[tops[0]!]) return null;
+  const cloned = cloneTopLevelSelectionState({ ...s, selectedIds: [id] }, worldOffset);
+  if (!cloned) return null;
+  return {
+    nodes: cloned.nodes,
+    childOrder: cloned.childOrder,
+    ui: {
+      selectedIds: cloned.selectedIds,
+      tool: cloned.tool,
+      editingTextId: cloned.editingTextId,
+      contextMenu: null,
+    },
+  };
+}
+
+function buildDeleteSingleResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  id: string,
+): StructuralDocumentResult | null {
+  const tops = topLevelSelectedIds([id], s.nodes).filter((tid) => {
+    const nn = s.nodes[tid];
+    return nn && !nn.locked && nn.visible;
+  });
+  if (tops.length === 0) return null;
+  const parentsToRelayout = new Set<string>();
+  for (const root of tops) {
+    parentsToRelayout.add(parentListKey(s.nodes[root]!.parentId));
+  }
+  const toRemove = new Set<string>();
+  for (const root of tops) {
+    for (const tid of collectSubtreeIds(root, s.childOrder)) {
+      toRemove.add(tid);
+    }
+  }
+  let nodes = { ...s.nodes };
+  const childOrder: Record<string, string[]> = {};
+  for (const [k, arr] of Object.entries(s.childOrder)) {
+    childOrder[k] = arr.filter((tid) => !toRemove.has(tid));
+  }
+  for (const tid of toRemove) {
+    delete nodes[tid];
+    delete childOrder[tid];
+  }
+  nodes = relayoutParentsWithAutoLayout(nodes, childOrder, parentsToRelayout);
+  return {
+    nodes,
+    childOrder,
+    ui: {
+      selectedIds: [] as string[],
+      editingTextId: null,
+      contextMenu: null,
+      layerRenameId: null,
+    },
+  };
+}
+
+const PLUGIN_RENAME_LABELS: Record<NodeKind, string> = {
+  frame: "Screen",
+  group: "Group",
+  rectangle: "Card",
+  ellipse: "Badge",
+  line: "Divider",
+  arrow: "Arrow",
+  polygon: "Polygon",
+  path: "Vector",
+  text: "Label",
+  image: "Image",
+};
+
+function buildApplyPluginLoremResult(
+  s: Pick<EditorState, "selectedIds" | "nodes" | "childOrder">,
+): StructuralDocumentResult | null {
+  const textIds = s.selectedIds.filter((id) => {
+    const n = s.nodes[id];
+    return n?.type === "text" && !n.locked;
+  });
+  if (textIds.length === 0) return null;
+  const lorem =
+    "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation.";
+  const nodes = { ...s.nodes };
+  for (const id of textIds) {
+    const n = nodes[id];
+    if (!n || n.type !== "text" || n.locked) continue;
+    nodes[id] = { ...n, content: lorem };
+  }
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+function buildApplyPluginRenameResult(
+  s: Pick<EditorState, "selectedIds" | "nodes" | "childOrder">,
+): StructuralDocumentResult | null {
+  const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+    const n = s.nodes[id];
+    return n && !n.locked;
+  });
+  if (tops.length === 0) return null;
+  const counts = new Map<NodeKind, number>();
+  const nodes = { ...s.nodes };
+  for (const id of tops) {
+    const n = nodes[id];
+    if (!n) continue;
+    const c = (counts.get(n.type) ?? 0) + 1;
+    counts.set(n.type, c);
+    const base = PLUGIN_RENAME_LABELS[n.type] ?? "Layer";
+    const name = c > 1 ? `${base} ${c}` : base;
+    nodes[id] = { ...n, name };
+  }
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+function buildApplyPluginIconResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds">,
+): StructuralDocumentResult | null {
+  const frameId = resolveFrameParentForPlugin(s);
+  if (!frameId) return null;
+  const frame = s.nodes[frameId];
+  if (!frame || frame.locked) return null;
+  const gid = `group-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const pathId = `path-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const pts: PathPoint[] = [
+    { id: newPathPointId(), x: 32, y: 4 },
+    { id: newPathPointId(), x: 56, y: 56 },
+    { id: newPathPointId(), x: 32, y: 40 },
+    { id: newPathPointId(), x: 8, y: 56 },
+  ];
+  let pathNode: EditorNode = {
+    id: pathId,
+    parentId: gid,
+    type: "path",
+    name: "Mark",
+    x: 0,
+    y: 0,
+    width: 64,
+    height: 64,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    pathPoints: pts,
+    pathClosed: true,
+    fill: DEFAULT_SHAPE_FILL,
+    fillEnabled: true,
+    fillOpacity: 1,
+    strokeColor: DEFAULT_SHAPE_STROKE,
+    strokeWidth: 1.5,
+    strokePosition: "center",
+  };
+  pathNode = normalizePathNode(pathNode);
+  const nodes: Record<string, EditorNode> = { ...s.nodes };
+  nodes[pathId] = pathNode;
+  nodes[gid] = {
+    id: gid,
+    parentId: frameId,
+    type: "group",
+    name: "Plugin icon",
+    x: 88,
+    y: 140,
+    width: pathNode.width,
+    height: pathNode.height,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+  };
+  const childOrder = { ...s.childOrder, [gid]: [pathId] };
+  const order = [...(childOrder[frameId] ?? [])];
+  order.push(gid);
+  childOrder[frameId] = order;
+  const nodesOut = relayoutParentsWithAutoLayout(nodes, childOrder, [frameId]);
+  return {
+    nodes: nodesOut,
+    childOrder,
+    ui: {
+      selectedIds: [gid],
+      tool: "move" as Tool,
+      editingTextId: null,
+    },
+  };
+}
+
+function buildImportImageAssetResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "assets">,
+  asset: EditorAsset,
+): StructuralDocumentResult {
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    assets: { ...s.assets, [asset.id]: asset },
+    ui: {},
+  };
+}
+
+function buildReplaceImageAssetResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "assets">,
+  nodeId: string,
+  asset: EditorAsset,
+): StructuralDocumentResult | null {
+  const n = s.nodes[nodeId];
+  if (!n || n.type !== "image") return null;
+  const baseName = (asset.name || "Image").replace(/\.[^.]+$/, "") || "Image";
+  return {
+    nodes: {
+      ...s.nodes,
+      [nodeId]: {
+        ...n,
+        assetId: asset.id,
+        imageSrc: asset.dataUrl,
+        imageName: asset.name,
+        imageMimeType: asset.mimeType,
+        name: baseName,
+      },
+    },
+    childOrder: s.childOrder,
+    assets: { ...s.assets, [asset.id]: asset },
+    ui: {},
+  };
+}
+
+function buildDeleteAssetResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "assets">,
+  assetId: string,
+): StructuralDocumentResult | null {
+  if (!s.assets[assetId]) return null;
+  const { [assetId]: _removed, ...rest } = s.assets;
+  const nodes = { ...s.nodes };
+  for (const nid of Object.keys(nodes)) {
+    const n = nodes[nid];
+    if (n?.type === "image" && n.assetId === assetId) {
+      nodes[nid] = { ...n, assetId: undefined };
+    }
+  }
+  return { nodes, childOrder: s.childOrder, assets: rest, ui: {} };
+}
+
+function buildReplaceAssetResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "assets">,
+  assetId: string,
+  asset: EditorAsset,
+): StructuralDocumentResult | null {
+  const existing = s.assets[assetId];
+  if (!existing) return null;
+  const nextAsset: EditorAsset = {
+    ...asset,
+    id: assetId,
+    createdAt: existing.createdAt,
+  };
+  const baseName = (nextAsset.name || "Image").replace(/\.[^.]+$/, "") || "Image";
+  const nodes = { ...s.nodes };
+  for (const nid of Object.keys(nodes)) {
+    const n = nodes[nid];
+    if (n?.type === "image" && n.assetId === assetId) {
+      nodes[nid] = {
+        ...n,
+        imageSrc: nextAsset.dataUrl,
+        imageName: nextAsset.name,
+        imageMimeType: nextAsset.mimeType,
+        name: baseName,
+      };
+    }
+  }
+  return {
+    nodes,
+    childOrder: s.childOrder,
+    assets: { ...s.assets, [assetId]: nextAsset },
+    ui: {},
+  };
+}
+
+function pickColorTokenSourceNode(
+  s: Pick<EditorState, "selectedIds" | "nodes" | "designTokens">,
+): EditorNode | null {
+  const colorTypes = new Set<NodeKind>(["frame", "rectangle", "ellipse", "path", "text"]);
+  for (const id of s.selectedIds) {
+    const raw = s.nodes[id];
+    if (!raw || raw.locked || !raw.visible) continue;
+    if (!colorTypes.has(raw.type)) continue;
+    const merged = mergeInstanceOverrides(raw, s.nodes);
+    const n = resolveNodeWithDesignTokens(merged, s.designTokens);
+    if (effectiveFillType(n) === "gradient") continue;
+    const h = n.type === "text" ? (n.textColor ?? n.fill) : n.fill;
+    if (!h) continue;
+    return n;
+  }
+  return null;
+}
+
+function buildCreateColorTokenFromSelectionResult(
+  s: Pick<EditorState, "selectedIds" | "nodes" | "childOrder" | "designTokens">,
+  name?: string,
+): StructuralDocumentResult | null {
+  const picked = pickColorTokenSourceNode(s);
+  if (!picked) return null;
+  const hex = picked.type === "text" ? (picked.textColor ?? picked.fill) : picked.fill;
+  if (!hex) return null;
+  const colorCount = Object.values(s.designTokens).filter((t) => t.type === "color").length;
+  const tid = newDesignTokenId("color");
+  const nm =
+    name?.trim() ||
+    `Color / ${picked.name || "Selection"}${colorCount > 0 ? ` ${colorCount + 1}` : ""}`;
+  const token: DesignToken = {
+    id: tid,
+    name: nm.slice(0, 64),
+    type: "color",
+    value: { hex, opacity: picked.fillOpacity ?? 1 },
+    createdAt: designTokenTimestamp(),
+    updatedAt: designTokenTimestamp(),
+  };
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    designTokens: { ...s.designTokens, [tid]: token },
+    ui: {},
+  };
+}
+
+function buildCreateGradientTokenFromSelectionResult(
+  s: Pick<EditorState, "selectedIds" | "nodes" | "childOrder" | "designTokens">,
+  name?: string,
+): StructuralDocumentResult | null {
+  const shapeTypes = new Set<NodeKind>(["frame", "rectangle", "ellipse", "path"]);
+  let picked: EditorNode | null = null;
+  for (const id of s.selectedIds) {
+    const raw = s.nodes[id];
+    if (!raw || raw.locked || !raw.visible) continue;
+    if (!shapeTypes.has(raw.type)) continue;
+    const merged = mergeInstanceOverrides(raw, s.nodes);
+    const n = resolveNodeWithDesignTokens(merged, s.designTokens);
+    if (effectiveFillType(n) !== "gradient") continue;
+    picked = n;
+    break;
+  }
+  if (!picked) return null;
+  const gradient = normalizeFillGradient(picked.fillGradient, picked.fill);
+  const gradCount = Object.values(s.designTokens).filter((t) => t.type === "gradient").length;
+  const tid = newDesignTokenId("grad");
+  const nm =
+    name?.trim() ||
+    `Gradient / ${picked.name || "Selection"}${gradCount > 0 ? ` ${gradCount + 1}` : ""}`;
+  const token: DesignToken = {
+    id: tid,
+    name: nm.slice(0, 64),
+    type: "gradient",
+    value: gradient,
+    createdAt: designTokenTimestamp(),
+    updatedAt: designTokenTimestamp(),
+  };
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    designTokens: { ...s.designTokens, [tid]: token },
+    ui: {},
+  };
+}
+
+function buildCreateTypographyTokenFromSelectionResult(
+  s: Pick<EditorState, "selectedIds" | "nodes" | "childOrder" | "designTokens">,
+  name?: string,
+): StructuralDocumentResult | null {
+  let picked: EditorNode | null = null;
+  for (const id of s.selectedIds) {
+    const raw = s.nodes[id];
+    if (!raw || raw.locked || !raw.visible || raw.type !== "text") continue;
+    const merged = mergeInstanceOverrides(raw, s.nodes);
+    picked = resolveNodeWithDesignTokens(merged, s.designTokens);
+    break;
+  }
+  if (!picked) return null;
+  const typoCount = Object.values(s.designTokens).filter((t) => t.type === "typography").length;
+  const tid = newDesignTokenId("type");
+  const nm =
+    name?.trim() ||
+    `Typography / ${picked.name || "Text"}${typoCount > 0 ? ` ${typoCount + 1}` : ""}`;
+  const token: DesignToken = {
+    id: tid,
+    name: nm.slice(0, 64),
+    type: "typography",
+    value: {
+      fontFamily: picked.fontFamily ?? "Inter, system-ui, sans-serif",
+      fontSize: picked.fontSize ?? DEFAULT_TEXT_FONT_SIZE,
+      fontWeight: picked.fontWeight ?? 500,
+      lineHeight: picked.lineHeight ?? 1.25,
+      letterSpacing: picked.letterSpacing ?? 0,
+    },
+    createdAt: designTokenTimestamp(),
+    updatedAt: designTokenTimestamp(),
+  };
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    designTokens: { ...s.designTokens, [tid]: token },
+    ui: {},
+  };
+}
+
+function buildCreateSpacingTokenResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "designTokens">,
+  name: string,
+  value: number,
+): StructuralDocumentResult | null {
+  if (!Number.isFinite(value)) return null;
+  const tid = newDesignTokenId("space");
+  const token: DesignToken = {
+    id: tid,
+    name: name.trim() || "Spacing",
+    type: "spacing",
+    value: { value },
+    createdAt: designTokenTimestamp(),
+    updatedAt: designTokenTimestamp(),
+  };
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    designTokens: { ...s.designTokens, [tid]: token },
+    ui: {},
+  };
+}
+
+function buildCreateColorTokenResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "designTokens">,
+  name: string,
+  hex: string,
+  opacity = 1,
+): StructuralDocumentResult | null {
+  const h = normalizeHex(hex.trim().startsWith("#") ? hex.trim() : `#${hex.trim()}`);
+  if (!h) return null;
+  const token = createColorDesignToken(
+    name,
+    { hex: h, opacity: Math.min(1, Math.max(0, opacity)) },
+    s.designTokens,
+  );
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    designTokens: { ...s.designTokens, [token.id]: token },
+    ui: { _createdColorTokenId: token.id },
+  };
+}
+
+function buildSeedDesignSystemColorPaletteResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "designTokens">,
+): StructuralDocumentResult {
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    designTokens: buildPaletteTokens(DEFAULT_COLOR_PALETTE, s.designTokens),
+    ui: {},
+  };
+}
+
+function buildUpdateDesignTokenResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "designTokens">,
+  id: string,
+  patch: Partial<Omit<DesignToken, "id" | "createdAt">>,
+): StructuralDocumentResult | null {
+  const t = s.designTokens[id];
+  if (!t) return null;
+  const next: DesignToken = {
+    ...t,
+    ...patch,
+    id: t.id,
+    createdAt: t.createdAt,
+    type: patch.type ?? t.type,
+    value: patch.value !== undefined ? (patch.value as DesignToken["value"]) : t.value,
+    updatedAt: designTokenTimestamp(),
+  };
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    designTokens: { ...s.designTokens, [id]: next },
+    ui: {},
+  };
+}
+
+function buildDeleteDesignTokenResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "designTokens">,
+  id: string,
+): StructuralDocumentResult | null {
+  if (!s.designTokens[id]) return null;
+  const { [id]: _removed, ...rest } = s.designTokens;
+  const nodes = { ...s.nodes };
+  for (const nid of Object.keys(nodes)) {
+    const n = nodes[nid];
+    if (!n) continue;
+    let next = n;
+    if (n.fillTokenId === id) next = { ...next, fillTokenId: undefined };
+    if (n.textStyleTokenId === id) next = { ...next, textStyleTokenId: undefined };
+    if (n.effectTokenId === id) next = { ...next, effectTokenId: undefined };
+    nodes[nid] = next;
+  }
+  return {
+    nodes,
+    childOrder: s.childOrder,
+    designTokens: rest,
+    ui: {},
+  };
+}
+
+function buildCreateEffectTokenFromSelectionResult(
+  s: Pick<EditorState, "selectedIds" | "nodes" | "childOrder" | "designTokens">,
+  name?: string,
+): StructuralDocumentResult | null {
+  let pickedId: string | null = null;
+  for (const id of s.selectedIds) {
+    const raw = s.nodes[id];
+    if (!raw || raw.locked || !raw.visible) continue;
+    pickedId = id;
+    break;
+  }
+  if (!pickedId) return null;
+  const merged = mergeInstanceOverrides(s.nodes[pickedId]!, s.nodes);
+  const resolved = resolveNodeWithDesignTokens(merged, s.designTokens);
+  const effList = resolved.effects?.length
+    ? resolved.effects.map((e) => ({ ...e, id: newNodeEffectId() }))
+    : undefined;
+  const value: EffectTokenValue =
+    effList && effList.length > 0
+      ? { effects: effList }
+      : { shadow: "0 4px 12px rgba(15, 23, 42, 0.2)", blur: 0 };
+  const n = s.nodes[pickedId]!;
+  const effectCount = Object.values(s.designTokens).filter((t) => t.type === "effect").length;
+  const tid = newDesignTokenId("effect");
+  const nm =
+    name?.trim() ||
+    `Effect / ${n.name || "Selection"}${effectCount > 0 ? ` ${effectCount + 1}` : ""}`;
+  const token: DesignToken = {
+    id: tid,
+    name: nm.slice(0, 64),
+    type: "effect",
+    value,
+    createdAt: designTokenTimestamp(),
+    updatedAt: designTokenTimestamp(),
+  };
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    designTokens: { ...s.designTokens, [tid]: token },
+    ui: {},
+  };
+}
+
+function buildCommitLayoutGuideResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "layoutGuides" | "layoutGuideDraft">,
+): StructuralDocumentResult | null {
+  if (!s.layoutGuideDraft) return null;
+  const guide: LayoutGuide = {
+    id: `lg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    axis: s.layoutGuideDraft.axis,
+    pos: s.layoutGuideDraft.pos,
+  };
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    ui: {
+      layoutGuides: [...s.layoutGuides, guide],
+      layoutGuideDraft: null,
+    },
+  };
+}
+
+function buildRemoveLayoutGuideResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "layoutGuides" | "selectedLayoutGuideId">,
+  id: string,
+): StructuralDocumentResult {
+  const layoutGuides = s.layoutGuides.filter((g) => g.id !== id);
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    ui: {
+      layoutGuides,
+      selectedLayoutGuideId: s.selectedLayoutGuideId === id ? null : s.selectedLayoutGuideId,
+    },
+  };
+}
+
+function buildUpdateLayoutGuidePositionResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "layoutGuides">,
+  id: string,
+  pos: number,
+): StructuralDocumentResult {
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    ui: {
+      layoutGuides: s.layoutGuides.map((g) => (g.id === id ? { ...g, pos } : g)),
+    },
+  };
+}
+
+function buildImportFontAssetResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "fontAssets">,
+  asset: EditorFontAsset,
+): StructuralDocumentResult {
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    fontAssets: { ...s.fontAssets, [asset.id]: asset },
+    ui: {},
+  };
+}
+
+function buildSetCanvasBackgroundColorResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "canvasBackgroundColor">,
+  hex: string,
+): StructuralDocumentResult | null {
+  const normalized = normalizeHex(hex.startsWith("#") ? hex : `#${hex}`);
+  if (!normalized || s.canvasBackgroundColor === normalized) return null;
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    ui: { canvasBackgroundColor: normalized },
+  };
+}
+
+function buildToggleGridResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "showGrid">,
+): StructuralDocumentResult {
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    ui: { showGrid: !s.showGrid },
+  };
+}
+
+function buildToggleRulersResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "showRulers">,
+): StructuralDocumentResult {
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    ui: { showRulers: !s.showRulers },
+  };
+}
+
+function buildSetDocumentNameResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "fileName">,
+  name: string,
+): StructuralDocumentResult | null {
+  const next = name.trim() ? name.trim() : "Untitled";
+  if (next === s.fileName) return null;
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    ui: { fileName: next },
+  };
+}
+
+function buildDeleteEmptyTextOnEditEndResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds">,
+  textId: string,
+): StructuralDocumentResult | null {
+  if (!s.nodes[textId]) {
+    return {
+      nodes: s.nodes,
+      childOrder: s.childOrder,
+      ui: { editingTextId: null, textEditSelection: null },
+    };
+  }
+  const parentRef = s.nodes[textId]?.parentId;
+  const { nodes, childOrder } = removeNodeAndDescendants(s, textId);
+  const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
+  return {
+    nodes: nodes2,
+    childOrder,
+    ui: {
+      editingTextId: null,
+      textEditSelection: null,
+      selectedIds: s.selectedIds.filter((id) => id !== textId),
+    },
+  };
+}
+
+function buildTogglePathClosedResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  nodeId: string,
+): StructuralDocumentResult | null {
+  const n = s.nodes[nodeId];
+  if (!n || n.type !== "path") return null;
+  return {
+    nodes: { ...s.nodes, [nodeId]: { ...n, pathClosed: !n.pathClosed } },
+    childOrder: s.childOrder,
+    ui: {},
+  };
+}
+
+function buildAddCommentResult(
+  s: Pick<
+    EditorState,
+    "nodes" | "childOrder" | "comments" | "editorMode" | "isPlacingComment" | "tool"
+  >,
+  point: { x: number; y: number },
+  parentNodeIdOverride?: string,
+): StructuralDocumentResult | null {
+  if (s.editorMode !== "design" || !s.isPlacingComment || s.tool !== "comment") return null;
+  const hit =
+    parentNodeIdOverride ??
+    pickDeepestVisibleNodeAtWorldPoint(point.x, point.y, s.nodes, s.childOrder) ??
+    undefined;
+  const frameHit =
+    pickDeepestFrameAtWorldPoint(point.x, point.y, s.nodes, s.childOrder) ?? undefined;
+  const id = newCommentId();
+  const next: EditorComment = {
+    id,
+    x: point.x,
+    y: point.y,
+    ...(hit ? { parentNodeId: hit } : {}),
+    ...(frameHit ? { frameId: frameHit } : {}),
+    author: defaultCommentAuthor(),
+    body: "",
+    createdAt: new Date().toISOString(),
+    resolved: false,
+    replies: [],
+  };
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    ui: {
+      comments: [...s.comments, next],
+      activeCommentId: id,
+      isPlacingComment: false,
+      _newCommentId: id,
+    },
+  };
+}
+
+function buildUpdateCommentResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "comments">,
+  id: string,
+  body: string,
+): StructuralDocumentResult | null {
+  const prev = s.comments.find((c) => c.id === id);
+  if (!prev || prev.body === body) return null;
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    ui: {
+      comments: s.comments.map((c) => (c.id === id ? { ...c, body } : c)),
+    },
+  };
+}
+
+function buildAddCommentReplyResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "comments">,
+  commentId: string,
+  body: string,
+): StructuralDocumentResult | null {
+  if (!isNonEmptyCommentBody(body)) return null;
+  const reply: EditorCommentReply = {
+    id: newReplyId(),
+    author: defaultCommentAuthor("reply"),
+    body: body.trim(),
+    createdAt: new Date().toISOString(),
+  };
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    ui: {
+      comments: s.comments.map((c) =>
+        c.id === commentId ? { ...c, replies: [...c.replies, reply] } : c,
+      ),
+    },
+  };
+}
+
+function buildResolveCommentResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "comments">,
+  id: string,
+  resolved: boolean,
+): StructuralDocumentResult | null {
+  if (!s.comments.some((c) => c.id === id)) return null;
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    ui: {
+      comments: s.comments.map((c) => (c.id === id ? { ...c, resolved } : c)),
+    },
+  };
+}
+
+function buildDeleteCommentResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "comments" | "activeCommentId">,
+  id: string,
+  opts?: { pendingBody?: string },
+): StructuralDocumentResult | null {
+  if (!s.comments.some((c) => c.id === id)) return null;
+  let comments = s.comments;
+  if (opts?.pendingBody !== undefined) {
+    const pb = opts.pendingBody.trim();
+    if (isNonEmptyCommentBody(pb)) {
+      comments = comments.map((c) => (c.id === id ? { ...c, body: pb } : c));
+    }
+  }
+  return {
+    nodes: s.nodes,
+    childOrder: s.childOrder,
+    ui: {
+      comments: comments.filter((c) => c.id !== id),
+      activeCommentId: s.activeCommentId === id ? null : s.activeCommentId,
+    },
+  };
+}
+
+function buildAddTextToolbarResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "canvasBackgroundColor">,
+): StructuralDocumentResult {
+  const ts = textStyleFromSelection(s);
+  const typo = resolveTextTypo(ts);
+  const content = "New text";
+  const { width: tw, height: th } = computeTextBoxSize(
+    content,
+    typo,
+    "auto-width",
+    MIN_TEXT_BOX,
+    MIN_TEXT_BOX,
+  );
+  const id = `text-${Date.now()}`;
+  const roots = [...(s.childOrder[ROOT] ?? [])];
+  roots.push(id);
+  const node: EditorNode = {
+    id,
+    parentId: null,
+    type: "text",
+    name: layerNameFromTextContent(content),
+    x: 120,
+    y: 200,
+    width: tw,
+    height: th,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    content,
+    textResizeMode: "auto-width",
+    ...ts,
+    fillEnabled: true,
+    fillOpacity: 1,
+  };
+  return {
+    nodes: { ...s.nodes, [id]: node },
+    childOrder: { ...s.childOrder, [ROOT]: roots },
+    ui: { selectedIds: [id] },
+  };
+}
+
+function buildAddImageNodeResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds" | "assets">,
+  assetId: string,
+  worldX?: number,
+  worldY?: number,
+): StructuralDocumentResult | null {
+  const asset = s.assets[assetId];
+  if (!asset) return null;
+  const iw = asset.width && asset.width > 0 ? asset.width : 200;
+  const ih = asset.height && asset.height > 0 ? asset.height : 150;
+  const scale = Math.min(1, 480 / iw, 480 / ih);
+  const w = Math.max(16, Math.round(iw * scale));
+  const h = Math.max(16, Math.round(ih * scale));
+  const cx = worldX ?? 200;
+  const cy = worldY ?? 200;
+  const { x, y } = worldCenteredRootPoint(cx, cy, w, h);
+  const id = `image-${Date.now()}`;
+  const baseName = (asset.name || "Image").replace(/\.[^.]+$/, "") || "Image";
+  const node: EditorNode = {
+    id,
+    parentId: null,
+    type: "image",
+    name: baseName,
+    x,
+    y,
+    width: w,
+    height: h,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    assetId,
+    imageSrc: asset.dataUrl,
+    imageName: asset.name,
+    imageMimeType: asset.mimeType,
+    imageFitMode: "fill",
+    fillOpacity: 1,
+    fillEnabled: true,
+  };
+  const inserted = insertNodeWithFrameParenting(
+    node,
+    { x, y, width: w, height: h },
+    s.nodes,
+    s.childOrder,
+    s.selectedIds,
+  );
+  return {
+    nodes: inserted.nodes,
+    childOrder: inserted.childOrder,
+    ui: { selectedIds: [id], tool: "move" as Tool },
+  };
+}
+
+function buildUpdateNodeStyleResult(
+  s: EditorState,
+  id: string,
+  patch: NodeStylePatch,
+): StructuralDocumentResult | null {
+  const n = s.nodes[id];
+  if (!n || n.locked) return null;
+
+  const instRoot = findInstanceRoot(s.nodes, id);
+  const layoutBase =
+    n.type === "text" && instRoot && instRoot !== id
+      ? mergeInstanceOverrides(n, s.nodes)
+      : n;
+  const strokeKeys = [
+    "stroke",
+    "strokeColor",
+    "strokeType",
+    "strokeGradient",
+    "strokeImageAssetId",
+    "strokeVideoAssetId",
+    "strokeWidth",
+    "strokeOpacity",
+    "strokeEnabled",
+    "strokePosition",
+    "strokeStyle",
+    "strokeDashLength",
+    "strokeDashGap",
+    "strokeLinecap",
+    "strokeLinejoin",
+  ] as const;
+  const touchesStroke = strokeKeys.some((k) => k in patch);
+  let mergedPatch = touchesStroke
+    ? { ...patch, ...mergeStrokeIntoNode(layoutBase, patch) }
+    : patch;
+  if ("fillGradient" in mergedPatch) {
+    mergedPatch = { ...mergedPatch, fillTokenId: undefined };
+  }
+  let finalPatch: Partial<EditorNode> =
+    n.type === "text" ? withTextLayoutPatch(layoutBase, mergedPatch) : mergedPatch;
+  if (n.type === "text" && "content" in mergedPatch) {
+    finalPatch = {
+      ...finalPatch,
+      name: layerNameFromTextContent(
+        (mergedPatch as { content?: string }).content ?? n.content,
+      ),
+    };
+  }
+
+  let nodes: Record<string, EditorNode>;
+  if (instRoot && instRoot !== id) {
+    const rn = s.nodes[instRoot]!;
+    const io: Record<string, Record<string, unknown>> = { ...(rn.instanceOverrides ?? {}) };
+    const prev =
+      io[id] && typeof io[id] === "object" && !Array.isArray(io[id])
+        ? { ...(io[id] as Record<string, unknown>) }
+        : {};
+    io[id] = { ...prev, ...finalPatch };
+    if ("fillGradient" in finalPatch) {
+      delete (io[id] as Record<string, unknown>).fillTokenId;
+      nodes = { ...s.nodes, [instRoot]: { ...rn, instanceOverrides: io }, [id]: { ...n, fillTokenId: undefined } };
+    } else {
+      nodes = { ...s.nodes, [instRoot]: { ...rn, instanceOverrides: io } };
+    }
+  } else {
+    const expanded = expandBooleanFillStylePatches(id, finalPatch, s.nodes, s.childOrder);
+    if (expanded) {
+      nodes = { ...s.nodes };
+      for (const [nid, p] of Object.entries(expanded)) {
+        const cur = nodes[nid];
+        if (cur && !cur.locked) nodes[nid] = { ...cur, ...p };
+      }
+    } else {
+      nodes = { ...s.nodes, [id]: { ...n, ...finalPatch } };
+    }
+  }
+
+  const fp = finalPatch as Partial<EditorNode>;
+  let childOrder = s.childOrder;
+  if (
+    n.parentId &&
+    (fp.width != null || fp.height != null) &&
+    (n.type === "text" ? patchAffectsTextLayout(patch) : true)
+  ) {
+    nodes = relayoutParentsWithAutoLayout(nodes, childOrder, [n.parentId]);
+  }
+  return { nodes, childOrder, ui: {} };
+}
+
+function buildUpdateNodeResult(
+  s: EditorState,
+  id: string,
+  patch: Partial<EditorNode>,
+  opts?: { allowZeroGeometry?: boolean },
+): StructuralDocumentResult | null {
+  const n = s.nodes[id];
+  if (!n || n.locked) return null;
+  const allowZeroGeometry = opts?.allowZeroGeometry === true;
+  const geomMin = allowZeroGeometry ? 0 : 1;
+  const rotationOnlyInput =
+    patch.rotation != null &&
+    Object.keys(patch).every((k) => k === "rotation" || k === "x" || k === "y");
+  const rotateGeomLock = s.rotateGeomSnapshot != null;
+  const patchForApply =
+    s.transformInteractionMode === "rotate" || rotateGeomLock || rotationOnlyInput
+      ? {
+          ...(patch.rotation != null ? { rotation: patch.rotation } : {}),
+          ...(patch.x != null ? { x: patch.x } : {}),
+          ...(patch.y != null ? { y: patch.y } : {}),
+        }
+      : patch;
+  const instRoot = findInstanceRoot(s.nodes, id);
+  let nodes = { ...s.nodes };
+  const stylePart: Partial<EditorNode> = {};
+  const directPart: Partial<EditorNode> = {};
+
+  const layoutBase =
+    n.type === "text" && instRoot && instRoot !== id
+      ? mergeInstanceOverrides(n, s.nodes)
+      : n;
+  const layoutAwarePatch =
+    n.type === "text" ? withTextLayoutPatch(layoutBase, patchForApply) : patchForApply;
+
+  if (instRoot && instRoot !== id) {
+    for (const k of Object.keys(layoutAwarePatch)) {
+      const v = layoutAwarePatch[k as keyof typeof layoutAwarePatch];
+      if (INSTANCE_STYLE_KEYS.has(k)) {
+        (stylePart as Record<string, unknown>)[k] = v;
+      } else {
+        (directPart as Record<string, unknown>)[k] = v;
+      }
+    }
+    if (Object.keys(stylePart).length > 0) {
+      const root = nodes[instRoot]!;
+      const io: Record<string, Record<string, unknown>> = { ...(root.instanceOverrides ?? {}) };
+      const prev =
+        io[id] && typeof io[id] === "object" && !Array.isArray(io[id])
+          ? { ...(io[id] as Record<string, unknown>) }
+          : {};
+      io[id] = { ...prev, ...stylePart };
+      nodes[instRoot] = { ...root, instanceOverrides: io };
+    }
+  } else {
+    Object.assign(directPart, layoutAwarePatch);
+  }
+
+  if (Object.keys(directPart).length > 0) {
+    nodes[id] = { ...n, ...directPart };
+  }
+
+  let merged = nodes[id]!;
+  if (s.rotateGeomSnapshot?.nodeId === id) {
+    const snap = s.rotateGeomSnapshot;
+    merged = {
+      ...merged,
+      x: snap.x,
+      y: snap.y,
+      width: snap.width,
+      height: snap.height,
+    };
+    nodes[id] = merged;
+  } else {
+    merged = sanitizeNodeGeometry(merged, n, { minDimension: geomMin });
+    nodes[id] = merged;
+  }
+  if (
+    s.transformInteractionMode !== "rotate" &&
+    (merged.type === "line" || merged.type === "arrow")
+  ) {
+    const endpointTouched =
+      layoutAwarePatch.lineX1 != null ||
+      layoutAwarePatch.lineY1 != null ||
+      layoutAwarePatch.lineX2 != null ||
+      layoutAwarePatch.lineY2 != null;
+    const boxTouched =
+      layoutAwarePatch.x != null ||
+      layoutAwarePatch.y != null ||
+      layoutAwarePatch.width != null ||
+      layoutAwarePatch.height != null ||
+      layoutAwarePatch.rotation != null;
+    if (endpointTouched) {
+      const ep = lineEndpointsFromNode(merged);
+      nodes[id] = {
+        ...merged,
+        ...linePatchFromEndpoints(ep.x1, ep.y1, ep.x2, ep.y2, merged, allowZeroGeometry ? 0 : undefined),
+      };
+    } else if (boxTouched) {
+      nodes[id] = { ...merged, ...lineEndpointsPatchFromLayout(merged) };
+    }
+    merged = nodes[id]!;
+  }
+  if (merged.type === "polygon") {
+    const touchesSides =
+      layoutAwarePatch.polygonSides != null || layoutAwarePatch.cornerRadius != null;
+    const touchesBox =
+      layoutAwarePatch.width != null ||
+      layoutAwarePatch.height != null ||
+      layoutAwarePatch.x != null ||
+      layoutAwarePatch.y != null;
+    if (touchesSides || touchesBox) {
+      nodes[id] = {
+        ...merged,
+        ...polygonGeometryPatch(merged, {
+          polygonSides: layoutAwarePatch.polygonSides ?? merged.polygonSides,
+          cornerRadius: layoutAwarePatch.cornerRadius ?? merged.cornerRadius,
+        }),
+      };
+      merged = nodes[id]!;
+    }
+  }
+  const keys = Object.keys(layoutAwarePatch);
+  const layoutSelf =
+    (merged.type === "frame" || merged.type === "group") &&
+    keys.some((k) => LAYOUT_FIELD_KEYS.has(k));
+  const positionGeom = keys.some((k) => GEOM_KEYS.has(k));
+  const rotationOnly =
+    layoutAwarePatch.rotation != null &&
+    keys.every((k) => k === "rotation" || k === "x" || k === "y");
+  const geom = positionGeom || layoutAwarePatch.rotation != null;
+  const refresh = new Set<string>();
+  if (layoutSelf) refresh.add(id);
+  if (positionGeom && !rotationOnly) {
+    if (merged.parentId) refresh.add(merged.parentId);
+    if ((merged.type === "frame" || merged.type === "group") && (merged.layoutMode ?? "none") !== "none") {
+      refresh.add(id);
+    }
+  }
+  if (
+    n.type === "text" &&
+    patchAffectsTextLayout(patch) &&
+    (layoutAwarePatch.width != null || layoutAwarePatch.height != null) &&
+    n.parentId
+  ) {
+    refresh.add(n.parentId);
+  }
+  if (positionGeom && !rotationOnly) {
+    const parent = merged.parentId ? nodes[merged.parentId] : undefined;
+    if (parent && (isMaskGroup(parent) || isBooleanGroup(parent))) {
+      nodes = syncGroupFrameToVisible(parent.id, nodes, s.childOrder);
+    } else if (
+      (isMaskGroup(merged) && merged.maskId) ||
+      isBooleanGroup(merged)
+    ) {
+      nodes = syncGroupFrameToVisible(id, nodes, s.childOrder);
+    }
+  }
+  if (!rotationOnly) {
+    nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
+  }
+  const finalNode = nodes[id];
+  if (finalNode) {
+    if (s.rotateGeomSnapshot?.nodeId === id) {
+      const snap = s.rotateGeomSnapshot;
+      nodes[id] = {
+        ...finalNode,
+        x: snap.x,
+        y: snap.y,
+        width: snap.width,
+        height: snap.height,
+      };
+    } else {
+      nodes[id] = sanitizeNodeGeometry(finalNode, n, { minDimension: geomMin });
+    }
+  }
+  if (geom && !allowZeroGeometry) {
+    warnInvalidNodeGeometry("updateNode", id, nodes[id] ?? merged, nodes);
+  }
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+function buildUpdateNodesResult(
+  s: EditorState,
+  patches: Record<string, Partial<EditorNode>>,
+): StructuralDocumentResult | null {
+  const ids = Object.keys(patches);
+  if (ids.length === 0) return null;
+  let nodes = { ...s.nodes };
+  const refresh = new Set<string>();
+  let changed = false;
+  let rotationOnlyBatch = true;
+  for (const id of ids) {
+    const n = nodes[id];
+    const patch = patches[id];
+    if (!n || !patch || n.locked) continue;
+    const rotationOnlyInput =
+      patch.rotation != null &&
+      Object.keys(patch).every((k) => k === "rotation" || k === "x" || k === "y");
+    const rotateGeomLock = s.rotateGeomSnapshot != null;
+    const patchForApply =
+      s.transformInteractionMode === "rotate" || rotateGeomLock || rotationOnlyInput
+        ? {
+            ...(patch.rotation != null ? { rotation: patch.rotation } : {}),
+            ...(patch.x != null ? { x: patch.x } : {}),
+            ...(patch.y != null ? { y: patch.y } : {}),
+          }
+        : patch;
+    const layoutAwarePatch = n.type === "text" ? withTextLayoutPatch(n, patchForApply) : patchForApply;
+    let merged = { ...n, ...layoutAwarePatch };
+    if (s.rotateGeomSnapshot?.nodeId === id) {
+      const snap = s.rotateGeomSnapshot;
+      merged = { ...merged, x: snap.x, y: snap.y, width: snap.width, height: snap.height };
+    }
+    nodes[id] = merged;
+    changed = true;
+    const keys = Object.keys(layoutAwarePatch);
+    const rotationOnly =
+      layoutAwarePatch.rotation != null &&
+      keys.every((k) => k === "rotation" || k === "x" || k === "y");
+    if (!rotationOnly) rotationOnlyBatch = false;
+    const layoutSelf =
+      (n.type === "frame" || n.type === "group") &&
+      keys.some((k) => LAYOUT_FIELD_KEYS.has(k));
+    const positionGeom = keys.some((k) => GEOM_KEYS.has(k));
+    if (layoutSelf) refresh.add(id);
+    if (positionGeom && !rotationOnly) {
+      if (n.parentId) refresh.add(n.parentId);
+      if ((n.type === "frame" || n.type === "group") && (n.layoutMode ?? "none") !== "none") {
+        refresh.add(id);
+      }
+    }
+    if (
+      n.type === "text" &&
+      patchAffectsTextLayout(patch) &&
+      (layoutAwarePatch.width != null || layoutAwarePatch.height != null) &&
+      n.parentId
+    ) {
+      refresh.add(n.parentId);
+    }
+  }
+  if (!changed) return null;
+  if (!rotationOnlyBatch) {
+    nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
+  }
+  for (const id of ids) {
+    const merged = nodes[id];
+    if (merged && patches[id]) {
+      const geom = Object.keys(patches[id]!).some(
+        (k) => GEOM_KEYS.has(k) || k === "rotation",
+      );
+      if (geom) warnInvalidNodeGeometry("updateNodes", id, merged, nodes);
+    }
+  }
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+type ResizeNodeOpts = {
+  fixedWorld?: { x: number; y: number } | null;
+  pointerWorld?: { x: number; y: number };
+  startPointerWorld?: { x: number; y: number };
+};
+
+function buildResizeNodeResult(
+  s: EditorState,
+  id: string,
+  handle: ResizeHandle,
+  startBounds: Bounds,
+  currentPoint: { x: number; y: number },
+  modifiers: ResizeModifiers,
+  opts?: ResizeNodeOpts,
+): StructuralDocumentResult | null {
+  if (s.transformInteractionMode === "rotate" || s.rotateGeomSnapshot) return null;
+  const n = s.nodes[id];
+  if (!n || n.locked || !n.visible) return null;
+  const kind: ResizeKind =
+    n.type === "rectangle" ||
+    n.type === "ellipse" ||
+    n.type === "frame" ||
+    n.type === "text" ||
+    n.type === "line" ||
+    n.type === "arrow" ||
+    n.type === "polygon" ||
+    n.type === "path" ||
+    n.type === "group" ||
+    n.type === "image"
+      ? n.type
+      : "rectangle";
+  const rotated = hasRotation(n.rotation);
+  const centerProportional =
+    modifiers.shiftKey &&
+    modifiers.altKey &&
+    isCornerHandle(handle) &&
+    opts?.pointerWorld &&
+    opts?.startPointerWorld &&
+    opts?.fixedWorld;
+  const localStart: Bounds = {
+    x: 0,
+    y: 0,
+    width: startBounds.width,
+    height: startBounds.height,
+  };
+  const next = centerProportional
+    ? centerProportionalScaleFromWorld(
+        startBounds,
+        opts!.fixedWorld!,
+        opts!.startPointerWorld!,
+        opts!.pointerWorld!,
+      )
+    : computeResizedBounds(
+        handle,
+        localStart,
+        clampResizePointerLocal(currentPoint, localStart, true),
+        modifiers,
+        kind,
+      );
+  const clamped = clampNodeDimensions(
+    next.width,
+    next.height,
+    startBounds.width,
+    startBounds.height,
+    RESIZE_MIN_DIMENSION,
+  );
+  let width = clamped.width;
+  let height = clamped.height;
+  let x: number;
+  let y: number;
+  if (centerProportional) {
+    x = finiteCoord(next.x, n.x);
+    y = finiteCoord(next.y, n.y);
+  } else if (rotated) {
+    x = n.x;
+    y = n.y;
+  } else {
+    x = finiteCoord(startBounds.x + next.x, n.x);
+    y = finiteCoord(startBounds.y + next.y, n.y);
+  }
+  const pos = clampNodePosition(x, y, { x: n.x, y: n.y });
+  x = pos.x;
+  y = pos.y;
+
+  if (opts?.fixedWorld) {
+    const scaleFromCenter = modifiers.altKey;
+    const anchorLocal = scaleFromCenter
+      ? { x: width / 2, y: height / 2 }
+      : getResizeAnchorLocal(handle, width, height);
+    const solved = solveNodeXYForAnchorWorld(
+      n,
+      s.nodes,
+      width,
+      height,
+      anchorLocal,
+      opts.fixedWorld,
+      { x, y },
+    );
+    x = solved.x;
+    y = solved.y;
+  }
+
+  const content = buildResizeContentPatches(n, startBounds, { x, y, width, height }, handle, modifiers);
+  let nodePatch: Partial<EditorNode> = { x, y, width, height, ...content };
+  if (n.type === "text") {
+    const widthChanged = width !== startBounds.width;
+    if ((n.textResizeMode ?? "auto-width") === "auto-width" && widthChanged) {
+      nodePatch = { ...nodePatch, ...textResizePatch("auto-height") };
+    }
+    const layoutPatch = textLayoutPatchForNode({ ...n, ...nodePatch }, n.content ?? "");
+    if (layoutPatch) nodePatch = { ...nodePatch, ...layoutPatch };
+  }
+  let nodes: Record<string, EditorNode> = {
+    ...s.nodes,
+    [id]: { ...n, ...nodePatch },
+  };
+
+  const sx = startBounds.width > 0 ? width / startBounds.width : 1;
+  const sy = startBounds.height > 0 ? height / startBounds.height : 1;
+  const uniform = isProportionalResize(handle, modifiers)
+    ? Math.max(sx, sy)
+    : Math.sqrt(Math.max(0, sx * sy));
+
+  const isContainer = n.type === "frame" || n.type === "group";
+  const layoutMode = n.layoutMode ?? "none";
+  if (isContainer && layoutMode === "none") {
+    if (shouldProportionalFrameScale(handle, modifiers)) {
+      const childPatches = scaleSubtreeContentPatches(id, nodes, s.childOrder, sx, sy, uniform);
+      for (const [cid, patch] of Object.entries(childPatches)) {
+        const cn = nodes[cid];
+        if (cn && !cn.locked) nodes[cid] = { ...cn, ...patch };
+      }
+    } else {
+      const cp = constraintResizeChildPatches(
+        id,
+        toLayoutMap(nodes),
+        s.childOrder,
+        n.width,
+        n.height,
+        width,
+        height,
+      );
+      for (const [cid, patch] of Object.entries(cp)) {
+        const cn = nodes[cid];
+        if (cn && !cn.locked) nodes[cid] = { ...cn, ...patch };
+      }
+    }
+  } else if (isContainer && layoutMode !== "none") {
+    const sizingPatch = layoutSizingPatchesForManualResize(
+      n,
+      width !== startBounds.width,
+      height !== startBounds.height,
+    );
+    if (Object.keys(sizingPatch).length > 0) {
+      nodes[id] = { ...nodes[id]!, ...sizingPatch };
+    }
+    nodes = deepAutoLayout(nodes, s.childOrder, id);
+  }
+  if (n.parentId) {
+    nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId]);
+  }
+  nodes[id] = sanitizeNodeGeometry(nodes[id]!, n);
+  const merged = nodes[id]!;
+  warnInvalidNodeGeometry("resizeNode", id, merged, nodes);
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+function buildResizeFrameWithConstraintsResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  frameId: string,
+  newBounds: { x?: number; y?: number; width: number; height: number },
+  opts?: { skipParentRelayout?: boolean },
+): StructuralDocumentResult | null {
+  const n = s.nodes[frameId];
+  if (!n || n.locked || (n.type !== "frame" && n.type !== "group")) return null;
+  const oldW = n.width;
+  const oldH = n.height;
+  const W = Math.max(RESIZE_MIN_DIMENSION, newBounds.width);
+  const H = Math.max(RESIZE_MIN_DIMENSION, newBounds.height);
+  const next: EditorNode = {
+    ...n,
+    width: W,
+    height: H,
+    ...(newBounds.x !== undefined ? { x: newBounds.x } : {}),
+    ...(newBounds.y !== undefined ? { y: newBounds.y } : {}),
+  };
+  let nodes: Record<string, EditorNode> = { ...s.nodes, [frameId]: next };
+  const layoutMode = next.layoutMode ?? "none";
+  if (layoutMode === "none") {
+    const cp = constraintResizeChildPatches(
+      frameId,
+      toLayoutMap(nodes),
+      s.childOrder,
+      oldW,
+      oldH,
+      W,
+      H,
+    );
+    for (const [cid, patch] of Object.entries(cp)) {
+      const cn = nodes[cid];
+      if (cn && !cn.locked) nodes[cid] = { ...cn, ...patch };
+    }
+  } else {
+    const sizingPatch = layoutSizingPatchesForManualResize(
+      next,
+      Math.abs(W - oldW) > 0.01,
+      Math.abs(H - oldH) > 0.01,
+    );
+    if (Object.keys(sizingPatch).length > 0) {
+      nodes[frameId] = { ...nodes[frameId]!, ...sizingPatch };
+    }
+    nodes = deepAutoLayout(nodes, s.childOrder, frameId);
+  }
+  if (next.parentId && !opts?.skipParentRelayout) {
+    nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [next.parentId]);
+  }
+  return { nodes, childOrder: s.childOrder, ui: {} };
+}
+
+type ResponsivePreviewGeomBackup = Record<
+  string,
+  { x: number; y: number; width: number; height: number }
+>;
+
+function restoreNodesFromGeomBackup(
+  nodes: Record<string, EditorNode>,
+  geomBackup: ResponsivePreviewGeomBackup,
+): Record<string, EditorNode> {
+  const out = { ...nodes };
+  for (const [bid, g] of Object.entries(geomBackup)) {
+    const nn = out[bid];
+    if (nn) out[bid] = { ...nn, ...g };
+  }
+  return out;
+}
+
+function buildOpenResponsivePreviewResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "responsivePreview">,
+  frameId: string,
+): StructuralDocumentResult {
+  let nodes = { ...s.nodes };
+  if (s.responsivePreview) {
+    nodes = restoreNodesFromGeomBackup(nodes, s.responsivePreview.geomBackup);
+  }
+  const n = nodes[frameId];
+  if (!n || n.locked || (n.type !== "frame" && n.type !== "group")) {
+    return { nodes, childOrder: s.childOrder, ui: { responsivePreview: null } };
+  }
+  const subtree = collectSubtreeIds(frameId, s.childOrder);
+  const geomBackup: ResponsivePreviewGeomBackup = {};
+  for (const tid of subtree) {
+    const t = nodes[tid];
+    if (!t) continue;
+    geomBackup[tid] = { x: t.x, y: t.y, width: t.width, height: t.height };
+  }
+  return {
+    nodes,
+    childOrder: s.childOrder,
+    ui: {
+      responsivePreview: {
+        frameId,
+        geomBackup,
+        draftWidth: n.width,
+        draftHeight: n.height,
+      },
+    },
+  };
+}
+
+function buildUpdateResponsivePreviewBoundsResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "responsivePreview">,
+  width: number,
+  height: number,
+): StructuralDocumentResult | null {
+  const rp = s.responsivePreview;
+  if (!rp) return null;
+  let nodes = restoreNodesFromGeomBackup(s.nodes, rp.geomBackup);
+  const fr = nodes[rp.frameId];
+  if (!fr || fr.locked) {
+    return { nodes, childOrder: s.childOrder, ui: { responsivePreview: null } };
+  }
+  const oldW = fr.width;
+  const oldH = fr.height;
+  const W = Math.max(RESIZE_MIN_DIMENSION, width);
+  const H = Math.max(RESIZE_MIN_DIMENSION, height);
+  nodes[rp.frameId] = { ...fr, width: W, height: H };
+  const layoutMode = fr.layoutMode ?? "none";
+  if (layoutMode === "none") {
+    const cp = constraintResizeChildPatches(
+      rp.frameId,
+      toLayoutMap(nodes),
+      s.childOrder,
+      oldW,
+      oldH,
+      W,
+      H,
+    );
+    for (const [cid, patch] of Object.entries(cp)) {
+      const cn = nodes[cid];
+      if (cn && !cn.locked) nodes[cid] = { ...cn, ...patch };
+    }
+  } else {
+    nodes = deepAutoLayout(nodes, s.childOrder, rp.frameId);
+  }
+  const par = nodes[rp.frameId]?.parentId;
+  if (par) nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [par]);
+  return {
+    nodes,
+    childOrder: s.childOrder,
+    ui: { responsivePreview: { ...rp, draftWidth: W, draftHeight: H } },
+  };
+}
+
+function buildResetResponsivePreviewResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "responsivePreview">,
+): StructuralDocumentResult | null {
+  const rp = s.responsivePreview;
+  if (!rp) return null;
+  const nodes = restoreNodesFromGeomBackup(s.nodes, rp.geomBackup);
+  const og = rp.geomBackup[rp.frameId]!;
+  return {
+    nodes,
+    childOrder: s.childOrder,
+    ui: { responsivePreview: { ...rp, draftWidth: og.width, draftHeight: og.height } },
+  };
+}
+
+function buildCancelResponsivePreviewResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "responsivePreview">,
+): StructuralDocumentResult | null {
+  const rp = s.responsivePreview;
+  if (!rp) return null;
+  return {
+    nodes: restoreNodesFromGeomBackup(s.nodes, rp.geomBackup),
+    childOrder: s.childOrder,
+    ui: { responsivePreview: null },
+  };
+}
+
+function buildRestoreResponsivePreviewGeomResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "responsivePreview">,
+): StructuralDocumentResult | null {
+  const rp = s.responsivePreview;
+  if (!rp) return null;
+  return {
+    nodes: restoreNodesFromGeomBackup(s.nodes, rp.geomBackup),
+    childOrder: s.childOrder,
+    ui: { responsivePreview: null },
+  };
+}
+
+function buildEndRotateInteractionResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "rotateGeomSnapshot">,
+  nodeId: string,
+  rotation: number,
+): StructuralDocumentResult | null {
+  const snap = s.rotateGeomSnapshot;
+  if (!snap || snap.nodeId !== nodeId) return null;
+  const n = s.nodes[nodeId];
+  if (!n || n.locked) return null;
+  const nodes = {
+    ...s.nodes,
+    [nodeId]: sanitizeNodeGeometry(
+      {
+        ...n,
+        rotation,
+        x: snap.x,
+        y: snap.y,
+        width: snap.width,
+        height: snap.height,
+      },
+      { width: snap.width, height: snap.height },
+    ),
+  };
+  return {
+    nodes,
+    childOrder: s.childOrder,
+    ui: { transformInteractionMode: "none", rotateGeomSnapshot: null },
+  };
+}
+
 function cloneTopLevelSelectionState(
   s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds">,
-  offset: number,
+  worldOffset: CloneWorldOffset | null,
 ): Pick<EditorState, "nodes" | "childOrder" | "selectedIds" | "tool" | "editingTextId"> | null {
   const tops = editableTopLevelSelection(s);
   if (tops.length === 0) return null;
@@ -1821,7 +6552,7 @@ function cloneTopLevelSelectionState(
     const idMap = new Map<string, string>();
     const renderParent = parentOf.get(rootId) ?? null;
     const inAutoLayout = parentUsesAutoLayout(renderParent, s.nodes);
-    const rootOffset = inAutoLayout ? 0 : offset;
+    const rootOffset = inAutoLayout ? null : worldOffset;
 
     const cloneRecursive = (oldId: string, newParent: string | null): string => {
       const old = s.nodes[oldId];
@@ -1966,6 +6697,7 @@ const INSTANCE_STYLE_KEYS = new Set<string>([
   "strokePosition",
   "strokeSides",
   "strokeSidesCustom",
+  "strokeSidesCustomColors",
   "cornerRadius",
   "cornerRadii",
   "textColor",
@@ -2134,20 +6866,19 @@ function textStyleFromSelection(
         fontWeight: n.fontWeight ?? 500,
         lineHeight: n.lineHeight ?? 1.25,
         letterSpacing: n.letterSpacing ?? 0,
-        fill: n.fill ?? "#0f172a",
-        textColor: n.textColor ?? n.fill ?? "#0f172a",
+        fill: n.fill ?? DEFAULT_TEXT_COLOR,
+        textColor: n.textColor ?? n.fill ?? DEFAULT_TEXT_COLOR,
       };
     }
   }
-  const { defaultText } = canvasChromeForeground(s.canvasBackgroundColor);
   return {
     fontFamily: DEFAULT_TEXT_FONT_FAMILY,
     fontSize: DEFAULT_TEXT_FONT_SIZE,
     fontWeight: 500,
     lineHeight: 1.25,
     letterSpacing: 0,
-    fill: defaultText,
-    textColor: defaultText,
+    fill: DEFAULT_TEXT_COLOR,
+    textColor: DEFAULT_TEXT_COLOR,
   };
 }
 
@@ -2158,6 +6889,7 @@ export function toPersistSlice(s: EditorState): EditorPersistSlice {
     nodes: s.nodes,
     childOrder: s.childOrder,
     assets: s.assets,
+    fontAssets: s.fontAssets,
     designTokens: s.designTokens,
     fileName: s.fileName,
     selectedIds: s.selectedIds,
@@ -2200,11 +6932,12 @@ function editorStateAfterDocumentImport(
     pathEditModeNodeId: null,
     shapeEditModeNodeId: null,
     transformInteractionMode: "none",
+    rotateGeomSnapshot: null,
     isMovingSelection: false,
     rotateHandleHovered: false,
     rotateHandleHoverHandle: null,
     objectEditModeNodeId: null,
-    selectedPathPointId: null,
+    selectedPathPointIds: [],
     presenceUsers: [],
     showPresence: false,
     presenceActivityLog: [],
@@ -2219,6 +6952,7 @@ function editorStateAfterDocumentImport(
     teamInviteModalOpen: false,
     apiFileId: undefined,
     apiWorkspaceId: undefined,
+    apiFileRevision: undefined,
     isApiBackedFile: false,
     apiCommentsStatus: "idle" as ApiCommentsStatus,
     versionHistoryOpen: false,
@@ -2228,6 +6962,7 @@ function editorStateAfterDocumentImport(
     tool: "move",
     leftTab: "layers",
     documentSaveStatus: "saved",
+    realtimeSyncStatus: "idle" as RealtimeSyncStatus,
     documentHydrating: false,
     documentHydrationRevision: s.documentHydrationRevision + 1,
     historyPast: [],
@@ -2258,11 +6993,12 @@ function editorPartialFromPaytmCraftDocument(doc: PaytmCraftDocument, s: EditorS
     pathEditModeNodeId: null,
     shapeEditModeNodeId: null,
     transformInteractionMode: "none",
+    rotateGeomSnapshot: null,
     isMovingSelection: false,
     rotateHandleHovered: false,
     rotateHandleHoverHandle: null,
     objectEditModeNodeId: null,
-    selectedPathPointId: null,
+    selectedPathPointIds: [],
     presenceUsers: [],
     showPresence: false,
     presenceActivityLog: [],
@@ -2277,6 +7013,7 @@ function editorPartialFromPaytmCraftDocument(doc: PaytmCraftDocument, s: EditorS
     teamInviteModalOpen: false,
     apiFileId: s.apiFileId,
     apiWorkspaceId: s.apiWorkspaceId,
+    apiFileRevision: s.apiFileRevision,
     isApiBackedFile: s.isApiBackedFile,
     apiCommentsStatus: s.apiCommentsStatus,
     versionHistoryOpen: false,
@@ -2366,7 +7103,7 @@ function pageSwitchUiReset(): Partial<EditorState> {
     pencilDrawingNodeId: null,
     pathEditModeNodeId: null,
   objectEditModeNodeId: null,
-    selectedPathPointId: null,
+    selectedPathPointIds: [],
     historyPast: [],
     historyFuture: [],
   };
@@ -2378,6 +7115,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   return {
   tool: "move",
+  lastShapeTool: "rect",
   framePresetId: DEFAULT_FRAME_PRESET_ID,
   editorMode: "design",
   leftTab: "layers",
@@ -2392,6 +7130,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   pageOrder: initialDoc.pageOrder,
   activePageId: initialDoc.activePageId,
   assets: initialDoc.assets,
+  fontAssets: initialDoc.fontAssets ?? {},
   designTokens: initialDoc.designTokens,
   guides: [],
   dragMeasurements: [],
@@ -2402,7 +7141,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   selectedLayoutGuideId: null,
   fileName: initialDoc.fileName,
   showGrid: initialDoc.showGrid,
-  showRulers: initialDoc.showRulers ?? true,
+  showRulers: initialDoc.showRulers ?? false,
   canvasBackgroundColor: initialDoc.canvasBackgroundColor,
   comments: initialDoc.comments,
   commentsPanelOpen: false,
@@ -2410,15 +7149,19 @@ export const useEditorStore = create<EditorState>((set, get) => {
   isPlacingComment: false,
   penDrawingNodeId: null,
   pencilDrawingNodeId: null,
+  shapeDrawingSession: null,
+  frameDrawingSession: null,
+  textDrawingSession: null,
   pencilStrokeWidth: 2,
   pathEditModeNodeId: null,
   shapeEditModeNodeId: null,
   transformInteractionMode: "none",
+  rotateGeomSnapshot: null,
   isMovingSelection: false,
   rotateHandleHovered: false,
   rotateHandleHoverHandle: null,
   objectEditModeNodeId: null,
-  selectedPathPointId: null,
+  selectedPathPointIds: [],
   editingTextId: null,
   textEditSelection: null,
   hoveredCanvasId: null,
@@ -2430,10 +7173,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
   prototypePreview: null,
   responsivePreview: null,
   documentSaveStatus: "saved",
+  realtimeSyncStatus: "idle" as RealtimeSyncStatus,
   documentHydrating: false,
   documentHydrationRevision: 0,
   apiFileId: undefined,
   apiWorkspaceId: undefined,
+  apiFileRevision: undefined,
   isApiBackedFile: false,
   apiCommentsStatus: "idle" as ApiCommentsStatus,
   versionHistoryOpen: false,
@@ -2441,7 +7186,30 @@ export const useEditorStore = create<EditorState>((set, get) => {
   apiFileVersions: [],
   historyPast: [],
   historyFuture: [],
+  wasmHistoryCanUndo: false,
+  wasmHistoryCanRedo: false,
   isApplyingHistory: false,
+  isApplyingWasmMirror: false,
+
+  applyWasmDocumentPatch: (patch) => {
+    const s = get();
+    if (s.isApplyingWasmMirror || s.isApplyingHistory) return;
+    if (
+      JSON.stringify(s.nodes) === JSON.stringify(patch.nodes) &&
+      JSON.stringify(s.childOrder) === JSON.stringify(patch.childOrder)
+    ) {
+      return;
+    }
+    set((state) => {
+      const merged = {
+        isApplyingWasmMirror: true,
+        nodes: patch.nodes,
+        childOrder: patch.childOrder,
+      };
+      return { ...merged, ...syncActivePageRecord({ ...state, ...merged }) };
+    });
+    set({ isApplyingWasmMirror: false });
+  },
 
   presenceUsers: [],
   showPresence: false,
@@ -2532,6 +7300,20 @@ export const useEditorStore = create<EditorState>((set, get) => {
   figImportStatus: null,
   figImportToast: null,
   setFigImportToast: (message) => set({ figImportToast: message }),
+  figFidelityCaptures: null,
+  figFidelityReport: null,
+  figFidelityOverlayEnabled: false,
+  setFigFidelityOverlayEnabled: (enabled) => set({ figFidelityOverlayEnabled: enabled }),
+  refreshFigFidelityReport: () => {
+    const { figFidelityCaptures, nodes } = get();
+    if (!figFidelityCaptures) return;
+    void import("@/lib/figImport/runFigFidelityInspection").then(({ runFigFidelityInspection }) => {
+      set({ figFidelityReport: runFigFidelityInspection(figFidelityCaptures, nodes) });
+    });
+  },
+  svgImportNotice: null,
+  setSvgImportNotice: (notice) => set({ svgImportNotice: notice }),
+  clearSvgImportNotice: () => set({ svgImportNotice: null }),
   codeRoundTripOpen: false,
   codeRoundTripTab: "export",
   codeRoundTripSourceHeader: null,
@@ -2685,152 +7467,59 @@ export const useEditorStore = create<EditorState>((set, get) => {
   closeActivePlugin: () => set({ activePluginId: undefined }),
 
   applyPluginLoremIpsumToSelection: () => {
-    const s0 = get();
-    const textIds = s0.selectedIds.filter((id) => {
-      const n = s0.nodes[id];
-      return n?.type === "text" && !n.locked;
-    });
-    if (textIds.length === 0) return;
-    const lorem =
-      "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation.";
+    const result = buildApplyPluginLoremResult(get());
+    if (!result) return;
     get().pushHistory();
-    set((s) => {
-      const nodes = { ...s.nodes };
-      for (const id of textIds) {
-        const n = nodes[id];
-        if (!n || n.type !== "text" || n.locked) continue;
-        nodes[id] = { ...n, content: lorem };
-      }
-      return { nodes };
-    });
+    commitStructuralResult(result);
   },
 
   applyPluginRenameSelection: () => {
-    const s0 = get();
-    const tops = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
-      const n = s0.nodes[id];
-      return n && !n.locked;
-    });
-    if (tops.length === 0) return;
-    const label: Record<NodeKind, string> = {
-      frame: "Screen",
-      group: "Group",
-      rectangle: "Card",
-      ellipse: "Badge",
-      line: "Divider",
-      arrow: "Arrow",
-      polygon: "Polygon",
-      path: "Vector",
-      text: "Label",
-      image: "Image",
-    };
+    const result = buildApplyPluginRenameResult(get());
+    if (!result) return;
     get().pushHistory();
-    set((s) => {
-      const tops2 = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
-        const n = s.nodes[id];
-        return n && !n.locked;
-      });
-      if (tops2.length === 0) return s;
-      const counts = new Map<NodeKind, number>();
-      const nodes = { ...s.nodes };
-      for (const id of tops2) {
-        const n = nodes[id];
-        if (!n) continue;
-        const c = (counts.get(n.type) ?? 0) + 1;
-        counts.set(n.type, c);
-        const base = label[n.type] ?? "Layer";
-        const name = c > 1 ? `${base} ${c}` : base;
-        nodes[id] = { ...n, name };
-      }
-      return { nodes };
-    });
+    commitStructuralResult(result);
   },
 
   applyPluginIconInSelection: () => {
-    const s0 = get();
-    const frameId = resolveFrameParentForPlugin(s0);
-    if (!frameId) return;
-    const frame = s0.nodes[frameId];
-    if (!frame || frame.locked) return;
+    const result = buildApplyPluginIconResult(get());
+    if (!result) return;
     get().pushHistory();
-    set((s) => {
-      const frameId2 = resolveFrameParentForPlugin(s);
-      if (!frameId2) return s;
-      const frame2 = s.nodes[frameId2];
-      if (!frame2 || frame2.locked) return s;
-      const gid = `group-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const pathId = `path-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const pts: PathPoint[] = [
-        { id: newPathPointId(), x: 32, y: 4 },
-        { id: newPathPointId(), x: 56, y: 56 },
-        { id: newPathPointId(), x: 32, y: 40 },
-        { id: newPathPointId(), x: 8, y: 56 },
-      ];
-      let pathNode: EditorNode = {
-        id: pathId,
-        parentId: gid,
-        type: "path",
-        name: "Mark",
-        x: 0,
-        y: 0,
-        width: 64,
-        height: 64,
-        rotation: 0,
-        visible: true,
-        locked: false,
-        expanded: true,
-        pathPoints: pts,
-        pathClosed: true,
-        fill: DEFAULT_SHAPE_FILL,
-        fillEnabled: true,
-        fillOpacity: 1,
-        strokeColor: DEFAULT_SHAPE_STROKE,
-        strokeWidth: 1.5,
-        strokePosition: "center",
-      };
-      pathNode = normalizePathNode(pathNode);
-      const nodes: Record<string, EditorNode> = { ...s.nodes };
-      nodes[pathId] = pathNode;
-      nodes[gid] = {
-        id: gid,
-        parentId: frameId2,
-        type: "group",
-        name: "Plugin icon",
-        x: 88,
-        y: 140,
-        width: pathNode.width,
-        height: pathNode.height,
-        rotation: 0,
-        visible: true,
-        locked: false,
-        expanded: true,
-      };
-      const childOrder = { ...s.childOrder, [gid]: [pathId] };
-      const order = [...(childOrder[frameId2] ?? [])];
-      order.push(gid);
-      childOrder[frameId2] = order;
-      let nodesOut = nodes;
-      nodesOut = relayoutParentsWithAutoLayout(nodesOut, childOrder, [frameId2]);
-      return {
-        nodes: nodesOut,
-        childOrder,
-        selectedIds: [gid],
-        tool: "move",
-        editingTextId: null,
-      };
-    });
+    commitStructuralResult(result);
   },
 
-  clearHistory: () => set({ historyPast: [], historyFuture: [] }),
+  clearHistory: () => {
+    if (isWasmDocumentAuthority()) {
+      try {
+        getActiveCraftEngine()?.clearHistory();
+      } catch {
+        /* engine not ready */
+      }
+    }
+    set({
+      historyPast: [],
+      historyFuture: [],
+      wasmHistoryCanUndo: false,
+      wasmHistoryCanRedo: false,
+    });
+  },
 
   pushHistory: (_label) => {
     const s = get();
     if (s.isApplyingHistory) return;
+    if (isWasmDocumentAuthority()) {
+      craftEngineAuthorityPushSnapshot();
+      set({
+        wasmHistoryCanUndo: craftEngineAuthorityCanUndo(),
+        wasmHistoryCanRedo: craftEngineAuthorityCanRedo(),
+      });
+      return;
+    }
     const snap = editorStateToHistorySnapshot({
       fileName: s.fileName,
       nodes: s.nodes,
       childOrder: s.childOrder,
       assets: s.assets,
+      fontAssets: s.fontAssets,
       designTokens: s.designTokens,
       selectedIds: s.selectedIds,
       zoom: s.zoom,
@@ -2849,13 +7538,56 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   undo: () => {
     const s = get();
-    if (s.isApplyingHistory || s.historyPast.length === 0) return;
+    if (s.isApplyingHistory) return;
+
+    if (isWasmDocumentAuthority()) {
+      const wasmPatch = craftEngineAuthorityUndo();
+      if (!wasmPatch) return;
+      const mergedPatch = mergeWasmSnapshotWithStore(s.nodes, wasmPatch);
+      set((state) => {
+        const merged = {
+          isApplyingHistory: true,
+          nodes: mergedPatch.nodes,
+          childOrder: mergedPatch.childOrder,
+          wasmHistoryCanUndo: craftEngineAuthorityCanUndo(),
+          wasmHistoryCanRedo: craftEngineAuthorityCanRedo(),
+          contextMenu: null,
+          editingTextId: null,
+          layerRenameId: null,
+          hoveredCanvasId: null,
+          prototypeWireDrag: null,
+          placingComponentMasterId: null,
+          selectedPrototypeLinkId: null,
+          guides: [],
+          activeCommentId: null,
+          isPlacingComment: false,
+          penDrawingNodeId: null,
+          pencilDrawingNodeId: null,
+          shapeDrawingSession: null,
+          frameDrawingSession: null,
+          textDrawingSession: null,
+          pathEditModeNodeId: null,
+          objectEditModeNodeId: null,
+          selectedPathPointIds: [],
+          responsivePreview: null,
+        };
+        return {
+          ...merged,
+          ...syncActivePageRecord({ ...state, ...merged }),
+        };
+      });
+      set({ isApplyingHistory: false });
+      return;
+    }
+
+    if (s.historyPast.length === 0) return;
     const prevSnap = s.historyPast[s.historyPast.length - 1]!;
     const currentSnap = editorStateToHistorySnapshot({
       fileName: s.fileName,
       nodes: s.nodes,
       childOrder: s.childOrder,
       assets: s.assets,
+      fontAssets: s.fontAssets,
       designTokens: s.designTokens,
       selectedIds: s.selectedIds,
       zoom: s.zoom,
@@ -2885,9 +7617,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
         isPlacingComment: false,
         penDrawingNodeId: null,
         pencilDrawingNodeId: null,
+        shapeDrawingSession: null,
+        frameDrawingSession: null,
+        textDrawingSession: null,
         pathEditModeNodeId: null,
   objectEditModeNodeId: null,
-        selectedPathPointId: null,
+        selectedPathPointIds: [],
         responsivePreview: null,
       };
       return {
@@ -2900,13 +7635,56 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   redo: () => {
     const s = get();
-    if (s.isApplyingHistory || s.historyFuture.length === 0) return;
+    if (s.isApplyingHistory) return;
+
+    if (isWasmDocumentAuthority()) {
+      const wasmPatch = craftEngineAuthorityRedo();
+      if (!wasmPatch) return;
+      const mergedPatch = mergeWasmSnapshotWithStore(s.nodes, wasmPatch);
+      set((state) => {
+        const merged = {
+          isApplyingHistory: true,
+          nodes: mergedPatch.nodes,
+          childOrder: mergedPatch.childOrder,
+          wasmHistoryCanUndo: craftEngineAuthorityCanUndo(),
+          wasmHistoryCanRedo: craftEngineAuthorityCanRedo(),
+          contextMenu: null,
+          editingTextId: null,
+          layerRenameId: null,
+          hoveredCanvasId: null,
+          prototypeWireDrag: null,
+          placingComponentMasterId: null,
+          selectedPrototypeLinkId: null,
+          guides: [],
+          activeCommentId: null,
+          isPlacingComment: false,
+          penDrawingNodeId: null,
+          pencilDrawingNodeId: null,
+          shapeDrawingSession: null,
+          frameDrawingSession: null,
+          textDrawingSession: null,
+          pathEditModeNodeId: null,
+          objectEditModeNodeId: null,
+          selectedPathPointIds: [],
+          responsivePreview: null,
+        };
+        return {
+          ...merged,
+          ...syncActivePageRecord({ ...state, ...merged }),
+        };
+      });
+      set({ isApplyingHistory: false });
+      return;
+    }
+
+    if (s.historyFuture.length === 0) return;
     const nextSnap = s.historyFuture[0]!;
     const currentSnap = editorStateToHistorySnapshot({
       fileName: s.fileName,
       nodes: s.nodes,
       childOrder: s.childOrder,
       assets: s.assets,
+      fontAssets: s.fontAssets,
       designTokens: s.designTokens,
       selectedIds: s.selectedIds,
       zoom: s.zoom,
@@ -2936,9 +7714,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
         isPlacingComment: false,
         penDrawingNodeId: null,
         pencilDrawingNodeId: null,
+        shapeDrawingSession: null,
+        frameDrawingSession: null,
+        textDrawingSession: null,
         pathEditModeNodeId: null,
   objectEditModeNodeId: null,
-        selectedPathPointId: null,
+        selectedPathPointIds: [],
         responsivePreview: null,
       };
       return {
@@ -2952,6 +7733,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
   setEditingTextId: (editingTextId) => {
     const prev = get().editingTextId;
     if (editingTextId && !prev) get().pushHistory();
+    if (!editingTextId && prev) {
+      const node = get().nodes[prev];
+      if (node?.type === "text" && !(node.content?.length)) {
+        get().pushHistory();
+        commitStructuralResult(buildDeleteEmptyTextOnEditEndResult(get(), prev));
+        return;
+      }
+    }
     set((s) => {
       if (!editingTextId) {
         return { editingTextId: null, textEditSelection: null };
@@ -2989,6 +7778,18 @@ export const useEditorStore = create<EditorState>((set, get) => {
     if (before.pencilDrawingNodeId && tool !== "pencil") {
       get().cancelPencilStroke();
     }
+    if (before.shapeDrawingSession) {
+      const nextShape = toolToShapeType(tool);
+      if (!nextShape || before.tool !== tool) {
+        get().cancelShapeFromDrag();
+      }
+    }
+    if (before.frameDrawingSession && tool !== "frame") {
+      get().cancelFrameFromDrag();
+    }
+    if (before.textDrawingSession && tool !== "text") {
+      get().cancelTextFromDrag();
+    }
     if (tool === "pencil") {
       clearPostCreationPointerSuppress();
     }
@@ -3012,6 +7813,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }
       return {
         tool,
+        ...(isShapeTool(tool) ? { lastShapeTool: tool } : {}),
         placingComponentMasterId: tool === "move" ? s.placingComponentMasterId : null,
         isPlacingComment: false,
         activeCommentId: null,
@@ -3037,8 +7839,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
         editorMode === "prototype" || editorMode === "inspect" ? null : s.pencilDrawingNodeId,
       pathEditModeNodeId:
         editorMode === "prototype" || editorMode === "inspect" ? null : s.pathEditModeNodeId,
-      selectedPathPointId:
-        editorMode === "prototype" || editorMode === "inspect" ? null : s.selectedPathPointId,
+      selectedPathPointIds:
+        editorMode === "prototype" || editorMode === "inspect" ? [] : s.selectedPathPointIds,
       commentsPanelOpen:
         editorMode === "prototype" || editorMode === "inspect" ? false : s.commentsPanelOpen,
     })),
@@ -3076,24 +7878,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return;
     }
     get().pushHistory();
-    set((s) => {
-      const w2 = s.prototypeWireDrag;
-      if (!w2) return { prototypeWireDrag: null };
-      const link = defaultPrototypeLink(w2.sourceNodeId, targetFrameId);
-      const srcNode = s.nodes[w2.sourceNodeId];
-      if (!srcNode) return { prototypeWireDrag: null };
-      const prevLinks = srcNode.prototypeLinks ?? [];
-      const nodes = {
-        ...s.nodes,
-        [w2.sourceNodeId]: { ...srcNode, prototypeLinks: [...prevLinks, link] },
-      };
-      return {
-        nodes,
-        prototypeWireDrag: null,
-        selectedPrototypeLinkId: link.id,
-        selectedIds: [w2.sourceNodeId],
-      };
-    });
+    commitStructuralResult(buildFinishPrototypeConnectionResult(get(), targetFrameId));
   },
 
   cancelPrototypeConnection: () => set({ prototypeWireDrag: null }),
@@ -3103,16 +7888,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const own = findPrototypeLinkOwner(s0.nodes, linkId);
     if (!own) return;
     get().pushHistory();
-    set((s) => {
-      const own2 = findPrototypeLinkOwner(s.nodes, linkId);
-      if (!own2) return s;
-      const node = s.nodes[own2.ownerId]!;
-      const arr = [...(node.prototypeLinks ?? [])];
-      const cur = arr[own2.index]!;
-      const next: PrototypeLink = { ...cur, ...patch, id: cur.id, sourceNodeId: cur.sourceNodeId };
-      arr[own2.index] = next;
-      return { nodes: { ...s.nodes, [own2.ownerId]: { ...node, prototypeLinks: arr } } };
-    });
+    commitStructuralResult(buildUpdatePrototypeLinkResult(get(), linkId, patch));
   },
 
   deletePrototypeLink: (linkId) => {
@@ -3120,17 +7896,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const own = findPrototypeLinkOwner(s0.nodes, linkId);
     if (!own) return;
     get().pushHistory();
-    set((s) => {
-      const own2 = findPrototypeLinkOwner(s.nodes, linkId);
-      if (!own2) return s;
-      const node = s.nodes[own2.ownerId]!;
-      const arr = (node.prototypeLinks ?? []).filter((l) => l.id !== linkId);
-      const nextNode: EditorNode = { ...node, prototypeLinks: arr.length ? arr : undefined };
-      return {
-        nodes: { ...s.nodes, [own2.ownerId]: nextNode },
-        selectedPrototypeLinkId: s.selectedPrototypeLinkId === linkId ? null : s.selectedPrototypeLinkId,
-      };
-    });
+    commitStructuralResult(buildDeletePrototypeLinkResult(get(), linkId));
   },
 
   setSelectedPrototypeLinkId: (selectedPrototypeLinkId) => set({ selectedPrototypeLinkId }),
@@ -3198,7 +7964,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       };
     }),
 
-  select: (id, additive) =>
+  select: (id, additive) => {
     set((s) => {
       if (!id)
         return {
@@ -3208,7 +7974,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
           pathEditModeNodeId: null,
           shapeEditModeNodeId: null,
           objectEditModeNodeId: null,
-          selectedPathPointId: null,
+          selectedPathPointIds: [],
         };
       if (additive) {
         const has = s.selectedIds.includes(id);
@@ -3219,7 +7985,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
           pathEditModeNodeId: null,
           shapeEditModeNodeId: null,
           objectEditModeNodeId: null,
-          selectedPathPointId: null,
+          selectedPathPointIds: [],
         };
       }
       const preserveObjectEdit =
@@ -3235,11 +8001,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
         pathEditModeNodeId: null,
         shapeEditModeNodeId: null,
         objectEditModeNodeId: preserveObjectEdit ? s.objectEditModeNodeId : null,
-        selectedPathPointId: null,
+        selectedPathPointIds: [],
       };
-    }),
+    });
+    const st = get();
+    syncDuplicateRepeatSelection(st.selectedIds, st.nodes);
+  },
 
-  clearSelection: () =>
+  clearSelection: () => {
     set((s) => {
       const next = {
         selectedIds: [] as string[],
@@ -3253,11 +8022,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
         pathEditModeNodeId: null,
         shapeEditModeNodeId: null,
         objectEditModeNodeId: null,
-        selectedPathPointId: null,
+        selectedPathPointIds: [],
         prototypeWireDrag: null,
       };
       return { ...next, ...syncActivePageRecord({ ...s, ...next }) };
-    }),
+    });
+    resetDuplicateRepeatOffset();
+  },
 
   selectLayoutGuide: (id) =>
     set({
@@ -3269,33 +8040,18 @@ export const useEditorStore = create<EditorState>((set, get) => {
       selectedPrototypeLinkId: null,
       pathEditModeNodeId: null,
       objectEditModeNodeId: null,
-      selectedPathPointId: null,
+      selectedPathPointIds: [],
       prototypeWireDrag: null,
     }),
 
   removeLayoutGuide: (id) => {
     get().pushHistory();
-    set((state) => {
-      const layoutGuides = state.layoutGuides.filter((g) => g.id !== id);
-      const next = {
-        ...state,
-        layoutGuides,
-        selectedLayoutGuideId:
-          state.selectedLayoutGuideId === id ? null : state.selectedLayoutGuideId,
-      };
-      return { layoutGuides, selectedLayoutGuideId: next.selectedLayoutGuideId, ...syncActivePageRecord(next) };
-    });
+    commitStructuralResult(buildRemoveLayoutGuideResult(get(), id));
   },
 
   updateLayoutGuidePosition: (id, pos, opts) => {
     if (!opts?.skipHistory) get().pushHistory();
-    set((state) => {
-      const layoutGuides = state.layoutGuides.map((g) =>
-        g.id === id ? { ...g, pos } : g,
-      );
-      const next = { ...state, layoutGuides };
-      return { layoutGuides, ...syncActivePageRecord(next) };
-    });
+    commitStructuralResult(buildUpdateLayoutGuidePositionResult(get(), id, pos));
   },
 
   setZoom: (zoom) => set({ zoom: clampCanvasZoom(zoom) }),
@@ -3308,136 +8064,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const n0 = pre.nodes[id];
       if (n0 && !n0.locked) get().pushHistory();
     }
-    set((s) => {
-      const n = s.nodes[id];
-      if (!n || n.locked) return s;
-      const patchForApply =
-        s.transformInteractionMode === "rotate" && patch.rotation != null
-          ? { rotation: patch.rotation }
-          : patch;
-      const instRoot = findInstanceRoot(s.nodes, id);
-      let nodes = { ...s.nodes };
-      const stylePart: Partial<EditorNode> = {};
-      const directPart: Partial<EditorNode> = {};
-
-      const layoutBase =
-        n.type === "text" && instRoot && instRoot !== id
-          ? mergeInstanceOverrides(n, s.nodes)
-          : n;
-      const layoutAwarePatch =
-        n.type === "text" ? withTextLayoutPatch(layoutBase, patchForApply) : patchForApply;
-
-      if (instRoot && instRoot !== id) {
-        for (const k of Object.keys(layoutAwarePatch)) {
-          const v = layoutAwarePatch[k as keyof typeof layoutAwarePatch];
-          if (INSTANCE_STYLE_KEYS.has(k)) {
-            (stylePart as Record<string, unknown>)[k] = v;
-          } else {
-            (directPart as Record<string, unknown>)[k] = v;
-          }
-        }
-        if (Object.keys(stylePart).length > 0) {
-          const root = nodes[instRoot]!;
-          const io: Record<string, Record<string, unknown>> = { ...(root.instanceOverrides ?? {}) };
-          const prev =
-            io[id] && typeof io[id] === "object" && !Array.isArray(io[id])
-              ? { ...(io[id] as Record<string, unknown>) }
-              : {};
-          io[id] = { ...prev, ...stylePart };
-          nodes[instRoot] = { ...root, instanceOverrides: io };
-        }
-      } else {
-        Object.assign(directPart, layoutAwarePatch);
-      }
-
-      if (Object.keys(directPart).length > 0) {
-        nodes[id] = { ...n, ...directPart };
-      }
-
-      let merged = nodes[id]!;
-      if (merged.type === "line" || merged.type === "arrow") {
-        const endpointTouched =
-          layoutAwarePatch.lineX1 != null ||
-          layoutAwarePatch.lineY1 != null ||
-          layoutAwarePatch.lineX2 != null ||
-          layoutAwarePatch.lineY2 != null;
-        const boxTouched =
-          layoutAwarePatch.x != null ||
-          layoutAwarePatch.y != null ||
-          layoutAwarePatch.width != null ||
-          layoutAwarePatch.height != null ||
-          layoutAwarePatch.rotation != null;
-        if (endpointTouched) {
-          const ep = lineEndpointsFromNode(merged);
-          nodes[id] = { ...merged, ...linePatchFromEndpoints(ep.x1, ep.y1, ep.x2, ep.y2, merged) };
-        } else if (boxTouched) {
-          nodes[id] = { ...merged, ...lineEndpointsPatchFromLayout(merged) };
-        }
-        merged = nodes[id]!;
-      }
-      if (merged.type === "polygon") {
-        const touchesSides =
-          layoutAwarePatch.polygonSides != null || layoutAwarePatch.cornerRadius != null;
-        const touchesBox =
-          layoutAwarePatch.width != null ||
-          layoutAwarePatch.height != null ||
-          layoutAwarePatch.x != null ||
-          layoutAwarePatch.y != null;
-        if (touchesSides || touchesBox) {
-          nodes[id] = {
-            ...merged,
-            ...polygonGeometryPatch(merged, {
-              polygonSides: layoutAwarePatch.polygonSides ?? merged.polygonSides,
-              cornerRadius: layoutAwarePatch.cornerRadius ?? merged.cornerRadius,
-            }),
-          };
-          merged = nodes[id]!;
-        }
-      }
-      const keys = Object.keys(layoutAwarePatch);
-      const layoutSelf =
-        (merged.type === "frame" || merged.type === "group") &&
-        keys.some((k) => LAYOUT_FIELD_KEYS.has(k));
-      const positionGeom = keys.some((k) => GEOM_KEYS.has(k));
-      const rotationOnly =
-        layoutAwarePatch.rotation != null &&
-        keys.every((k) => k === "rotation" || k === "x" || k === "y");
-      const geom = positionGeom || layoutAwarePatch.rotation != null;
-      const refresh = new Set<string>();
-      if (layoutSelf) refresh.add(id);
-      if (positionGeom && !rotationOnly) {
-        if (merged.parentId) refresh.add(merged.parentId);
-        if ((merged.type === "frame" || merged.type === "group") && (merged.layoutMode ?? "none") !== "none") {
-          refresh.add(id);
-        }
-      }
-      if (
-        n.type === "text" &&
-        patchAffectsTextLayout(patch) &&
-        (layoutAwarePatch.width != null || layoutAwarePatch.height != null) &&
-        n.parentId
-      ) {
-        refresh.add(n.parentId);
-      }
-      if (positionGeom && !rotationOnly) {
-        const parent = merged.parentId ? nodes[merged.parentId] : undefined;
-        if (parent && (isMaskGroup(parent) || isBooleanGroup(parent))) {
-          nodes = syncGroupFrameToVisible(parent.id, nodes, s.childOrder);
-        } else if (
-          (isMaskGroup(merged) && merged.maskId) ||
-          isBooleanGroup(merged)
-        ) {
-          nodes = syncGroupFrameToVisible(id, nodes, s.childOrder);
-        }
-      }
-      if (!rotationOnly) {
-        nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
-      }
-      if (geom) {
-        warnInvalidNodeGeometry("updateNode", id, nodes[id] ?? merged, nodes);
-      }
-      return { nodes };
-    });
+    commitStructuralResult(buildUpdateNodeResult(get(), id, patch, opts));
+    if (patch.x != null || patch.y != null) {
+      const st = get();
+      refreshDuplicateStepAfterMove(st.selectedIds, st.nodes, st.childOrder);
+    }
+    const after = get().nodes[id];
+    if (after) {
+      const mirrored = mirrorNodeGeometryToWasm(id, patch, after);
+      if (!mirrored) syncWasmDocumentAfterStoreUpdate();
+    }
   },
 
   updateNodes: (patches, opts) => {
@@ -3447,62 +8083,18 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const pre = get();
       if (ids.some((id) => pre.nodes[id] && !pre.nodes[id]!.locked)) get().pushHistory();
     }
-    set((s) => {
-      let nodes = { ...s.nodes };
-      const refresh = new Set<string>();
-      let changed = false;
-      let rotationOnlyBatch = true;
-      for (const id of ids) {
-        const n = nodes[id];
-        const patch = patches[id];
-        if (!n || !patch || n.locked) continue;
-        const patchForApply =
-          s.transformInteractionMode === "rotate" && patch.rotation != null
-            ? { rotation: patch.rotation }
-            : patch;
-        const layoutAwarePatch = n.type === "text" ? withTextLayoutPatch(n, patchForApply) : patchForApply;
-        nodes[id] = { ...n, ...layoutAwarePatch };
-        changed = true;
-        const keys = Object.keys(layoutAwarePatch);
-        const rotationOnly =
-          layoutAwarePatch.rotation != null &&
-          keys.every((k) => k === "rotation" || k === "x" || k === "y");
-        if (!rotationOnly) rotationOnlyBatch = false;
-        const layoutSelf =
-          (n.type === "frame" || n.type === "group") &&
-          keys.some((k) => LAYOUT_FIELD_KEYS.has(k));
-        const positionGeom = keys.some((k) => GEOM_KEYS.has(k));
-        if (layoutSelf) refresh.add(id);
-        if (positionGeom && !rotationOnly) {
-          if (n.parentId) refresh.add(n.parentId);
-          if ((n.type === "frame" || n.type === "group") && (n.layoutMode ?? "none") !== "none") {
-            refresh.add(id);
-          }
-        }
-        if (
-          n.type === "text" &&
-          patchAffectsTextLayout(patch) &&
-          (layoutAwarePatch.width != null || layoutAwarePatch.height != null) &&
-          n.parentId
-        ) {
-          refresh.add(n.parentId);
-        }
-      }
-      if (!changed) return s;
-      if (!rotationOnlyBatch) {
-        nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
-      }
-      for (const id of ids) {
-        const merged = nodes[id];
-        if (merged && patches[id]) {
-          const geom = Object.keys(patches[id]!).some(
-            (k) => GEOM_KEYS.has(k) || k === "rotation",
-          );
-          if (geom) warnInvalidNodeGeometry("updateNodes", id, merged, nodes);
-        }
-      }
-      return { nodes };
-    });
+    commitStructuralResult(buildUpdateNodesResult(get(), patches));
+    const st = get();
+    const entries = ids
+      .map((nodeId) => {
+        const node = st.nodes[nodeId];
+        const nodePatch = patches[nodeId];
+        if (!node || !nodePatch) return null;
+        return { nodeId, patch: nodePatch, node };
+      })
+      .filter((e): e is NonNullable<typeof e> => e != null);
+    const mirrored = mirrorGeometryPatchesToWasm(entries);
+    if (!mirrored) syncWasmDocumentAfterStoreUpdate();
   },
 
   updateNodeStyle: (id, patch, opts) => {
@@ -3511,392 +8103,111 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const n0 = pre.nodes[id];
       if (n0 && !n0.locked) get().pushHistory();
     }
-    set((s) => {
-      const n = s.nodes[id];
-      if (!n || n.locked) return s;
-      const instRoot = findInstanceRoot(s.nodes, id);
-      const layoutBase =
-        n.type === "text" && instRoot && instRoot !== id
-          ? mergeInstanceOverrides(n, s.nodes)
-          : n;
-      const strokeKeys = [
-        "stroke",
-        "strokeColor",
-        "strokeType",
-        "strokeGradient",
-        "strokeWidth",
-        "strokeOpacity",
-        "strokeEnabled",
-        "strokePosition",
-        "strokeStyle",
-        "strokeDashLength",
-        "strokeDashGap",
-        "strokeLinecap",
-        "strokeLinejoin",
-      ] as const;
-      const touchesStroke = strokeKeys.some((k) => k in patch);
-      const mergedPatch = touchesStroke
-        ? { ...patch, ...mergeStrokeIntoNode(layoutBase, patch) }
-        : patch;
-      let finalPatch: Partial<EditorNode> =
-        n.type === "text" ? withTextLayoutPatch(layoutBase, mergedPatch) : mergedPatch;
-      if (n.type === "text" && "content" in mergedPatch) {
-        finalPatch = {
-          ...finalPatch,
-          name: layerNameFromTextContent(
-            (mergedPatch as { content?: string }).content ?? n.content,
-          ),
-        };
-      }
-
-      let nodes: Record<string, EditorNode>;
-      if (instRoot && instRoot !== id) {
-        const rn = s.nodes[instRoot]!;
-        const io: Record<string, Record<string, unknown>> = { ...(rn.instanceOverrides ?? {}) };
-        const prev =
-          io[id] && typeof io[id] === "object" && !Array.isArray(io[id])
-            ? { ...(io[id] as Record<string, unknown>) }
-            : {};
-        io[id] = { ...prev, ...finalPatch };
-        nodes = { ...s.nodes, [instRoot]: { ...rn, instanceOverrides: io } };
-      } else {
-        const expanded = expandBooleanFillStylePatches(id, finalPatch, s.nodes, s.childOrder);
-        if (expanded) {
-          nodes = { ...s.nodes };
-          for (const [nid, p] of Object.entries(expanded)) {
-            const cur = nodes[nid];
-            if (cur && !cur.locked) nodes[nid] = { ...cur, ...p };
-          }
-        } else {
-          nodes = { ...s.nodes, [id]: { ...n, ...finalPatch } };
-        }
-      }
-
-      const fp = finalPatch as Partial<EditorNode>;
-      if (
-        n.parentId &&
-        (fp.width != null || fp.height != null) &&
-        (n.type === "text" ? patchAffectsTextLayout(patch) : true)
-      ) {
-        nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId]);
-      }
-      return { nodes };
-    });
+    commitStructuralResult(buildUpdateNodeStyleResult(get(), id, patch));
   },
 
   setNodeFillHex: (nodeId, hex, opts) => {
-    const normalized = normalizeHex(hex.trim().startsWith("#") ? hex.trim() : `#${hex.trim()}`);
-    if (!normalized) return;
     if (!opts?.skipHistory && !get().isApplyingHistory) {
       const n0 = get().nodes[nodeId];
       if (n0 && !n0.locked) get().pushHistory();
     }
-    set((s) => {
-      const n = s.nodes[nodeId];
-      if (!n || n.locked) return s;
-      const stylePatch: NodeStylePatch = { fill: normalized, fillType: "solid" };
-      const instRoot = findInstanceRoot(s.nodes, nodeId);
-      let nodes = { ...s.nodes };
-
-      const applyFill = (targetId: string, base: EditorNode) => {
-        const expanded = expandBooleanFillStylePatches(targetId, stylePatch, nodes, s.childOrder);
-        if (expanded) {
-          for (const [nid, p] of Object.entries(expanded)) {
-            const cur = nodes[nid];
-            if (cur && !cur.locked) {
-              nodes[nid] = { ...cur, ...p, fillTokenId: undefined };
-            }
-          }
-          return;
-        }
-        nodes[targetId] = { ...base, ...stylePatch, fillTokenId: undefined };
-      };
-
-      if (instRoot && instRoot !== nodeId) {
-        nodes[nodeId] = { ...nodes[nodeId]!, fillTokenId: undefined };
-        const rn = nodes[instRoot]!;
-        const io: Record<string, Record<string, unknown>> = { ...(rn.instanceOverrides ?? {}) };
-        const prev =
-          io[nodeId] && typeof io[nodeId] === "object" && !Array.isArray(io[nodeId])
-            ? { ...(io[nodeId] as Record<string, unknown>) }
-            : {};
-        const nextOv: Record<string, unknown> = { ...prev, ...stylePatch };
-        delete nextOv.fillTokenId;
-        io[nodeId] = nextOv;
-        nodes[instRoot] = { ...rn, instanceOverrides: io };
-      } else {
-        applyFill(nodeId, n);
-      }
-      return { nodes };
-    });
+    commitStructuralResult(buildSetNodeFillHexResult(get(), nodeId, hex));
   },
 
   setNodeTextColorHex: (nodeId, hex, opts) => {
-    const normalized = normalizeHex(hex.trim().startsWith("#") ? hex.trim() : `#${hex.trim()}`);
-    if (!normalized) return;
     if (!opts?.skipHistory && !get().isApplyingHistory) {
       const n0 = get().nodes[nodeId];
       if (n0 && !n0.locked) get().pushHistory();
     }
-    set((s) => {
-      const n = s.nodes[nodeId];
-      if (!n || n.locked) return s;
-      const stylePatch: NodeStylePatch = { textColor: normalized };
-      const instRoot = findInstanceRoot(s.nodes, nodeId);
-      let nodes = { ...s.nodes };
+    commitStructuralResult(buildSetNodeTextColorHexResult(get(), nodeId, hex));
+  },
 
-      if (instRoot && instRoot !== nodeId) {
-        nodes[nodeId] = { ...nodes[nodeId]!, fillTokenId: undefined };
-        const rn = nodes[instRoot]!;
-        const io: Record<string, Record<string, unknown>> = { ...(rn.instanceOverrides ?? {}) };
-        const prev =
-          io[nodeId] && typeof io[nodeId] === "object" && !Array.isArray(io[nodeId])
-            ? { ...(io[nodeId] as Record<string, unknown>) }
-            : {};
-        const nextOv: Record<string, unknown> = { ...prev, ...stylePatch };
-        delete nextOv.fillTokenId;
-        io[nodeId] = nextOv;
-        nodes[instRoot] = { ...rn, instanceOverrides: io };
-      } else {
-        nodes[nodeId] = { ...n, ...stylePatch, fillTokenId: undefined };
-      }
-      return { nodes };
+  setSelectionFillHex: (hex, opts) => {
+    const tops = topLevelSelectedIds(get().selectedIds, get().nodes).filter((id) => {
+      const n = get().nodes[id];
+      return n && !n.locked && n.visible && nodeSupportsFillColor(n);
     });
+    if (tops.length === 0) return;
+    if (!opts?.skipHistory && !get().isApplyingHistory) get().pushHistory();
+    commitStructuralResult(buildSetSelectionFillHexResult(get(), hex));
   },
 
   setNodeVisible: (id, visible) => {
     get().pushHistory();
-    set((s) => {
-      const n = s.nodes[id];
-      if (!n) return s;
-      let nodes = { ...s.nodes, [id]: { ...n, visible } };
-      const par = nodes[id]!.parentId;
-      if (par) {
-        nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [par]);
-      }
-      return { nodes };
-    });
+    commitStructuralResult(buildPatchNodeWithParentRelayoutResult(get(), id, { visible }));
   },
 
   setNodeLocked: (id, locked) => {
     get().pushHistory();
-    set((s) => {
-      const n = s.nodes[id];
-      if (!n) return s;
-      let nodes = { ...s.nodes, [id]: { ...n, locked } };
-      const par = nodes[id]!.parentId;
-      if (par) {
-        nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [par]);
-      }
-      return { nodes };
-    });
+    commitStructuralResult(buildPatchNodeWithParentRelayoutResult(get(), id, { locked }));
   },
 
   toggleVisible: (id) => {
+    const n = get().nodes[id];
+    if (!n) return;
     get().pushHistory();
-    set((s) => {
-      const n = s.nodes[id];
-      if (!n) return s;
-      const visible = !n.visible;
-      let nodes = { ...s.nodes, [id]: { ...n, visible } };
-      const par = nodes[id]!.parentId;
-      if (par) {
-        nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [par]);
-      }
-      return { nodes };
-    });
+    commitStructuralResult(buildPatchNodeWithParentRelayoutResult(get(), id, { visible: !n.visible }));
   },
 
   toggleLock: (id) => {
+    const n = get().nodes[id];
+    if (!n) return;
     get().pushHistory();
-    set((s) => {
-      const n = s.nodes[id];
-      if (!n) return s;
-      const locked = !n.locked;
-      let nodes = { ...s.nodes, [id]: { ...n, locked } };
-      const par = nodes[id]!.parentId;
-      if (par) {
-        nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [par]);
-      }
-      return { nodes };
-    });
+    commitStructuralResult(buildPatchNodeWithParentRelayoutResult(get(), id, { locked: !n.locked }));
   },
 
   toggleExpanded: (id) => {
     get().pushHistory();
-    set((s) => {
-      const n = s.nodes[id];
-      if (!n) return s;
-      return { nodes: { ...s.nodes, [id]: { ...n, expanded: !n.expanded } } };
-    });
+    commitStructuralResult(buildToggleExpandedResult(get(), id));
   },
 
   renameNode: (id, name) => {
     get().pushHistory();
-    set((s) => {
-      const n = s.nodes[id];
-      if (!n) return s;
-      return { nodes: { ...s.nodes, [id]: { ...n, name } } };
-    });
+    commitStructuralResult(buildRenameNodeResult(get(), id, name));
   },
 
   addRectangle: () => {
     get().pushHistory();
-    set((s) => {
-      const id = `rect-${Date.now()}`;
-      const roots = [...(s.childOrder[ROOT] ?? [])];
-      roots.push(id);
-      const node: EditorNode = {
-        id,
-        parentId: null,
-        type: "rectangle",
-        name: nextNumberedLayerName(s.nodes, "Rectangle"),
-        x: 120,
-        y: 120,
-        width: 160,
-        height: 100,
-        rotation: 0,
-        visible: true,
-        locked: false,
-        expanded: true,
-        fill: DEFAULT_SHAPE_FILL,
-        cornerRadius: 8,
-        fillEnabled: true,
-        fillOpacity: 1,
-        strokePosition: "center",
-      };
-      return {
-        nodes: { ...s.nodes, [id]: node },
-        childOrder: { ...s.childOrder, [ROOT]: roots },
-        selectedIds: [id],
-      };
-    });
+    commitStructuralResult(buildAddRectangleToolbarResult(get()));
   },
 
   addText: () => {
     get().pushHistory();
-    set((s) => {
-      const ts = textStyleFromSelection(s);
-      const typo = resolveTextTypo(ts);
-      const content = "New text";
-      const { width: tw, height: th } = computeTextBoxSize(
-        content,
-        typo,
-        "auto-width",
-        MIN_TEXT_BOX,
-        MIN_TEXT_BOX,
-      );
-      const id = `text-${Date.now()}`;
-      const roots = [...(s.childOrder[ROOT] ?? [])];
-      roots.push(id);
-      const node: EditorNode = {
-        id,
-        parentId: null,
-        type: "text",
-        name: layerNameFromTextContent(content),
-        x: 120,
-        y: 200,
-        width: tw,
-        height: th,
-        rotation: 0,
-        visible: true,
-        locked: false,
-        expanded: true,
-        content,
-        textResizeMode: "auto-width",
-        ...ts,
-        fillEnabled: true,
-        fillOpacity: 1,
-      };
-      return {
-        nodes: { ...s.nodes, [id]: node },
-        childOrder: { ...s.childOrder, [ROOT]: roots },
-        selectedIds: [id],
-      };
-    });
+    commitStructuralResult(buildAddTextToolbarResult(get()));
   },
 
   addRectangleAt: (worldX, worldY) => {
     get().pushHistory();
-    set((s) => {
-      const w = 120;
-      const h = 80;
-      const { x, y } = worldCenteredRootPoint(worldX, worldY, w, h);
-      const id = `rect-${Date.now()}`;
-      const node: EditorNode = {
-        id,
-        parentId: null,
-        type: "rectangle",
-        name: nextNumberedLayerName(s.nodes, "Rectangle"),
-        x,
-        y,
-        width: w,
-        height: h,
-        rotation: 0,
-        visible: true,
-        locked: false,
-        expanded: true,
-        fill: DEFAULT_SHAPE_FILL,
-        cornerRadius: 8,
-        fillEnabled: true,
-        fillOpacity: 1,
-        strokePosition: "center",
-      };
-      const inserted = insertNodeWithFrameParenting(
-        node,
-        { x, y, width: w, height: h },
-        s.nodes,
-        s.childOrder,
-        s.selectedIds,
-      );
-      return {
-        nodes: inserted.nodes,
-        childOrder: inserted.childOrder,
-        selectedIds: [id],
-        tool: "move",
-        editingTextId: null,
-      };
+    const result = buildAddRectangleResult(get(), worldX, worldY);
+    commitDocumentMutation(result, (built) => {
+      set({
+        nodes: built.nodes,
+        childOrder: built.childOrder,
+        ...(built.ui as {
+          selectedIds: string[];
+          tool: Tool;
+          editingTextId: string | null;
+        }),
+      });
+      syncWasmDocumentAfterStoreUpdate();
     });
   },
 
   addTextAt: (worldX, worldY) => {
     get().pushHistory();
-    set((s) => {
-      const ts = textStyleFromSelection(s);
-      const typo = resolveTextTypo(ts);
-      const { width: tw, height: th } = computeTextBoxSize(
-        "",
-        typo,
-        "auto-width",
-        MIN_TEXT_BOX,
-        MIN_TEXT_BOX,
-      );
-      const boxW = Math.max(tw, EMPTY_TEXT_PLACEHOLDER_WIDTH);
-      const { x, y } = worldCenteredRootPoint(worldX, worldY, boxW, th);
-      const id = `text-${Date.now()}`;
-      const { node: base } = createPointTextAt(x, y, boxW, th, ts);
-      const node: EditorNode = {
-        ...base,
-        id,
-        parentId: null,
-        name: layerNameFromTextContent(base.content),
-        ...textResizePatch("auto-width"),
-      };
-      const inserted = insertNodeWithFrameParenting(
-        node,
-        { x, y, width: node.width, height: node.height },
-        s.nodes,
-        s.childOrder,
-        s.selectedIds,
-      );
-      return {
-        nodes: inserted.nodes,
-        childOrder: inserted.childOrder,
-        selectedIds: [id],
-        tool: "move",
-        editingTextId: id,
-        textEditSelection: { anchor: 0, focus: 0 },
-      };
+    const result = buildAddTextAtResult(get(), worldX, worldY);
+    commitDocumentMutation(result, (built) => {
+      set({
+        nodes: built.nodes,
+        childOrder: built.childOrder,
+        ...(built.ui as {
+          selectedIds: string[];
+          tool: Tool;
+          editingTextId: string | null;
+          textEditSelection: { anchor: number; focus: number };
+        }),
+      });
+      syncWasmDocumentAfterStoreUpdate();
     });
     requestAnimationFrame(() => {
       const el = document.querySelector<HTMLTextAreaElement>(`[data-text-editor="${get().editingTextId}"]`);
@@ -3906,32 +8217,19 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   createTextBoxFromDrag: (start, end, modifiers) => {
     get().pushHistory();
-    set((s) => {
-      const ts = textStyleFromSelection(s);
-      const { x, y, width, height, node: base } = createTextBoxFromDrag(start, end, modifiers, ts);
-      const id = `text-${Date.now()}`;
-      const node: EditorNode = {
-        ...base,
-        id,
-        parentId: null,
-        name: layerNameFromTextContent(base.content),
-        ...textResizePatch(base.textResizeMode ?? "auto-height"),
-      };
-      const inserted = insertNodeWithFrameParenting(
-        node,
-        { x, y, width, height },
-        s.nodes,
-        s.childOrder,
-        s.selectedIds,
-      );
-      return {
-        nodes: inserted.nodes,
-        childOrder: inserted.childOrder,
-        selectedIds: [id],
-        tool: "move",
-        editingTextId: id,
-        textEditSelection: { anchor: 0, focus: 0 },
-      };
+    const result = buildCreateTextBoxFromDragResult(get(), start, end, modifiers);
+    commitDocumentMutation(result, (built) => {
+      set({
+        nodes: built.nodes,
+        childOrder: built.childOrder,
+        ...(built.ui as {
+          selectedIds: string[];
+          tool: Tool;
+          editingTextId: string | null;
+          textEditSelection: { anchor: number; focus: number };
+        }),
+      });
+      syncWasmDocumentAfterStoreUpdate();
     });
     requestAnimationFrame(() => {
       const el = document.querySelector<HTMLTextAreaElement>(`[data-text-editor="${get().editingTextId}"]`);
@@ -3946,11 +8244,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return null;
     }
     try {
-      const asset = await buildEditorAssetFromFile(file);
+      const asset = await resolveImageAssetFromFile(file, {
+        workspaceId: get().apiWorkspaceId,
+      });
       get().pushHistory();
-      set((s) => ({
-        assets: { ...s.assets, [asset.id]: asset },
-      }));
+      commitStructuralResult(buildImportImageAssetResult(get(), asset));
       return asset.id;
     } catch (e) {
       window.alert(e instanceof Error ? e.message : "Could not import image.");
@@ -3958,56 +8256,108 @@ export const useEditorStore = create<EditorState>((set, get) => {
     }
   },
 
+  importVideoAsset: async (file) => {
+    const msg = validateVideoImportFile(file);
+    if (msg) {
+      window.alert(msg);
+      return null;
+    }
+    try {
+      const asset = await buildEditorVideoAssetFromFile(file);
+      get().pushHistory();
+      commitStructuralResult(buildImportImageAssetResult(get(), asset));
+      return asset.id;
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : "Could not import video.");
+      return null;
+    }
+  },
+
+  importFontFile: async (file) => {
+    try {
+      const asset = await buildEditorFontAssetFromFile(file);
+      get().pushHistory();
+      commitStructuralResult(buildImportFontAssetResult(get(), asset));
+      return asset.id;
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : "Could not import font.");
+      return null;
+    }
+  },
+
   addImageNodeAt: (assetId, worldX, worldY) => {
     get().pushHistory();
-    set((s) => {
-      const asset = s.assets[assetId];
-      if (!asset) return s;
-      const iw = asset.width && asset.width > 0 ? asset.width : 200;
-      const ih = asset.height && asset.height > 0 ? asset.height : 150;
-      const scale = Math.min(1, 480 / iw, 480 / ih);
-      const w = Math.max(16, Math.round(iw * scale));
-      const h = Math.max(16, Math.round(ih * scale));
-      const cx = worldX ?? 200;
-      const cy = worldY ?? 200;
-      const { x, y } = worldCenteredRootPoint(cx, cy, w, h);
-      const id = `image-${Date.now()}`;
-      const baseName = (asset.name || "Image").replace(/\.[^.]+$/, "") || "Image";
-      const node: EditorNode = {
-        id,
-        parentId: null,
-        type: "image",
-        name: baseName,
-        x,
-        y,
-        width: w,
-        height: h,
-        rotation: 0,
-        visible: true,
-        locked: false,
-        expanded: true,
-        assetId,
-        imageSrc: asset.dataUrl,
-        imageName: asset.name,
-        imageMimeType: asset.mimeType,
-        imageFitMode: "fill",
-        fillOpacity: 1,
-        fillEnabled: true,
-      };
-      const inserted = insertNodeWithFrameParenting(
-        node,
-        { x, y, width: w, height: h },
-        s.nodes,
-        s.childOrder,
-        s.selectedIds,
-      );
-      return {
-        nodes: inserted.nodes,
-        childOrder: inserted.childOrder,
-        selectedIds: [id],
-        tool: "move" as Tool,
-      };
+    const result = buildAddImageNodeResult(get(), assetId, worldX, worldY);
+    commitDocumentMutation(result, (built) => {
+      set({
+        nodes: built.nodes,
+        childOrder: built.childOrder,
+        ...(built.ui as { selectedIds: string[]; tool: Tool }),
+      });
+      syncWasmDocumentAfterStoreUpdate();
     });
+  },
+
+  placeImageFilesOnCanvas: async (files, worldX, worldY) => {
+    const valid: File[] = [];
+    for (const file of files) {
+      const msg = validateImageImportFile(file);
+      if (msg) {
+        window.alert(msg);
+        continue;
+      }
+      valid.push(file);
+    }
+    if (valid.length === 0) return 0;
+
+    const svgImports: Awaited<ReturnType<typeof importSvgFileToEditorGraph>>[] = [];
+    const rasterFiles: File[] = [];
+    for (const file of valid) {
+      if (isSvgLayerImportFile(file)) {
+        try {
+          const imported = await importSvgFileToEditorGraph(file);
+          if (imported) {
+            svgImports.push(imported);
+            const diag = imported.diagnostics;
+            const notes = [
+              ...(diag.warnings ?? []),
+              ...(diag.unsupportedElements ?? []),
+            ];
+            if (notes.length > 0) {
+              console.warn(`[svg-import] ${file.name}`, notes);
+              get().setSvgImportNotice({
+                title: `SVG import: ${file.name} — ${notes.length} note${notes.length === 1 ? "" : "s"}`,
+                details: notes.slice(0, 12),
+              });
+            }
+          } else {
+            window.alert(`Could not import layers from ${file.name}. The SVG may be empty, too large, or unsupported.`);
+          }
+        } catch (e) {
+          window.alert(e instanceof Error ? e.message : `Could not import ${file.name}.`);
+        }
+        continue;
+      }
+      rasterFiles.push(file);
+    }
+
+    const assetsToAdd: EditorAsset[] = [];
+    for (const file of rasterFiles) {
+      try {
+        assetsToAdd.push(
+          await resolveImageAssetFromFile(file, { workspaceId: get().apiWorkspaceId }),
+        );
+      } catch (e) {
+        window.alert(e instanceof Error ? e.message : "Could not import image.");
+      }
+    }
+
+    if (svgImports.length === 0 && assetsToAdd.length === 0) return 0;
+
+    get().pushHistory();
+    const result = buildPlaceImportedFilesResult(get(), svgImports, assetsToAdd, worldX, worldY);
+    commitStructuralResult(result);
+    return (result.ui.selectedIds as string[]).length;
   },
 
   replaceImageAsset: async (nodeId, file) => {
@@ -4019,298 +8369,105 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const n0 = get().nodes[nodeId];
     if (!n0 || n0.type !== "image") return;
     try {
-      const asset = await buildEditorAssetFromFile(file);
-      get().pushHistory();
-      set((s) => {
-        const n = s.nodes[nodeId];
-        if (!n || n.type !== "image") return s;
-        const baseName = (asset.name || "Image").replace(/\.[^.]+$/, "") || "Image";
-        return {
-          assets: { ...s.assets, [asset.id]: asset },
-          nodes: {
-            ...s.nodes,
-            [nodeId]: {
-              ...n,
-              assetId: asset.id,
-              imageSrc: asset.dataUrl,
-              imageName: asset.name,
-              imageMimeType: asset.mimeType,
-              name: baseName,
-            },
-          },
-        };
+      const asset = await resolveImageAssetFromFile(file, {
+        workspaceId: get().apiWorkspaceId,
       });
+      get().pushHistory();
+      commitStructuralResult(buildReplaceImageAssetResult(get(), nodeId, asset));
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : "Could not replace image.");
+    }
+  },
+
+  replaceAsset: async (assetId, file) => {
+    const msg = validateImageImportFile(file);
+    if (msg) {
+      window.alert(msg);
+      return;
+    }
+    if (!get().assets[assetId]) return;
+    try {
+      const asset = await resolveImageAssetFromFile(file, {
+        workspaceId: get().apiWorkspaceId,
+      });
+      get().pushHistory();
+      commitStructuralResult(buildReplaceAssetResult(get(), assetId, asset));
     } catch (e) {
       window.alert(e instanceof Error ? e.message : "Could not replace image.");
     }
   },
 
   deleteAsset: (assetId) => {
+    const result = buildDeleteAssetResult(get(), assetId);
+    if (!result) return;
     get().pushHistory();
-    set((s) => {
-      if (!s.assets[assetId]) return s;
-      const { [assetId]: _removed, ...rest } = s.assets;
-      const nodes = { ...s.nodes };
-      for (const nid of Object.keys(nodes)) {
-        const n = nodes[nid];
-        if (n?.type === "image" && n.assetId === assetId) {
-          nodes[nid] = { ...n, assetId: undefined };
-        }
-      }
-      return { assets: rest, nodes };
-    });
+    commitStructuralResult(result);
   },
 
   createColorTokenFromSelection: (name) => {
-    const s0 = get();
-    const colorTypes = new Set<NodeKind>(["frame", "rectangle", "ellipse", "path", "text"]);
-    let picked: EditorNode | null = null;
-    for (const id of s0.selectedIds) {
-      const raw = s0.nodes[id];
-      if (!raw || raw.locked || !raw.visible) continue;
-      if (!colorTypes.has(raw.type)) continue;
-      const merged = mergeInstanceOverrides(raw, s0.nodes);
-      const n = resolveNodeWithDesignTokens(merged, s0.designTokens);
-      if (effectiveFillType(n) === "gradient") continue;
-      const h = n.type === "text" ? (n.textColor ?? n.fill) : n.fill;
-      if (!h) continue;
-      picked = n;
-      break;
-    }
-    if (!picked) return;
-    const hex = picked.type === "text" ? (picked.textColor ?? picked.fill) : picked.fill;
-    if (!hex) return;
+    const result = buildCreateColorTokenFromSelectionResult(get(), name);
+    if (!result) return;
     get().pushHistory();
-    set((s) => {
-      const colorCount = Object.values(s.designTokens).filter((t) => t.type === "color").length;
-      const tid = newDesignTokenId("color");
-      const nm =
-        name?.trim() ||
-        `Color / ${picked!.name || "Selection"}${colorCount > 0 ? ` ${colorCount + 1}` : ""}`;
-      const token: DesignToken = {
-        id: tid,
-        name: nm.slice(0, 64),
-        type: "color",
-        value: { hex, opacity: picked!.fillOpacity ?? 1 },
-        createdAt: designTokenTimestamp(),
-        updatedAt: designTokenTimestamp(),
-      };
-      return { designTokens: { ...s.designTokens, [tid]: token } };
-    });
+    commitStructuralResult(result);
   },
 
   createGradientTokenFromSelection: (name) => {
-    const s0 = get();
-    const shapeTypes = new Set<NodeKind>(["frame", "rectangle", "ellipse", "path"]);
-    let picked: EditorNode | null = null;
-    for (const id of s0.selectedIds) {
-      const raw = s0.nodes[id];
-      if (!raw || raw.locked || !raw.visible) continue;
-      if (!shapeTypes.has(raw.type)) continue;
-      const merged = mergeInstanceOverrides(raw, s0.nodes);
-      const n = resolveNodeWithDesignTokens(merged, s0.designTokens);
-      if (effectiveFillType(n) !== "gradient") continue;
-      picked = n;
-      break;
-    }
-    if (!picked) return;
-    const gradient = normalizeFillGradient(picked.fillGradient, picked.fill);
+    const result = buildCreateGradientTokenFromSelectionResult(get(), name);
+    if (!result) return;
     get().pushHistory();
-    set((s) => {
-      const gradCount = Object.values(s.designTokens).filter((t) => t.type === "gradient").length;
-      const tid = newDesignTokenId("grad");
-      const nm =
-        name?.trim() ||
-        `Gradient / ${picked!.name || "Selection"}${gradCount > 0 ? ` ${gradCount + 1}` : ""}`;
-      const token: DesignToken = {
-        id: tid,
-        name: nm.slice(0, 64),
-        type: "gradient",
-        value: gradient,
-        createdAt: designTokenTimestamp(),
-        updatedAt: designTokenTimestamp(),
-      };
-      return { designTokens: { ...s.designTokens, [tid]: token } };
-    });
+    commitStructuralResult(result);
   },
 
   createTypographyTokenFromSelection: (name) => {
-    const s0 = get();
-    let picked: EditorNode | null = null;
-    for (const id of s0.selectedIds) {
-      const raw = s0.nodes[id];
-      if (!raw || raw.locked || !raw.visible || raw.type !== "text") continue;
-      const merged = mergeInstanceOverrides(raw, s0.nodes);
-      picked = resolveNodeWithDesignTokens(merged, s0.designTokens);
-      break;
-    }
-    if (!picked) return;
+    const result = buildCreateTypographyTokenFromSelectionResult(get(), name);
+    if (!result) return;
     get().pushHistory();
-    set((s) => {
-      const typoCount = Object.values(s.designTokens).filter((t) => t.type === "typography").length;
-      const tid = newDesignTokenId("type");
-      const nm =
-        name?.trim() ||
-        `Typography / ${picked!.name || "Text"}${typoCount > 0 ? ` ${typoCount + 1}` : ""}`;
-      const token: DesignToken = {
-        id: tid,
-        name: nm.slice(0, 64),
-        type: "typography",
-        value: {
-          fontFamily: picked!.fontFamily ?? "Inter, system-ui, sans-serif",
-          fontSize: picked!.fontSize ?? DEFAULT_TEXT_FONT_SIZE,
-          fontWeight: picked!.fontWeight ?? 500,
-          lineHeight: picked!.lineHeight ?? 1.25,
-          letterSpacing: picked!.letterSpacing ?? 0,
-        },
-        createdAt: designTokenTimestamp(),
-        updatedAt: designTokenTimestamp(),
-      };
-      return { designTokens: { ...s.designTokens, [tid]: token } };
-    });
+    commitStructuralResult(result);
   },
 
   createSpacingToken: (name, value) => {
-    if (!Number.isFinite(value)) return;
+    const result = buildCreateSpacingTokenResult(get(), name, value);
+    if (!result) return;
     get().pushHistory();
-    set((s) => {
-      const tid = newDesignTokenId("space");
-      const token: DesignToken = {
-        id: tid,
-        name: name.trim() || "Spacing",
-        type: "spacing",
-        value: { value },
-        createdAt: designTokenTimestamp(),
-        updatedAt: designTokenTimestamp(),
-      };
-      return { designTokens: { ...s.designTokens, [tid]: token } };
-    });
+    commitStructuralResult(result);
   },
 
   createColorToken: (name, hex, opacity = 1) => {
-    const h = normalizeHex(hex.trim().startsWith("#") ? hex.trim() : `#${hex.trim()}`);
-    if (!h) return null;
+    const result = buildCreateColorTokenResult(get(), name, hex, opacity);
+    if (!result) return null;
     get().pushHistory();
-    let createdId: string | null = null;
-    set((s) => {
-      const token = createColorDesignToken(
-        name,
-        { hex: h, opacity: Math.min(1, Math.max(0, opacity)) },
-        s.designTokens,
-      );
-      createdId = token.id;
-      return { designTokens: { ...s.designTokens, [token.id]: token } };
-    });
-    return createdId;
+    commitStructuralResult(result);
+    return (result.ui._createdColorTokenId as string) ?? null;
   },
 
   seedDesignSystemColorPalette: () => {
     get().pushHistory();
-    set((s) => ({
-      designTokens: buildPaletteTokens(DEFAULT_COLOR_PALETTE, s.designTokens),
-    }));
+    commitStructuralResult(buildSeedDesignSystemColorPaletteResult(get()));
   },
 
   updateDesignToken: (id, patch) => {
+    const result = buildUpdateDesignTokenResult(get(), id, patch);
+    if (!result) return;
     get().pushHistory();
-    set((s) => {
-      const t = s.designTokens[id];
-      if (!t) return s;
-      const next: DesignToken = {
-        ...t,
-        ...patch,
-        id: t.id,
-        createdAt: t.createdAt,
-        type: patch.type ?? t.type,
-        value: patch.value !== undefined ? (patch.value as DesignToken["value"]) : t.value,
-        updatedAt: designTokenTimestamp(),
-      };
-      return { designTokens: { ...s.designTokens, [id]: next } };
-    });
+    commitStructuralResult(result);
   },
 
   deleteDesignToken: (id) => {
+    const result = buildDeleteDesignTokenResult(get(), id);
+    if (!result) return;
     get().pushHistory();
-    set((s) => {
-      if (!s.designTokens[id]) return s;
-      const { [id]: _removed, ...rest } = s.designTokens;
-      const nodes = { ...s.nodes };
-      for (const nid of Object.keys(nodes)) {
-        const n = nodes[nid];
-        if (!n) continue;
-        let next = n;
-        if (n.fillTokenId === id) next = { ...next, fillTokenId: undefined };
-        if (n.textStyleTokenId === id) next = { ...next, textStyleTokenId: undefined };
-        if (n.effectTokenId === id) next = { ...next, effectTokenId: undefined };
-        nodes[nid] = next;
-      }
-      return { designTokens: rest, nodes };
-    });
+    commitStructuralResult(result);
   },
 
   applyTokenToSelection: (tokenId) => {
-    const tok = get().designTokens[tokenId];
-    if (!tok) return;
+    if (!get().designTokens[tokenId]) return;
     get().pushHistory();
-    set((s) => {
-      const t = s.designTokens[tokenId];
-      if (!t) return s;
-      const nodes = { ...s.nodes };
-      for (const id of s.selectedIds) {
-        const raw = nodes[id];
-        if (!raw || raw.locked) continue;
-        if (t.type === "color") {
-          if (["frame", "rectangle", "ellipse", "path", "text"].includes(raw.type)) {
-            nodes[id] = {
-              ...raw,
-              fillTokenId: tokenId,
-              fillType: "solid",
-              fillEnabled: true,
-            };
-          }
-        } else if (t.type === "gradient") {
-          if (["frame", "rectangle", "ellipse", "path"].includes(raw.type)) {
-            nodes[id] = { ...raw, fillTokenId: tokenId, fillType: "gradient" };
-          }
-        } else if (t.type === "typography") {
-          if (raw.type === "text") nodes[id] = { ...raw, textStyleTokenId: tokenId };
-        } else if (t.type === "effect") {
-          nodes[id] = { ...raw, effectTokenId: tokenId };
-        } else if (t.type === "spacing" && isSpacingValue(t.value)) {
-          const v = Math.max(0, t.value.value);
-          if (raw.type === "frame" || raw.type === "group") {
-            nodes[id] = {
-              ...raw,
-              paddingTop: v,
-              paddingRight: v,
-              paddingBottom: v,
-              paddingLeft: v,
-              layoutGap: v,
-            };
-          }
-        }
-      }
-      return { nodes };
-    });
+    commitStructuralResult(buildApplyTokenToSelectionResult(get(), tokenId));
   },
 
   detachTokenFromSelection: (tokenType) => {
     get().pushHistory();
-    set((s) => {
-      const nodes = { ...s.nodes };
-      for (const id of s.selectedIds) {
-        const raw = nodes[id];
-        if (!raw) continue;
-        if ((tokenType === "color" || tokenType === "gradient") && raw.fillTokenId) {
-          nodes[id] = { ...raw, fillTokenId: undefined };
-        } else if (tokenType === "typography" && raw.textStyleTokenId) {
-          nodes[id] = { ...raw, textStyleTokenId: undefined };
-        } else if (tokenType === "effect" && raw.effectTokenId) {
-          nodes[id] = { ...raw, effectTokenId: undefined };
-        }
-      }
-      return { nodes };
-    });
+    commitStructuralResult(buildDetachTokenFromSelectionResult(get(), tokenType));
   },
 
   addEffect: (nodeId, type) => {
@@ -4328,13 +8485,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return;
     }
     get().pushHistory();
-    set((s) => {
-      const n = s.nodes[nodeId];
-      if (!n || n.locked) return s;
-      const ne = defaultNodeEffect(type);
-      const list = [...(n.effects ?? []), ne];
-      return { nodes: { ...s.nodes, [nodeId]: { ...n, effects: list } } };
-    });
+    commitStructuralResult(buildAddEffectResult(get(), nodeId, type));
   },
 
   updateEffect: (nodeId, effectId, patch) => {
@@ -4353,14 +8504,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return;
     }
     get().pushHistory();
-    set((s) => {
-      const nn = s.nodes[nodeId];
-      if (!nn || nn.locked) return s;
-      const list = (nn.effects ?? []).map((e) =>
-        e.id === effectId ? mergeNodeEffectPatch(e, patch) : e,
-      );
-      return { nodes: { ...s.nodes, [nodeId]: { ...nn, effects: list } } };
-    });
+    commitStructuralResult(buildUpdateEffectResult(get(), nodeId, effectId, patch));
   },
 
   deleteEffect: (nodeId, effectId) => {
@@ -4377,12 +8521,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return;
     }
     get().pushHistory();
-    set((s) => {
-      const nn = s.nodes[nodeId];
-      if (!nn || nn.locked) return s;
-      const list = (nn.effects ?? []).filter((e) => e.id !== effectId);
-      return { nodes: { ...s.nodes, [nodeId]: { ...nn, effects: list.length ? list : undefined } } };
-    });
+    commitStructuralResult(buildDeleteEffectResult(get(), nodeId, effectId));
   },
 
   toggleEffect: (nodeId, effectId) => {
@@ -4399,50 +8538,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return;
     }
     get().pushHistory();
-    set((s) => {
-      const nn = s.nodes[nodeId];
-      if (!nn || nn.locked) return s;
-      const list = (nn.effects ?? []).map((e) => (e.id === effectId ? { ...e, visible: !e.visible } : e));
-      return { nodes: { ...s.nodes, [nodeId]: { ...nn, effects: list } } };
-    });
+    commitStructuralResult(buildToggleEffectResult(get(), nodeId, effectId));
   },
 
   createEffectTokenFromSelection: (name) => {
-    const s0 = get();
-    let pickedId: string | null = null;
-    for (const id of s0.selectedIds) {
-      const raw = s0.nodes[id];
-      if (!raw || raw.locked || !raw.visible) continue;
-      pickedId = id;
-      break;
-    }
-    if (!pickedId) return;
-    const merged = mergeInstanceOverrides(s0.nodes[pickedId]!, s0.nodes);
-    const resolved = resolveNodeWithDesignTokens(merged, s0.designTokens);
-    const effList = resolved.effects?.length ? resolved.effects.map((e) => ({ ...e, id: newNodeEffectId() })) : undefined;
-    const value: EffectTokenValue =
-      effList && effList.length > 0
-        ? { effects: effList }
-        : { shadow: "0 4px 12px rgba(15, 23, 42, 0.2)", blur: 0 };
+    const result = buildCreateEffectTokenFromSelectionResult(get(), name);
+    if (!result) return;
     get().pushHistory();
-    set((s) => {
-      const n = s.nodes[pickedId!];
-      if (!n) return s;
-      const effectCount = Object.values(s.designTokens).filter((t) => t.type === "effect").length;
-      const tid = newDesignTokenId("effect");
-      const nm =
-        name?.trim() ||
-        `Effect / ${n.name || "Selection"}${effectCount > 0 ? ` ${effectCount + 1}` : ""}`;
-      const token: DesignToken = {
-        id: tid,
-        name: nm.slice(0, 64),
-        type: "effect",
-        value,
-        createdAt: designTokenTimestamp(),
-        updatedAt: designTokenTimestamp(),
-      };
-      return { designTokens: { ...s.designTokens, [tid]: token } };
-    });
+    commitStructuralResult(result);
   },
 
   applyEffectTokenToSelection: (tokenId) => {
@@ -4464,217 +8567,235 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   createFrameWithBounds: (x, y, width, height, opts) => {
     get().pushHistory();
-    set((s) => {
-      const id = `frame-${Date.now()}`;
-      const name = opts?.name ?? nextFrameName(s.nodes);
-      const W = Math.max(RESIZE_MIN_DIMENSION, Math.round(width));
-      const H = Math.max(RESIZE_MIN_DIMENSION, Math.round(height));
-      const bx = Math.round(x);
-      const by = Math.round(y);
-      const node: EditorNode = {
-        id,
-        parentId: null,
-        type: "frame",
-        name,
-        x: bx,
-        y: by,
-        width: W,
-        height: H,
-        rotation: 0,
-        visible: true,
-        locked: false,
-        expanded: true,
-        fill: DEFAULT_FRAME_FILL,
-        fillEnabled: true,
-        fillOpacity: 1,
-        strokePosition: "center",
-      };
-      const inserted = insertNodeWithFrameParenting(
-        node,
-        { x: bx, y: by, width: W, height: H },
-        s.nodes,
-        s.childOrder,
-        s.selectedIds,
-      );
-      const childOrder = {
-        ...inserted.childOrder,
-        [id]: inserted.childOrder[id] ?? [],
-      };
-      return {
-        nodes: inserted.nodes,
-        childOrder,
-        selectedIds: [id],
-        tool: "move",
-        editingTextId: null,
-      };
-    });
+    commitStructuralResult(buildCreateFrameWithBoundsResult(get(), x, y, width, height, opts));
     get().setTool("move");
   },
 
   addEllipseAt: (worldX, worldY) => {
     get().pushHistory();
-    set((s) => {
-      const w = 120;
-      const h = 80;
-      const { x, y } = worldCenteredRootPoint(worldX, worldY, w, h);
-      const id = `ellipse-${Date.now()}`;
-      const node: EditorNode = {
-        id,
-        parentId: null,
-        type: "ellipse",
-        name: nextNumberedLayerName(s.nodes, "Ellipse"),
-        x,
-        y,
-        width: w,
-        height: h,
-        rotation: 0,
-        visible: true,
-        locked: false,
-        expanded: true,
-        fill: DEFAULT_SHAPE_FILL,
-        cornerRadius: 0,
-        fillEnabled: true,
-        fillOpacity: 1,
-        strokePosition: "center",
-      };
-      const inserted = insertNodeWithFrameParenting(
-        node,
-        { x, y, width: w, height: h },
-        s.nodes,
-        s.childOrder,
-        s.selectedIds,
-      );
-      return {
-        nodes: inserted.nodes,
-        childOrder: inserted.childOrder,
-        selectedIds: [id],
-        tool: "move",
-      };
-    });
+    commitStructuralResult(buildAddEllipseResult(get(), worldX, worldY));
   },
 
   addLineAt: (worldX, worldY) => {
     get().pushHistory();
-    set((s) => {
-      const w = 120;
-      const h = 8;
-      const { x, y } = worldCenteredRootPoint(worldX, worldY, w, h);
-      const id = `line-${Date.now()}`;
-      const node: EditorNode = {
-        id,
-        parentId: null,
-        type: "line",
-        name: nextNumberedLayerName(s.nodes, "Line"),
-        x,
-        y,
-        width: w,
-        height: h,
-        rotation: 0,
-        visible: true,
-        locked: false,
-        expanded: true,
-        fill: "transparent",
-        fillEnabled: false,
-        fillOpacity: 0,
-        strokeColor: DEFAULT_SHAPE_STROKE,
-        strokeWidth: 3,
-        strokePosition: "center",
-      };
-      const inserted = insertNodeWithFrameParenting(
-        node,
-        { x, y, width: w, height: h },
-        s.nodes,
-        s.childOrder,
-        s.selectedIds,
-      );
-      return {
-        nodes: inserted.nodes,
-        childOrder: inserted.childOrder,
-        selectedIds: [id],
-        tool: "move",
-      };
-    });
+    commitStructuralResult(buildAddLineResult(get(), worldX, worldY));
   },
 
   addTriangleAt: (worldX, worldY) => {
     get().pushHistory();
-    set((s) => {
-      const w = 120;
-      const h = 104;
-      const { x, y } = worldCenteredRootPoint(worldX, worldY, w, h);
-      const id = `tri-${Date.now()}`;
-      const pts: PathPoint[] = [
-        { id: newPathPointId(), x: w / 2, y: 0 },
-        { id: newPathPointId(), x: w, y: h },
-        { id: newPathPointId(), x: 0, y: h },
-      ];
-      let node: EditorNode = {
-        id,
-        parentId: null,
-        type: "path",
-        name: nextNumberedLayerName(s.nodes, "Triangle"),
-        x,
-        y,
-        width: w,
-        height: h,
-        rotation: 0,
-        visible: true,
-        locked: false,
-        expanded: true,
-        pathPoints: pts,
-        pathClosed: true,
-        fill: DEFAULT_SHAPE_FILL,
-        fillEnabled: true,
-        fillOpacity: 1,
-        strokeColor: DEFAULT_SHAPE_STROKE,
-        strokeWidth: 0,
-        strokePosition: "center",
-      };
-      node = normalizePathNode(node);
-      const inserted = insertNodeWithFrameParenting(
-        node,
-        { x, y, width: node.width, height: node.height },
-        s.nodes,
-        s.childOrder,
-        s.selectedIds,
-      );
-      return {
-        nodes: inserted.nodes,
-        childOrder: inserted.childOrder,
-        selectedIds: [id],
-        tool: "move",
-      };
-    });
+    commitStructuralResult(buildAddTriangleResult(get(), worldX, worldY));
   },
 
   createShapeFromDrag: (shapeType, start, end, modifiers, style) => {
     get().pushHistory();
-    set((s) => {
-      const draft = createShapeNode(shapeType, start, end, modifiers, style);
-      const id = `${draft.type}-${Date.now()}`;
-      const name = nextNumberedLayerName(s.nodes, draft.name);
-      const node: EditorNode = { ...draft, id, name };
-      const bounds = { x: node.x, y: node.y, width: node.width, height: node.height };
-      const inserted = insertNodeWithFrameParenting(
-        node,
-        bounds,
-        s.nodes,
-        s.childOrder,
-        s.selectedIds,
-      );
-      const frameId = inserted.nodes[id]?.parentId;
-      const nodesOut = frameId
-        ? relayoutParentsWithAutoLayout(inserted.nodes, inserted.childOrder, [frameId])
-        : inserted.nodes;
-
-      return {
-        nodes: nodesOut,
-        childOrder: inserted.childOrder,
-        selectedIds: [id],
-        tool: "move",
-      };
-    });
+    commitStructuralResult(
+      buildCreateShapeFromDragResult(get(), shapeType, start, end, modifiers, style),
+    );
     get().setTool("move");
+  },
+
+  startShapeFromDrag: (shapeType, start, modifiers, style) => {
+    const s0 = get();
+    if (s0.editorMode !== "design") return;
+    if (s0.frameDrawingSession) get().cancelFrameFromDrag();
+    if (s0.textDrawingSession) get().cancelTextFromDrag();
+    if (s0.shapeDrawingSession) get().cancelShapeFromDrag();
+    get().pushHistory();
+    commitStructuralResult(buildStartShapeFromDragResult(get(), shapeType, start, style));
+  },
+
+  updateShapeFromDrag: (end, modifiers) => {
+    const session = get().shapeDrawingSession;
+    if (!session) return;
+    const { nodes, childOrder } = get();
+    const node = nodes[session.nodeId];
+    if (!node) return;
+    const drag = worldDragPairInParentSpace(
+      node.parentId,
+      nodes,
+      childOrder,
+      session.start,
+      end,
+    );
+    const patch = shapeGeometryPatchFromDrag(
+      session.shapeType,
+      drag.start,
+      drag.end,
+      modifiers,
+      session.style,
+      "live",
+    );
+    get().updateNode(session.nodeId, patch, { skipHistory: true, allowZeroGeometry: true });
+  },
+
+  finishShapeFromDrag: (end, modifiers) => {
+    const session = get().shapeDrawingSession;
+    if (!session) return;
+    const { nodeId, shapeType, start, style } = session;
+    const dist = Math.hypot(end.x - start.x, end.y - start.y);
+    let finalEnd = end;
+    let finalMods = modifiers;
+    const clickOnly = dist < 4;
+    if (clickOnly) {
+      finalEnd =
+        shapeType === "line" || shapeType === "arrow"
+          ? { x: start.x + 120, y: start.y }
+          : { x: start.x + 120, y: start.y + 80 };
+      finalMods = { shiftKey: false, altKey: false };
+    }
+    const { nodes, childOrder } = get();
+    const node = nodes[nodeId];
+    const drag = node
+      ? worldDragPairInParentSpace(node.parentId, nodes, childOrder, start, finalEnd)
+      : { start, end: finalEnd };
+    const patch = shapeGeometryPatchFromDrag(
+      shapeType,
+      drag.start,
+      drag.end,
+      finalMods,
+      style,
+      clickOnly ? "commit" : "live",
+    );
+    get().updateNode(nodeId, patch, {
+      skipHistory: true,
+      allowZeroGeometry: !clickOnly,
+    });
+    if (!clickOnly) {
+      const n = get().nodes[nodeId];
+      if (n && isZeroAreaDraftNode(n)) {
+        get().cancelShapeFromDrag();
+        return;
+      }
+    }
+    commitStructuralResult(buildFinishShapeDragResult(get(), nodeId));
+    get().setTool("move");
+  },
+
+  cancelShapeFromDrag: () => {
+    const session = get().shapeDrawingSession;
+    if (!session) return;
+    commitStructuralResult(
+      buildRemoveDraftNodeResult(get(), session.nodeId, "shapeDrawingSession"),
+    );
+  },
+
+  startFrameFromDrag: (start) => {
+    const s0 = get();
+    if (s0.editorMode !== "design") return;
+    if (s0.shapeDrawingSession) get().cancelShapeFromDrag();
+    if (s0.textDrawingSession) get().cancelTextFromDrag();
+    if (s0.frameDrawingSession) get().cancelFrameFromDrag();
+    get().pushHistory();
+    commitStructuralResult(buildStartFrameFromDragResult(get(), start));
+  },
+
+  updateFrameFromDrag: (end, modifiers) => {
+    const session = get().frameDrawingSession;
+    if (!session) return;
+    const { nodes, childOrder } = get();
+    const node = nodes[session.nodeId];
+    if (!node) return;
+    const drag = worldDragPairInParentSpace(
+      node.parentId,
+      nodes,
+      childOrder,
+      session.start,
+      end,
+    );
+    const patch = frameGeometryPatchFromDrag(drag.start, drag.end, modifiers, "live");
+    get().updateNode(session.nodeId, patch, { skipHistory: true, allowZeroGeometry: true });
+  },
+
+  finishFrameFromDrag: (end, modifiers) => {
+    const session = get().frameDrawingSession;
+    if (!session) return;
+    const { nodeId, start } = session;
+    const dist = Math.hypot(end.x - start.x, end.y - start.y);
+    if (dist < 4) {
+      get().cancelFrameFromDrag();
+      get().createFrameAt(start.x, start.y);
+      return;
+    }
+    const { nodes, childOrder } = get();
+    const node0 = nodes[nodeId];
+    const drag = node0
+      ? worldDragPairInParentSpace(node0.parentId, nodes, childOrder, start, end)
+      : { start, end };
+    const patch = frameGeometryPatchFromDrag(drag.start, drag.end, modifiers, "live");
+    get().updateNode(nodeId, patch, { skipHistory: true, allowZeroGeometry: true });
+    const n = get().nodes[nodeId];
+    if (n && isZeroAreaDraftNode(n)) {
+      get().cancelFrameFromDrag();
+      return;
+    }
+    commitStructuralResult(buildFinishFrameDragResult(get(), nodeId));
+    get().setTool("move");
+  },
+
+  cancelFrameFromDrag: () => {
+    const session = get().frameDrawingSession;
+    if (!session) return;
+    commitStructuralResult(
+      buildRemoveDraftNodeResult(get(), session.nodeId, "frameDrawingSession"),
+    );
+  },
+
+  startTextFromDrag: (start) => {
+    const s0 = get();
+    if (s0.editorMode !== "design") return;
+    if (s0.shapeDrawingSession) get().cancelShapeFromDrag();
+    if (s0.frameDrawingSession) get().cancelFrameFromDrag();
+    if (s0.textDrawingSession) get().cancelTextFromDrag();
+    get().pushHistory();
+    commitStructuralResult(buildStartTextFromDragResult(get(), start));
+  },
+
+  updateTextFromDrag: (end, modifiers) => {
+    const session = get().textDrawingSession;
+    if (!session) return;
+    const { nodes, childOrder } = get();
+    const node = nodes[session.nodeId];
+    if (!node) return;
+    const drag = worldDragPairInParentSpace(
+      node.parentId,
+      nodes,
+      childOrder,
+      session.start,
+      end,
+    );
+    const patch = textGeometryPatchFromDrag(drag.start, drag.end, modifiers, "live");
+    get().updateNode(session.nodeId, patch, { skipHistory: true, allowZeroGeometry: true });
+  },
+
+  finishTextFromDrag: (end, modifiers) => {
+    const session = get().textDrawingSession;
+    if (!session) return;
+    const { nodeId, start } = session;
+    const dist = Math.hypot(end.x - start.x, end.y - start.y);
+    const result =
+      dist < 4
+        ? buildFinishTextDragClickResult(get(), nodeId, start)
+        : buildFinishTextDragBoxResult(get(), nodeId, start, end, modifiers);
+    if (!result) {
+      get().cancelTextFromDrag();
+      return;
+    }
+    commitStructuralResult(result);
+    get().setTool("move");
+    requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLTextAreaElement>(
+        `[data-text-editor="${get().editingTextId}"]`,
+      );
+      el?.focus();
+    });
+  },
+
+  cancelTextFromDrag: () => {
+    const session = get().textDrawingSession;
+    if (!session) return;
+    commitStructuralResult(
+      buildRemoveDraftNodeResult(get(), session.nodeId, "textDrawingSession"),
+    );
   },
 
   booleanUnionSelection: () => {
@@ -4694,101 +8815,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return;
     }
     get().pushHistory();
-    set((s) => {
-      const tops = getBooleanEligibleSelection(s.selectedIds, s.nodes);
-      if (tops.length < 2) return s;
-      const parentId = s.nodes[tops[0]!]!.parentId;
-      if (!tops.every((id) => s.nodes[id]!.parentId === parentId)) return s;
-      const P = parentListKey(parentId);
-      const list = s.childOrder[P] ?? [];
-      let ordered = [...tops].sort((a, b) => list.indexOf(a) - list.indexOf(b));
-      if (operation === "subtract") {
-        const top = topmostAmongSiblings(tops, s.nodes, s.childOrder);
-        ordered = ordered.filter((id) => id !== top).concat(top);
-      }
-      const pw = parentId ? worldRect(parentId, s.nodes) : { x: 0, y: 0, width: 0, height: 0 };
-      const visible = boundsForBooleanChildren(operation, ordered, s.nodes);
-      const minX = visible.x;
-      const minY = visible.y;
-      const maxX = visible.x + visible.width;
-      const maxY = visible.y + visible.height;
-      const gw = visible.width;
-      const gh = visible.height;
-      const gx = minX - pw.x;
-      const gy = minY - pw.y;
-      const gid = `group-bool-${Date.now()}`;
-      const nodes = { ...s.nodes };
-      const childOrder = { ...s.childOrder };
-      const fillSource = nodes[ordered[0]!];
-      nodes[gid] = {
-        id: gid,
-        parentId,
-        type: "group",
-        name: BOOLEAN_OPERATION_LABELS[operation],
-        x: gx,
-        y: gy,
-        width: gw,
-        height: gh,
-        rotation: 0,
-        visible: true,
-        locked: false,
-        expanded: true,
-        isBooleanGroup: true,
-        booleanOperation: operation,
-        fill: fillSource?.fill,
-        fillEnabled: fillSource?.fillEnabled ?? true,
-        fillOpacity: fillSource?.fillOpacity ?? 1,
-        fillType: fillSource?.fillType,
-        fillGradient: fillSource?.fillGradient,
-      };
-      for (const id of ordered) {
-        const o = getNodeWorldOrigin(id, nodes);
-        const n = nodes[id]!;
-        nodes[id] = {
-          ...n,
-          parentId: gid,
-          x: o.x - minX,
-          y: o.y - minY,
-        };
-      }
-      const parentList = [...(childOrder[P] ?? [])];
-      const ixs = ordered.map((id) => parentList.indexOf(id)).sort((a, b) => a - b);
-      const insertAt = ixs[0]!;
-      const newList = parentList.filter((id) => !ordered.includes(id));
-      newList.splice(insertAt, 0, gid);
-      childOrder[P] = newList;
-      childOrder[gid] = ordered;
-      const nodesOut = relayoutParentsWithAutoLayout(nodes, childOrder, [P]);
-      return {
-        nodes: nodesOut,
-        childOrder,
-        selectedIds: [gid],
-        tool: "move",
-        editingTextId: null,
-        objectEditModeNodeId: null,
-      };
-    });
+    commitStructuralResult(buildCreateBooleanGroupResult(get(), operation));
   },
 
   updateBooleanOperation: (groupId, operation) => {
     const g = get().nodes[groupId];
     if (!g?.isBooleanGroup || g.locked) return;
     get().pushHistory();
-    set((s) => {
-      const node = s.nodes[groupId];
-      if (!node?.isBooleanGroup) return s;
-      let nodes = {
-        ...s.nodes,
-        [groupId]: {
-          ...node,
-          booleanOperation: operation,
-          name: BOOLEAN_OPERATION_LABELS[operation],
-          flattenedPathData: undefined,
-        },
-      };
-      nodes = syncGroupFrameToVisible(groupId, nodes, s.childOrder);
-      return { nodes };
-    });
+    commitStructuralResult(buildUpdateBooleanOperationResult(get(), groupId, operation));
   },
 
   flattenSelection: () => {
@@ -4810,29 +8844,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return;
     }
     get().pushHistory();
-    set((s) => {
-      const g2 = s.nodes[gid];
-      if (!g2?.isBooleanGroup) return s;
-      const parentId = g2.parentId;
-      const P = parentListKey(parentId);
-      const pw = parentId ? worldRect(parentId, s.nodes) : { x: 0, y: 0, width: 0, height: 0 };
-      const pathNode = booleanResultToPathNode(result, g2, parentId);
-      pathNode.x = result.x - pw.x;
-      pathNode.y = result.y - pw.y;
-      const nodes = { ...s.nodes, [pathNode.id]: pathNode };
-      const childOrder = { ...s.childOrder };
-      for (const cid of kids) {
-        delete nodes[cid];
-        delete childOrder[cid];
-      }
-      delete nodes[gid];
-      delete childOrder[gid];
-      const list = (childOrder[P] ?? []).filter((id) => id !== gid);
-      const idx = (s.childOrder[P] ?? []).indexOf(gid);
-      list.splice(Math.max(0, idx), 0, pathNode.id);
-      childOrder[P] = list;
-      return { nodes, childOrder, selectedIds: [pathNode.id], tool: "move" };
-    });
+    commitStructuralResult(buildFlattenBooleanGroupResult(get(), result));
   },
 
   outlineStrokeSelection: () => {
@@ -4856,32 +8868,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     }
     const removeKids = booleanGroupChildrenToRemove(node, ctx);
     get().pushHistory();
-    set((s) => {
-      const current = s.nodes[id];
-      if (!current) return s;
-      const next = { ...converted, id, name: current.name, parentId: current.parentId };
-      const nodes = { ...s.nodes, [id]: next };
-      const childOrder = { ...s.childOrder };
-      for (const cid of removeKids) {
-        delete nodes[cid];
-        delete childOrder[cid];
-      }
-      if (removeKids.length > 0) {
-        delete childOrder[id];
-      }
-      const parentRef = current.parentId;
-      const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
-      return {
-        nodes: nodes2,
-        childOrder,
-        pathEditModeNodeId: id,
-        shapeEditModeNodeId: null,
-        objectEditModeNodeId: null,
-        selectedPathPointId: null,
-        selectedIds: [id],
-        tool: "move",
-      };
-    });
+    commitStructuralResult(buildOutlineStrokeSelectionResult(get(), id, converted, removeKids));
   },
 
   enterObjectEditMode: (nodeId) => {
@@ -4916,179 +8903,74 @@ export const useEditorStore = create<EditorState>((set, get) => {
       window.alert("Mask requires shapes on the same level.");
       return;
     }
+    const result = buildUseSelectionAsMaskResult(get());
+    if (!result) {
+      window.alert("Mask requires shapes on the same level.");
+      return;
+    }
     get().pushHistory();
-    set((s) => {
-      const tops = getBooleanEligibleSelection(s.selectedIds, s.nodes);
-      if (tops.length < 2) return s;
-      const parentId = s.nodes[tops[0]!]!.parentId;
-      const P = parentListKey(parentId);
-      const maskId = topmostAmongSiblings(tops, s.nodes, s.childOrder);
-      const contentIds = tops.filter((id) => id !== maskId);
-      const allIds = [...contentIds, maskId];
-      const pw = parentId ? worldRect(parentId, s.nodes) : { x: 0, y: 0, width: 0, height: 0 };
-      const visible = boundsForMaskAndContent(maskId, contentIds, s.nodes, s.childOrder);
-      const minX = visible.x;
-      const minY = visible.y;
-      const maxX = visible.x + visible.width;
-      const maxY = visible.y + visible.height;
-      const gid = `group-mask-${Date.now()}`;
-      const nodes = { ...s.nodes };
-      const childOrder = { ...s.childOrder };
-      nodes[gid] = {
-        id: gid,
-        parentId,
-        type: "group",
-        name: "Mask group",
-        x: minX - pw.x,
-        y: minY - pw.y,
-        width: maxX - minX,
-        height: maxY - minY,
-        rotation: 0,
-        visible: true,
-        locked: false,
-        expanded: true,
-        maskId,
-      };
-      for (const id of contentIds) {
-        const o = getNodeWorldOrigin(id, nodes);
-        nodes[id] = {
-          ...nodes[id]!,
-          parentId: gid,
-          x: o.x - minX,
-          y: o.y - minY,
-          maskedBy: gid,
-          isMask: false,
-        };
-      }
-      const mo = getNodeWorldOrigin(maskId, nodes);
-      nodes[maskId] = {
-        ...nodes[maskId]!,
-        parentId: gid,
-        x: mo.x - minX,
-        y: mo.y - minY,
-        isMask: true,
-        name: "Mask",
-        maskedBy: undefined,
-      };
-      const parentList = [...(childOrder[P] ?? [])];
-      const insertAt = Math.min(...allIds.map((id) => parentList.indexOf(id)).filter((i) => i >= 0));
-      childOrder[P] = parentList.filter((id) => !allIds.includes(id));
-      childOrder[P]!.splice(Math.max(0, insertAt), 0, gid);
-      childOrder[gid] = [...contentIds, maskId];
-      const firstContent = contentIds[0];
-      return {
-        nodes: relayoutParentsWithAutoLayout(nodes, childOrder, [P]),
-        childOrder,
-        selectedIds: firstContent ? [firstContent] : [gid],
-        tool: "move",
-      };
-    });
+    commitStructuralResult(result);
   },
 
   releaseMask: (maskGroupId) => {
-    const g0 = get().nodes[maskGroupId];
-    if (!g0 || !isMaskGroup(g0) || g0.locked) return;
+    const result = buildReleaseMaskResult(get(), maskGroupId);
+    if (!result) return;
     get().pushHistory();
-    set((s) => {
-      const g = s.nodes[maskGroupId];
-      if (!g || !isMaskGroup(g)) return s;
-      const parentId = g.parentId;
-      const P = parentListKey(parentId);
-      const kids = [...(s.childOrder[maskGroupId] ?? [])];
-      const nodes = { ...s.nodes };
-      const childOrder = { ...s.childOrder };
-      const gw = worldRect(maskGroupId, s.nodes);
-      for (const kid of kids) {
-        const kn = nodes[kid];
-        if (!kn) continue;
-        const kw = worldRect(kid, s.nodes);
-        nodes[kid] = {
-          ...kn,
-          parentId,
-          x: kw.x - (parentId ? worldRect(parentId, s.nodes).x : 0),
-          y: kw.y - (parentId ? worldRect(parentId, s.nodes).y : 0),
-          isMask: undefined,
-          maskedBy: undefined,
-        };
-      }
-      const list = [...(childOrder[P] ?? [])];
-      const gi = list.indexOf(maskGroupId);
-      list.splice(gi, 1, ...kids);
-      childOrder[P] = list;
-      delete nodes[maskGroupId];
-      delete childOrder[maskGroupId];
-      return { nodes, childOrder, selectedIds: kids, tool: "move" };
-    });
+    commitStructuralResult(result);
   },
 
   setNodeAsMask: (nodeId, isMask) => {
     const n = get().nodes[nodeId];
     if (!n || n.locked) return;
     get().pushHistory();
-    set((s) => ({
-      nodes: {
-        ...s.nodes,
-        [nodeId]: {
-          ...s.nodes[nodeId]!,
-          isMask,
-          name: isMask ? "Mask" : s.nodes[nodeId]!.name,
-        },
-      },
-    }));
+    commitStructuralResult(buildSetNodeAsMaskResult(get(), nodeId, isMask));
   },
 
   duplicateSelection: () => {
     if (editableTopLevelSelection(get()).length === 0) return;
     get().pushHistory();
-    const zoom = get().zoom;
-    const offset = 10 / Math.max(zoom, 0.01);
-    set((s) => cloneTopLevelSelectionState(s, offset) ?? s);
+    const s = get();
+    const tops = editableTopLevelSelection(s);
+    if (!selectionMatchesDuplicateChain(tops)) {
+      resetDuplicateRepeatOffset();
+    }
+    const result = buildDuplicateSelectionResult(s, getDuplicateStepOffset(tops));
+    commitStructuralResult(result);
+    if (result) {
+      recordDuplicateCreated(
+        result.ui.selectedIds as string[],
+        result.nodes,
+        result.childOrder,
+      );
+    }
   },
 
   cloneSelectionInPlace: () => {
     if (editableTopLevelSelection(get()).length === 0) return [];
-    set((s) => cloneTopLevelSelectionState(s, 0) ?? s);
+    const s = get();
+    // Option/Alt drag: always clone on top of the selection (no Cmd+D repeat step).
+    const result = buildDuplicateSelectionResult(s, null);
+    commitStructuralResult(result);
     return get().selectedIds;
   },
 
   alignSelection: (direction) => {
-    const s0 = get();
-    const tops0 = alignableSelectionIds(s0.selectedIds, s0.nodes);
-    if (tops0.length < 2) return;
+    if (!canAlignSelection(get().selectedIds, get().nodes, get().childOrder)) return;
     get().pushHistory();
-    set((s) => {
-      const tops = alignableSelectionIds(s.selectedIds, s.nodes);
-      if (tops.length < 2) return s;
-      let nodes = alignNodesInDocument(s.nodes, s.childOrder, tops, direction);
-      const relayoutKeys = relayoutParentKeysAfterManualPosition(
-        nodes,
-        s.childOrder,
-        tops,
-        parentListKey,
-      );
-      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, relayoutKeys);
-      return { nodes };
-    });
+    commitStructuralResult(buildAlignSelectionResult(get(), direction));
+  },
+
+  alignSelectionToGrid: (row, col) => {
+    if (!canAlignSelection(get().selectedIds, get().nodes, get().childOrder)) return;
+    get().pushHistory();
+    commitStructuralResult(buildAlignSelectionGridResult(get(), row, col));
   },
 
   distributeSelection: (axis) => {
-    const s0 = get();
-    const tops0 = alignableSelectionIds(s0.selectedIds, s0.nodes);
+    const tops0 = alignableSelectionIds(get().selectedIds, get().nodes);
     if (tops0.length < 3) return;
     get().pushHistory();
-    set((s) => {
-      const tops = alignableSelectionIds(s.selectedIds, s.nodes);
-      if (tops.length < 3) return s;
-      let nodes = distributeNodesInDocument(s.nodes, s.childOrder, tops, axis);
-      const relayoutKeys = relayoutParentKeysAfterManualPosition(
-        nodes,
-        s.childOrder,
-        tops,
-        parentListKey,
-      );
-      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, relayoutKeys);
-      return { nodes };
-    });
+    commitStructuralResult(buildDistributeSelectionResult(get(), axis));
   },
 
   selectAllEditable: () =>
@@ -5110,38 +8992,20 @@ export const useEditorStore = create<EditorState>((set, get) => {
         selectedPrototypeLinkId: null,
         pathEditModeNodeId: null,
   objectEditModeNodeId: null,
-        selectedPathPointId: null,
+        selectedPathPointIds: [],
       };
     }),
 
   toggleLockSelection: () => {
-    const s0 = get();
-    if (!s0.selectedIds.length) return;
+    if (!get().selectedIds.length) return;
     get().pushHistory();
-    set((s) => {
-      const nodes = { ...s.nodes };
-      for (const id of s.selectedIds) {
-        const n = nodes[id];
-        if (!n) continue;
-        nodes[id] = { ...n, locked: !n.locked };
-      }
-      return { nodes };
-    });
+    commitStructuralResult(buildToggleLockSelectionResult(get()));
   },
 
   toggleVisibleSelection: () => {
-    const s0 = get();
-    if (!s0.selectedIds.length) return;
+    if (!get().selectedIds.length) return;
     get().pushHistory();
-    set((s) => {
-      const nodes = { ...s.nodes };
-      for (const id of s.selectedIds) {
-        const n = nodes[id];
-        if (!n) continue;
-        nodes[id] = { ...n, visible: !n.visible };
-      }
-      return { nodes };
-    });
+    commitStructuralResult(buildToggleVisibleSelectionResult(get()));
   },
 
   copySelection: () => {
@@ -5174,377 +9038,78 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const raw = getEditorClipboardJson();
     const payload = raw ? parseEditorClipboardPayload(raw) : null;
     if (!payload?.rootIds?.length) return;
-    const OFFSET = opts?.inPlace ? 0 : 24;
     get().pushHistory();
-    set((s) => {
-      const idMap = new Map<string, string>();
-      const newAssetIds = new Map<string, string>();
-      if (payload.assets) {
-        for (const aid of Object.keys(payload.assets)) {
-          newAssetIds.set(aid, `asset-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
-        }
-      }
-      let nodes: Record<string, EditorNode> = { ...s.nodes };
-      let childOrder: Record<string, string[]> = { ...s.childOrder };
-      const assets: Record<string, EditorAsset> = { ...s.assets };
-      if (payload.assets) {
-        for (const [oldAid, ast] of Object.entries(payload.assets)) {
-          const nid = newAssetIds.get(oldAid)!;
-          assets[nid] = { ...ast, id: nid };
-        }
-      }
-
-      const newRoots: string[] = [];
-      const pasteParentId = resolvePasteParentId(s);
-
-      for (const rootId of payload.rootIds) {
-        const rootOld = payload.nodes[rootId];
-        if (!rootOld) continue;
-        const rootLabel =
-          rootOld.type === "text"
-            ? duplicatedTextLayerName(rootOld.content)
-            : nextDuplicatedLayerName(nodes, rootOld.name);
-
-        const cloneRecursive = (oldId: string, newParent: string | null, treeRootOldId: string): string => {
-          const old = payload.nodes[oldId];
-          if (!old) return "";
-          const newId = `${old.type}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-          idMap.set(oldId, newId);
-          const isTreeRoot = oldId === treeRootOldId;
-          const worldR = worldRect(oldId, payload.nodes);
-          const wx = worldR.x;
-          const wy = worldR.y + (isTreeRoot ? -OFFSET : 0);
-          const pos = isTreeRoot
-            ? worldPointToParentLocal(wx, wy, newParent, s.nodes)
-            : { x: old.x, y: old.y };
-
-          let base: EditorNode = {
-            ...JSON.parse(JSON.stringify(old)) as EditorNode,
-            id: newId,
-            parentId: newParent,
-            name:
-              old.type === "text"
-                ? duplicatedTextLayerName(old.content)
-                : oldId === rootId
-                  ? rootLabel
-                  : old.name,
-            x: pos.x,
-            y: pos.y,
-          };
-          if (base.type === "path" && base.pathPoints?.length) {
-            base = { ...base, pathPoints: rekeyPathPoints(base.pathPoints) };
-          }
-          if (old.effects?.length) {
-            base = { ...base, effects: old.effects.map((e) => ({ ...e, id: newNodeEffectId() })) };
-          }
-          if (base.type === "image" && base.assetId && newAssetIds.has(base.assetId)) {
-            const na = newAssetIds.get(base.assetId)!;
-            const assetRow = assets[na];
-            base = {
-              ...base,
-              assetId: na,
-              imageSrc: assetRow?.dataUrl ?? base.imageSrc,
-            };
-          }
-          nodes[newId] = base;
-          const newKids: string[] = [];
-          for (const k of payload.childOrder[oldId] ?? []) {
-            newKids.push(cloneRecursive(k, newId, treeRootOldId));
-          }
-          childOrder[newId] = newKids;
-          return newId;
-        };
-
-        const newRootId = cloneRecursive(rootId, pasteParentId, rootId);
-        newRoots.push(newRootId);
-        for (const nid of collectSubtreeIds(newRootId, childOrder)) {
-          const n = nodes[nid]!;
-          if (!n.prototypeLinks?.length) continue;
-          nodes[nid] = {
-            ...n,
-            prototypeLinks: n.prototypeLinks.map((l) => ({
-              ...l,
-              id: newPrototypeLinkId(),
-              sourceNodeId: idMap.get(l.sourceNodeId) ?? l.sourceNodeId,
-              targetFrameId:
-                l.targetFrameId && idMap.has(l.targetFrameId) ? idMap.get(l.targetFrameId)! : l.targetFrameId,
-            })),
-          };
-        }
-      }
-
-      for (const newId of idMap.values()) {
-        const n = nodes[newId];
-        if (!n?.instanceOverrides) continue;
-        const io: Record<string, Record<string, unknown>> = {};
-        for (const [k, v] of Object.entries(n.instanceOverrides)) {
-          const nk = idMap.has(k) ? (idMap.get(k) as string) : k;
-          io[nk] = v as Record<string, unknown>;
-        }
-        nodes[newId] = { ...n, instanceOverrides: io };
-      }
-
-      const topsSel = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
-        const n = s.nodes[id];
-        return n && !n.locked && n.visible;
-      });
-      const anchor = topsSel.length ? topsSel[topsSel.length - 1]! : null;
-      const byParent = new Map<string, string[]>();
-      for (const newR of newRoots) {
-        const pk = parentListKey(nodes[newR]!.parentId);
-        if (!byParent.has(pk)) byParent.set(pk, []);
-        byParent.get(pk)!.push(newR);
-      }
-      for (const [pk, group] of byParent) {
-        let list = [...(childOrder[pk] ?? [])].filter((id) => !group.includes(id));
-        let ins = list.length;
-        if (anchor) {
-          const apk = parentListKey(s.nodes[anchor]!.parentId);
-          if (apk === pk) {
-            const idx = list.indexOf(anchor);
-            ins = idx >= 0 ? idx + 1 : list.length;
-          }
-        }
-        list = [...list.slice(0, ins), ...group, ...list.slice(ins)];
-        childOrder[pk] = list;
-      }
-
-      let nodesOut = nodes;
-      const relayoutKeys = new Set<string>();
-      for (const nr of newRoots) relayoutKeys.add(parentListKey(nodes[nr]!.parentId));
-      nodesOut = relayoutParentsWithAutoLayout(nodesOut, childOrder, relayoutKeys);
-
-      return {
-        nodes: nodesOut,
-        childOrder,
-        assets,
-        selectedIds: newRoots,
-        tool: "move" as Tool,
-        editingTextId: null,
-        contextMenu: null,
-      };
-    });
+    commitStructuralResult(
+      buildPasteSelectionResult(get(), payload, opts?.inPlace ? 0 : 24),
+    );
   },
 
   deleteSelection: (opts) => {
-    const s0 = get();
-    const tops0 = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
-      const n = s0.nodes[id];
-      return n && !n.locked && n.visible;
-    });
-    if (tops0.length === 0) return;
+    if (editableTopLevelSelection(get()).length === 0) return;
     if (!opts?.skipHistory) get().pushHistory();
-    set((s) => {
-      const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
-        const n = s.nodes[id];
-        return n && !n.locked && n.visible;
+    const result = buildDeleteSelectionResult(get());
+    commitDocumentMutation(result, (built) => {
+      set({
+        nodes: built.nodes,
+        childOrder: built.childOrder,
+        ...(built.ui as {
+          selectedIds: string[];
+          editingTextId: string | null;
+          pathEditModeNodeId: string | null;
+          selectedPathPointIds: string[];
+        }),
       });
-      if (tops.length === 0) return s;
-      const parentsToRelayout = new Set<string>();
-      for (const root of tops) {
-        parentsToRelayout.add(parentListKey(s.nodes[root]!.parentId));
-      }
-      const toRemove = new Set<string>();
-      for (const root of tops) {
-        for (const id of collectSubtreeIds(root, s.childOrder)) {
-          toRemove.add(id);
-        }
-      }
-      let nodes = { ...s.nodes };
-      const childOrder: Record<string, string[]> = {};
-      for (const [k, arr] of Object.entries(s.childOrder)) {
-        childOrder[k] = arr.filter((id) => !toRemove.has(id));
-      }
-      for (const id of toRemove) {
-        delete nodes[id];
-        delete childOrder[id];
-      }
-      nodes = relayoutParentsWithAutoLayout(nodes, childOrder, parentsToRelayout);
-      return { nodes, childOrder, selectedIds: [], editingTextId: null, pathEditModeNodeId: null, selectedPathPointId: null };
+      syncWasmDocumentAfterStoreUpdate();
     });
   },
 
   bringForward: () => {
-    const s0 = get();
-    const tops0 = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
-      const n = s0.nodes[id];
-      return n && !n.locked && n.visible;
-    });
-    if (tops0.length === 0) return;
+    if (editableTopLevelSelection(get()).length === 0) return;
     get().pushHistory();
-    set((s) => {
-      const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
-        const n = s.nodes[id];
-        return n && !n.locked && n.visible;
-      });
-      if (tops.length === 0) return s;
-      const childOrder = { ...s.childOrder };
-      const byParent = new Map<string, string[]>();
-      for (const id of tops) {
-        const P = parentListKey(s.nodes[id]!.parentId);
-        if (!byParent.has(P)) byParent.set(P, []);
-        byParent.get(P)!.push(id);
-      }
-      for (const [P, ids] of byParent) {
-        const list = [...(childOrder[P] ?? [])];
-        const idxs = ids
-          .map((id) => list.indexOf(id))
-          .filter((i) => i >= 0)
-          .sort((a, b) => b - a);
-        for (const i of idxs) {
-          if (i < list.length - 1) {
-            const t = list[i + 1];
-            list[i + 1] = list[i]!;
-            list[i] = t!;
-          }
-        }
-        childOrder[P] = list;
-      }
-      let nodes = { ...s.nodes };
-      nodes = relayoutParentsWithAutoLayout(nodes, childOrder, byParent.keys());
-      return { childOrder, nodes };
+    const result = buildZOrderResult(get(), "forward");
+    commitDocumentMutation(result, (built) => {
+      set({ nodes: built.nodes, childOrder: built.childOrder });
+      syncWasmDocumentAfterStoreUpdate();
     });
   },
 
   sendBackward: () => {
-    const s0 = get();
-    const tops0 = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
-      const n = s0.nodes[id];
-      return n && !n.locked && n.visible;
-    });
-    if (tops0.length === 0) return;
+    if (editableTopLevelSelection(get()).length === 0) return;
     get().pushHistory();
-    set((s) => {
-      const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
-        const n = s.nodes[id];
-        return n && !n.locked && n.visible;
-      });
-      if (tops.length === 0) return s;
-      const childOrder = { ...s.childOrder };
-      const byParent = new Map<string, string[]>();
-      for (const id of tops) {
-        const P = parentListKey(s.nodes[id]!.parentId);
-        if (!byParent.has(P)) byParent.set(P, []);
-        byParent.get(P)!.push(id);
-      }
-      for (const [P, ids] of byParent) {
-        const list = [...(childOrder[P] ?? [])];
-        const idxs = ids
-          .map((id) => list.indexOf(id))
-          .filter((i) => i >= 0)
-          .sort((a, b) => a - b);
-        for (const i of idxs) {
-          if (i > 0) {
-            const t = list[i - 1];
-            list[i - 1] = list[i]!;
-            list[i] = t!;
-          }
-        }
-        childOrder[P] = list;
-      }
-      let nodes = { ...s.nodes };
-      nodes = relayoutParentsWithAutoLayout(nodes, childOrder, byParent.keys());
-      return { childOrder, nodes };
+    const result = buildZOrderResult(get(), "backward");
+    commitDocumentMutation(result, (built) => {
+      set({ nodes: built.nodes, childOrder: built.childOrder });
+      syncWasmDocumentAfterStoreUpdate();
     });
   },
 
   bringToFront: () => {
-    const s0 = get();
-    const tops0 = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
-      const n = s0.nodes[id];
-      return n && !n.locked && n.visible;
-    });
-    if (tops0.length === 0) return;
+    if (editableTopLevelSelection(get()).length === 0) return;
     get().pushHistory();
-    set((s) => {
-      const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
-        const n = s.nodes[id];
-        return n && !n.locked && n.visible;
-      });
-      if (tops.length === 0) return s;
-      const childOrder = { ...s.childOrder };
-      const byParent = new Map<string, string[]>();
-      for (const id of tops) {
-        const P = parentListKey(s.nodes[id]!.parentId);
-        if (!byParent.has(P)) byParent.set(P, []);
-        byParent.get(P)!.push(id);
-      }
-      for (const [P, ids] of byParent) {
-        const list = [...(childOrder[P] ?? [])];
-        const set = new Set(ids);
-        const rest = list.filter((id) => !set.has(id));
-        const stable = [...ids].sort((a, b) => list.indexOf(a) - list.indexOf(b));
-        childOrder[P] = [...rest, ...stable];
-      }
-      let nodes = { ...s.nodes };
-      nodes = relayoutParentsWithAutoLayout(nodes, childOrder, byParent.keys());
-      return { childOrder, nodes };
+    const result = buildZOrderResult(get(), "front");
+    commitDocumentMutation(result, (built) => {
+      set({ nodes: built.nodes, childOrder: built.childOrder });
+      syncWasmDocumentAfterStoreUpdate();
     });
   },
 
   sendToBack: () => {
-    const s0 = get();
-    const tops0 = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
-      const n = s0.nodes[id];
-      return n && !n.locked && n.visible;
-    });
-    if (tops0.length === 0) return;
+    if (editableTopLevelSelection(get()).length === 0) return;
     get().pushHistory();
-    set((s) => {
-      const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
-        const n = s.nodes[id];
-        return n && !n.locked && n.visible;
-      });
-      if (tops.length === 0) return s;
-      const childOrder = { ...s.childOrder };
-      const byParent = new Map<string, string[]>();
-      for (const id of tops) {
-        const P = parentListKey(s.nodes[id]!.parentId);
-        if (!byParent.has(P)) byParent.set(P, []);
-        byParent.get(P)!.push(id);
-      }
-      for (const [P, ids] of byParent) {
-        const list = [...(childOrder[P] ?? [])];
-        const set = new Set(ids);
-        const rest = list.filter((id) => !set.has(id));
-        const stable = [...ids].sort((a, b) => list.indexOf(a) - list.indexOf(b));
-        childOrder[P] = [...stable, ...rest];
-      }
-      let nodes = { ...s.nodes };
-      nodes = relayoutParentsWithAutoLayout(nodes, childOrder, byParent.keys());
-      return { childOrder, nodes };
+    const result = buildZOrderResult(get(), "back");
+    commitDocumentMutation(result, (built) => {
+      set({ nodes: built.nodes, childOrder: built.childOrder });
+      syncWasmDocumentAfterStoreUpdate();
     });
   },
 
   nudgeSelection: (dx, dy) => {
-    if (dx === 0 && dy === 0) return;
-    const s0 = get();
-    if (s0.editorMode !== "design") return;
-    const tops0 = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
-      const n = s0.nodes[id];
-      return n && !n.locked && n.visible;
-    });
-    if (tops0.length === 0) return;
+    const result = buildNudgeSelectionResult(get(), dx, dy);
+    if (!result) return;
     get().pushHistory();
-    set((s) => {
-      const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
-        const n = s.nodes[id];
-        return n && !n.locked && n.visible;
-      });
-      if (tops.length === 0) return s;
-      let nodes = { ...s.nodes };
-      const refresh = new Set<string>();
-      for (const id of tops) {
-        const n = nodes[id]!;
-        nodes[id] = { ...n, x: n.x + dx, y: n.y + dy };
-        if (n.parentId) refresh.add(n.parentId);
-        if ((n.type === "frame" || n.type === "group") && (n.layoutMode ?? "none") !== "none") {
-          refresh.add(id);
-        }
-      }
-      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
-      return { nodes };
-    });
+    commitStructuralResult(result);
+    const st = get();
+    refreshDuplicateStepAfterMove(st.selectedIds, st.nodes, st.childOrder);
   },
 
   setPencilStrokeWidth: (width) => {
@@ -5554,26 +9119,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
   setSelectionStrokeWidth: (width) => {
     const s0 = get();
     if (s0.editorMode !== "design") return;
-    const next = clampStrokeWidth(width);
     const tops = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
       const n = s0.nodes[id];
       return n && !n.locked && n.visible && nodeSupportsStrokeWidth(n);
     });
     if (tops.length === 0) return;
     get().pushHistory();
-    set((s) => {
-      let nodes = { ...s.nodes };
-      for (const id of tops) {
-        const n = nodes[id];
-        if (!n || n.locked || !nodeSupportsStrokeWidth(n)) continue;
-        nodes[id] = {
-          ...n,
-          strokeWidth: next,
-          strokeEnabled: next > 0 ? true : n.strokeEnabled,
-        };
-      }
-      return { nodes, pencilStrokeWidth: next };
-    });
+    commitStructuralResult(buildSetSelectionStrokeWidthResult(get(), width));
   },
 
   nudgeSelectionStrokeWidth: (delta) => {
@@ -5591,25 +9143,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return;
     }
     get().pushHistory();
-    set((s) => {
-      let nodes = { ...s.nodes };
-      let preset = s.pencilStrokeWidth;
-      for (const id of tops) {
-        const n = nodes[id];
-        if (!n || n.locked || !nodeSupportsStrokeWidth(n)) continue;
-        const next = clampStrokeWidth((n.strokeWidth ?? 0) + delta);
-        preset = next;
-        nodes[id] = {
-          ...n,
-          strokeWidth: next,
-          strokeEnabled: next > 0 ? true : n.strokeEnabled,
-        };
-      }
-      return { nodes, pencilStrokeWidth: preset };
-    });
+    commitStructuralResult(buildNudgeSelectionStrokeWidthResult(get(), delta));
   },
 
-  reorderAutoLayoutChildByArrow: (arrowCode) => {
+  reorderAutoLayoutChildByArrow: (arrowCode, shiftKey = false) => {
     const s0 = get();
     if (s0.editorMode !== "design") return false;
     const tops = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
@@ -5623,6 +9160,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       arrowCode,
       s0.nodes,
       s0.childOrder,
+      shiftKey,
     );
     if (targetIndex == null) return false;
     get().pushHistory();
@@ -5638,93 +9176,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
     if (!a?.parentId || a.parentId !== b?.parentId) return;
     const parentId = a.parentId;
     if (!opts?.skipHistory) get().pushHistory();
-    set((s) => {
-      const nextOrder = swapAutoLayoutSiblingOrder(parentId, idA, idB, s.childOrder);
-      if (!nextOrder) return s;
-      let nodes = relayoutParentsWithAutoLayout(s.nodes, nextOrder, [parentId]);
-      return { nodes, childOrder: nextOrder };
-    });
+    commitStructuralResult(buildSwapAutoLayoutSiblingsResult(get(), idA, idB));
   },
 
   groupSelection: () => {
-    const s0 = get();
-    const tops0 = topLevelSelectedIds(s0.selectedIds, s0.nodes).filter((id) => {
-      const n = s0.nodes[id];
-      return n && !n.locked && n.visible;
-    });
-    if (tops0.length < 2) return;
-    const parentId0 = s0.nodes[tops0[0]!]!.parentId;
-    if (!tops0.every((id) => s0.nodes[id]!.parentId === parentId0)) return;
+    const result = buildGroupSelectionResult(get());
+    if (!result) return;
     get().pushHistory();
-    set((s) => {
-      const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
-        const n = s.nodes[id];
-        return n && !n.locked && n.visible;
-      });
-      if (tops.length < 2) return s;
-      const parentId = s.nodes[tops[0]!]!.parentId;
-      if (!tops.every((id) => s.nodes[id]!.parentId === parentId)) return s;
-      const P = parentListKey(parentId);
-      const pw = parentId ? worldRect(parentId, s.nodes) : { x: 0, y: 0, width: 0, height: 0 };
-      let minX = Infinity;
-      let minY = Infinity;
-      let maxX = -Infinity;
-      let maxY = -Infinity;
-      for (const id of tops) {
-        const w = worldRect(id, s.nodes);
-        minX = Math.min(minX, w.x);
-        minY = Math.min(minY, w.y);
-        maxX = Math.max(maxX, w.x + w.width);
-        maxY = Math.max(maxY, w.y + w.height);
-      }
-      const gw = maxX - minX;
-      const gh = maxY - minY;
-      const gx = minX - pw.x;
-      const gy = minY - pw.y;
-      const gid = `group-${Date.now()}`;
-      const nodes = { ...s.nodes };
-      const childOrder = { ...s.childOrder };
-      nodes[gid] = {
-        id: gid,
-        parentId,
-        type: "group",
-        name: "Group",
-        x: gx,
-        y: gy,
-        width: gw,
-        height: gh,
-        rotation: 0,
-        visible: true,
-        locked: false,
-        expanded: true,
-      };
-      for (const id of tops) {
-        const w = worldRect(id, s.nodes);
-        const n = nodes[id]!;
-        nodes[id] = {
-          ...n,
-          parentId: gid,
-          x: w.x - minX,
-          y: w.y - minY,
-        };
-      }
-      const list = [...(childOrder[P] ?? [])];
-      const ixs = tops.map((id) => list.indexOf(id)).sort((a, b) => a - b);
-      const insertAt = ixs[0]!;
-      const newList = list.filter((id) => !tops.includes(id));
-      newList.splice(insertAt, 0, gid);
-      childOrder[P] = newList;
-      childOrder[gid] = tops;
-      let nodesOut = nodes;
-      nodesOut = relayoutParentsWithAutoLayout(nodesOut, childOrder, [P]);
-      return {
-        nodes: nodesOut,
-        childOrder,
-        selectedIds: [gid],
-        tool: "move",
-        editingTextId: null,
-      };
-    });
+    commitStructuralResult(result);
   },
 
   addAutoLayoutToSelection: () => {
@@ -5734,13 +9193,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const result = applyAutoLayoutToSelection(s0.nodes, s0.childOrder, s0.selectedIds);
     if (!result) return;
     get().pushHistory();
-    set({
-      nodes: result.nodes,
-      childOrder: result.childOrder,
-      selectedIds: result.selectedIds,
-      tool: "move",
-      editingTextId: null,
-    });
+    commitStructuralResult(buildAutoLayoutMutationResult(result));
   },
 
   addAutoLayoutToContainer: (containerId) => {
@@ -5751,13 +9204,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const result = applyAutoLayoutToContainer(s0.nodes, s0.childOrder, containerId);
     if (!result) return;
     get().pushHistory();
-    set({
-      nodes: result.nodes,
-      childOrder: result.childOrder,
-      selectedIds: result.selectedIds,
-      tool: "move",
-      editingTextId: null,
-    });
+    commitStructuralResult(buildAutoLayoutMutationResult(result));
   },
 
   wrapSelectionInFrame: () => {
@@ -5767,73 +9214,27 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const result = applyWrapSelectionInFrame(s0.nodes, s0.childOrder, s0.selectedIds);
     if (!result) return;
     get().pushHistory();
-    set({
-      nodes: result.nodes,
-      childOrder: result.childOrder,
-      selectedIds: result.selectedIds,
-      tool: "move",
-      editingTextId: null,
-    });
+    commitStructuralResult(buildAutoLayoutMutationResult(result));
   },
 
   ungroupSelection: () => {
-    const s0 = get();
-    if (s0.selectedIds.length !== 1) return;
-    const gid0 = s0.selectedIds[0]!;
-    const g0 = s0.nodes[gid0];
-    if (!g0 || g0.type !== "group" || g0.locked || !g0.visible) return;
-    const kids0 = [...(s0.childOrder[gid0] ?? [])];
-    if (kids0.length === 0) return;
+    const result = buildUngroupSelectionResult(get());
+    if (!result) return;
     get().pushHistory();
-    set((s) => {
-      if (s.selectedIds.length !== 1) return s;
-      const gid = s.selectedIds[0]!;
-      const g = s.nodes[gid];
-      if (!g || g.type !== "group" || g.locked || !g.visible) return s;
-      const kids = [...(s.childOrder[gid] ?? [])];
-      if (kids.length === 0) return s;
-      const parentId = g.parentId;
-      const P = parentListKey(parentId);
-      const pg = worldRect(gid, s.nodes);
-      const pp = parentId ? worldRect(parentId, s.nodes) : { x: 0, y: 0, width: 0, height: 0 };
-      const nodes = { ...s.nodes };
-      const childOrder = { ...s.childOrder };
-      for (const id of kids) {
-        const n = nodes[id]!;
-        nodes[id] = {
-          ...n,
-          parentId: parentId ?? null,
-          x: n.x + (pg.x - pp.x),
-          y: n.y + (pg.y - pp.y),
-        };
-      }
-      const list = [...(childOrder[P] ?? [])];
-      const ix = list.indexOf(gid);
-      const newList = list.filter((id) => id !== gid);
-      newList.splice(ix >= 0 ? ix : newList.length, 0, ...kids);
-      childOrder[P] = newList;
-      delete nodes[gid];
-      delete childOrder[gid];
-      let nodesOut = nodes;
-      nodesOut = relayoutParentsWithAutoLayout(nodesOut, childOrder, [P]);
-      return {
-        nodes: nodesOut,
-        childOrder,
-        selectedIds: kids,
-        tool: "move",
-        editingTextId: null,
-      };
-    });
+    commitStructuralResult(result);
   },
 
-  toggleSelectNode: (id) =>
+  toggleSelectNode: (id) => {
     set((s) => ({
       selectedIds: s.selectedIds.includes(id)
         ? s.selectedIds.filter((x) => x !== id)
         : [...s.selectedIds, id],
-    })),
+    }));
+    const st = get();
+    syncDuplicateRepeatSelection(st.selectedIds, st.nodes);
+  },
 
-  setSelection: (ids) =>
+  setSelection: (ids) => {
     set({
       selectedIds: ids,
       selectedLayoutGuideId: null,
@@ -5841,102 +9242,79 @@ export const useEditorStore = create<EditorState>((set, get) => {
       contextMenu: null,
       selectedPrototypeLinkId: null,
       pathEditModeNodeId: null,
-  objectEditModeNodeId: null,
-      selectedPathPointId: null,
-    }),
+      objectEditModeNodeId: null,
+      selectedPathPointIds: [],
+    });
+    const st = get();
+    syncDuplicateRepeatSelection(st.selectedIds, st.nodes);
+  },
 
   setGuides: (guides) => set({ guides, dragMeasurements: [] }),
-  setSnapOverlay: (guides, dragMeasurements) => set({ guides, dragMeasurements }),
+  setSnapOverlay: (guides, dragMeasurements) =>
+    set((s) => {
+      if (
+        s.guides === guides &&
+        s.dragMeasurements === dragMeasurements
+      ) {
+        return s;
+      }
+      if (
+        s.guides.length === guides.length &&
+        s.dragMeasurements.length === dragMeasurements.length &&
+        s.guides.every(
+          (g, i) =>
+            g.axis === guides[i]?.axis &&
+            g.pos === guides[i]?.pos &&
+            g.from === guides[i]?.from &&
+            g.to === guides[i]?.to,
+        ) &&
+        s.dragMeasurements.every(
+          (m, i) =>
+            m.x1 === dragMeasurements[i]?.x1 &&
+            m.y1 === dragMeasurements[i]?.y1 &&
+            m.x2 === dragMeasurements[i]?.x2 &&
+            m.y2 === dragMeasurements[i]?.y2 &&
+            m.distance === dragMeasurements[i]?.distance,
+        )
+      ) {
+        return s;
+      }
+      return { guides, dragMeasurements };
+    }),
   setSwapDragIndicator: (swapDragIndicator) => set({ swapDragIndicator }),
   setAutoLayoutReorderIndicator: (autoLayoutReorderIndicator) =>
     set({ autoLayoutReorderIndicator }),
   setLayoutGuideDraft: (layoutGuideDraft) => set({ layoutGuideDraft }),
   cancelLayoutGuideDraft: () => set({ layoutGuideDraft: null }),
   commitLayoutGuide: () => {
-    const s = get();
-    if (!s.layoutGuideDraft) return;
-    const guide: LayoutGuide = {
-      id: `lg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      axis: s.layoutGuideDraft.axis,
-      pos: s.layoutGuideDraft.pos,
-    };
+    const result = buildCommitLayoutGuideResult(get());
+    if (!result) return;
     get().pushHistory();
-    set((state) => {
-      const layoutGuides = [...state.layoutGuides, guide];
-      const next = { ...state, layoutGuides, layoutGuideDraft: null };
-      return { layoutGuides, layoutGuideDraft: null, ...syncActivePageRecord(next) };
+    commitStructuralResult(result);
+  },
+
+  reorderNode: (id, targetParentId, targetIndex) => {
+    const result = buildReorderNodeResult(get(), id, targetParentId, targetIndex);
+    commitDocumentMutation(result, (built) => {
+      set({ nodes: built.nodes, childOrder: built.childOrder });
+      syncWasmDocumentAfterStoreUpdate();
     });
   },
 
-  reorderNode: (id, targetParentId, targetIndex) =>
-    set((s) => {
-      const n = s.nodes[id];
-      if (!n || n.locked) return s;
-      if ((n.parentId ?? ROOT) !== targetParentId) return s;
-      const res = applyMoveNodeToParent(s, id, targetParentId, targetIndex);
-      if (!res) return s;
-      let { nodes, childOrder } = res;
-      nodes = relayoutParentsWithAutoLayout(nodes, childOrder, [targetParentId]);
-      return { nodes, childOrder };
-    }),
-
-  moveNodeToParent: (id, newParentId, index) =>
-    set((s) => {
-      const n = s.nodes[id];
-      if (!n || n.locked) return s;
-      const newKey = newParentId === ROOT ? ROOT : newParentId;
-      const oldKey = parentListKey(n.parentId);
-
-      let stateForMove = s;
-      if (newKey !== ROOT) {
-        const parent = s.nodes[newKey];
-        const gapPatch = freezeAutoLayoutGapBeforeChildInsert(
-          parent,
-          s.nodes,
-          s.childOrder,
-          id,
-        );
-        if (gapPatch && parent) {
-          stateForMove = {
-            ...s,
-            nodes: {
-              ...s.nodes,
-              [newKey]: { ...parent, ...gapPatch, layoutDirty: true },
-            },
-          };
-        }
-      }
-
-      const res = applyMoveNodeToParent(stateForMove, id, newKey, index);
-      if (!res) return s;
-      let { nodes, childOrder } = res;
-      const refresh = new Set<string>();
-      if (oldKey !== newKey) {
-        if (oldKey !== ROOT) refresh.add(oldKey);
-        if (newKey !== ROOT) refresh.add(newKey);
-      } else {
-        refresh.add(oldKey);
-      }
-      nodes = relayoutParentsWithAutoLayout(nodes, childOrder, refresh);
-      return { nodes, childOrder };
-    }),
+  moveNodeToParent: (id, newParentId, index) => {
+    const result = buildMoveNodeToParentResult(get(), id, newParentId, index);
+    commitDocumentMutation(result, (built) => {
+      set({ nodes: built.nodes, childOrder: built.childOrder });
+      syncWasmDocumentAfterStoreUpdate();
+    });
+  },
 
   updateLayout: (id, patch) => {
     const s0 = get();
     const n0 = s0.nodes[id];
     if (!n0 || n0.locked || (n0.type !== "frame" && n0.type !== "group")) return;
     get().pushHistory();
-    set((s) => {
-      const n = s.nodes[id];
-      if (!n || n.locked || (n.type !== "frame" && n.type !== "group")) return s;
-      const nodes = applyLayoutPatchWithAutoLayout(
-        s.nodes,
-        s.childOrder,
-        id,
-        patch,
-      ) as EditorState["nodes"];
-      return { nodes };
-    });
+    commitStructuralResult(buildUpdateLayoutResult(get(), id, patch));
   },
 
   updateLayoutSizing: (id, axis, mode) => {
@@ -5944,22 +9322,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const n0 = s0.nodes[id];
     if (!n0 || n0.locked) return;
     get().pushHistory();
-    set((s) => {
-      const n = s.nodes[id];
-      if (!n || n.locked) return s;
-      const patch =
-        axis === "horizontal"
-          ? { layoutSizingHorizontal: mode }
-          : { layoutSizingVertical: mode };
-      let nodes = { ...s.nodes, [id]: { ...n, ...patch, layoutDirty: true } };
-      const refresh = new Set<string>();
-      if (n.parentId) refresh.add(n.parentId);
-      if ((n.type === "frame" || n.type === "group") && (n.layoutMode ?? "none") !== "none") {
-        refresh.add(id);
-      }
-      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
-      return { nodes };
-    });
+    commitStructuralResult(buildUpdateLayoutSizingResult(get(), id, axis, mode));
   },
 
   updateLayoutPositioning: (id, positioning) => {
@@ -5967,14 +9330,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const n0 = s0.nodes[id];
     if (!n0 || n0.locked) return;
     get().pushHistory();
-    set((s) => {
-      const n = s.nodes[id];
-      if (!n || n.locked) return s;
-      let nodes = { ...s.nodes, [id]: { ...n, layoutPositioning: positioning, layoutDirty: true } };
-      const par = n.parentId;
-      if (par) nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [par]);
-      return { nodes };
-    });
+    commitStructuralResult(buildUpdateLayoutPositioningResult(get(), id, positioning));
   },
 
   updateConstraints: (id, patch) => {
@@ -5982,11 +9338,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const n0 = s0.nodes[id];
     if (!n0 || n0.locked) return;
     get().pushHistory();
-    set((s) => {
-      const n = s.nodes[id];
-      if (!n || n.locked) return s;
-      return { nodes: { ...s.nodes, [id]: { ...n, ...patch } } };
-    });
+    commitStructuralResult(buildUpdateConstraintsResult(get(), id, patch));
   },
 
   applyAutoLayout: (parentId) => {
@@ -5994,231 +9346,49 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const p0 = s0.nodes[parentId];
     if (!p0 || (p0.type !== "frame" && p0.type !== "group")) return;
     get().pushHistory();
-    set((s) => {
-      const p = s.nodes[parentId];
-      if (!p || (p.type !== "frame" && p.type !== "group")) return s;
-      const nodes = deepAutoLayout({ ...s.nodes }, s.childOrder, parentId);
-      return { nodes };
-    });
+    commitStructuralResult(buildApplyAutoLayoutResult(get(), parentId));
   },
 
   createComponentFromSelection: () => {
-    const s0 = get();
-    if (!canCreateComponentFromSelection(s0.selectedIds, s0.nodes)) return;
+    const result = buildCreateComponentFromSelectionResult(get());
+    if (!result) return;
     get().pushHistory();
-    set((s) => {
-      if (!canCreateComponentFromSelection(s.selectedIds, s.nodes)) return s;
-
-      let nodes = { ...s.nodes };
-      let childOrder = { ...s.childOrder };
-      let tops = topLevelSelectedIds(s.selectedIds, nodes).filter((id) => {
-        const n = nodes[id];
-        return n && !n.locked && n.visible;
-      });
-
-      if (tops.length >= 2) {
-        const grouped = groupNodesForComponent(nodes, childOrder, tops);
-        if (!grouped) return s;
-        nodes = grouped.nodes;
-        childOrder = grouped.childOrder;
-        tops = [grouped.groupId];
-      }
-
-      let rootId = tops[0]!;
-      const wrapped = wrapNodeInFrameForComponent(nodes, childOrder, rootId);
-      if (!wrapped) return s;
-      nodes = wrapped.nodes;
-      childOrder = wrapped.childOrder;
-      rootId = wrapped.frameId;
-
-      const root = nodes[rootId];
-      if (!root || root.isComponent) return s;
-
-      nodes = markNodeAsComponent(nodes, rootId);
-      const parentId = nodes[rootId]!.parentId;
-      if (parentId) {
-        nodes = relayoutParentsWithAutoLayout(nodes, childOrder, [parentId]);
-      }
-
-      return {
-        nodes,
-        childOrder,
-        selectedIds: [rootId],
-        leftTab: "components" as LeftTab,
-        tool: "move" as Tool,
-      };
-    });
+    commitStructuralResult(result);
   },
 
   createInstance: (componentKey, worldX, worldY) => {
-    const s0 = get();
-    const masterId = resolveMasterRootId(s0.nodes, componentKey);
-    if (!masterId) return;
-    const master = s0.nodes[masterId];
-    if (!master?.isComponent || !master.componentId) return;
+    const result = buildCreateInstanceResult(get(), componentKey, worldX, worldY);
+    if (!result) return;
     get().pushHistory();
-    set((s) => {
-      const masterId = resolveMasterRootId(s.nodes, componentKey);
-      if (!masterId) return s;
-      const master = s.nodes[masterId];
-      if (!master?.isComponent || !master.componentId) return s;
-      const pid = frameParentAtWorldPoint(worldX, worldY, s.nodes, s.childOrder);
-      const pos = centeredLocalPointInParent(
-        worldX,
-        worldY,
-        pid,
-        s.nodes,
-        master.width,
-        master.height,
-        s.childOrder,
-      );
-      const parentKey = parentListKey(pid);
-      const res = cloneEditorSubtree(
-        s.nodes,
-        s.childOrder,
-        masterId,
-        pid,
-        parentKey,
-        (root) => ({
-          ...root,
-          x: pos.x,
-          y: pos.y,
-          sourceComponentId: masterId,
-          componentId: master.componentId,
-          instanceOverrides: {},
-        }),
-        (_old, fresh) => stripComponentFields(fresh),
-      );
-      if (!res) return s;
-      let { nodes, childOrder, newRootId } = res;
-      if (pid) nodes = relayoutParentsWithAutoLayout(nodes, childOrder, [pid]);
-      const repaired = repairNodeHierarchy(nodes, childOrder);
-      return {
-        nodes: repaired.nodes,
-        childOrder: repaired.childOrder,
-        selectedIds: [newRootId],
-        tool: "move",
-        placingComponentMasterId: null,
-        editingTextId: null,
-      };
-    });
+    commitStructuralResult(result);
   },
 
   detachInstance: (instanceRootId) => {
-    const s0 = get();
-    const root = s0.nodes[instanceRootId];
-    if (!root?.sourceComponentId || root.locked) return;
-    const next = detachInstanceTree(s0.nodes, s0.childOrder, instanceRootId);
-    if (!next) return;
+    const result = buildDetachInstanceResult(get(), instanceRootId);
+    if (!result) return;
     get().pushHistory();
-    set({ nodes: next, selectedIds: [instanceRootId] });
+    commitStructuralResult(result);
   },
 
   updateInstanceOverride: (instanceRootId, targetNodeId, patch) => {
-    const s0 = get();
-    const root = s0.nodes[instanceRootId];
-    if (!root?.sourceComponentId || root.locked) return;
+    const result = buildUpdateInstanceOverrideResult(get(), instanceRootId, targetNodeId, patch);
+    if (!result) return;
     get().pushHistory();
-    set((s) => {
-      const root2 = s.nodes[instanceRootId];
-      if (!root2?.sourceComponentId || root2.locked) return s;
-      const io: Record<string, Record<string, unknown>> = { ...(root2.instanceOverrides ?? {}) };
-      const prev =
-        io[targetNodeId] && typeof io[targetNodeId] === "object" && !Array.isArray(io[targetNodeId])
-          ? { ...(io[targetNodeId] as Record<string, unknown>) }
-          : {};
-      io[targetNodeId] = { ...prev, ...patch };
-      return {
-        nodes: {
-          ...s.nodes,
-          [instanceRootId]: { ...root2, instanceOverrides: io },
-        },
-      };
-    });
+    commitStructuralResult(result);
   },
 
   createVariantFromComponent: (componentKey) => {
-    const s0 = get();
-    const masterId = resolveMasterRootId(s0.nodes, componentKey);
-    if (!masterId) return;
-    const m0 = s0.nodes[masterId];
-    if (!m0?.isComponent || m0.locked) return;
+    const result = buildCreateVariantFromComponentResult(get(), componentKey);
+    if (!result) return;
     get().pushHistory();
-    set((s) => {
-      const masterId = resolveMasterRootId(s.nodes, componentKey);
-      if (!masterId) return s;
-      const m = s.nodes[masterId];
-      if (!m?.isComponent || m.locked) return s;
-      const OFFSET = 24;
-      const vg = m.variantGroupId ?? newVariantGroupId();
-      const siblingCount =
-        (m.variantGroupId
-          ? Object.values(s.nodes).filter((x) => x.variantGroupId === vg).length
-          : 0) + 1;
-      const res = cloneEditorSubtree(
-        s.nodes,
-        s.childOrder,
-        masterId,
-        m.parentId,
-        parentListKey(m.parentId),
-        (root) => ({
-          ...root,
-          isComponent: true,
-          componentId: newComponentId(),
-          variantGroupId: vg,
-          variantProperties: {
-            ...(m.variantProperties ?? {}),
-            Variant: `V${siblingCount + 1}`,
-          },
-          name: `${m.name} · variant`,
-        }),
-        (old, fresh) => {
-          let next = stripComponentFields(fresh);
-          if (old.id === masterId) {
-            next = { ...next, x: next.x + OFFSET, y: next.y + OFFSET };
-          }
-          return next;
-        },
-      );
-      if (!res) return s;
-      let nodes = res.nodes;
-      const childOrder = res.childOrder;
-      if (!m.variantGroupId) {
-        nodes = { ...nodes, [masterId]: { ...m, variantGroupId: vg } };
-      }
-      nodes = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(m.parentId)]);
-      return {
-        nodes,
-        childOrder,
-        selectedIds: [res.newRootId],
-        tool: "move",
-        editingTextId: null,
-      };
-    });
+    commitStructuralResult(result);
   },
 
   updateVariantProperties: (componentKey, properties) => {
-    const s0 = get();
-    const id0 = resolveMasterRootId(s0.nodes, componentKey);
-    if (!id0) return;
-    const n0 = s0.nodes[id0];
-    if (!n0?.isComponent || n0.locked) return;
+    const result = buildUpdateVariantPropertiesResult(get(), componentKey, properties);
+    if (!result) return;
     get().pushHistory();
-    set((s) => {
-      const id = resolveMasterRootId(s.nodes, componentKey);
-      if (!id) return s;
-      const n = s.nodes[id];
-      if (!n?.isComponent || n.locked) return s;
-      return {
-        nodes: {
-          ...s.nodes,
-          [id]: {
-            ...n,
-            variantProperties: { ...(n.variantProperties ?? {}), ...properties },
-          },
-        },
-      };
-    });
+    commitStructuralResult(result);
   },
 
   duplicateSingle: (id) => {
@@ -6229,183 +9399,48 @@ export const useEditorStore = create<EditorState>((set, get) => {
     });
     if (tops0.length === 0) return;
     if (!s0.nodes[tops0[0]!]) return;
+    if (!selectionMatchesDuplicateChain(tops0)) {
+      resetDuplicateRepeatOffset();
+    }
+    const result = buildDuplicateSingleResult(s0, id, getDuplicateStepOffset(tops0));
+    if (!result) return;
     get().pushHistory();
-    set((s) => {
-      const offset = 10 / Math.max(s.zoom, 0.01);
-      const cloned = cloneTopLevelSelectionState({ ...s, selectedIds: [id] }, offset);
-      if (!cloned) return s;
-      return {
-        ...cloned,
-        contextMenu: null,
-      };
-    });
+    commitStructuralResult(result);
+    recordDuplicateCreated(result.ui.selectedIds as string[], result.nodes, result.childOrder);
   },
 
   deleteSingle: (id) => {
-    const s0 = get();
-    const tops0 = topLevelSelectedIds([id], s0.nodes).filter((tid) => {
-      const nn = s0.nodes[tid];
-      return nn && !nn.locked && nn.visible;
-    });
-    if (tops0.length === 0) return;
+    const result = buildDeleteSingleResult(get(), id);
+    if (!result) return;
     get().pushHistory();
-    set((s) => {
-      const tops = topLevelSelectedIds([id], s.nodes).filter((tid) => {
-        const nn = s.nodes[tid];
-        return nn && !nn.locked && nn.visible;
-      });
-      if (tops.length === 0) return s;
-      const parentsToRelayout = new Set<string>();
-      for (const root of tops) {
-        parentsToRelayout.add(parentListKey(s.nodes[root]!.parentId));
-      }
-      const toRemove = new Set<string>();
-      for (const root of tops) {
-        for (const tid of collectSubtreeIds(root, s.childOrder)) {
-          toRemove.add(tid);
-        }
-      }
-      let nodes = { ...s.nodes };
-      const childOrder: Record<string, string[]> = {};
-      for (const [k, arr] of Object.entries(s.childOrder)) {
-        childOrder[k] = arr.filter((tid) => !toRemove.has(tid));
-      }
-      for (const tid of toRemove) {
-        delete nodes[tid];
-        delete childOrder[tid];
-      }
-      nodes = relayoutParentsWithAutoLayout(nodes, childOrder, parentsToRelayout);
-      return {
-        nodes,
-        childOrder,
-        selectedIds: [],
-        editingTextId: null,
-        contextMenu: null,
-        layerRenameId: null,
-      };
-    });
+    commitStructuralResult(result);
   },
 
   resizeNode: (id, handle, startBounds, currentPoint, modifiers, opts) => {
     if (get().transformInteractionMode === "rotate") return;
+    if (get().rotateGeomSnapshot) return;
     if (!opts?.skipHistory && !get().isApplyingHistory) {
       const pre = get();
       const n0 = pre.nodes[id];
       if (n0 && !n0.locked && n0.visible) get().pushHistory();
     }
-    set((s) => {
-      if (s.transformInteractionMode === "rotate") return s;
-      const n = s.nodes[id];
-      if (!n || n.locked || !n.visible) return s;
-      const kind: ResizeKind =
-        n.type === "rectangle" ||
-        n.type === "ellipse" ||
-        n.type === "frame" ||
-        n.type === "text" ||
-        n.type === "line" ||
-        n.type === "arrow" ||
-        n.type === "polygon" ||
-        n.type === "path" ||
-        n.type === "group" ||
-        n.type === "image"
-          ? n.type
-          : "rectangle";
-      const rotated = hasRotation(n.rotation);
-      /** Resize drags on rotated layers pass pointer in node-local space; bounds are 0,0,w,h. */
-      const resizeStart: Bounds = rotated
-        ? { x: 0, y: 0, width: startBounds.width, height: startBounds.height }
-        : startBounds;
-      const next = computeResizedBounds(handle, resizeStart, currentPoint, modifiers, kind);
-      let x = rotated ? n.x : finiteCoord(next.x, n.x);
-      let y = rotated ? n.y : finiteCoord(next.y, n.y);
-      const width = finiteDimension(next.width, RESIZE_MIN_DIMENSION);
-      const height = finiteDimension(next.height, RESIZE_MIN_DIMENSION);
-
-      if (opts?.fixedWorld && rotated) {
-        const centerScale = modifiers.shiftKey && modifiers.altKey;
-        const anchorLocal = centerScale
-          ? { x: width / 2, y: height / 2 }
-          : getResizeAnchorLocal(handle, width, height);
-        const solved = solveNodeXYForAnchorWorld(
-          n,
-          s.nodes,
-          width,
-          height,
-          anchorLocal,
-          opts.fixedWorld,
-          { x: n.x, y: n.y },
-        );
-        x = solved.x;
-        y = solved.y;
-      }
-
-      const content = buildResizeContentPatches(n, startBounds, { x, y, width, height }, handle, modifiers);
-      let nodePatch: Partial<EditorNode> = { x, y, width, height, ...content };
-      if (n.type === "text") {
-        const mode = n.textResizeMode ?? "auto-width";
-        const widthChanged = width !== startBounds.width;
-        if (mode === "auto-width" && widthChanged && (handle === "e" || handle === "w" || handle === "se" || handle === "sw" || handle === "ne" || handle === "nw")) {
-          nodePatch = { ...nodePatch, ...textResizePatch("auto-height") };
-        }
-        const layoutPatch = textLayoutPatchForNode(
-          { ...n, ...nodePatch },
-          n.content ?? "",
-        );
-        if (layoutPatch) nodePatch = { ...nodePatch, ...layoutPatch };
-      }
-      let nodes: Record<string, EditorNode> = {
-        ...s.nodes,
-        [id]: { ...n, ...nodePatch },
-      };
-
-      const sx = startBounds.width > 0 ? width / startBounds.width : 1;
-      const sy = startBounds.height > 0 ? height / startBounds.height : 1;
-      const uniform = isProportionalResize(handle, modifiers)
-        ? Math.max(sx, sy)
-        : Math.sqrt(Math.max(0, sx * sy));
-
-      const isContainer = n.type === "frame" || n.type === "group";
-      const layoutMode = n.layoutMode ?? "none";
-      if (isContainer && layoutMode === "none") {
-        if (shouldProportionalFrameScale(handle, modifiers)) {
-          const childPatches = scaleSubtreeContentPatches(id, nodes, s.childOrder, sx, sy, uniform);
-          for (const [cid, patch] of Object.entries(childPatches)) {
-            const cn = nodes[cid];
-            if (cn && !cn.locked) nodes[cid] = { ...cn, ...patch };
-          }
-        } else {
-          const cp = constraintResizeChildPatches(
-            id,
-            toLayoutMap(nodes),
-            s.childOrder,
-            n.width,
-            n.height,
-            width,
-            height,
-          );
-          for (const [cid, patch] of Object.entries(cp)) {
-            const cn = nodes[cid];
-            if (cn && !cn.locked) nodes[cid] = { ...cn, ...patch };
-          }
-        }
-      } else if (isContainer && layoutMode !== "none") {
-        const sizingPatch = layoutSizingPatchesForManualResize(
-          n,
-          width !== startBounds.width,
-          height !== startBounds.height,
-        );
-        if (Object.keys(sizingPatch).length > 0) {
-          nodes[id] = { ...nodes[id]!, ...sizingPatch };
-        }
-        nodes = deepAutoLayout(nodes, s.childOrder, id);
-      }
-      if (n.parentId) {
-        nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId]);
-      }
-      const merged = nodes[id]!;
-      warnInvalidNodeGeometry("resizeNode", id, merged, nodes);
-      return { nodes };
-    });
+    const result = buildResizeNodeResult(
+      get(),
+      id,
+      handle,
+      startBounds,
+      currentPoint,
+      modifiers,
+      opts,
+    );
+    if (!result) return;
+    const isLiveResizePreview =
+      Boolean(opts?.skipHistory) && get().transformInteractionMode === "resize";
+    if (isLiveResizePreview) {
+      applyResizePreviewToStore(result);
+      return;
+    }
+    commitStructuralResult(result);
   },
 
   resizeFrameWithConstraints: (frameId, newBounds, opts) => {
@@ -6413,188 +9448,75 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const n0 = get().nodes[frameId];
       if (n0 && !n0.locked) get().pushHistory();
     }
-    set((s) => {
-      const n = s.nodes[frameId];
-      if (!n || n.locked || (n.type !== "frame" && n.type !== "group")) return s;
-      const oldW = n.width;
-      const oldH = n.height;
-      const W = Math.max(RESIZE_MIN_DIMENSION, newBounds.width);
-      const H = Math.max(RESIZE_MIN_DIMENSION, newBounds.height);
-      const next: EditorNode = {
-        ...n,
-        width: W,
-        height: H,
-        ...(newBounds.x !== undefined ? { x: newBounds.x } : {}),
-        ...(newBounds.y !== undefined ? { y: newBounds.y } : {}),
-      };
-      let nodes: Record<string, EditorNode> = { ...s.nodes, [frameId]: next };
-      const layoutMode = next.layoutMode ?? "none";
-      if (layoutMode === "none") {
-        const cp = constraintResizeChildPatches(
-          frameId,
-          toLayoutMap(nodes),
-          s.childOrder,
-          oldW,
-          oldH,
-          W,
-          H,
-        );
-        for (const [cid, patch] of Object.entries(cp)) {
-          const cn = nodes[cid];
-          if (cn && !cn.locked) nodes[cid] = { ...cn, ...patch };
-        }
-      } else {
-        const sizingPatch = layoutSizingPatchesForManualResize(
-          next,
-          Math.abs(W - oldW) > 0.01,
-          Math.abs(H - oldH) > 0.01,
-        );
-        if (Object.keys(sizingPatch).length > 0) {
-          nodes[frameId] = { ...nodes[frameId]!, ...sizingPatch };
-        }
-        nodes = deepAutoLayout(nodes, s.childOrder, frameId);
-      }
-      if (next.parentId && !opts?.skipParentRelayout) {
-        nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [next.parentId]);
-      }
-      return { nodes };
-    });
+    commitStructuralResult(buildResizeFrameWithConstraintsResult(get(), frameId, newBounds, opts));
   },
 
   openResponsivePreview: (frameId) => {
-    set((s) => {
-      let nodes = { ...s.nodes };
-      if (s.responsivePreview) {
-        for (const [bid, g] of Object.entries(s.responsivePreview.geomBackup)) {
-          const nn = nodes[bid];
-          if (nn) nodes[bid] = { ...nn, ...g };
-        }
-      }
-      const n = nodes[frameId];
-      if (!n || n.locked || (n.type !== "frame" && n.type !== "group")) {
-        return { nodes, responsivePreview: null };
-      }
-      const subtree = collectSubtreeIds(frameId, s.childOrder);
-      const geomBackup: Record<string, { x: number; y: number; width: number; height: number }> = {};
-      for (const tid of subtree) {
-        const t = nodes[tid];
-        if (!t) continue;
-        geomBackup[tid] = { x: t.x, y: t.y, width: t.width, height: t.height };
-      }
-      return {
-        nodes,
-        responsivePreview: {
-          frameId,
-          geomBackup,
-          draftWidth: n.width,
-          draftHeight: n.height,
-        },
-      };
-    });
+    commitStructuralResult(buildOpenResponsivePreviewResult(get(), frameId));
   },
 
   updateResponsivePreviewBounds: (width, height) => {
-    set((s) => {
-      const rp = s.responsivePreview;
-      if (!rp) return s;
-      let nodes = { ...s.nodes };
-      for (const [bid, g] of Object.entries(rp.geomBackup)) {
-        const nn = nodes[bid];
-        if (nn) nodes[bid] = { ...nn, ...g };
+    const nodesBefore = get().nodes;
+    const rp = get().responsivePreview;
+    const result = buildUpdateResponsivePreviewBoundsResult(get(), width, height);
+    if (!result) return;
+    commitStructuralResult(result);
+    if (!rp) return;
+    const stAfter = get();
+    const nodesAfter = stAfter.nodes;
+    const candidateIds = new Set<string>([rp.frameId]);
+    const stack = [rp.frameId];
+    while (stack.length > 0) {
+      const pid = stack.pop()!;
+      for (const cid of stAfter.childOrder[pid] ?? []) {
+        candidateIds.add(cid);
+        stack.push(cid);
       }
-      const fr = nodes[rp.frameId];
-      if (!fr || fr.locked) return { ...s, responsivePreview: null };
-      const oldW = fr.width;
-      const oldH = fr.height;
-      const W = Math.max(RESIZE_MIN_DIMENSION, width);
-      const H = Math.max(RESIZE_MIN_DIMENSION, height);
-      nodes[rp.frameId] = { ...fr, width: W, height: H };
-      const layoutMode = fr.layoutMode ?? "none";
-      if (layoutMode === "none") {
-        const cp = constraintResizeChildPatches(
-          rp.frameId,
-          toLayoutMap(nodes),
-          s.childOrder,
-          oldW,
-          oldH,
-          W,
-          H,
-        );
-        for (const [cid, patch] of Object.entries(cp)) {
-          const cn = nodes[cid];
-          if (cn && !cn.locked) nodes[cid] = { ...cn, ...patch };
-        }
-      } else {
-        nodes = deepAutoLayout(nodes, s.childOrder, rp.frameId);
-      }
-      const par = nodes[rp.frameId]?.parentId;
-      if (par) nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [par]);
-      return {
-        nodes,
-        responsivePreview: { ...rp, draftWidth: W, draftHeight: H },
-      };
-    });
+    }
+    const entries: Array<{ nodeId: string; patch: Partial<EditorNode>; node: EditorNode }> = [];
+    for (const nodeId of candidateIds) {
+      const before = nodesBefore[nodeId];
+      const after = nodesAfter[nodeId];
+      if (!after) continue;
+      const patch: Partial<EditorNode> = {};
+      if (before?.x !== after.x) patch.x = after.x;
+      if (before?.y !== after.y) patch.y = after.y;
+      if (before?.width !== after.width) patch.width = after.width;
+      if (before?.height !== after.height) patch.height = after.height;
+      if (Object.keys(patch).length === 0) continue;
+      entries.push({ nodeId, patch, node: after });
+    }
+    if (entries.length > 0) {
+      const mirrored = mirrorGeometryPatchesToWasm(entries);
+      if (!mirrored) syncWasmDocumentAfterStoreUpdate();
+    }
   },
 
   resetResponsivePreview: () => {
-    set((s) => {
-      const rp = s.responsivePreview;
-      if (!rp) return s;
-      let nodes = { ...s.nodes };
-      for (const [bid, g] of Object.entries(rp.geomBackup)) {
-        const nn = nodes[bid];
-        if (nn) nodes[bid] = { ...nn, ...g };
-      }
-      const og = rp.geomBackup[rp.frameId]!;
-      return {
-        nodes,
-        responsivePreview: { ...rp, draftWidth: og.width, draftHeight: og.height },
-      };
-    });
+    commitStructuralResult(buildResetResponsivePreviewResult(get()));
   },
 
   cancelResponsivePreview: () => {
-    set((s) => {
-      const rp = s.responsivePreview;
-      if (!rp) return s;
-      let nodes = { ...s.nodes };
-      for (const [bid, g] of Object.entries(rp.geomBackup)) {
-        const nn = nodes[bid];
-        if (nn) nodes[bid] = { ...nn, ...g };
-      }
-      return { nodes, responsivePreview: null };
-    });
+    commitStructuralResult(buildCancelResponsivePreviewResult(get()));
   },
 
   applyResponsivePreview: () => {
     const rp = get().responsivePreview;
     if (!rp) return;
-    const { frameId, geomBackup: gb, draftWidth, draftHeight } = rp;
-    set((s) => {
-      let nodes = { ...s.nodes };
-      for (const [bid, g] of Object.entries(gb)) {
-        const nn = nodes[bid];
-        if (nn) nodes[bid] = { ...nn, ...g };
-      }
-      return { nodes, responsivePreview: null };
-    });
+    const { frameId, draftWidth, draftHeight } = rp;
+    commitStructuralResult(buildRestoreResponsivePreviewGeomResult(get()));
     get().pushHistory();
     get().resizeFrameWithConstraints(frameId, { width: draftWidth, height: draftHeight }, { skipHistory: true });
   },
 
   toggleGrid: () => {
     get().pushHistory();
-    set((s) => {
-      const next = { showGrid: !s.showGrid };
-      return { ...next, ...syncActivePageRecord({ ...s, ...next }) };
-    });
+    commitStructuralResult(buildToggleGridResult(get()));
   },
 
   toggleRulers: () => {
-    set((s) => {
-      const next = { showRulers: !s.showRulers };
-      return { ...next, ...syncActivePageRecord({ ...s, ...next }) };
-    });
+    get().pushHistory();
+    commitStructuralResult(buildToggleRulersResult(get()));
   },
 
   setCanvasBackgroundColor: (hex, opts) => {
@@ -6603,10 +9525,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const s = get();
     if (s.canvasBackgroundColor === normalized) return;
     if (!opts?.skipHistory && !get().isApplyingHistory) get().pushHistory();
-    set((state) => {
-      const next = { canvasBackgroundColor: normalized };
-      return { ...next, ...syncActivePageRecord({ ...state, ...next }) };
-    });
+    commitStructuralResult(buildSetCanvasBackgroundColorResult(get(), hex));
   },
 
   startPlacingComment: () => {
@@ -6629,39 +9548,18 @@ export const useEditorStore = create<EditorState>((set, get) => {
   },
 
   addComment: (point, parentNodeIdOverride) => {
-    const s = get();
-    if (s.editorMode !== "design" || !s.isPlacingComment || s.tool !== "comment") return;
-    const hit =
-      parentNodeIdOverride ??
-      pickDeepestVisibleNodeAtWorldPoint(point.x, point.y, s.nodes, s.childOrder) ??
-      undefined;
-    const frameHit =
-      pickDeepestFrameAtWorldPoint(point.x, point.y, s.nodes, s.childOrder) ?? undefined;
+    const result = buildAddCommentResult(get(), point, parentNodeIdOverride);
+    if (!result) return;
     get().pushHistory();
-    const id = newCommentId();
-    const next: EditorComment = {
-      id,
-      x: point.x,
-      y: point.y,
-      ...(hit ? { parentNodeId: hit } : {}),
-      ...(frameHit ? { frameId: frameHit } : {}),
-      author: defaultCommentAuthor(),
-      body: "",
-      createdAt: new Date().toISOString(),
-      resolved: false,
-      replies: [],
-    };
-    set({
-      comments: [...s.comments, next],
-      activeCommentId: id,
-      isPlacingComment: false,
-    });
+    commitStructuralResult(result);
+    const localId = result.ui._newCommentId as string;
+    const next = get().comments.find((c) => c.id === localId);
+    if (!next) return;
 
     const st2 = get();
-    if (getPaytmCraftPublicEnv().mode !== "api" || !st2.isApiBackedFile || !st2.apiFileId) return;
+    if (!isPaytmCraftHttpApiMode() || !st2.isApiBackedFile || !st2.apiFileId) return;
 
     const fileId = st2.apiFileId;
-    const localId = id;
     const p = apiClient
       .createComment({
         fileId,
@@ -6700,14 +9598,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
   },
 
   updateComment: (id, body) => {
-    const s = get();
-    const prev = s.comments.find((c) => c.id === id);
-    if (!prev || prev.body === body) return;
+    const result = buildUpdateCommentResult(get(), id, body);
+    if (!result) return;
     get().pushHistory();
-    set((state) => ({
-      comments: state.comments.map((c) => (c.id === id ? { ...c, body } : c)),
-    }));
-    if (getPaytmCraftPublicEnv().mode !== "api" || !get().isApiBackedFile) return;
+    commitStructuralResult(result);
+    if (!isPaytmCraftHttpApiMode() || !get().isApiBackedFile) return;
     void resolveCommentServerId(id).then((sid) =>
       apiClient
         .updateComment(sid, { body })
@@ -6722,27 +9617,18 @@ export const useEditorStore = create<EditorState>((set, get) => {
   },
 
   addCommentReply: (commentId, body) => {
-    if (!isNonEmptyCommentBody(body)) return;
+    const result = buildAddCommentReplyResult(get(), commentId, body);
+    if (!result) return;
     get().pushHistory();
-    const reply: EditorCommentReply = {
-      id: newReplyId(),
-      author: defaultCommentAuthor("reply"),
-      body: body.trim(),
-      createdAt: new Date().toISOString(),
-    };
-    set((state) => ({
-      comments: state.comments.map((c) =>
-        c.id === commentId ? { ...c, replies: [...c.replies, reply] } : c,
-      ),
-    }));
+    commitStructuralResult(result);
   },
 
   resolveComment: (id) => {
+    const result = buildResolveCommentResult(get(), id, true);
+    if (!result) return;
     get().pushHistory();
-    set((state) => ({
-      comments: state.comments.map((c) => (c.id === id ? { ...c, resolved: true } : c)),
-    }));
-    if (getPaytmCraftPublicEnv().mode !== "api" || !get().isApiBackedFile) return;
+    commitStructuralResult(result);
+    if (!isPaytmCraftHttpApiMode() || !get().isApiBackedFile) return;
     void resolveCommentServerId(id).then((sid) =>
       apiClient
         .updateComment(sid, { resolved: true })
@@ -6757,11 +9643,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
   },
 
   reopenComment: (id) => {
+    const result = buildResolveCommentResult(get(), id, false);
+    if (!result) return;
     get().pushHistory();
-    set((state) => ({
-      comments: state.comments.map((c) => (c.id === id ? { ...c, resolved: false } : c)),
-    }));
-    if (getPaytmCraftPublicEnv().mode !== "api" || !get().isApiBackedFile) return;
+    commitStructuralResult(result);
+    if (!isPaytmCraftHttpApiMode() || !get().isApiBackedFile) return;
     void resolveCommentServerId(id).then((sid) =>
       apiClient
         .updateComment(sid, { resolved: false })
@@ -6782,20 +9668,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     abortedCommentCreates.add(id);
     pendingCommentCreateByLocalId.delete(id);
     if (!opts?.skipHistory) get().pushHistory();
-    set((state) => {
-      let { comments } = state;
-      if (opts?.pendingBody !== undefined) {
-        const pb = opts.pendingBody.trim();
-        if (isNonEmptyCommentBody(pb)) {
-          comments = comments.map((c) => (c.id === id ? { ...c, body: pb } : c));
-        }
-      }
-      return {
-        comments: comments.filter((c) => c.id !== id),
-        activeCommentId: state.activeCommentId === id ? null : state.activeCommentId,
-      };
-    });
-    if (getPaytmCraftPublicEnv().mode !== "api" || !get().isApiBackedFile) return;
+    commitStructuralResult(buildDeleteCommentResult(get(), id, opts));
+    if (!isPaytmCraftHttpApiMode() || !get().isApiBackedFile) return;
     void sidPromise
       .then((sid) =>
         apiClient.deleteComment(sid).catch((err) => {
@@ -6836,50 +9710,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const s0 = get();
     if (s0.editorMode !== "design" || s0.tool !== "pen" || s0.penDrawingNodeId) return;
     get().pushHistory();
-    set((s) => {
-      if (s.editorMode !== "design" || s.tool !== "pen" || s.penDrawingNodeId) return s;
-
-      const id = `path-${Date.now()}`;
-      const pt0: PathPoint = { id: newPathPointId(), x: 0, y: 0 };
-      let node: EditorNode = {
-        id,
-        parentId: null,
-        type: "path",
-        name: nextNumberedLayerName(s.nodes, "Vector"),
-        x: 0,
-        y: 0,
-        width: 1,
-        height: 1,
-        rotation: 0,
-        visible: true,
-        locked: false,
-        expanded: true,
-        pathPoints: [pt0],
-        pathClosed: false,
-        fillEnabled: false,
-        fillOpacity: 1,
-        fill: "transparent",
-        strokeColor: "#0f172a",
-        strokeWidth: 2,
-        strokePosition: "center",
-      };
-      node = normalizePathNode(node);
-      const inserted = insertNodeWithFrameParenting(
-        node,
-        { x: worldPoint.x, y: worldPoint.y, width: node.width, height: node.height },
-        s.nodes,
-        s.childOrder,
-        s.selectedIds,
-      );
-
-      return {
-        nodes: inserted.nodes,
-        childOrder: inserted.childOrder,
-        penDrawingNodeId: id,
-        selectedIds: [],
-        tool: "pen",
-      };
-    });
+    commitStructuralResult(buildStartPathAtResult(get(), worldPoint));
   },
 
   addPathPoint: (worldPoint) => {
@@ -6896,20 +9727,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       get().finishPath(true);
       return;
     }
-    set((s) => {
-      const n = s.nodes[drawId];
-      if (!n || n.type !== "path" || !n.pathPoints) return s;
-      const nOrigin = getRenderedWorldTopLeft(drawId, s.nodes, s.childOrder);
-      const plx = worldPoint.x - nOrigin.x;
-      const ply = worldPoint.y - nOrigin.y;
-      const pts = [...n.pathPoints, { id: newPathPointId(), x: plx, y: ply }];
-      let next: EditorNode = { ...n, pathPoints: pts };
-      next = normalizePathNode(next);
-      let nodes = { ...s.nodes, [drawId]: next };
-      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
-      const repaired = repairNodeHierarchy(nodes, s.childOrder);
-      return { nodes: repaired.nodes, childOrder: repaired.childOrder };
-    });
+    commitStructuralResult(buildAddPathPointResult(get(), drawId, worldPoint));
   },
 
   addPathPointDrag: (anchorWorld, dragWorld) => {
@@ -6928,103 +9746,19 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return;
     }
 
-    set((s) => {
-      const n = s.nodes[drawId];
-      if (!n || n.type !== "path" || !n.pathPoints?.length) return s;
-      const nOrigin = getRenderedWorldTopLeft(drawId, s.nodes, s.childOrder);
-      const anchorLocal = {
-        x: anchorWorld.x - nOrigin.x,
-        y: anchorWorld.y - nOrigin.y,
-      };
-      const dragLocal = {
-        x: dragWorld.x - nOrigin.x,
-        y: dragWorld.y - nOrigin.y,
-      };
-      const hx = dragLocal.x - anchorLocal.x;
-      const hy = dragLocal.y - anchorLocal.y;
-
-      const pts = [...n.pathPoints];
-      const prevIdx = pts.length - 1;
-      const prev = pts[prevIdx]!;
-      pts[prevIdx] = {
-        ...prev,
-        handleOut: { x: hx, y: hy },
-      };
-
-      const newPt: PathPoint = {
-        id: newPathPointId(),
-        x: anchorLocal.x,
-        y: anchorLocal.y,
-        handleIn: { x: -hx, y: -hy },
-      };
-      pts.push(newPt);
-
-      let next: EditorNode = { ...n, pathPoints: pts };
-      next = normalizePathNode(next);
-      let nodes = { ...s.nodes, [drawId]: next };
-      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
-      const repaired = repairNodeHierarchy(nodes, s.childOrder);
-      return { nodes: repaired.nodes, childOrder: repaired.childOrder };
-    });
+    commitStructuralResult(buildAddPathPointDragResult(get(), drawId, anchorWorld, dragWorld));
   },
 
   finishPath: (asClosed) => {
     const id = get().penDrawingNodeId;
     if (!id) return;
-    const closed = Boolean(asClosed);
-    set((s) => {
-      const n = s.nodes[id];
-      if (!n || n.type !== "path") return { ...s, penDrawingNodeId: null };
-      const pts = n.pathPoints ?? [];
-      if (pts.length < 2) {
-        const parentRef = n.parentId;
-        const { nodes, childOrder } = removeNodeAndDescendants(s, id);
-        const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
-        return {
-          ...s,
-          nodes: nodes2,
-          childOrder,
-          penDrawingNodeId: null,
-          selectedIds: [],
-          pathEditModeNodeId: null,
-          objectEditModeNodeId: null,
-          selectedPathPointId: null,
-        };
-      }
-      let next: EditorNode = { ...n, pathClosed: closed };
-      next = normalizePathNode(next);
-      let nodes = { ...s.nodes, [id]: next };
-      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
-      const repaired = repairNodeHierarchy(nodes, s.childOrder);
-      return {
-        ...s,
-        nodes: repaired.nodes,
-        childOrder: repaired.childOrder,
-        penDrawingNodeId: null,
-        selectedIds: [id],
-        pathEditModeNodeId: null,
-        objectEditModeNodeId: null,
-        selectedPathPointId: null,
-      };
-    });
+    commitStructuralResult(buildFinishPathResult(get(), id, Boolean(asClosed)));
   },
 
   cancelPath: () => {
     const id = get().penDrawingNodeId;
     if (!id) return;
-    set((s) => {
-      if (!s.nodes[id]) return { ...s, penDrawingNodeId: null };
-      const parentRef = s.nodes[id]?.parentId;
-      const { nodes, childOrder } = removeNodeAndDescendants(s, id);
-      const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
-      return {
-        ...s,
-        nodes: nodes2,
-        childOrder,
-        penDrawingNodeId: null,
-        selectedIds: [],
-      };
-    });
+    commitStructuralResult(buildCancelPathResult(get(), id));
   },
 
   startPencilStroke: (worldPoint) => {
@@ -7032,54 +9766,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     if (s0.editorMode !== "design" || s0.tool !== "pencil") return;
     if (s0.pencilDrawingNodeId) get().cancelPencilStroke();
     get().pushHistory();
-    set((s) => {
-      if (s.editorMode !== "design" || s.tool !== "pencil") return s;
-      const id = `path-${Date.now()}`;
-      const { defaultText } = canvasChromeForeground(s.canvasBackgroundColor);
-      const strokeWidth = clampStrokeWidth(s.pencilStrokeWidth || DEFAULT_PENCIL_STROKE_WIDTH);
-      const pt0: PathPoint = { id: newPathPointId(), x: 0, y: 0 };
-      let node: EditorNode = {
-        id,
-        parentId: null,
-        type: "path",
-        name: nextNumberedLayerName(s.nodes, "Freehand"),
-        x: 0,
-        y: 0,
-        width: 1,
-        height: 1,
-        rotation: 0,
-        visible: true,
-        locked: false,
-        expanded: true,
-        pathPoints: [pt0],
-        pathClosed: false,
-        fillEnabled: false,
-        fillOpacity: 1,
-        fill: "transparent",
-        strokeColor: defaultText,
-        strokeEnabled: true,
-        strokeWidth,
-        strokeLinecap: "round",
-        strokeLinejoin: "round",
-        strokePosition: "center",
-        strokeWidthProfile: "uniform",
-      };
-      node = normalizePathNode(node);
-      const inserted = insertNodeWithFrameParenting(
-        node,
-        { x: worldPoint.x, y: worldPoint.y, width: node.width, height: node.height },
-        s.nodes,
-        s.childOrder,
-        s.selectedIds,
-      );
-      return {
-        nodes: inserted.nodes,
-        childOrder: inserted.childOrder,
-        pencilDrawingNodeId: id,
-        selectedIds: [],
-        tool: "pencil",
-      };
-    });
+    commitStructuralResult(buildStartPencilStrokeResult(get(), worldPoint));
   },
 
   extendPencilStroke: (worldPoint) => {
@@ -7093,202 +9780,47 @@ export const useEditorStore = create<EditorState>((set, get) => {
     if (!drawId || s0.tool !== "pencil") return;
     const path = s0.nodes[drawId];
     if (!path || path.type !== "path" || !path.pathPoints?.length) return;
-    set((s) => {
-      const n = s.nodes[drawId];
-      if (!n || n.type !== "path" || !n.pathPoints?.length) return s;
-      const nOrigin = getRenderedWorldTopLeft(drawId, s.nodes, s.childOrder);
-      let pts = n.pathPoints;
-      let last = pts[pts.length - 1]!;
-      let changed = false;
-      for (const worldPoint of worldPoints) {
-        const lx = worldPoint.x - nOrigin.x;
-        const ly = worldPoint.y - nOrigin.y;
-        const firstSample = pts.length === 1;
-        if (
-          !firstSample &&
-          !shouldSampleFreehandPoint(last.x, last.y, lx, ly, s.zoom)
-        ) {
-          continue;
-        }
-        const id = newPathPointId();
-        pts = [...pts, { id, x: lx, y: ly }];
-        last = pts[pts.length - 1]!;
-        changed = true;
-      }
-      if (!changed) return s;
-      let next: EditorNode = { ...n, pathPoints: pts };
-      next = normalizePathNode(next);
-      return { ...s, nodes: { ...s.nodes, [drawId]: next } };
-    });
+    commitStructuralResult(buildExtendPencilStrokeResult(get(), drawId, worldPoints));
   },
 
   finishPencilStroke: () => {
     const id = get().pencilDrawingNodeId;
     if (!id) return;
-    const s0 = get();
-    const path = s0.nodes[id];
+    const path = get().nodes[id];
     if (!path || path.type !== "path" || !path.pathPoints?.length) {
       get().cancelPencilStroke();
       return;
     }
-    const epsilon = 1.5 / Math.max(s0.zoom, 0.01);
-    set((s) => {
-      const n = s.nodes[id];
-      if (!n || n.type !== "path" || !n.pathPoints) {
-        return { ...s, pencilDrawingNodeId: null };
-      }
-      const raw = n.pathPoints;
-      let simplified = simplifyPolyline(
-        raw.map((p) => ({ x: p.x, y: p.y })),
-        epsilon,
-      );
-      if (simplified.length < 2 && raw.length >= 2) {
-        simplified = [
-          { x: raw[0]!.x, y: raw[0]!.y },
-          { x: raw[raw.length - 1]!.x, y: raw[raw.length - 1]!.y },
-        ];
-      }
-      if (simplified.length < 2) {
-        if (raw.length >= 1) {
-          const p = raw[0]!;
-          simplified = [
-            { x: p.x, y: p.y },
-            { x: p.x + 0.5, y: p.y + 0.5 },
-          ];
-        } else {
-          const parentRef = n.parentId;
-          const { nodes, childOrder } = removeNodeAndDescendants(s, id);
-          const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
-          return {
-            ...s,
-            nodes: nodes2,
-            childOrder,
-            pencilDrawingNodeId: null,
-            selectedIds: [],
-          };
-        }
-      }
-      const pts: PathPoint[] = simplified.map((p) => ({
-        id: newPathPointId(),
-        x: p.x,
-        y: p.y,
-      }));
-      let next: EditorNode = { ...n, pathPoints: pts, pathClosed: false };
-      next = normalizePathNode(next);
-      let nodes = { ...s.nodes, [id]: next };
-      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
-      const repaired = repairNodeHierarchy(nodes, s.childOrder);
-      return {
-        ...s,
-        nodes: repaired.nodes,
-        childOrder: repaired.childOrder,
-        pencilDrawingNodeId: null,
-        tool: "move",
-        selectedIds: [id],
-        pathEditModeNodeId: null,
-        objectEditModeNodeId: null,
-        selectedPathPointId: null,
-      };
-    });
+    commitStructuralResult(buildFinishPencilStrokeResult(get(), id));
     get().setTool("move");
   },
 
   cancelPencilStroke: () => {
     const id = get().pencilDrawingNodeId;
     if (!id) return;
-    set((s) => {
-      if (!s.nodes[id]) return { ...s, pencilDrawingNodeId: null };
-      const parentRef = s.nodes[id]?.parentId;
-      const { nodes, childOrder } = removeNodeAndDescendants(s, id);
-      const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
-      return {
-        ...s,
-        nodes: nodes2,
-        childOrder,
-        pencilDrawingNodeId: null,
-        selectedIds: [],
-      };
-    });
+    commitStructuralResult(buildCancelPencilStrokeResult(get(), id));
   },
 
   updatePathPoint: (nodeId, pointId, patch, opts) => {
     if (!opts?.skipHistory && !get().isApplyingHistory) get().pushHistory();
-    set((s) => {
-      const n = s.nodes[nodeId];
-      if (!n || n.type !== "path" || !n.pathPoints) return s;
-      const mirroring = n.pathHandleMirroring ?? "none";
-      const pts = n.pathPoints.map((p) => {
-        if (p.id !== pointId) return p;
-        let merged: PathPoint = { ...p };
-        if (patch.x !== undefined) merged.x = patch.x;
-        if (patch.y !== undefined) merged.y = patch.y;
-        const handlePatch: Partial<PathPoint> = {};
-        if ("handleIn" in patch) handlePatch.handleIn = patch.handleIn;
-        if ("handleOut" in patch) handlePatch.handleOut = patch.handleOut;
-        if ("handleIn" in patch || "handleOut" in patch) {
-          const movedWhich =
-            "handleIn" in patch && !("handleOut" in patch)
-              ? "in"
-              : "handleOut" in patch && !("handleIn" in patch)
-                ? "out"
-                : undefined;
-          merged = mergePathPointHandles(merged, handlePatch, mirroring, movedWhich);
-        }
-        return merged;
-      });
-      let next: EditorNode = { ...n, pathPoints: pts };
-      next = normalizePathNode(next);
-      let nodes = { ...s.nodes, [nodeId]: next };
-      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
-      return { nodes };
-    });
+    commitStructuralResult(buildUpdatePathPointResult(get(), nodeId, pointId, patch));
   },
 
   deletePathPoint: (nodeId, pointId) => {
     get().pushHistory();
-    set((s) => {
-      const n = s.nodes[nodeId];
-      if (!n || n.type !== "path" || !n.pathPoints) return s;
-      const nextPts = n.pathPoints.filter((p) => p.id !== pointId);
-      if (nextPts.length < 2) {
-        const parentRef = n.parentId;
-        const { nodes, childOrder } = removeNodeAndDescendants(s, nodeId);
-        const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(parentRef)]);
-        return {
-          ...s,
-          nodes: nodes2,
-          childOrder,
-          selectedIds: s.selectedIds.filter((x) => x !== nodeId),
-          pathEditModeNodeId: s.pathEditModeNodeId === nodeId ? null : s.pathEditModeNodeId,
-          selectedPathPointId: null,
-        };
-      }
-      let next: EditorNode = { ...n, pathPoints: nextPts };
-      next = normalizePathNode(next);
-      let nodes = { ...s.nodes, [nodeId]: next };
-      nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
-      return {
-        ...s,
-        nodes,
-        selectedPathPointId: s.selectedPathPointId === pointId ? null : s.selectedPathPointId,
-      };
-    });
+    commitStructuralResult(buildDeletePathPointResult(get(), nodeId, pointId));
   },
 
   togglePathClosed: (nodeId) => {
     get().pushHistory();
-    set((s) => {
-      const n = s.nodes[nodeId];
-      if (!n || n.type !== "path") return s;
-      return { nodes: { ...s.nodes, [nodeId]: { ...n, pathClosed: !n.pathClosed } } };
-    });
+    commitStructuralResult(buildTogglePathClosedResult(get(), nodeId));
   },
 
   setPathEditMode: (nodeId) =>
     set({
       pathEditModeNodeId: nodeId,
       shapeEditModeNodeId: null,
-      selectedPathPointId: null,
+      selectedPathPointIds: [],
     }),
 
   enterShapeEditMode: (nodeId) => {
@@ -7307,7 +9839,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         pathEditModeNodeId: id,
         shapeEditModeNodeId: null,
         selectedIds: [id],
-        selectedPathPointId: null,
+        selectedPathPointIds: [],
         objectEditModeNodeId: null,
       });
       return;
@@ -7317,7 +9849,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       shapeEditModeNodeId: id,
       pathEditModeNodeId: null,
       selectedIds: [id],
-      selectedPathPointId: null,
+      selectedPathPointIds: [],
       objectEditModeNodeId: null,
     });
   },
@@ -7329,7 +9861,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       shapeEditModeNodeId: null,
       pathEditModeNodeId: null,
       editingTextId: null,
-      selectedPathPointId: null,
+      selectedPathPointIds: [],
     }),
 
   toggleEditMode: (nodeId) => {
@@ -7347,9 +9879,52 @@ export const useEditorStore = create<EditorState>((set, get) => {
     get().enterShapeEditMode(id);
   },
 
-  setTransformInteractionMode: (mode) => set({ transformInteractionMode: mode }),
+  setTransformInteractionMode: (mode) => {
+    set({ transformInteractionMode: mode });
+    if (mode === "none") flushDeferredWasmReconcile();
+  },
 
-  setIsMovingSelection: (active) => set({ isMovingSelection: active }),
+  setRotateGeomSnapshot: (snapshot) => set({ rotateGeomSnapshot: snapshot }),
+
+  beginRotateInteraction: (nodeId, snapshot) =>
+    set({
+      transformInteractionMode: "rotate",
+      rotateGeomSnapshot: { nodeId, ...snapshot },
+    }),
+
+  endRotateInteraction: (nodeId, rotation) => {
+    const snap = get().rotateGeomSnapshot;
+    if (!snap || snap.nodeId !== nodeId) {
+      set({ transformInteractionMode: "none", rotateGeomSnapshot: null });
+      return;
+    }
+    const before = get().nodes[nodeId];
+    const result = buildEndRotateInteractionResult(get(), nodeId, rotation);
+    if (!result) {
+      set({ transformInteractionMode: "none", rotateGeomSnapshot: null });
+      return;
+    }
+    commitStructuralResult(result);
+    const after = get().nodes[nodeId];
+    if (after && before) {
+      const patch: Partial<EditorNode> = {};
+      if (before.rotation !== after.rotation) patch.rotation = after.rotation;
+      if (before.x !== after.x) patch.x = after.x;
+      if (before.y !== after.y) patch.y = after.y;
+      if (before.width !== after.width) patch.width = after.width;
+      if (before.height !== after.height) patch.height = after.height;
+      if (Object.keys(patch).length > 0) {
+        const mirrored = mirrorNodeGeometryToWasm(nodeId, patch, after);
+        if (!mirrored) syncWasmDocumentAfterStoreUpdate();
+      }
+    }
+    flushDeferredWasmReconcile();
+  },
+
+  setIsMovingSelection: (active) => {
+    set({ isMovingSelection: active });
+    if (!active) flushDeferredWasmReconcile();
+  },
 
   setRotateHandleHovered: (hovered, handle) =>
     set({
@@ -7362,70 +9937,51 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const id = nodeId ?? s.selectedIds[0];
     if (!id) return;
     const raw = s.nodes[id];
-    if (!raw || raw.locked || raw.visible === false) return;
-    if (
-      raw.type !== "rectangle" &&
-      raw.type !== "ellipse" &&
-      raw.type !== "line" &&
-      raw.type !== "polygon" &&
-      raw.type !== "path"
-    ) {
-      return;
-    }
+    if (!raw || !isVectorEditableShape(raw)) return;
     if (s.editingTextId || s.penDrawingNodeId || s.pencilDrawingNodeId) return;
     const needsConvert = raw.type !== "path" && raw.type !== "polygon";
     if (needsConvert) get().pushHistory();
-    set((st) => {
-      const current = st.nodes[id];
-      if (!current) return st;
-      let converted: EditorNode;
-      if (current.type === "polygon") {
-        const built = shapeToPathPoints(current);
-        if (!built) return st;
-        converted = {
-          ...current,
-          pathPoints: built.pathPoints,
-          pathClosed: built.pathClosed,
-        };
-      } else {
-        const c = convertNodeToPath(current);
-        if (!c) return st;
-        converted = ensureRoundedRectPathPoints(c);
-      }
-      const nodes =
-        needsConvert || converted !== current
-          ? { ...st.nodes, [id]: converted }
-          : st.nodes;
-      return {
-        nodes,
-        pathEditModeNodeId: id,
-        shapeEditModeNodeId: null,
-        selectedIds: [id],
-        selectedPathPointId: null,
-        objectEditModeNodeId: null,
-      };
-    });
+    commitStructuralResult(buildEnterVectorEditModeResult(get(), nodeId));
   },
 
   setPathHandleMirroring: (mode) => {
     const id = get().pathEditModeNodeId ?? get().selectedIds[0];
     if (!id) return;
     get().pushHistory();
-    set((s) => {
-      const n = s.nodes[id];
-      if (!n || n.type !== "path") return s;
-      return { nodes: { ...s.nodes, [id]: { ...n, pathHandleMirroring: mode } } };
-    });
+    commitStructuralResult(buildSetPathHandleMirroringResult(get(), id, mode));
   },
 
-  setSelectedPathPointId: (id) => set({ selectedPathPointId: id }),
+  setSelectedPathPointIds: (ids) => set({ selectedPathPointIds: ids }),
+
+  togglePathPointSelection: (pointId, additive) =>
+    set((s) => {
+      const next = additive
+        ? s.selectedPathPointIds.includes(pointId)
+          ? s.selectedPathPointIds.filter((id) => id !== pointId)
+          : [...s.selectedPathPointIds, pointId]
+        : [pointId];
+      return { selectedPathPointIds: next };
+    }),
+
+  updatePathPoints: (nodeId, patches, opts) => {
+    if (!opts?.skipHistory && !get().isApplyingHistory) get().pushHistory();
+    commitStructuralResult(buildUpdatePathPointsResult(get(), nodeId, patches));
+  },
+
+  deletePathPoints: (nodeId, pointIds) => {
+    if (pointIds.length === 0) return;
+    get().pushHistory();
+    commitStructuralResult(buildDeletePathPointsResult(get(), nodeId, pointIds));
+  },
 
   setApiFileSession: (fileId, workspaceId) => {
     pendingCommentCreateByLocalId.clear();
     abortedCommentCreates.clear();
+    setActiveApiFileId(fileId);
     set({
       apiFileId: fileId,
       apiWorkspaceId: workspaceId,
+      apiFileRevision: undefined,
       isApiBackedFile: true,
       apiCommentsStatus: "loading" as ApiCommentsStatus,
       versionHistoryOpen: false,
@@ -7438,9 +9994,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
   clearApiFileSession: () => {
     pendingCommentCreateByLocalId.clear();
     abortedCommentCreates.clear();
+    setActiveApiFileId(null);
+    setActiveApiRevision(null);
     set({
       apiFileId: undefined,
       apiWorkspaceId: undefined,
+      apiFileRevision: undefined,
       isApiBackedFile: false,
       apiCommentsStatus: "idle" as ApiCommentsStatus,
       versionHistoryOpen: false,
@@ -7450,7 +10009,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   },
 
   saveCurrentDocumentAsApiFile: async () => {
-    if (getPaytmCraftPublicEnv().mode !== "api") return;
+    if (!isPaytmCraftHttpApiMode()) return;
     const st = get();
     if (st.apiFileId) return;
     const wid = getActiveMockWorkspace().id;
@@ -7470,12 +10029,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
       set({
         apiFileId: created.id,
         apiWorkspaceId: wid,
+        apiFileRevision: created.revision,
         isApiBackedFile: true,
         documentSaveStatus: "saved-api" as DocumentSaveStatus,
         versionHistoryOpen: false,
         apiVersionsStatus: "idle" as ApiVersionsStatus,
         apiFileVersions: [],
       });
+      setActiveApiFileId(created.id);
+      setActiveApiRevision(created.revision ?? null);
       pendingCommentCreateByLocalId.clear();
       abortedCommentCreates.clear();
       void get().loadApiComments();
@@ -7487,7 +10049,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   loadApiComments: async () => {
     const st = get();
-    if (getPaytmCraftPublicEnv().mode !== "api" || !st.isApiBackedFile || !st.apiFileId) {
+    if (!isPaytmCraftHttpApiMode() || !st.isApiBackedFile || !st.apiFileId) {
       set({ apiCommentsStatus: "idle" as ApiCommentsStatus });
       return;
     }
@@ -7522,7 +10084,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   },
 
   syncCommentToApi: (commentId) => {
-    if (getPaytmCraftPublicEnv().mode !== "api" || !get().isApiBackedFile || !get().apiFileId) return;
+    if (!isPaytmCraftHttpApiMode() || !get().isApiBackedFile || !get().apiFileId) return;
     const c = get().comments.find((x) => x.id === commentId);
     if (!c) return;
     void resolveCommentServerId(commentId).then((sid) =>
@@ -7539,7 +10101,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   },
 
   deleteApiComment: (commentId) => {
-    if (getPaytmCraftPublicEnv().mode !== "api" || !get().isApiBackedFile) return;
+    if (!isPaytmCraftHttpApiMode() || !get().isApiBackedFile) return;
     void resolveCommentServerId(commentId).then((sid) =>
       apiClient.deleteComment(sid).catch((err) => {
         console.warn("[Paytm Craft] deleteApiComment failed", err);
@@ -7632,7 +10194,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   loadApiFileVersions: async () => {
     const st = get();
-    if (getPaytmCraftPublicEnv().mode !== "api" || !st.isApiBackedFile || !st.apiFileId) {
+    if (!isPaytmCraftHttpApiMode() || !st.isApiBackedFile || !st.apiFileId) {
       set({
         apiVersionsStatus: "idle" as ApiVersionsStatus,
         apiFileVersions: [],
@@ -7699,7 +10261,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         pencilDrawingNodeId: null,
         pathEditModeNodeId: null,
   objectEditModeNodeId: null,
-        selectedPathPointId: null,
+        selectedPathPointIds: [],
         presenceUsers: [],
         showPresence: false,
         presenceActivityLog: [],
@@ -7717,9 +10279,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
         tool: "move",
         leftTab: "layers",
         documentSaveStatus: "saved-api" as DocumentSaveStatus,
+        apiFileRevision: file.revision,
         documentHydrationRevision: s.documentHydrationRevision + 1,
         historyFuture: [],
       }));
+      setActiveApiRevision(file.revision ?? null);
       void getSyncProvider()
         .saveDocument(raw)
         .catch((err) => {
@@ -7736,31 +10300,45 @@ export const useEditorStore = create<EditorState>((set, get) => {
     set({ documentSaveStatus: "saving" });
     const st = get();
     const doc = editorStateToDocument(toPersistSlice(st));
-    const shouldPushApi =
-      getPaytmCraftPublicEnv().mode === "api" && st.isApiBackedFile && Boolean(st.apiFileId);
+    const viaApi =
+      isPaytmCraftHttpApiMode() && st.isApiBackedFile && Boolean(st.apiFileId);
 
     void getSyncProvider()
       .saveDocument(doc)
       .then(() => {
-        if (!shouldPushApi) {
-          set({ documentSaveStatus: "saved" });
-          return;
-        }
-        const fileId = st.apiFileId!;
-        return apiClient
-          .saveFile(fileId, { documentJson: doc })
-          .then(() => {
-            set({ documentSaveStatus: "saved-api" });
-          })
-          .catch((e) => {
-            console.warn("[Paytm Craft] API save failed", e);
-            set({ documentSaveStatus: "api-save-failed" });
-          });
+        set({
+          documentSaveStatus: viaApi ? ("saved-api" as DocumentSaveStatus) : "saved",
+          ...(viaApi ? { apiFileRevision: getActiveApiRevision() ?? undefined } : {}),
+        });
       })
       .catch((e) => {
-        console.warn("[Paytm Craft] saveToLocal failed", e);
-        set({ documentSaveStatus: "unsaved" });
+        console.warn("[Paytm Craft] saveDocument failed", e);
+        if (viaApi && isApiSaveConflictError(e)) {
+          set({ documentSaveStatus: "api-conflict" as DocumentSaveStatus });
+          return;
+        }
+        set({
+          documentSaveStatus: viaApi ? ("api-save-failed" as DocumentSaveStatus) : "unsaved",
+        });
       });
+  },
+
+  reloadApiFileFromServer: async () => {
+    const st = get();
+    if (!isPaytmCraftHttpApiMode() || !st.apiFileId) return;
+    try {
+      const detail = await apiClient.getFile(st.apiFileId);
+      if (!detail) return;
+      const slice = persistSliceFromApiFileDetail(detail);
+      await get().loadWorkspaceFromPersist(slice, {
+        apiFileId: detail.id,
+        apiWorkspaceId: detail.workspaceId,
+        apiRevision: detail.revision,
+      });
+      void get().loadApiComments();
+    } catch (e) {
+      console.warn("[Paytm Craft] reloadApiFileFromServer failed", e);
+    }
   },
 
   loadFromLocal: async () => {
@@ -7831,6 +10409,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       nodes: sliceFromDoc.nodes,
       childOrder: sliceFromDoc.childOrder,
       assets: sliceFromDoc.assets,
+      fontAssets: sliceFromDoc.fontAssets,
       designTokens: sliceFromDoc.designTokens,
       fileName: sliceFromDoc.fileName,
       selectedIds: sliceFromDoc.selectedIds,
@@ -7897,28 +10476,31 @@ export const useEditorStore = create<EditorState>((set, get) => {
       figImportToast: null,
     });
     try {
-      await waitForNextPaint();
       if (isFigImportCancelled(importGen)) return;
       const bytes = new Uint8Array(await file.arrayBuffer());
+      let lastProgressAt = 0;
       const onProgress = (message: string) => {
-        if (!isFigImportCancelled(importGen)) {
-          useEditorStore.setState({ figImportStatus: message });
-        }
+        if (isFigImportCancelled(importGen)) return;
+        const now = Date.now();
+        if (now - lastProgressAt < 100) return;
+        lastProgressAt = now;
+        useEditorStore.setState({ figImportStatus: message });
       };
       const result = await convertFigFileAsync(bytes, file.name, onProgress);
       if (isFigImportCancelled(importGen)) return;
       if (!result.ok) {
         throw new Error(result.error);
       }
-      set({ figImportStatus: "Preparing canvas…" });
+      set({ figImportStatus: "Applying to canvas…" });
       const prepared = prepareDocumentForEditorImport(result.document);
       if (isFigImportCancelled(importGen)) return;
       const { finalizeFigmaImportToEditor } = await import("@/lib/figImport/finalizeFigmaImport");
       await finalizeFigmaImportToEditor({
         prepared,
         fileName: result.document.name || file.name.replace(/\.fig$/i, ""),
-        runPostLayout: true,
+        runPostLayout: false,
         importGen,
+        figFidelityCaptures: result.figFidelityCaptures,
       });
     } catch (e) {
       if (!isFigImportCancelled(importGen)) {
@@ -8025,6 +10607,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       nodes: slice.nodes,
       childOrder: slice.childOrder,
       assets: slice.assets ?? {},
+      fontAssets: slice.fontAssets ?? {},
       designTokens: slice.designTokens ?? {},
       fileName: slice.fileName,
       selectedIds: slice.selectedIds,
@@ -8054,7 +10637,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       pencilDrawingNodeId: null,
       pathEditModeNodeId: null,
   objectEditModeNodeId: null,
-      selectedPathPointId: null,
+      selectedPathPointIds: [],
       presenceUsers: [],
       showPresence: false,
       presenceActivityLog: [],
@@ -8069,6 +10652,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       teamInviteModalOpen: false,
       apiFileId: backed ? apiSession!.apiFileId : undefined,
       apiWorkspaceId: backed ? apiSession!.apiWorkspaceId : undefined,
+      apiFileRevision: backed ? apiSession!.apiRevision : undefined,
       isApiBackedFile: backed,
       apiCommentsStatus: (backed ? "loading" : "idle") as ApiCommentsStatus,
       versionHistoryOpen: false,
@@ -8077,12 +10661,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
       editorMode: "design",
       tool: "move",
       leftTab: "layers",
-      documentSaveStatus: "saved",
+      documentSaveStatus: (backed ? "saved-api" : "saved") as DocumentSaveStatus,
       documentHydrating: false,
       documentHydrationRevision: s.documentHydrationRevision + 1,
       historyPast: [],
       historyFuture: [],
     }));
+    setActiveApiFileId(backed ? apiSession!.apiFileId : null);
+    setActiveApiRevision(backed ? apiSession!.apiRevision ?? null : null);
     if (typeof requestAnimationFrame === "function") {
       requestAnimationFrame(() => {
         if (Object.keys(get().nodes).length > 0) {
@@ -8097,10 +10683,19 @@ export const useEditorStore = create<EditorState>((set, get) => {
           .then(() => {
             if (!get().isApiBackedFile) {
               useEditorStore.setState({ documentSaveStatus: "saved" });
+            } else {
+              useEditorStore.setState({
+                documentSaveStatus: "saved-api",
+                apiFileRevision: getActiveApiRevision() ?? undefined,
+              });
             }
           })
           .catch((e) => {
             console.warn("[Paytm Craft] persist save failed", e);
+            if (get().isApiBackedFile && isApiSaveConflictError(e)) {
+              useEditorStore.setState({ documentSaveStatus: "api-conflict" });
+              return;
+            }
             useEditorStore.setState({ documentSaveStatus: "unsaved" });
           });
 
@@ -8170,7 +10765,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       pencilDrawingNodeId: null,
       pathEditModeNodeId: null,
   objectEditModeNodeId: null,
-      selectedPathPointId: null,
+      selectedPathPointIds: [],
       presenceUsers: [],
       showPresence: false,
       presenceActivityLog: [],
@@ -8189,6 +10784,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       teamInviteModalOpen: false,
       apiFileId: undefined,
       apiWorkspaceId: undefined,
+      apiFileRevision: undefined,
       isApiBackedFile: false,
       apiCommentsStatus: "idle" as ApiCommentsStatus,
       versionHistoryOpen: false,
@@ -8288,7 +10884,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   resetDocument: () => {
     const s = get();
-    if (s.documentSaveStatus === "unsaved" || s.documentSaveStatus === "api-save-failed") {
+    if (
+      s.documentSaveStatus === "unsaved" ||
+      s.documentSaveStatus === "api-save-failed" ||
+      s.documentSaveStatus === "api-conflict"
+    ) {
       if (!window.confirm("Discard unsaved changes and create a new file?")) return;
     }
     const { nodes, childOrder } = buildMock();
@@ -8296,7 +10896,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       zoom: DEFAULT_CANVAS_ZOOM,
       pan: { x: 40, y: 24 },
       showGrid: false,
-      showRulers: true,
+      showRulers: false,
     });
     set({
       nodes,
@@ -8305,13 +10905,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
       pageOrder: pageInit.pageOrder,
       activePageId: pageInit.activePageId,
       assets: {},
+      fontAssets: {},
       designTokens: {},
       fileName: "Untitled",
       selectedIds: [],
       zoom: DEFAULT_CANVAS_ZOOM,
       pan: { x: 40, y: 24 },
       showGrid: false,
-      showRulers: true,
+      showRulers: false,
       comments: [],
       commentsPanelOpen: false,
       activeCommentId: null,
@@ -8320,7 +10921,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       pencilDrawingNodeId: null,
       pathEditModeNodeId: null,
   objectEditModeNodeId: null,
-      selectedPathPointId: null,
+      selectedPathPointIds: [],
       presenceUsers: [],
       showPresence: false,
       presenceActivityLog: [],
@@ -8335,6 +10936,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       teamInviteModalOpen: false,
       apiFileId: undefined,
       apiWorkspaceId: undefined,
+      apiFileRevision: undefined,
       isApiBackedFile: false,
       apiCommentsStatus: "idle" as ApiCommentsStatus,
       versionHistoryOpen: false,
@@ -8357,7 +10959,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
       documentHydrationRevision: s.documentHydrationRevision + 1,
       historyPast: [],
       historyFuture: [],
+      wasmHistoryCanUndo: false,
+      wasmHistoryCanRedo: false,
     });
+    if (isWasmDocumentAuthority()) {
+      try {
+        getActiveCraftEngine()?.clearHistory();
+      } catch {
+        /* engine not ready */
+      }
+      requestCraftEngineWasmBootstrap();
+    }
     void getSyncProvider()
       .saveDocument(editorStateToDocument(toPersistSlice(get())))
       .catch((e) => {
@@ -8367,10 +10979,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
   },
 
   setDocumentName: (name) => {
-    const next = name.trim() ? name.trim() : "Untitled";
-    if (next === get().fileName) return;
+    const result = buildSetDocumentNameResult(get(), name);
+    if (!result) return;
     get().pushHistory();
-    set({ fileName: next });
+    commitStructuralResult(result);
   },
 
   setActivePage: (pageId) => {

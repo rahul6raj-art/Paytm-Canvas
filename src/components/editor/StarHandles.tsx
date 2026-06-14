@@ -64,6 +64,8 @@ export function StarHandles() {
         pointCount: starPreview.pointCount,
         ratio: starPreview.ratio,
         cornerRadius: starPreview.cornerRadius,
+        outerCornerRadius: starPreview.outerCornerRadius,
+        innerCornerRadius: starPreview.innerCornerRadius,
       };
     }
     return effectiveStarParams(node);
@@ -82,12 +84,12 @@ export function StarHandles() {
       params.ratio,
       node.width,
       node.height,
-      params.cornerRadius,
+      params.outerCornerRadius,
     );
     return {
       ratio: localToWorld(id, ratioLocal, nodes, childOrder),
       corner: localToWorld(id, cornerLocal, nodes, childOrder),
-      cornerRadius: params.cornerRadius,
+      cornerRadius: params.outerCornerRadius,
     };
   }, [show, id, node, params, nodes, childOrder]);
 

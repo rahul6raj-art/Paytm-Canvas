@@ -19,6 +19,7 @@ export type InitialDocumentFields = Pick<
   | "canvasBackgroundColor"
   | "selectedIds"
   | "assets"
+  | "fontAssets"
   | "designTokens"
   | "fileName"
   | "comments"
@@ -47,6 +48,7 @@ export function createEmptyDocumentFields(): InitialDocumentFields {
     canvasBackgroundColor: page.canvasBackgroundColor,
     selectedIds: [],
     assets: {},
+    fontAssets: {},
     designTokens: {},
     fileName: "Untitled",
     comments: [],
@@ -77,6 +79,7 @@ export function mergeSampleDocumentFields(
     canvasBackgroundColor: active.canvasBackgroundColor,
     selectedIds: [],
     assets: {},
+    fontAssets: {},
     designTokens: {},
     fileName,
     comments: [],

@@ -1,7 +1,19 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
+import { appFieldClass, appFieldRadius, inspectorControlHeightClass } from "@/lib/appFieldStyles";
+import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
+import {
+  inspectorFieldIconSlotClass,
+  inspectorTransformActionBtnClass,
+} from "@/lib/inspectorIconStyles";
 import { cn } from "@/lib/utils";
+import {
+  FlipHorizontalIcon,
+  FlipVerticalIcon,
+  Rotate90Icon,
+  RotationAngleIcon,
+} from "./InspectorSettingIcons";
 
 function TransformIconBtn({
   active,
@@ -15,7 +27,7 @@ function TransformIconBtn({
   disabled?: boolean;
   title: string;
   onClick: () => void;
-  children: ReactNode;
+  children: React.ReactNode;
   className?: string;
 }) {
   return (
@@ -25,8 +37,7 @@ function TransformIconBtn({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "flex h-6 min-w-0 flex-1 items-center justify-center text-app-muted transition-colors",
-        "hover:bg-app-hover hover:text-app-fg disabled:opacity-40",
+        inspectorTransformActionBtnClass,
         active && "bg-accent/15 text-app-fg",
         className,
       )}
@@ -36,80 +47,97 @@ function TransformIconBtn({
   );
 }
 
-export function Rotate90Icon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden className="text-current">
-      <path
-        d="M8 3.2 11.2 6.4 8 9.6 4.8 6.4Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.15"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M5.2 2.6a5.2 5.2 0 0 1 6.1-.4"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.15"
-        strokeLinecap="round"
-      />
-      <path
-        d="M10.8 2.2 11.6 4.1 9.7 4.9"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.15"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+function normalizeRotation(deg: number): number {
+  return ((deg % 360) + 360) % 360;
 }
 
-export function FlipHorizontalIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden className="text-current">
-      <line x1="8" y1="2.5" x2="8" y2="13.5" stroke="currentColor" strokeWidth="1.15" />
-      <path
-        d="M4.5 6 6.8 8 4.5 10"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.15"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M11.5 6 9.2 8 11.5 10"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.15"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+function parseRotationDraft(raw: string, fallback: number): number {
+  const trimmed = raw.trim().replace(/°/g, "");
+  if (trimmed === "" || trimmed === "-" || trimmed === "." || trimmed === "-.") return fallback;
+  const n = Number(trimmed);
+  return Number.isFinite(n) ? n : fallback;
 }
 
-export function FlipVerticalIcon() {
+function formatRotation(deg: number): string {
+  return `${Math.round(normalizeRotation(deg))}°`;
+}
+
+function RotationAngleInput({
+  value,
+  onCommit,
+  disabled,
+  instanceKey = "",
+}: {
+  value: number;
+  onCommit: (deg: number) => void;
+  disabled?: boolean;
+  instanceKey?: string;
+}) {
+  const [text, setText] = useState(() => formatRotation(value));
+
+  useEffect(() => {
+    setText(formatRotation(value));
+  }, [value, instanceKey]);
+
+  const commitValue = (deg: number) => {
+    const next = normalizeRotation(deg);
+    onCommit(next);
+    setText(formatRotation(next));
+    return next;
+  };
+
+  const apply = (raw: string) => {
+    const trimmed = raw.trim().replace(/°/g, "");
+    if (trimmed === "" || trimmed === "-" || trimmed === "." || trimmed === "-.") return false;
+    const n = Number(trimmed);
+    if (!Number.isFinite(n)) return false;
+    commitValue(n);
+    return true;
+  };
+
+  const nudge = (direction: 1 | -1, shift: boolean, alt: boolean) => {
+    const delta = keyboardNudgeStep(1, 0, shift, alt) * direction;
+    const current = parseRotationDraft(text, value);
+    commitValue(current + delta);
+  };
+
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden className="text-current">
-      <line x1="2.5" y1="8" x2="13.5" y2="8" stroke="currentColor" strokeWidth="1.15" />
-      <path
-        d="M6 4.5 8 6.8 10 4.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.15"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+    <div
+      className={cn(
+        "flex min-w-0 flex-1 items-center overflow-hidden border border-app-border bg-app-inset",
+        inspectorControlHeightClass,
+        appFieldRadius,
+      )}
+    >
+      <span className={inspectorFieldIconSlotClass} aria-hidden>
+        <RotationAngleIcon />
+      </span>
+      <input
+        type="text"
+        inputMode="decimal"
+        disabled={disabled}
+        aria-label="Rotation"
+        className={cn(
+          appFieldClass,
+          "flex-1 rounded-none border-0 bg-transparent px-1.5 py-0 shadow-none",
+          "font-mono tabular-nums focus-visible:ring-0",
+        )}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => {
+          if (!apply(text)) setText(formatRotation(value));
+        }}
+        onKeyDown={(e) => {
+          handlePanelFieldKeyDown(e, {
+            onEnter: () => {
+              if (!apply(text)) setText(formatRotation(value));
+              e.currentTarget.blur();
+            },
+            onArrowNudge: nudge,
+          });
+        }}
       />
-      <path
-        d="M6 11.5 8 9.2 10 11.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.15"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+    </div>
   );
 }
 
@@ -130,7 +158,11 @@ export function TransformActions({
 }) {
   return (
     <div
-      className="flex overflow-hidden rounded-md border border-app-border bg-app-inset"
+      className={cn(
+        "flex shrink-0 items-center overflow-hidden border border-app-border bg-app-inset",
+        inspectorControlHeightClass,
+        appFieldRadius,
+      )}
       role="group"
       aria-label="Transform"
     >
@@ -159,6 +191,51 @@ export function TransformActions({
       >
         <FlipVerticalIcon />
       </TransformIconBtn>
+    </div>
+  );
+}
+
+/** Figma-style rotation field + transform action buttons. */
+export function RotationTransformRow({
+  rotation,
+  flipHorizontal,
+  flipVertical,
+  disabled,
+  instanceKey,
+  onRotationCommit,
+  onRotate90,
+  onFlipHorizontal,
+  onFlipVertical,
+}: {
+  rotation: number;
+  flipHorizontal?: boolean;
+  flipVertical?: boolean;
+  disabled?: boolean;
+  instanceKey?: string;
+  onRotationCommit: (deg: number) => void;
+  onRotate90: () => void;
+  onFlipHorizontal: () => void;
+  onFlipVertical: () => void;
+}) {
+  return (
+    <div>
+      <div className="inspector-field-label">Rotation</div>
+      <div className="flex gap-1">
+        <RotationAngleInput
+          value={rotation}
+          disabled={disabled}
+          instanceKey={instanceKey}
+          onCommit={onRotationCommit}
+        />
+        <TransformActions
+          flipHorizontal={flipHorizontal}
+          flipVertical={flipVertical}
+          disabled={disabled}
+          onRotate90={onRotate90}
+          onFlipHorizontal={onFlipHorizontal}
+          onFlipVertical={onFlipVertical}
+        />
+      </div>
     </div>
   );
 }

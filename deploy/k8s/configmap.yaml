@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: craft-backend
+  namespace: craft
+  labels:
+    app.kubernetes.io/part-of: paytm-craft
+data:
+  CRAFT_API_ENV: production
+  CRAFT_API_ALLOW_ANON: "0"
+  CRAFT_API_COOKIE_SECURE: "1"
+  CRAFT_API_TRUST_PROXY: "1"
+  CRAFT_API_RBAC: "1"
+  # Comma-separated Next.js origin(s)
+  CRAFT_API_CORS_ORIGIN: https://craft.example.com
+  CRAFT_APP_URL: https://craft.example.com
+  CRAFT_SYNC_ENV: production
+  CRAFT_SYNC_ALLOW_ANON: "0"
+  CRAFT_SYNC_DEBOUNCE_MS: "3000"
+  S3_REGION: us-east-1

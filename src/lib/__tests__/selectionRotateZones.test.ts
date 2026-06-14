@@ -1,22 +1,30 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  CANVAS_ROTATE_CORNER_GAP_SCREEN_PX,
   pointerOnCornerHandleRotateHalf,
+  rotateCornerZoneOffsetWorld,
   rotateEdgeBandsForAxisBounds,
   rotateEdgeBandsForCorners,
   rotateZonesForAxisBounds,
   rotateZonesForCornerHandles,
   topRotateHandleWorld,
 } from "@/lib/selectionRotateZones";
+import { CANVAS_HANDLE_SCREEN_PX } from "@/lib/canvasVisual";
 
 describe("selectionRotateZones", () => {
-  it("places rotate zones outside axis-aligned corners", () => {
+  it("places rotate zones just outside corner resize handles", () => {
     const bounds = { x: 100, y: 200, width: 80, height: 60 };
     const zones = rotateZonesForAxisBounds(bounds, 1);
     const se = zones.find((z) => z.handle === "se");
     assert.ok(se);
-    assert.ok(se!.x > bounds.x + bounds.width);
-    assert.ok(se!.y > bounds.y + bounds.height);
+    const cornerX = bounds.x + bounds.width;
+    const cornerY = bounds.y + bounds.height;
+    const offset = rotateCornerZoneOffsetWorld(1);
+    assert.ok(Math.hypot(se!.x - cornerX, se!.y - cornerY) >= offset - 0.01);
+    assert.equal(offset, CANVAS_HANDLE_SCREEN_PX / 2 + CANVAS_ROTATE_CORNER_GAP_SCREEN_PX);
+    assert.ok(se!.x > cornerX);
+    assert.ok(se!.y > cornerY);
   });
 
   it("places rotate zones outside oriented corner handles", () => {

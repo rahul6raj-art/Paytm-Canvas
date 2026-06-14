@@ -37,9 +37,7 @@ export function FigImportOverlay() {
 
   if (!busy) return null;
 
-  const detail =
-    status ??
-    "Preparing your design… Large files can take a few minutes — please keep this tab open.";
+  const detail = status ?? "Unpacking and converting your design…";
 
   return (
     <div
@@ -55,22 +53,22 @@ export function FigImportOverlay() {
         </div>
         <div className="mb-3 flex items-center justify-center gap-2">
           <Loader2 className="h-5 w-5 animate-spin text-accent" aria-hidden />
-          <p className="text-[15px] font-semibold text-app-fg">Importing from Figma</p>
+          <p className="text-base font-semibold text-app-fg">Importing from Figma</p>
         </div>
-        <p className="text-[13px] leading-relaxed text-app-muted">{detail}</p>
-        {elapsedSec >= 5 ? (
-          <p className="mt-2 text-[12px] tabular-nums text-app-subtle">
+        <p className="text-ui-sm leading-relaxed text-app-muted">{detail}</p>
+        {elapsedSec >= 8 ? (
+          <p className="mt-2 text-ui tabular-nums text-app-subtle">
             {elapsedSec}s elapsed · keep this tab open
           </p>
         ) : (
-          <p className="mt-2 text-[12px] text-app-subtle">Keep this tab open until import finishes.</p>
+          <p className="mt-2 text-ui text-app-subtle">Usually finishes in a few seconds.</p>
         )}
         <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-app-inset">
           <div className="h-full w-2/5 animate-pulse rounded-full bg-accent" />
         </div>
         <button
           type="button"
-          className="mt-4 text-[12px] font-medium text-app-subtle underline-offset-2 hover:text-app-fg hover:underline"
+          className="mt-4 text-ui font-medium text-app-subtle underline-offset-2 hover:text-app-fg hover:underline"
           onClick={() => {
             resetEditorBlockingState();
           }}

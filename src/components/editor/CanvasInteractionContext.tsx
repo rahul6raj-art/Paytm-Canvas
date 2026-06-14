@@ -5,6 +5,8 @@ import { createContext, useContext } from "react";
 export type CanvasInteractionState = {
   spaceDown: boolean;
   panning: boolean;
+  /** ⌘ on macOS / Ctrl on Windows — deep-select nested layers inside frames. */
+  commandDown: boolean;
   /** Option / Alt held — measurements outside selection; copy cursor on selection. */
   optionDown: boolean;
   /** Pointer is over selected bounds while Option is held (duplicate, not measure). */
@@ -16,6 +18,7 @@ export type CanvasInteractionState = {
 export const CanvasInteractionContext = createContext<CanvasInteractionState>({
   spaceDown: false,
   panning: false,
+  commandDown: false,
   optionDown: false,
   optionOverSelection: false,
   optionPointerHoverId: null,

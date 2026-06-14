@@ -63,6 +63,7 @@ export function computeAutoLayoutArrowReorderIndex(
   arrowCode: string,
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
+  shiftKey = false,
 ): number | null {
   const delta = autoLayoutArrowReorderDelta(ctx.mode, arrowCode);
   if (delta === 0) return null;
@@ -75,15 +76,37 @@ export function computeAutoLayoutArrowReorderIndex(
   const flowIdx = flowKids.indexOf(ctx.childId);
   if (flowIdx < 0) return null;
 
+  const fullList = childOrder[ctx.parentId] ?? [];
+
+  if (shiftKey) {
+    const targetFlowIdx = delta < 0 ? 0 : flowKids.length - 1;
+    if (targetFlowIdx === flowIdx) return null;
+    const anchorId = flowKids[targetFlowIdx]!;
+    const anchorFullIdx = fullList.indexOf(anchorId);
+    if (anchorFullIdx < 0) return null;
+    return delta < 0 ? anchorFullIdx : anchorFullIdx + 1;
+  }
+
   const nextFlowIdx = flowIdx + delta;
   if (nextFlowIdx < 0 || nextFlowIdx >= flowKids.length) return null;
 
-  const fullList = childOrder[ctx.parentId] ?? [];
   const neighborId = flowKids[nextFlowIdx]!;
   const neighborFullIdx = fullList.indexOf(neighborId);
   if (neighborFullIdx < 0) return null;
 
   return delta < 0 ? neighborFullIdx : neighborFullIdx + 1;
+}
+
+/** @deprecated Perpendicular nudge is allowed; flow children detach to absolute on nudge. */
+export function autoLayoutArrowBlocksNudge(
+  selectedIds: string[],
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  arrowCode: string,
+): boolean {
+  const ctx = getAutoLayoutArrowReorderContext(selectedIds, nodes, childOrder);
+  if (!ctx) return false;
+  return autoLayoutArrowReorderDelta(ctx.mode, arrowCode) === 0;
 }
 
 export function swapAutoLayoutSiblingOrder(

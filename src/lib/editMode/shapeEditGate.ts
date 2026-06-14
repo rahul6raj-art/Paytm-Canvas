@@ -1,7 +1,40 @@
 import type { EditorNode } from "@/stores/useEditorStore";
+import { isCanvasBgCreationTool } from "@/lib/canvasInteractionGuards";
 import { isPolygonNode } from "@/lib/shapes/polygonGeometry";
 import { isStarNode } from "@/lib/shapes/starGeometry";
 import { supportsCornerRadiusHandles } from "@/lib/cornerRadius";
+
+export type EllipseArcCanvasGateState = {
+  editorMode: string;
+  tool: string;
+  penDrawingNodeId: string | null;
+  pencilDrawingNodeId: string | null;
+  isPlacingComment: boolean;
+  selectedIds: readonly string[];
+  transformInteractionMode: string;
+  dragActive: boolean;
+};
+
+/** True when sweep/ratio arc handles should render on the canvas. */
+export function shouldShowEllipseArcHandlesOnCanvas(
+  state: EllipseArcCanvasGateState,
+  node: Pick<EditorNode, "type" | "visible" | "locked"> | null | undefined,
+): boolean {
+  if (!node || node.type !== "ellipse" || node.visible === false || node.locked) return false;
+  if (state.editorMode !== "design" || state.tool !== "move") return false;
+  if (state.penDrawingNodeId || state.pencilDrawingNodeId || state.isPlacingComment) {
+    return false;
+  }
+  if (isCanvasBgCreationTool(state.tool, state.editorMode, { isPlacingComment: state.isPlacingComment })) {
+    return false;
+  }
+  if (state.selectedIds.length !== 1) return false;
+  if (state.transformInteractionMode === "resize" || state.transformInteractionMode === "rotate") {
+    return false;
+  }
+  if (state.dragActive) return false;
+  return true;
+}
 
 export type ShapeEditGateState = {
   editorMode: string;

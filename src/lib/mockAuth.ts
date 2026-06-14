@@ -30,6 +30,9 @@ export interface MockWorkspace {
   slug: string;
   section: MockWorkspaceSection;
   members: MockTeamMember[];
+  /** Set when loaded from API (Track 12+). */
+  teamId?: string;
+  teamName?: string;
 }
 
 export interface MockPendingInvite {

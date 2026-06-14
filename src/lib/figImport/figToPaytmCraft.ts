@@ -27,7 +27,6 @@ import type { LayoutPositioning } from "@/lib/layoutEngine/types";
 import {
   resetImportYieldTick,
   yieldImportTick,
-  waitForNextPaint,
 } from "@/lib/figImport/figImportRuntime";
 import type { FigImportProgress } from "@/lib/figImport/figImportRuntime";
 import { applyDeepAutoLayoutAll, type CrossAxisAlign, type LayoutFields, type LayoutNode, type PrimaryAxisAlign } from "@/lib/autoLayout";
@@ -70,6 +69,13 @@ import {
 import { figStyleOverrideTable } from "@/lib/figImport/figPaintCore";
 import { pickCanvasScreenRoots } from "@/lib/figImport/figCanvasRoots";
 import { importFigmaComponentLibrary, symbolRootKey } from "@/lib/figImport/figComponentLibrary";
+import {
+  hydrateSymbolMasterSync,
+  importFigInstanceFromMaster,
+  removeImportedNode,
+} from "@/lib/figImport/figInstanceImport";
+import type { FigImportFidelityCapture } from "@/lib/figImport/figFidelityTypes";
+import { snapshotFromFigNode } from "@/lib/figImport/figSourceSnapshot";
 import type { ImportCtx } from "@/lib/figImport/figImportTypes";
 
 const ROOT = EDITOR_ROOT_KEY;
@@ -78,7 +84,7 @@ const ROOT = EDITOR_ROOT_KEY;
 const PASS_THROUGH_TYPES = new Set(["SECTION", "DOCUMENT"]);
 
 function createImportCtx(
-  base: Omit<ImportCtx, "hydratedSymbols" | "importNodesProcessed" | "onProgress"> & {
+  base: Omit<ImportCtx, "hydratedSymbols" | "importNodesProcessed" | "onProgress" | "fidelityCaptures"> & {
     onProgress?: FigImportProgress;
   },
 ): ImportCtx {
@@ -86,6 +92,7 @@ function createImportCtx(
     ...base,
     hydratedSymbols: new Set(),
     importNodesProcessed: 0,
+    fidelityCaptures: new Map(),
   };
 }
 
@@ -107,11 +114,14 @@ async function hydrateSymbolMasterAsync(
 ): Promise<void> {
   if (ctx.hydratedSymbols.has(symId)) return;
   const symNode = doc.nodeMap.get(symId);
-  if (!symNode || !isImportableNode(symNode) || symNode.type === "INSTANCE") {
+  if (!symNode || symNode.type === "INSTANCE") {
     ctx.hydratedSymbols.add(symId);
     return;
   }
-  await walkFigTreeAsync(symId, masterId, doc, ctx, instanceForOverrides);
+  if ((ctx.childOrder[masterId] ?? []).length === 0) {
+    await walkFigTreeAsync(symId, masterId, doc, ctx, instanceForOverrides ?? null);
+    finalizeFigContainer(symId, masterId, doc, ctx, isImportableNode);
+  }
   ctx.hydratedSymbols.add(symId);
 }
 
@@ -129,7 +139,7 @@ const SKIP_TYPES = new Set([
 ]);
 
 export type FigImportResult =
-  | { ok: true; document: PaytmCraftDocument }
+  | { ok: true; document: PaytmCraftDocument; figFidelityCaptures?: Record<string, FigImportFidelityCapture> }
   | { ok: false; error: string };
 
 function nextId(ctx: ImportCtx, prefix: string): string {
@@ -316,6 +326,7 @@ function textFieldsFromFigNode(
   doc: FigDocument,
   variableColors: Map<string, FigColor>,
   defaultFill?: string,
+  styleKeyToTokenId?: Map<string, string>,
 ): Pick<
   EditorNode,
   | "content"
@@ -327,9 +338,16 @@ function textFieldsFromFigNode(
   | "letterSpacing"
   | "textAlign"
   | "textResizeMode"
+  | "textStyleTokenId"
 > {
   const styled = mergeTextStyleFromLibrary(doc, node);
   const runFill = dominantTextFillFromRuns(styled, variableColors);
+  const styleKey = guidKeyFromFig(
+    (styled as FigNode & { styleIdForText?: { guid?: { sessionID?: number; localID?: number } } })
+      .styleIdForText?.guid,
+  );
+  const textStyleTokenId =
+    styleKey && styleKeyToTokenId?.has(styleKey) ? styleKeyToTokenId.get(styleKey) : undefined;
 
   let fontName = styled.fontName;
   let fontSize = styled.fontSize;
@@ -365,11 +383,16 @@ function textFieldsFromFigNode(
           ? "right"
           : "left",
     textResizeMode: figTextResizeMode(styled) ?? "auto-height",
+    ...(textStyleTokenId ? { textStyleTokenId } : {}),
   };
 }
 
-function buildDesignTokensFromFig(fig: FigDocument): Record<string, DesignToken> {
+function buildDesignTokensFromFig(fig: FigDocument): {
+  tokens: Record<string, DesignToken>;
+  tokensByVariableKey: Map<string, string>;
+} {
   const tokens: Record<string, DesignToken> = {};
+  const tokensByVariableKey = new Map<string, string>();
   const now = designTokenTimestamp();
 
   for (const node of fig.nodes) {
@@ -394,6 +417,7 @@ function buildDesignTokensFromFig(fig: FigDocument): Record<string, DesignToken>
           createdAt: now,
           updatedAt: now,
         };
+        tokensByVariableKey.set(key, id);
         break;
       }
       continue;
@@ -414,12 +438,63 @@ function buildDesignTokensFromFig(fig: FigDocument): Record<string, DesignToken>
           createdAt: now,
           updatedAt: now,
         };
+        tokensByVariableKey.set(key, id);
         break;
       }
     }
   }
 
-  return tokens;
+  return { tokens, tokensByVariableKey };
+}
+
+function guidKeyFromFig(guid?: { sessionID?: number; localID?: number }): string | null {
+  if (guid?.sessionID == null || guid?.localID == null) return null;
+  return `${guid.sessionID}:${guid.localID}`;
+}
+
+function buildTextStyleTokensFromFig(fig: FigDocument): {
+  tokens: Record<string, DesignToken>;
+  styleKeyToTokenId: Map<string, string>;
+} {
+  const tokens: Record<string, DesignToken> = {};
+  const styleKeyToTokenId = new Map<string, string>();
+  const styleKeys = new Set<string>();
+  const now = designTokenTimestamp();
+
+  for (const node of fig.nodes) {
+    const ext = node as FigNode & { styleIdForText?: { guid?: { sessionID?: number; localID?: number } } };
+    const key = guidKeyFromFig(ext.styleIdForText?.guid);
+    if (key) styleKeys.add(key);
+  }
+
+  for (const styleKey of styleKeys) {
+    const styleNode = fig.nodeMap.get(styleKey);
+    if (!styleNode || styleNode.type !== "TEXT") continue;
+    const id = newDesignTokenId("fig-text");
+    tokens[id] = {
+      id,
+      name: (styleNode.name ?? "").trim() || styleKey,
+      type: "typography",
+      value: {
+        fontFamily: styleNode.fontName?.family ?? "Inter",
+        fontSize: styleNode.fontSize ?? 16,
+        fontWeight: figFontWeight(styleNode.fontName?.style) ?? 400,
+        lineHeight: figLineHeightMultiplier(styleNode) ?? 1.2,
+        letterSpacing: figLetterSpacingPx(styleNode) ?? 0,
+      },
+      createdAt: now,
+      updatedAt: now,
+    };
+    styleKeyToTokenId.set(styleKey, id);
+  }
+
+  return { tokens, styleKeyToTokenId };
+}
+
+function mergeDesignTokens(
+  ...groups: Record<string, DesignToken>[]
+): Record<string, DesignToken> {
+  return Object.assign({}, ...groups);
 }
 
 function inferCanvasBackground(fig: FigDocument, rootFrameFills: string[]): string {
@@ -745,14 +820,18 @@ function normalizeFigRootFramesOnCanvas(
 }
 
 /**
- * Align parentId/childOrder without re-running auto-layout or lifting frames.
- * Preserves Figma transform positions for 1:1 visual import.
+ * Align parentId/childOrder, then run auto-layout on stack frames (matches Figma API import).
+ * Figma absolute transforms seed the tree; layout reflow applies only to auto-layout containers.
  */
 function finalizeFigPageImport(ctx: ImportCtx): void {
   ctx.childOrder = reconcileChildOrderWithParents(ctx.nodes, ctx.childOrder);
   ctx.nodes = syncParentIdsFromChildOrder(ctx.nodes, ctx.childOrder);
   ctx.childOrder = dedupeChildOrderLists(ctx.nodes, ctx.childOrder);
   ctx.nodes = normalizeFigRootFramesOnCanvas(ctx.nodes, ctx.childOrder);
+  ctx.nodes = applyDeepAutoLayoutAll(
+    ctx.nodes as Record<string, LayoutNode>,
+    ctx.childOrder,
+  ) as ImportCtx["nodes"];
 }
 
 /** Run auto-layout after import on idle time (import skips this for responsiveness). */
@@ -785,10 +864,6 @@ export function applyFigDocumentPostImportLayout(doc: PaytmCraftDocument): Paytm
 function mapNodeKind(node: FigNode): NodeKind | null {
   switch (node.type) {
     case "FRAME": {
-      const hasAutoLayout = node.stackMode && node.stackMode !== "NONE";
-      // Group-like frames (resizeToFit) still clip in Figma when clip is enabled.
-      const clips = figContainerClipChildren(node) === true;
-      if (node.resizeToFit && !hasAutoLayout && !clips) return "group";
       return "frame";
     }
     case "GROUP":
@@ -898,6 +973,20 @@ function svgPathToPathPoints(svgPath: string): PathPoint[] {
   return points;
 }
 
+function captureFidelitySnapshot(
+  source: FigNode,
+  doc: FigDocument,
+  ctx: ImportCtx,
+  editorId: string,
+): void {
+  const snap = snapshotFromFigNode(source, doc, ctx);
+  if (!snap) return;
+  ctx.fidelityCaptures?.set(editorId, {
+    figma: snap,
+    importedAt: new Date().toISOString(),
+  });
+}
+
 function convertFigNode(
   node: FigNode,
   doc: FigDocument,
@@ -936,7 +1025,7 @@ function convertFigNode(
     flipVertical: placement.flipVertical,
     visible: true,
     locked: ext.locked === true,
-    expanded: true,
+    expanded: false,
     fillEnabled: Boolean(solid.fill || gradient.fillType || imagePaint),
     fillTokenId,
     ...solid,
@@ -974,9 +1063,11 @@ function convertFigNode(
   }
 
   if (base.type === "text") {
-    Object.assign(base, textFieldsFromFigNode(source, doc, ctx.variableColors, base.fill));
+    Object.assign(base, textFieldsFromFigNode(source, doc, ctx.variableColors, base.fill, ctx.styleKeyToTokenId));
     const vAlign = ext.textAlignVertical?.toUpperCase();
-    if (vAlign === "CENTER") base.textAlign = base.textAlign ?? "left";
+    if (vAlign === "CENTER") base.verticalAlign = "middle";
+    else if (vAlign === "BOTTOM") base.verticalAlign = "bottom";
+    else base.verticalAlign = "top";
     if (!base.fill && base.textColor) {
       base.fill = base.textColor;
       base.fillEnabled = true;
@@ -1019,6 +1110,7 @@ function convertFigNode(
           ctx.nodes[id] = normalized;
           const parentKey = paytmParentId ?? ROOT;
           appendChild(ctx, parentKey, id);
+          captureFidelitySnapshot(source, doc, ctx, id);
           return normalized;
         }
       }
@@ -1031,6 +1123,7 @@ function convertFigNode(
   ctx.nodes[id] = base;
   const parentKey = paytmParentId ?? ROOT;
   appendChild(ctx, parentKey, id);
+  captureFidelitySnapshot(source, doc, ctx, id);
   return base;
 }
 
@@ -1112,20 +1205,28 @@ async function walkFigTreeAsync(
       const masterId = symId ? ctx.componentMasters.get(symId) : undefined;
       const overrides = instanceOverridesFromSymbol(child, ctx.idMap, ctx.variableColors);
 
+      if (symId && masterId) {
+        await hydrateSymbolMasterAsync(symId, masterId, doc, ctx, null);
+        removeImportedNode(ctx, converted.id, paytmParentId);
+        importFigInstanceFromMaster(ctx, {
+          masterId,
+          paytmParentId,
+          placement: converted,
+          overrides,
+          figInstanceKey: figKey,
+          doc,
+          isImportable: isImportableNode,
+        });
+        continue;
+      }
+
       const instanceNode: EditorNode = {
         ...ctx.nodes[converted.id]!,
-        ...(masterId ? { sourceComponentId: masterId } : {}),
         ...(Object.keys(overrides).length > 0 ? { instanceOverrides: overrides } : {}),
       };
       ctx.nodes[converted.id] = instanceNode;
 
-      if (symId && masterId) {
-        await hydrateSymbolMasterAsync(symId, masterId, doc, ctx, null);
-        const instanceKids = sortedFigChildren(doc, figKey);
-        if (instanceKids.length > 0) {
-          await walkFigTreeAsync(figKey, converted.id, doc, ctx, child);
-        }
-      } else if (symId) {
+      if (symId) {
         const symNode = doc.nodeMap.get(symId);
         if (symNode && isImportableNode(symNode) && symNode.type !== "INSTANCE") {
           const symRoot = convertFigNode(
@@ -1191,9 +1292,23 @@ function walkFigTree(
       const masterId = symId ? ctx.componentMasters.get(symId) : undefined;
       const overrides = instanceOverridesFromSymbol(child, ctx.idMap, ctx.variableColors);
 
+      if (symId && masterId) {
+        hydrateSymbolMasterSync(symId, masterId, doc, ctx, walkFigTree, isImportableNode);
+        removeImportedNode(ctx, converted.id, paytmParentId);
+        importFigInstanceFromMaster(ctx, {
+          masterId,
+          paytmParentId,
+          placement: converted,
+          overrides,
+          figInstanceKey: figKey,
+          doc,
+          isImportable: isImportableNode,
+        });
+        continue;
+      }
+
       const instanceNode: EditorNode = {
         ...ctx.nodes[converted.id]!,
-        ...(masterId ? { sourceComponentId: masterId } : {}),
         ...(Object.keys(overrides).length > 0 ? { instanceOverrides: overrides } : {}),
       };
       ctx.nodes[converted.id] = instanceNode;
@@ -1252,26 +1367,8 @@ export async function convertFigBytesToPaytmCraftAsync(
   onProgress?: FigImportProgress,
 ): Promise<FigImportResult> {
   resetImportYieldTick();
-  try {
-    onProgress?.("Decoding Figma document…");
-    await waitForNextPaint();
-    const fig = await new Promise<FigDocument>((resolve, reject) => {
-      setTimeout(() => {
-        try {
-          resolve(parseFig(bytes));
-        } catch (e) {
-          reject(e);
-        }
-      }, 0);
-    });
-    await yieldImportTick(1);
-    return buildPaytmCraftFromFig(fig, fileName, onProgress);
-  } catch (e) {
-    return {
-      ok: false,
-      error: e instanceof Error ? e.message : "Could not parse .fig file.",
-    };
-  }
+  onProgress?.("Decoding Figma document…");
+  return convertFigBytesToPaytmCraft(bytes, fileName);
 }
 
 /** Synchronous import (worker thread only). */
@@ -1307,10 +1404,13 @@ async function buildPaytmCraftFromFig(
     const pages: NonNullable<PaytmCraftDocument["pages"]> = [];
     const mergedAssets: Record<string, EditorAsset> = {};
     const variableColors = buildVariableColorMap(fig);
-    const designTokens = buildDesignTokensFromFig(fig);
-    const tokensByVariableKey = buildTokensByVariableKey(designTokens, variableColors);
+    const variableTokens = buildDesignTokensFromFig(fig);
+    const textStyleTokens = buildTextStyleTokensFromFig(fig);
+    const designTokens = mergeDesignTokens(variableTokens.tokens, textStyleTokens.tokens);
+    const tokensByVariableKey = buildTokensByVariableKey(variableTokens.tokensByVariableKey);
     const rootFrameFills: string[] = [];
     let pageIndex = 0;
+    const mergedFidelityCaptures = new Map<string, FigImportFidelityCapture>();
 
     for (const canvas of canvases) {
       const canvasId = nodeId(canvas);
@@ -1325,6 +1425,7 @@ async function buildPaytmCraftFromFig(
         vectorPathsCache: new Map(),
         componentMasters: new Map(),
         tokensByVariableKey,
+        styleKeyToTokenId: textStyleTokens.styleKeyToTokenId,
         seq: pageIndex * 10_000,
         onProgress,
       });
@@ -1339,6 +1440,8 @@ async function buildPaytmCraftFromFig(
         convertFigNode,
         nextId,
         appendChild,
+        finalizeContainer: (figKey, paytmId) =>
+          finalizeFigContainer(figKey, paytmId, fig, ctx, isImportableNode),
       });
 
       const screenRoots = pickCanvasScreenRoots(fig, canvasId, {
@@ -1356,6 +1459,10 @@ async function buildPaytmCraftFromFig(
       await yieldImportTick(1);
 
       if ((ctx.childOrder[ROOT] ?? []).length === 0) continue;
+
+      for (const [kid, cap] of ctx.fidelityCaptures ?? []) {
+        mergedFidelityCaptures.set(kid, cap);
+      }
 
       Object.assign(mergedAssets, ctx.assets);
 
@@ -1437,7 +1544,10 @@ async function buildPaytmCraftFromFig(
     }
 
     onProgress?.("Finalizing canvas…");
-    return { ok: true, document };
+    const figFidelityCaptures = mergedFidelityCaptures.size
+      ? Object.fromEntries(mergedFidelityCaptures)
+      : undefined;
+    return { ok: true, document, figFidelityCaptures };
   } catch (e) {
     return {
       ok: false,
@@ -1459,10 +1569,13 @@ function buildPaytmCraftFromFigSync(fig: FigDocument, fileName: string): FigImpo
     const pages: NonNullable<PaytmCraftDocument["pages"]> = [];
     const mergedAssets: Record<string, EditorAsset> = {};
     const variableColors = buildVariableColorMap(fig);
-    const designTokens = buildDesignTokensFromFig(fig);
-    const tokensByVariableKey = buildTokensByVariableKey(designTokens, variableColors);
+    const variableTokens = buildDesignTokensFromFig(fig);
+    const textStyleTokens = buildTextStyleTokensFromFig(fig);
+    const designTokens = mergeDesignTokens(variableTokens.tokens, textStyleTokens.tokens);
+    const tokensByVariableKey = buildTokensByVariableKey(variableTokens.tokensByVariableKey);
     const rootFrameFills: string[] = [];
     let pageIndex = 0;
+    const mergedFidelityCaptures = new Map<string, FigImportFidelityCapture>();
 
     for (const canvas of canvases) {
       const canvasId = nodeId(canvas);
@@ -1477,6 +1590,7 @@ function buildPaytmCraftFromFigSync(fig: FigDocument, fileName: string): FigImpo
         vectorPathsCache: new Map(),
         componentMasters: new Map(),
         tokensByVariableKey,
+        styleKeyToTokenId: textStyleTokens.styleKeyToTokenId,
         seq: pageIndex * 10_000,
       });
 
@@ -1485,6 +1599,8 @@ function buildPaytmCraftFromFigSync(fig: FigDocument, fileName: string): FigImpo
         convertFigNode,
         nextId,
         appendChild,
+        finalizeContainer: (figKey, paytmId) =>
+          finalizeFigContainer(figKey, paytmId, fig, ctx, isImportableNode),
       });
 
       const screenRoots = pickCanvasScreenRoots(fig, canvasId, {
@@ -1498,6 +1614,10 @@ function buildPaytmCraftFromFigSync(fig: FigDocument, fileName: string): FigImpo
       finalizeFigPageImport(ctx);
 
       if ((ctx.childOrder[ROOT] ?? []).length === 0) continue;
+
+      for (const [kid, cap] of ctx.fidelityCaptures ?? []) {
+        mergedFidelityCaptures.set(kid, cap);
+      }
 
       Object.assign(mergedAssets, ctx.assets);
 
@@ -1578,7 +1698,10 @@ function buildPaytmCraftFromFigSync(fig: FigDocument, fileName: string): FigImpo
       }
     }
 
-    return { ok: true, document };
+    const figFidelityCaptures = mergedFidelityCaptures.size
+      ? Object.fromEntries(mergedFidelityCaptures)
+      : undefined;
+    return { ok: true, document, figFidelityCaptures };
   } catch (e) {
     return {
       ok: false,

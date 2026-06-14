@@ -47,6 +47,23 @@ describe("resolveStrokeSpec", () => {
     assert.equal(spec.align, "outside");
     assert.equal(spec.join, "bevel");
   });
+
+  it("falls back to flat stroke width when nested stroke omits width (WASM round-trip)", () => {
+    const spec = resolveStrokeSpec({
+      strokeWidth: 4,
+      strokeColor: "#111111",
+      strokeEnabled: true,
+      stroke: {
+        enabled: true,
+        join: "miter",
+        cap: "butt",
+        dashPattern: [],
+      },
+    });
+    assert.equal(spec.width, 4);
+    assert.equal(spec.color, "#111111");
+    assert.equal(spec.enabled, true);
+  });
 });
 
 describe("mergeStrokeIntoNode", () => {

@@ -1,13 +1,15 @@
 import type { EditorAsset } from "@/lib/documentPersistence";
 import type { DesignToken } from "@/lib/designTokens";
 import { CANVAS_VISUAL } from "@/lib/canvasVisual";
+import { layerPanelChildIds, topLevelSelectedIds } from "@/lib/editorGraph";
 import { applyMatrixToPoint, composeSvgTransform, getNodeWorldMatrix, matrixToSvgTransform } from "@/lib/transformMath";
+import type { EllipseArcPreview } from "@/lib/shapes/ellipseArc";
 import type { EditorNode } from "@/stores/useEditorStore";
 import {
   collectNodeEffects,
   createSvgFilterRegistry,
   registerClipRect,
-  resolveNodeForMarkup,
+  resolveSceneRenderNode,
   svgImageMarkup,
   svgLine,
   svgPathMarkup,
@@ -16,7 +18,16 @@ import {
   svgTextMarkup,
 } from "@/lib/svgMarkupCore";
 import { shouldClipChildren } from "@/lib/clipChildren";
+import {
+  compositeEditModeForDrag,
+  isCompositeHiddenOperand,
+} from "@/lib/compositeSelection";
+import { buildBooleanRenderForGroup, isBooleanGroup } from "@/lib/booleanGeometry";
+import { isMaskGroup, renderMaskGroupSvg } from "@/lib/mask";
+import { booleanGroupSceneInnerMarkup } from "@/lib/codeExport/booleanRenderSvg";
 import { effectiveFillType, fillPaintCss } from "@/lib/fillGradient";
+import { gradientRenderScale } from "@/lib/gradient/svgSceneFill";
+import { svgLayerBlendStyleAttr } from "@/lib/layerBlendMode";
 
 const SUPPORTED_TYPES = new Set([
   "frame",
@@ -24,10 +35,18 @@ const SUPPORTED_TYPES = new Set([
   "rectangle",
   "ellipse",
   "line",
+  "arrow",
+  "polygon",
   "path",
   "text",
   "image",
 ]);
+
+export type SvgDragPreview = {
+  dx: number;
+  dy: number;
+  movingIds: readonly string[];
+};
 
 export type SvgSceneBuildInput = {
   rootIds: string[];
@@ -35,7 +54,39 @@ export type SvgSceneBuildInput = {
   childOrder: Record<string, string[]>;
   assets?: Record<string, EditorAsset>;
   designTokens?: Record<string, DesignToken>;
+  excludeNodeIds?: ReadonlySet<string>;
+  dragPreview?: SvgDragPreview;
+  /** Live ellipse arc drag preview (canvas handles). */
+  ellipseArcPreview?: EllipseArcPreview;
+  /** Boolean group in object-edit mode shows operand children instead of composite. */
+  objectEditModeNodeId?: string | null;
+  selectedIds?: readonly string[];
+  /** Viewport zoom — boosts angular/diamond gradient raster resolution when > 1. */
+  zoom?: number;
 };
+
+function collectMovingSubtreeIds(
+  movingIds: readonly string[],
+  childOrder: Record<string, string[]>,
+): Set<string> {
+  const out = new Set<string>();
+  const walk = (id: string) => {
+    out.add(id);
+    for (const cid of childOrder[id] ?? []) walk(cid);
+  };
+  for (const id of movingIds) walk(id);
+  return out;
+}
+
+function mergeExcludeSets(
+  a: ReadonlySet<string> | undefined,
+  b: ReadonlySet<string>,
+): ReadonlySet<string> {
+  if (!a?.size) return b;
+  const out = new Set(a);
+  b.forEach((id) => out.add(id));
+  return out;
+}
 
 export type SvgRootLabel = {
   id: string;
@@ -62,21 +113,30 @@ type BuildCtx = {
   childOrder: Record<string, string[]>;
   assets?: Record<string, EditorAsset>;
   designTokens: Record<string, DesignToken>;
+  excludeNodeIds?: ReadonlySet<string>;
+  renderScale: number;
+  ellipseArcPreview?: EllipseArcPreview;
+  objectEditModeNodeId?: string | null;
+  selectedIds?: readonly string[];
 };
 
 function renderChildren(parentId: string, ctx: BuildCtx): string {
-  const kids = ctx.childOrder[parentId] ?? [];
+  const kids = layerPanelChildIds(parentId, ctx.nodes, ctx.childOrder);
   let out = "";
   for (const cid of kids) {
     const c = ctx.nodes[cid];
     if (!c?.visible) continue;
     const inner = renderNode(cid, ctx);
-    if (inner) out += `<g transform="${composeSvgTransform(c)}">${inner}</g>`;
+    if (inner) {
+      const blend = svgLayerBlendStyleAttr(c);
+      out += `<g transform="${composeSvgTransform(c)}"${blend}>${inner}</g>`;
+    }
   }
   return out;
 }
 
 function renderNode(nodeId: string, ctx: BuildCtx): string {
+  if (ctx.excludeNodeIds?.has(nodeId)) return "";
   const node = ctx.nodes[nodeId];
   if (!node?.visible) return "";
   if (!SUPPORTED_TYPES.has(node.type)) {
@@ -85,36 +145,47 @@ function renderNode(nodeId: string, ctx: BuildCtx): string {
   }
 
   ctx.rendered += 1;
-  const resolved = resolveNodeForMarkup(node, ctx.designTokens);
+  const resolved = resolveSceneRenderNode(node, ctx.nodes, ctx.designTokens);
+  let paintNode = resolved;
+  if (node.type === "ellipse" && ctx.ellipseArcPreview?.nodeId === nodeId) {
+    paintNode = {
+      ...resolved,
+      arcStartDeg: ctx.ellipseArcPreview.startDeg,
+      arcSweepDeg: ctx.ellipseArcPreview.sweepDeg,
+      arcInnerRadiusRatio: ctx.ellipseArcPreview.innerRadiusRatio,
+    };
+  }
   const w = Math.max(1, node.width);
   const h = Math.max(1, node.height);
-  const { effects, legacyShadow } = collectNodeEffects(node, resolved, ctx.designTokens);
+  const { effects, legacyShadow } = collectNodeEffects(node, paintNode, ctx.designTokens);
   const filterRef = ctx.filterRegistry.register(nodeId, effects, legacyShadow);
 
   const wrapOpacity = (inner: string) => {
-    const op = resolved.opacity ?? 1;
+    const op = paintNode.opacity ?? 1;
     return op < 0.999 ? `<g opacity="${op}">${inner}</g>` : inner;
   };
 
   const registerGradient = (id: string, markup: string) => {
     ctx.defs.push(markup);
   };
-  const shapeOpts = { filterRef, nodeId, registerGradient };
+  const shapeOpts = { filterRef, nodeId, registerGradient, renderScale: ctx.renderScale, assets: ctx.assets };
 
   if (node.type === "rectangle" || node.type === "ellipse") {
-    return wrapOpacity(svgRectLike(resolved, shapeOpts));
+    return wrapOpacity(svgRectLike(paintNode, shapeOpts));
   }
 
   if (node.type === "line" || node.type === "arrow") {
     return wrapOpacity(svgLine(node));
   }
 
-  if (node.type === "path") {
-    return wrapOpacity(svgPathMarkup(resolved, shapeOpts));
+  if (node.type === "path" || node.type === "polygon") {
+    return wrapOpacity(svgPathMarkup(paintNode, shapeOpts));
   }
 
   if (node.type === "text") {
-    return wrapOpacity(svgTextMarkup(resolved));
+    const clipId = `pc-text-clip-${svgSafeId(nodeId)}`;
+    registerClipRect(ctx.defs, clipId, w, h);
+    return wrapOpacity(`<g clip-path="url(#${clipId})">${svgTextMarkup(paintNode)}</g>`);
   }
 
   if (node.type === "image") {
@@ -125,17 +196,81 @@ function renderNode(nodeId: string, ctx: BuildCtx): string {
     return wrapOpacity(svgImageMarkup(node, resolved, ctx.assets, clipRegister));
   }
 
-  if (node.type === "group") {
-    const stroke = "rgba(15,23,42,0.12)";
-    const shell = svgRectLike(
-      { ...resolved, fill: resolved.fill ?? "transparent", strokeColor: stroke, strokeWidth: 1 },
-      { ...shapeOpts, strokeOverride: stroke, strokeWidthOverride: 1 },
+  if (node.type === "group" && isMaskGroup(node)) {
+    const masked = renderMaskGroupSvg({
+      groupId: nodeId,
+      node,
+      nodes: ctx.nodes,
+      childOrder: ctx.childOrder,
+      objectEditModeNodeId: ctx.objectEditModeNodeId,
+      selectedIds: ctx.selectedIds ? [...ctx.selectedIds] : undefined,
+      registerDef: (markup) => ctx.defs.push(markup),
+      renderChild: (cid) => renderNode(cid, ctx),
+      filterRef,
+    });
+    if (masked) return wrapOpacity(masked.bodyMarkup);
+    return wrapOpacity(renderChildren(nodeId, ctx));
+  }
+
+  if (node.type === "group" && isBooleanGroup(node)) {
+    const childIds = layerPanelChildIds(nodeId, ctx.nodes, ctx.childOrder).filter((cid) => {
+      const c = ctx.nodes[cid];
+      return c?.visible && !c.locked;
+    });
+    const editing = ctx.objectEditModeNodeId === nodeId;
+    if (editing) {
+      return wrapOpacity(renderChildren(nodeId, ctx));
+    }
+    const op = node.booleanOperation ?? "union";
+    const booleanRender = buildBooleanRenderForGroup(
+      nodeId,
+      childIds,
+      ctx.nodes,
+      op,
+      ctx.childOrder,
     );
+    if (booleanRender) {
+      const composite = booleanGroupSceneInnerMarkup({
+        groupId: nodeId,
+        node: paintNode,
+        render: booleanRender,
+        width: w,
+        height: h,
+        registerGradient: (id, markup) => registerGradient(id, markup),
+        renderScale: ctx.renderScale,
+        filterRef,
+      });
+      return wrapOpacity(composite);
+    }
+    return wrapOpacity(renderChildren(nodeId, ctx));
+  }
+
+  if (node.type === "group") {
     const clip = shouldClipChildren(node);
-    if (!clip) return wrapOpacity(`${shell}${renderChildren(nodeId, ctx)}`);
+    const children = renderChildren(nodeId, ctx);
+    const hasOwnFill = node.fillEnabled && node.fill != null;
+    const hasOwnStroke = Boolean(node.strokeWidth && node.strokeColor);
+    if (!clip && !hasOwnFill && !hasOwnStroke) {
+      return wrapOpacity(children);
+    }
+
+    const stroke = hasOwnStroke ? resolved.strokeColor! : "rgba(15,23,42,0.12)";
+    const shell = svgRectLike(
+      {
+        ...resolved,
+        fill: resolved.fill ?? "transparent",
+        strokeColor: stroke,
+        strokeWidth: hasOwnStroke ? resolved.strokeWidth : 1,
+      },
+      {
+        ...shapeOpts,
+        strokeOverride: stroke,
+        strokeWidthOverride: hasOwnStroke ? resolved.strokeWidth : 1,
+      },
+    );
+    if (!clip) return wrapOpacity(`${shell}${children}`);
     const clipId = `pc-clip-${svgSafeId(nodeId)}`;
     registerClipRect(ctx.defs, clipId, w, h, node);
-    const children = renderChildren(nodeId, ctx);
     return wrapOpacity(`${shell}<g clip-path="url(#${clipId})">${children}</g>`);
   }
 
@@ -183,6 +318,21 @@ function renderNode(nodeId: string, ctx: BuildCtx): string {
 }
 
 export function buildSvgScene(input: SvgSceneBuildInput): SvgSceneBuildResult {
+  const movingSubtree =
+    input.dragPreview?.movingIds.length
+      ? collectMovingSubtreeIds(input.dragPreview.movingIds, input.childOrder)
+      : undefined;
+  const excludeNodeIds = movingSubtree
+    ? mergeExcludeSets(input.excludeNodeIds, movingSubtree)
+    : input.excludeNodeIds;
+
+  const effectiveObjectEditMode =
+    compositeEditModeForDrag(
+      input.dragPreview?.movingIds ?? [],
+      input.nodes,
+      input.objectEditModeNodeId,
+    ) ?? input.objectEditModeNodeId ?? null;
+
   const ctx: BuildCtx = {
     defs: [],
     filterRegistry: createSvgFilterRegistry(),
@@ -192,6 +342,11 @@ export function buildSvgScene(input: SvgSceneBuildInput): SvgSceneBuildResult {
     childOrder: input.childOrder,
     assets: input.assets,
     designTokens: input.designTokens ?? {},
+    excludeNodeIds,
+    renderScale: gradientRenderScale(input.zoom ?? 1),
+    ellipseArcPreview: input.ellipseArcPreview ?? null,
+    objectEditModeNodeId: effectiveObjectEditMode,
+    selectedIds: input.selectedIds,
   };
 
   const bodyParts: string[] = [];
@@ -205,16 +360,18 @@ export function buildSvgScene(input: SvgSceneBuildInput): SvgSceneBuildResult {
     const inner = renderNode(rid, ctx);
     if (node.type !== "frame") {
       if (inner) {
+        const blend = svgLayerBlendStyleAttr(node);
         bodyParts.push(
-          `<g transform="${rootTransform ?? ""}" data-node-id="${rid}">${inner}</g>`,
+          `<g transform="${rootTransform ?? ""}" data-node-id="${rid}"${blend}>${inner}</g>`,
         );
       }
       continue;
     }
 
     if (inner) {
+      const blend = svgLayerBlendStyleAttr(node);
       bodyParts.push(
-        `<g transform="${rootTransform ?? ""}" data-node-id="${rid}">${inner}</g>`,
+        `<g transform="${rootTransform ?? ""}" data-node-id="${rid}"${blend}>${inner}</g>`,
       );
     }
     rootLabels.push({
@@ -224,6 +381,36 @@ export function buildSvgScene(input: SvgSceneBuildInput): SvgSceneBuildResult {
       name: node.name,
       selected: false,
     });
+  }
+
+  if (input.dragPreview?.movingIds.length) {
+    const { dx, dy, movingIds } = input.dragPreview;
+    const tops = topLevelSelectedIds([...movingIds], input.nodes);
+    const overlayCtx: BuildCtx = {
+      ...ctx,
+      excludeNodeIds: input.excludeNodeIds,
+    };
+    for (const mid of tops) {
+      if (
+        isCompositeHiddenOperand(mid, input.nodes, {
+          objectEditModeNodeId: effectiveObjectEditMode,
+          selectedIds: input.selectedIds,
+        })
+      ) {
+        continue;
+      }
+      const wm = getNodeWorldMatrix(mid, input.nodes);
+      if (!wm) continue;
+      const shifted = { ...wm, e: wm.e + dx, f: wm.f + dy };
+      const inner = renderNode(mid, overlayCtx);
+      if (inner) {
+        const n = input.nodes[mid];
+        const blend = n ? svgLayerBlendStyleAttr(n) : "";
+        bodyParts.push(
+          `<g transform="${matrixToSvgTransform(shifted)}" data-drag-preview data-node-id="${mid}"${blend}>${inner}</g>`,
+        );
+      }
+    }
   }
 
   const allDefs = [...ctx.defs, ...ctx.filterRegistry.defs];

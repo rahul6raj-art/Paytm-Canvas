@@ -1,67 +1,78 @@
 "use client";
 
+import { useMemo } from "react";
 import { CANVAS_VISUAL } from "@/lib/canvasVisual";
-import {
-  getNodeWorldMatrix,
-  matrixToCssTransform,
-  nodeNeedsOrientedOverlay,
-} from "@/lib/transformMath";
-import { worldRect } from "@/lib/tree";
+import { worldPointToOverlay } from "@/lib/canvasOverlaySpace";
+import { getRenderedWorldBounds } from "@/lib/editorGraph";
+import { compositeSelectionBoundsId } from "@/lib/compositeSelection";
+import { getNodeTransformedWorldCorners } from "@/lib/transformMath";
 import { useEditorStore } from "@/stores/useEditorStore";
+import { useCanvasOverlaySpace } from "@/components/editor/useCanvasOverlaySpace";
 
-/** Single hover ring for SVG mode (DOM objects are not mounted). */
+/** Hover ring in viewport pixels — constant 1px stroke at any zoom. */
 export function SvgHoverOutline() {
   const hoveredCanvasId = useEditorStore((s) => s.hoveredCanvasId);
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const editorMode = useEditorStore((s) => s.editorMode);
   const nodes = useEditorStore((s) => s.nodes);
+  const childOrder = useEditorStore((s) => s.childOrder);
   const editingTextId = useEditorStore((s) => s.editingTextId);
   const pathEditModeNodeId = useEditorStore((s) => s.pathEditModeNodeId);
-
-  if (!hoveredCanvasId || editingTextId || pathEditModeNodeId) return null;
-  if (selectedIds.includes(hoveredCanvasId)) return null;
-
-  const node = nodes[hoveredCanvasId];
-  if (!node?.visible || node.locked) return null;
+  const objectEditModeNodeId = useEditorStore((s) => s.objectEditModeNodeId);
+  const overlay = useCanvasOverlaySpace();
 
   const ringColor =
     editorMode === "inspect" ? CANVAS_VISUAL.inspectHover : CANVAS_VISUAL.hoverOutline;
 
-  const oriented = nodeNeedsOrientedOverlay(hoveredCanvasId, nodes);
-  const worldMatrix = oriented ? getNodeWorldMatrix(hoveredCanvasId, nodes) : null;
+  const outlinePoints = useMemo(() => {
+    if (!hoveredCanvasId || editingTextId || pathEditModeNodeId) return null;
+    if (selectedIds.includes(hoveredCanvasId)) return null;
+    const node = nodes[hoveredCanvasId];
+    if (!node?.visible || node.locked) return null;
 
-  if (oriented && worldMatrix) {
-    return (
-      <div className="pointer-events-none absolute inset-0 z-[18]" aria-hidden>
-        <div
-          className="absolute box-border"
-          style={{
-            left: 0,
-            top: 0,
-            width: node.width,
-            height: node.height,
-            transform: matrixToCssTransform(worldMatrix),
-            transformOrigin: "0 0",
-            boxShadow: `0 0 0 1px ${ringColor}`,
-          }}
-        />
-      </div>
-    );
-  }
+    const outlineId = compositeSelectionBoundsId(hoveredCanvasId, nodes, {
+      objectEditModeNodeId,
+      selectedIds,
+    });
 
-  const wr = worldRect(hoveredCanvasId, nodes);
+    const corners = getNodeTransformedWorldCorners(outlineId, nodes);
+    if (corners) {
+      return corners.map((c) => worldPointToOverlay(c.x, c.y, overlay));
+    }
+    const wr = getRenderedWorldBounds(outlineId, nodes, childOrder);
+    return [
+      worldPointToOverlay(wr.x, wr.y, overlay),
+      worldPointToOverlay(wr.x + wr.width, wr.y, overlay),
+      worldPointToOverlay(wr.x + wr.width, wr.y + wr.height, overlay),
+      worldPointToOverlay(wr.x, wr.y + wr.height, overlay),
+    ];
+  }, [
+    hoveredCanvasId,
+    selectedIds,
+    editingTextId,
+    pathEditModeNodeId,
+    objectEditModeNodeId,
+    nodes,
+    childOrder,
+    overlay,
+  ]);
+
+  if (!outlinePoints) return null;
+
   return (
-    <div className="pointer-events-none absolute inset-0 z-[18]" aria-hidden>
-      <div
-        className="absolute box-border"
-        style={{
-          left: wr.x,
-          top: wr.y,
-          width: wr.width,
-          height: wr.height,
-          boxShadow: `0 0 0 1px ${ringColor}`,
-        }}
+    <svg
+      className="pointer-events-none absolute left-0 top-0 z-[28] overflow-visible"
+      width="100%"
+      height="100%"
+      aria-hidden
+    >
+      <polygon
+        points={outlinePoints.map((p) => `${p.x},${p.y}`).join(" ")}
+        fill="none"
+        stroke={ringColor}
+        strokeWidth={1}
+        vectorEffect="non-scaling-stroke"
       />
-    </div>
+    </svg>
   );
 }

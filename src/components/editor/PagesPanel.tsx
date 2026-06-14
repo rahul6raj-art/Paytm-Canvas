@@ -35,13 +35,13 @@ export function PagesPanel() {
   };
 
   return (
-    <div className="border-b border-app-border px-2 py-2">
-      <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-app-subtle">Pages</p>
+    <div className="border-b border-app-panel-edge px-3 py-2.5">
+      <div className="mb-2 flex items-center justify-between gap-2 px-1">
+        <p className="section-heading">Pages</p>
         <button
           type="button"
           onClick={() => addPage()}
-          className="flex h-6 items-center gap-1 rounded-md border border-app-border bg-app-hover px-2 text-[10px] font-semibold text-app-muted transition-colors hover:border-[rgba(13,153,255,0.35)] hover:bg-[rgba(13,153,255,0.12)] hover:text-app-fg"
+          className="flex h-7 items-center gap-1 rounded-md border border-app-border px-2 text-ui font-medium text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
           title="Add page"
           aria-label="Add page"
         >

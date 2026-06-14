@@ -23,9 +23,19 @@ describe("textNodeModel", () => {
     assert.equal(normalizeTextResizeMode(undefined, "height"), "auto-height");
   });
 
+  it("normalizeTextResizeMode prefers explicit textResizeMode over autoResize", () => {
+    assert.equal(normalizeTextResizeMode("auto-height", "width-height"), "auto-height");
+  });
+
   it("verticalContentOffsetY centers and bottoms content", () => {
     assert.equal(verticalContentOffsetY(20, 100, "top"), 0);
     assert.equal(verticalContentOffsetY(20, 100, "middle"), 40);
     assert.equal(verticalContentOffsetY(20, 100, "bottom"), 80);
+  });
+
+  it("verticalContentOffsetY keeps bottom/middle anchored when content overflows", () => {
+    assert.equal(verticalContentOffsetY(100, 20, "top"), 0);
+    assert.equal(verticalContentOffsetY(100, 20, "middle"), -40);
+    assert.equal(verticalContentOffsetY(100, 20, "bottom"), -80);
   });
 });

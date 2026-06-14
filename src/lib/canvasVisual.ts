@@ -1,8 +1,11 @@
 /** Default pasteboard / workspace background (design mode, light UI). */
 export const DEFAULT_CANVAS_BACKGROUND = "#e5e5e5";
 
-/** Default pasteboard when app UI is in dark mode (Figma-style). */
-export const CANVAS_WORKSPACE_DARK = "#2c2c2c";
+/** Default pasteboard when app UI is in dark mode (legacy explicit pick; theme-linked uses CSS var). */
+export const CANVAS_WORKSPACE_DARK = "#212121";
+
+/** Inline style for theme-linked pasteboard — tracks `:root` / `.dark` tokens. */
+export const THEME_CANVAS_WORKSPACE_CSS = "hsl(var(--pc-canvas-workspace))";
 
 const DEFAULT_LIGHT_WORKSPACE_HEXES = new Set([
   DEFAULT_CANVAS_BACKGROUND.toLowerCase(),
@@ -46,23 +49,38 @@ export function isDefaultLightWorkspaceBackground(backgroundColor: string): bool
   return spread < 28 && relativeLuminance(rgb) > 0.8;
 }
 
+/** True when the stored page background should track app light/dark theme tokens. */
+export function isThemeLinkedWorkspaceBackground(backgroundColor: string): boolean {
+  const normalized = backgroundColor.trim().toLowerCase();
+  return (
+    isDefaultLightWorkspaceBackground(backgroundColor) ||
+    normalized === CANVAS_WORKSPACE_DARK.toLowerCase()
+  );
+}
+
+/** Resolved hex for theme-linked workspace (labels, rulers, store helpers). */
+export function themeCanvasWorkspaceHex(theme: "light" | "dark"): string {
+  return theme === "dark" ? "#212121" : "#e8e8e8";
+}
+
+/** Hex pasteboard color for chrome math when the visible bg is theme-linked. */
+export function resolveDisplayCanvasBackgroundHex(
+  stored: string,
+  theme: "light" | "dark",
+): string {
+  if (isThemeLinkedWorkspaceBackground(stored)) {
+    return themeCanvasWorkspaceHex(theme);
+  }
+  return stored;
+}
+
 /** Map stored page background to a pasteboard color that matches app light/dark UI. */
 export function displayCanvasBackground(
   stored: string,
   theme: "light" | "dark",
 ): string {
-  const normalized = stored.trim().toLowerCase();
-  if (theme === "dark") {
-    if (isDefaultLightWorkspaceBackground(stored)) {
-      return CANVAS_WORKSPACE_DARK;
-    }
-    return stored;
-  }
-  if (normalized === CANVAS_WORKSPACE_DARK.toLowerCase()) {
-    return DEFAULT_CANVAS_BACKGROUND;
-  }
-  if (isDefaultLightWorkspaceBackground(stored)) {
-    return DEFAULT_CANVAS_BACKGROUND;
+  if (isThemeLinkedWorkspaceBackground(stored)) {
+    return THEME_CANVAS_WORKSPACE_CSS;
   }
   return stored;
 }
@@ -93,17 +111,286 @@ export const CANVAS_VISUAL = {
   maskOutline: "var(--pc-canvas-mask-outline)",
 } as const;
 
-/** Resize handle size in screen pixels (constant across zoom). */
+/** Frame title above artboards (screen px — rendered in overlay space). */
+export const CANVAS_FRAME_LABEL_FONT_SCREEN_PX = 11;
+export const CANVAS_FRAME_LABEL_OFFSET_SCREEN_PX = 18;
+
+/** Resize handle outer size in screen pixels (constant across zoom). */
 export const CANVAS_HANDLE_SCREEN_PX = 8;
+
+/** Resize handle ring width (screen px). */
+export const CANVAS_HANDLE_BORDER_SCREEN_PX = 1;
+
+const CANVAS_HANDLE_FILL = "#ffffff";
+
+/** Default inset for corner-radius handles from the corner along the bisector (screen px). */
+export const CANVAS_CORNER_RADIUS_HANDLE_INSET_SCREEN_PX = 12;
+
+/** Corner-radius handle outer diameter (screen px) — must stay larger than border × 2. */
+export const CANVAS_CORNER_RADIUS_HANDLE_SCREEN_PX = 10;
+
+/** Corner-radius handle ring width (screen px). */
+export const CANVAS_CORNER_RADIUS_HANDLE_BORDER_SCREEN_PX = 2;
+
+/** Rotate handle outer diameter on canvas (screen px). */
+export const CANVAS_ROTATE_HANDLE_SCREEN_PX = 14;
+
+/** Rotate glyph inside the top handle (screen px). */
+export const CANVAS_ROTATE_HANDLE_GLYPH_SCREEN_PX = 10;
+
+/** Figma-style rotate handle: white disc + blue ring + arc glyph. */
+export function canvasRotateHandleStyle(
+  borderColor: string,
+  outerPx = CANVAS_ROTATE_HANDLE_SCREEN_PX,
+  borderPx = CANVAS_HANDLE_BORDER_SCREEN_PX,
+): {
+  width: number;
+  height: number;
+  boxSizing: "border-box";
+  padding: number;
+  background: string;
+  border: string;
+  borderRadius: string;
+  display: "flex";
+  alignItems: "center";
+  justifyContent: "center";
+  color: string;
+} {
+  return {
+    width: outerPx,
+    height: outerPx,
+    boxSizing: "border-box",
+    padding: 0,
+    background: CANVAS_HANDLE_FILL,
+    border: `${borderPx}px solid ${borderColor}`,
+    borderRadius: "50%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: borderColor,
+  };
+}
+
+/** Ellipse arc sweep/ratio handle outer diameter (screen px). */
+export const CANVAS_ELLIPSE_ARC_HANDLE_SCREEN_PX = 10;
+
+/** Ellipse arc start/end dot diameter on partial arcs (screen px). */
+export const CANVAS_ELLIPSE_ARC_DOT_SCREEN_PX = 8;
+
+const CORNER_RADIUS_HANDLE_FILL = "#ffffff";
+const CORNER_RADIUS_HANDLE_RING = "#18a0fb";
+
+/** Crisp Figma-style corner-radius dot (fixed screen px, zoom-independent). */
+export function canvasCornerRadiusHandleStyle(
+  outerPx = CANVAS_CORNER_RADIUS_HANDLE_SCREEN_PX,
+  borderPx = CANVAS_CORNER_RADIUS_HANDLE_BORDER_SCREEN_PX,
+): {
+  width: number;
+  height: number;
+  boxSizing: "border-box";
+  padding: number;
+  background: string;
+  border: string;
+  borderRadius: string;
+} {
+  return {
+    width: outerPx,
+    height: outerPx,
+    boxSizing: "border-box",
+    padding: 0,
+    background: CORNER_RADIUS_HANDLE_FILL,
+    border: `${borderPx}px solid ${CORNER_RADIUS_HANDLE_RING}`,
+    borderRadius: "50%",
+  };
+}
+
+/** Live shape-draw anchor dot diameter (screen px). */
+export const CANVAS_SHAPE_DRAFT_DOT_SCREEN_PX = 6;
+
+const SHAPE_DRAFT_DOT_FILL = "#18a0fb";
+
+/** Figma-style blue anchor while drawing a shape from 0×0. */
+export function canvasShapeDraftDotStyle(
+  outerPx = CANVAS_SHAPE_DRAFT_DOT_SCREEN_PX,
+): {
+  width: number;
+  height: number;
+  boxSizing: "border-box";
+  background: string;
+  borderRadius: string;
+} {
+  return {
+    width: outerPx,
+    height: outerPx,
+    boxSizing: "border-box",
+    background: SHAPE_DRAFT_DOT_FILL,
+    borderRadius: "50%",
+  };
+}
+
+/** Swap-drag pink center handle outer diameter (screen px). */
+export const CANVAS_SWAP_PINK_DOT_SCREEN_PX = 10;
+
+/** Swap-drag pink center handle ring width (screen px). */
+export const CANVAS_SWAP_PINK_DOT_BORDER_SCREEN_PX = 2;
+
+/** Swap-drag target outline stroke (screen px). */
+export const CANVAS_SWAP_OUTLINE_SCREEN_PX = 1.5;
+
+/** Crisp Figma-style swap pink dot (fixed screen px, zoom-independent). */
+export function canvasSwapPinkDotStyle(
+  variant: "solid" | "ring" = "solid",
+  outerPx = CANVAS_SWAP_PINK_DOT_SCREEN_PX,
+  borderPx = CANVAS_SWAP_PINK_DOT_BORDER_SCREEN_PX,
+): {
+  width: number;
+  height: number;
+  boxSizing: "border-box";
+  padding: number;
+  background: string;
+  border: string;
+  borderRadius: string;
+  boxShadow: string;
+} {
+  const fill = variant === "solid" ? CANVAS_VISUAL.swapPink : "transparent";
+  const ring = variant === "solid" ? "#ffffff" : CANVAS_VISUAL.swapPink;
+  return {
+    width: outerPx,
+    height: outerPx,
+    boxSizing: "border-box",
+    padding: 0,
+    background: fill,
+    border: `${borderPx}px solid ${ring}`,
+    borderRadius: "50%",
+    boxShadow:
+      variant === "solid"
+        ? `0 0 0 1px ${CANVAS_VISUAL.swapPinkRing}`
+        : "0 0 0 1px rgba(255, 255, 255, 0.9)",
+  };
+}
+
+/** Smart-guide / measure line width in screen pixels (constant at any zoom). */
+export const CANVAS_GUIDE_LINE_SCREEN_PX = 1;
 
 /** Selection / hover outline width in screen pixels. */
 export const CANVAS_OUTLINE_SCREEN_PX = 1;
+
+/** Text edit caret width in screen pixels (constant at any zoom). */
+export const TEXT_CARET_SCREEN_PX = 1;
+
+/** Crisp square resize/rotate corner handle (fixed screen px). */
+export function canvasResizeHandleStyle(
+  borderColor: string,
+  outerPx = CANVAS_HANDLE_SCREEN_PX,
+  borderPx = CANVAS_HANDLE_BORDER_SCREEN_PX,
+): {
+  width: number;
+  height: number;
+  boxSizing: "border-box";
+  padding: number;
+  background: string;
+  border: string;
+  borderRadius: number;
+} {
+  return {
+    width: outerPx,
+    height: outerPx,
+    boxSizing: "border-box",
+    padding: 0,
+    background: CANVAS_HANDLE_FILL,
+    border: `${borderPx}px solid ${borderColor}`,
+    borderRadius: 0,
+  };
+}
+
+/** Crisp 1px selection frame outline (fixed screen px, zoom-independent). */
+export function canvasSelectionOutlineStyle(
+  color: string,
+  widthPx = CANVAS_OUTLINE_SCREEN_PX,
+): {
+  border: string;
+  boxShadow: string;
+} {
+  return {
+    border: "none",
+    boxShadow: `inset 0 0 0 ${widthPx}px ${color}`,
+  };
+}
 
 /** Half-length of auto-layout spacing tick marks (screen pixels, constant across zoom). */
 export const AUTO_LAYOUT_SPACING_TICK_SCREEN_PX = 12;
 
 /** Auto-layout spacing indicator stroke width in screen pixels. */
 export const AUTO_LAYOUT_SPACING_LINE_SCREEN_PX = 2;
+
+/** Offset for edit-value badges (corner radius, etc.) from the handle along the corner bisector. */
+export const CANVAS_EDIT_VALUE_BADGE_OFFSET_SCREEN_PX = 28;
+
+/** On-canvas linear gradient axis stroke (screen px). */
+export const CANVAS_GRADIENT_AXIS_SCREEN_PX = 1;
+
+/** Dot on the gradient axis at each stop (screen px). */
+export const CANVAS_GRADIENT_AXIS_DOT_SCREEN_PX = 6;
+
+/** Color stop square on the gradient overlay (screen px). */
+export const CANVAS_GRADIENT_STOP_SQUARE_SCREEN_PX = 14;
+
+/** Connector from axis dot to stop square (screen px). */
+export const CANVAS_GRADIENT_STOP_OFFSET_SCREEN_PX = 18;
+
+/** Wider hit target for clicking the gradient axis (screen px). */
+export const CANVAS_GRADIENT_AXIS_HIT_SCREEN_PX = 14;
+
+/** Stop square border (screen px). */
+export const CANVAS_GRADIENT_STOP_BORDER_SCREEN_PX = 2;
+
+const GRADIENT_AXIS_COLOR = "#ffffff";
+const GRADIENT_STOP_RING = "#18a0fb";
+
+/** Figma-style gradient stop swatch on canvas (fixed screen px). */
+export function canvasGradientStopSquareStyle(
+  color: string,
+  selected = false,
+  outerPx = CANVAS_GRADIENT_STOP_SQUARE_SCREEN_PX,
+  borderPx = CANVAS_GRADIENT_STOP_BORDER_SCREEN_PX,
+): {
+  width: number;
+  height: number;
+  boxSizing: "border-box";
+  background: string;
+  border: string;
+  borderRadius: number;
+} {
+  return {
+    width: outerPx,
+    height: outerPx,
+    boxSizing: "border-box",
+    background: color,
+    border: `${borderPx}px solid ${selected ? GRADIENT_STOP_RING : GRADIENT_AXIS_COLOR}`,
+    borderRadius: 0,
+  };
+}
+
+/** Dot on the gradient axis line (fixed screen px). */
+export function canvasGradientAxisDotStyle(
+  outerPx = CANVAS_GRADIENT_AXIS_DOT_SCREEN_PX,
+): {
+  width: number;
+  height: number;
+  boxSizing: "border-box";
+  background: string;
+  border: string;
+  borderRadius: string;
+} {
+  return {
+    width: outerPx,
+    height: outerPx,
+    boxSizing: "border-box",
+    background: GRADIENT_AXIS_COLOR,
+    border: `1px solid ${GRADIENT_AXIS_COLOR}`,
+    borderRadius: "50%",
+  };
+}
 
 /** Selection dimension badge (W × H below selection box). */
 export const CANVAS_SELECTION_DIMENSION_BADGE_FONT_SCREEN_PX = 14;

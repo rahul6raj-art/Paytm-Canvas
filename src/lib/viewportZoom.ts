@@ -2,6 +2,7 @@ import { waitForNextPaint } from "@/lib/figImport/figImportRuntime";
 import { ROOT, useEditorStore, type EditorNode } from "@/stores/useEditorStore";
 import {
   clampCanvasZoom,
+  DEFAULT_CANVAS_ZOOM,
   pickViewportRootIds,
   viewportForRootNodes,
   zoomAtScreenPoint,
@@ -225,14 +226,14 @@ export function cycleCanvasFrame(direction: 1 | -1): boolean {
   return true;
 }
 
-/** Reset zoom to 100% and center the primary artboard in the viewport (no history). */
+/** Reset zoom to the canvas default and center the primary artboard in the viewport (no history). */
 export function resetCanvasView() {
   const s = useEditorStore.getState();
   const el = document.querySelector(CANVAS_VIEWPORT_SELECTOR) as HTMLElement | null;
   const roots = s.childOrder[ROOT] ?? [];
   const mainId =
     roots.find((id) => s.nodes[id]?.type === "frame") ?? roots[0] ?? null;
-  const newZoom = 1;
+  const newZoom = DEFAULT_CANVAS_ZOOM;
 
   if (!el || !mainId) {
     useEditorStore.setState({ zoom: newZoom, pan: { x: 0, y: 0 } });

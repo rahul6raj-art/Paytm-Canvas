@@ -10,6 +10,24 @@ export function snapWorldToDevicePixel(
   return (snapped - pan) / zoom;
 }
 
+/** Snap a screen-space coordinate (e.g. pan) to the device pixel grid. */
+export function snapScreenToDevicePixel(
+  screenPx: number,
+  dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1,
+): number {
+  return Math.round(screenPx * dpr) / dpr;
+}
+
+export function snapPanToDevicePixels(
+  pan: { x: number; y: number },
+  dpr?: number,
+): { x: number; y: number } {
+  return {
+    x: snapScreenToDevicePixel(pan.x, dpr),
+    y: snapScreenToDevicePixel(pan.y, dpr),
+  };
+}
+
 /** Snap width/height so edges land on device pixels at the current zoom. */
 export function snapWorldSizeToDevicePixel(
   worldSize: number,

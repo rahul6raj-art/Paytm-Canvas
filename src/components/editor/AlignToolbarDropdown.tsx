@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AlignLeft, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { alignableSelectionIds } from "@/lib/alignSelection";
+import { alignableSelectionIds, canAlignSelection } from "@/lib/alignSelection";
 import { useEditorStore } from "@/stores/useEditorStore";
 import {
   useAnchoredDropdownPosition,
@@ -19,6 +19,7 @@ export function AlignToolbarDropdown() {
   const menuRef = useRef<HTMLDivElement>(null);
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const nodes = useEditorStore((s) => s.nodes);
+  const childOrder = useEditorStore((s) => s.childOrder);
 
   const position = useAnchoredDropdownPosition(anchorRef, open, 4);
   useDismissAnchoredDropdown(open, () => setOpen(false), anchorRef, menuRef);
@@ -26,7 +27,12 @@ export function AlignToolbarDropdown() {
   useEffect(() => setMounted(true), []);
 
   const tops = alignableSelectionIds(selectedIds, nodes);
-  const canAlign = tops.length >= 2;
+  const canAlign = canAlignSelection(selectedIds, nodes, childOrder);
+  const alignTitle = canAlign
+    ? tops.length >= 2
+      ? `Align ${tops.length} layers`
+      : "Align to parent frame"
+    : "Align — select 2+ layers or one layer inside a frame";
 
   const menu =
     open && mounted ? (
@@ -48,14 +54,10 @@ export function AlignToolbarDropdown() {
           type="button"
           aria-label="Align and distribute"
           aria-expanded={open}
-          title={
-            canAlign
-              ? `Align ${tops.length} layers`
-              : "Align — select 2 or more layers"
-          }
+          title={alignTitle}
           onClick={() => setOpen((o) => !o)}
           className={cn(
-            "flex h-8 items-center gap-0.5 rounded-md border px-1.5 text-[11px] font-medium transition-colors",
+            "flex h-8 items-center gap-0.5 rounded-md border px-1.5 text-ui font-medium transition-colors",
             open
               ? "border-[rgba(13,153,255,0.45)] bg-[rgba(13,153,255,0.15)] text-white"
               : canAlign

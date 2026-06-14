@@ -1,4 +1,5 @@
-import type { EditorNode } from "@/stores/useEditorStore";
+import { isCanvasBgCreationTool } from "@/lib/canvasInteractionGuards";
+import type { EditorMode, EditorNode, Tool } from "@/stores/useEditorStore";
 
 /** Top-left, top-right, bottom-right, bottom-left (Figma / CSS 4-value order). */
 export type CornerRadii = [number, number, number, number];
@@ -18,12 +19,40 @@ export function getNodeCornerRadii(
   return [r, r, r, r];
 }
 
+export function resizeCornerRadiiForCount(
+  radii: readonly number[] | undefined,
+  vertexCount: number,
+  fallback: number,
+): number[] {
+  const uniform = Math.max(0, fallback);
+  const out = Array.from({ length: vertexCount }, () => uniform);
+  if (!radii?.length) return out;
+  for (let i = 0; i < vertexCount; i++) {
+    out[i] = Math.max(0, radii[i] ?? radii[i % radii.length] ?? uniform);
+  }
+  return out;
+}
+
+export function hasIndependentVertexCornerRadii(
+  radii: readonly number[],
+): boolean {
+  if (radii.length <= 1) return false;
+  const first = radii[0] ?? 0;
+  return !radii.every((r) => r === first);
+}
+
 export function hasIndependentCornerRadii(
   node: Pick<EditorNode, "cornerRadius" | "cornerRadii">,
 ): boolean {
   if (!node.cornerRadii?.length) return false;
-  const [tl, tr, br, bl] = node.cornerRadii;
-  return !(tl === tr && tr === br && br === bl);
+  return hasIndependentVertexCornerRadii(node.cornerRadii);
+}
+
+/** True when the node stores an explicit per-corner radius array (unlinked mode). */
+export function isPerCornerRadiusMode(
+  node: Pick<EditorNode, "cornerRadii">,
+): boolean {
+  return (node.cornerRadii?.length ?? 0) > 0;
 }
 
 export function isUniformCornerRadii(radii: CornerRadii): boolean {
@@ -43,11 +72,80 @@ export function supportsCornerRadiusHandles(
   return node.type === "rectangle" || node.type === "frame";
 }
 
+export type CornerRadiusCanvasGateState = {
+  editorMode: EditorMode;
+  tool: Tool;
+  penDrawingNodeId: string | null;
+  pencilDrawingNodeId: string | null;
+  isPlacingComment: boolean;
+  selectedIds: readonly string[];
+  transformInteractionMode: "none" | "resize" | "rotate";
+  /** True while selected layer(s) are being moved on canvas. */
+  dragActive: boolean;
+};
+
+/** Figma-style corner radius dots on single-selected rectangle / frame (no edit mode required). */
+export function shouldShowCornerRadiusHandlesOnCanvas(
+  state: CornerRadiusCanvasGateState,
+  node: Pick<EditorNode, "type" | "visible" | "locked"> | null | undefined,
+): boolean {
+  if (!node || !supportsCornerRadiusHandles(node)) return false;
+  if (state.editorMode !== "design" || state.tool !== "move") return false;
+  if (state.penDrawingNodeId || state.pencilDrawingNodeId || state.isPlacingComment) {
+    return false;
+  }
+  if (isCanvasBgCreationTool(state.tool, state.editorMode, { isPlacingComment: state.isPlacingComment })) {
+    return false;
+  }
+  if (state.selectedIds.length !== 1) return false;
+  if (state.transformInteractionMode === "resize" || state.transformInteractionMode === "rotate") {
+    return false;
+  }
+  if (state.dragActive) return false;
+  return true;
+}
+
 /** CSS `border-radius` for canvas / export. */
 export function cornerRadiiToCss(radii: CornerRadii): string | number {
   if (isUniformCornerRadii(radii)) return radii[0];
   const [tl, tr, br, bl] = radii;
   return `${tl}px ${tr}px ${br}px ${bl}px`;
+}
+
+/** Max radius for one corner while other corners stay fixed. */
+export function maxCornerRadiusForIndex(
+  cornerIndex: 0 | 1 | 2 | 3,
+  radii: CornerRadii,
+  w: number,
+  h: number,
+): number {
+  const width = Math.max(0, w);
+  const height = Math.max(0, h);
+  const [tl, tr, br, bl] = radii;
+  switch (cornerIndex) {
+    case 0:
+      return Math.max(0, Math.min(width - tr, height - bl));
+    case 1:
+      return Math.max(0, Math.min(width - tl, height - br));
+    case 2:
+      return Math.max(0, Math.min(width - bl, height - tr));
+    case 3:
+      return Math.max(0, Math.min(width - br, height - tl));
+    default:
+      return 0;
+  }
+}
+
+/** Upper bound while dragging one corner (linked or independent). */
+export function resolveCornerRadiusDragMax(
+  cornerIndex: 0 | 1 | 2 | 3,
+  startRadii: CornerRadii,
+  linkCorners: boolean,
+  w: number,
+  h: number,
+): number {
+  if (linkCorners) return Math.min(Math.max(0, w), Math.max(0, h)) / 2;
+  return maxCornerRadiusForIndex(cornerIndex, startRadii, w, h);
 }
 
 /** Scale radii so adjacent corners do not overlap (CSS corner overlap). */
@@ -85,21 +183,18 @@ export function roundedRectPathD(w: number, h: number, radii: CornerRadii): stri
     return `M 0 0 H ${width} V ${height} H 0 Z`;
   }
 
+  const edgeEps = 0.001;
   const parts: string[] = [`M ${tl} 0`];
-  if (width - tl - tr > 0) parts.push(`H ${width - tr}`);
-  else if (tr > 0) parts.push(`H ${width}`);
+  if (width - tl - tr > edgeEps) parts.push(`H ${width - tr}`);
 
   if (tr > 0) parts.push(`A ${tr} ${tr} 0 0 1 ${width} ${tr}`);
-  if (height - tr - br > 0) parts.push(`V ${height - br}`);
-  else if (br > 0) parts.push(`V ${height}`);
+  if (height - tr - br > edgeEps) parts.push(`V ${height - br}`);
 
   if (br > 0) parts.push(`A ${br} ${br} 0 0 1 ${width - br} ${height}`);
-  if (width - br - bl > 0) parts.push(`H ${bl}`);
-  else if (bl > 0) parts.push(`H 0`);
+  if (width - br - bl > edgeEps) parts.push(`H ${bl}`);
 
   if (bl > 0) parts.push(`A ${bl} ${bl} 0 0 1 0 ${height - bl}`);
-  if (height - bl - tl > 0) parts.push(`V ${tl}`);
-  else if (tl > 0) parts.push(`V 0`);
+  if (height - bl - tl > edgeEps) parts.push(`V ${tl}`);
 
   if (tl > 0) parts.push(`A ${tl} ${tl} 0 0 1 ${tl} 0`);
   parts.push("Z");

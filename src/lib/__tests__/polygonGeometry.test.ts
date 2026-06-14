@@ -7,6 +7,7 @@ import {
   maxPolygonCornerRadius,
   polygonGeometryPatch,
   polygonPathD,
+  polygonPathDForNode,
   polygonVertices,
   pointInPolygon,
 } from "@/lib/shapes/polygonGeometry";
@@ -29,23 +30,23 @@ describe("polygonGeometry", () => {
     assert.equal(polygonVertices(6, 80, 60).length, 6);
   });
 
-  it("polygonPathD uses arcs when corner radius > 0", () => {
+  it("polygonPathD uses quadratic fillets when corner radius > 0", () => {
     const sharp = polygonPathD(100, 100, 6, 0);
     const round = polygonPathD(100, 100, 6, 12);
     assert.ok(sharp.includes("L "));
-    assert.ok(!sharp.includes(" A "));
-    assert.ok(round.includes(" A "));
+    assert.ok(!sharp.includes(" Q "));
+    assert.ok(round.includes(" Q "));
     assert.ok(round.endsWith(" Z"));
   });
 
   it("triangle corner radius rounds inward toward center", () => {
     const d = polygonPathD(100, 100, 3, 10);
     const top = polygonVertices(3, 100, 100)[0]!;
-    const arcMatch = /A\s+[\d.]+\s+[\d.]+\s+0\s+0\s+1\s+([\d.]+)\s+([\d.]+)/.exec(d);
-    assert.ok(arcMatch, "expected inward fillet arc on triangle");
-    const endX = Number(arcMatch[1]);
-    const endY = Number(arcMatch[2]);
-    assert.ok(endX > top.x, "first arc should move down-right from the top spike");
+    const quadMatch = /Q\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/.exec(d);
+    assert.ok(quadMatch, "expected inward quadratic fillet on triangle");
+    const endX = Number(quadMatch[3]);
+    const endY = Number(quadMatch[4]);
+    assert.ok(endX > top.x, "first curve should move down-right from the top spike");
     assert.ok(endY > top.y, "fillet should stay inside the shape, not above the tip");
   });
 
@@ -53,6 +54,34 @@ describe("polygonGeometry", () => {
     const max = maxPolygonCornerRadius(3, 100, 100);
     assert.ok(max > 0);
     assert.equal(clampPolygonCornerRadius(3, 100, 100, max + 50), max);
+  });
+
+  it("polygonPathDForNode supports per-vertex corner radii", () => {
+    const uniform = polygonPathDForNode({
+      width: 100,
+      height: 100,
+      polygonSides: 3,
+      cornerRadius: 8,
+    });
+    const mixed = polygonPathDForNode({
+      width: 100,
+      height: 100,
+      polygonSides: 3,
+      cornerRadius: 0,
+      cornerRadii: [12, 4, 0],
+    });
+    assert.ok(uniform.includes(" Q "));
+    assert.ok(mixed.includes(" Q "));
+    assert.notEqual(uniform, mixed);
+  });
+
+  it("polygonGeometryPatch resizes cornerRadii when sides change", () => {
+    const patch = polygonGeometryPatch(
+      { width: 80, height: 80, polygonSides: 3, cornerRadius: 0, cornerRadii: [10, 5, 2] },
+      { polygonSides: 4 },
+    );
+    assert.equal(patch.polygonSides, 4);
+    assert.deepEqual(patch.cornerRadii, [10, 5, 2, 10]);
   });
 
   it("polygonGeometryPatch syncs metadata and anchors", () => {

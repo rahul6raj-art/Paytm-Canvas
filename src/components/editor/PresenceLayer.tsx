@@ -61,7 +61,7 @@ export function PresenceLayer() {
             style={{ borderColor: r.color }}
           />
           <div
-            className="absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full border border-black/40 px-1 text-[9px] font-bold text-white shadow-sm"
+            className="absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full border border-black/40 px-1 text-ui font-bold text-white shadow-sm"
             style={{ backgroundColor: r.color }}
             title={r.name}
           >
@@ -75,7 +75,7 @@ export function PresenceLayer() {
           <CursorGlyph color={u.color} />
           <div
             className={cn(
-              "absolute left-[14px] top-[16px] max-w-[140px] truncate rounded-md border px-1.5 py-0.5 text-[10px] font-semibold shadow-md",
+              "absolute left-[14px] top-[16px] max-w-[140px] truncate rounded-md border px-1.5 py-0.5 text-ui font-semibold shadow-md",
             )}
             style={{
               borderColor: `${u.color}aa`,

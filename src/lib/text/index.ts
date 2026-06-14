@@ -27,7 +27,8 @@ export { textResizeModeToAutoResize, autoResizeToTextResizeMode } from "./autoRe
 export { createTextNode, createPointTextAt, createTextBoxFromDrag } from "./textCreation";
 export { hitTestTextLocal, hitTestTextWorld } from "./textHitTest";
 export { enterTextEditMode, exitTextEditMode } from "./textEditMode";
-export { verticalContentOffsetY, normalizeVerticalAlign } from "./textVerticalAlign";
+export { layoutTextCanonical, textLayoutForEditorNode, clearCanonicalTextLayoutCache } from "./canonicalTextLayout";
+export { getMissingFontWarnings, getFontWarnings, preserveImportFontFamily } from "./textFontManager";
 export {
   textAdvancedStyleFromNode,
   prepareTextForDisplay,

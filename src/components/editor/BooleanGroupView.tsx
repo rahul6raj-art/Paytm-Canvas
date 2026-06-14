@@ -2,8 +2,12 @@
 
 import { useMemo } from "react";
 import { useEditorStore, type EditorNode } from "@/stores/useEditorStore";
-import { fillCss } from "@/lib/color";
 import { buildBooleanRenderForGroup, buildMaskClipPathDForGroup } from "@/lib/booleanGeometry";
+import {
+  maskCompositorUsesSvgMask,
+  resolveMaskCompositorMode,
+  shouldShowMaskLayer,
+} from "@/lib/mask";
 import { svgSafeId } from "@/lib/svgMarkupCore";
 import { BooleanCompositeSvg } from "./BooleanCompositeSvg";
 
@@ -35,12 +39,6 @@ export function BooleanGroupView({
   }
 
   if (booleanRender) {
-    const fill =
-      node.fillEnabled === false
-        ? "none"
-        : node.fill
-          ? fillCss(node.fill, node.fillOpacity, node.fillEnabled)
-          : booleanRender.fill;
     const w = Math.max(1, node.width);
     const h = Math.max(1, node.height);
 
@@ -52,7 +50,7 @@ export function BooleanGroupView({
           node={node}
           width={w}
           height={h}
-          fill={fill}
+          fallbackFill={booleanRender.fill}
         />
         <div className="pointer-events-none absolute inset-0 hidden" aria-hidden>
           {childrenTree}
@@ -64,7 +62,7 @@ export function BooleanGroupView({
   return <>{childrenTree}</>;
 }
 
-/** Mask group — clips content to mask shape. */
+/** Mask group — Figma-like compositor (outline clipPath or alpha/luminance SVG mask). */
 export function MaskGroupView({
   groupId,
   node,
@@ -81,20 +79,48 @@ export function MaskGroupView({
 }) {
   const nodes = useEditorStore((s) => s.nodes);
   const selectedIds = useEditorStore((s) => s.selectedIds);
+  const objectEditModeNodeId = useEditorStore((s) => s.objectEditModeNodeId);
   const maskId = node.maskId;
-  const maskSelected = Boolean(maskId && selectedIds.includes(maskId));
   const safeId = svgSafeId(groupId);
   const clipId = `pc-mask-clip-${safeId}`;
+  const alphaMaskId = `pc-mask-alpha-${safeId}`;
 
   const maskChildOrder = useEditorStore((s) => s.childOrder);
-  const clipD = useMemo(() => {
+  const clip = useMemo(() => {
     if (!maskId) return null;
     return buildMaskClipPathDForGroup(groupId, maskId, nodes, maskChildOrder);
   }, [groupId, maskId, nodes, maskChildOrder]);
 
+  const mode = useMemo(() => {
+    if (!maskNode) return "OUTLINE" as const;
+    return resolveMaskCompositorMode(node, maskNode);
+  }, [node, maskNode]);
+
+  const usesSvgMask = maskCompositorUsesSvgMask(mode);
+  const showMaskLayer = shouldShowMaskLayer(node, {
+    objectEditModeNodeId,
+    selectedIds,
+  });
+
+  const maskStyle = useMemo((): React.CSSProperties | undefined => {
+    if (!clip) return undefined;
+    if (usesSvgMask) {
+      return {
+        mask: `url(#${alphaMaskId})`,
+        WebkitMask: `url(#${alphaMaskId})`,
+      };
+    }
+    return {
+      clipPath: `url(#${clipId})`,
+      WebkitClipPath: `url(#${clipId})`,
+    };
+  }, [clip, usesSvgMask, alphaMaskId, clipId]);
+
+  const escapedD = clip?.clipD.replace(/&/g, "&amp;").replace(/"/g, "&quot;") ?? "";
+
   return (
     <>
-      {clipD ? (
+      {clip ? (
         <svg
           className="pointer-events-none absolute inset-0 overflow-visible"
           width={Math.max(1, node.width)}
@@ -102,22 +128,30 @@ export function MaskGroupView({
           aria-hidden
         >
           <defs>
-            <clipPath id={clipId} clipPathUnits="userSpaceOnUse">
-              <path d={clipD} />
-            </clipPath>
+            {usesSvgMask ? (
+              <mask
+                id={alphaMaskId}
+                maskUnits="userSpaceOnUse"
+                maskContentUnits="userSpaceOnUse"
+                style={mode === "LUMINANCE" ? { maskType: "luminance" } : undefined}
+              >
+                <path d={escapedD} fill="white" fillRule={clip.clipRule} />
+              </mask>
+            ) : (
+              <clipPath id={clipId} clipPathUnits="userSpaceOnUse">
+                <path d={escapedD} clipRule={clip.clipRule} />
+              </clipPath>
+            )}
           </defs>
         </svg>
       ) : null}
       <div className="relative h-full w-full">
-        {maskLayer && maskSelected ? (
+        {maskLayer && showMaskLayer ? (
           <div className="absolute inset-0 z-0" data-mask-shape>
             {maskLayer}
           </div>
         ) : null}
-        <div
-          className="relative z-10 h-full w-full"
-          style={clipD ? { clipPath: `url(#${clipId})` } : undefined}
-        >
+        <div className="relative z-10 h-full w-full" style={maskStyle}>
           {contentTree}
         </div>
       </div>

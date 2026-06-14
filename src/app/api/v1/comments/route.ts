@@ -1,8 +1,11 @@
 import { jsonV1Data, jsonV1Error } from "@/lib/apiV1Responses";
 import { isNonEmptyString, parseJsonBody } from "@/lib/apiV1Validation";
+import { mockApiTokenGuard } from "@/lib/mockApiRequestAuth";
 import { commentToDto, mockApiStore } from "@/lib/mockApiStore";
 
 export async function GET(request: Request) {
+  const denied = mockApiTokenGuard(request, "GET", { read: "comments:read", write: "comments:write" });
+  if (denied) return denied;
   const { searchParams } = new URL(request.url);
   const fileId = searchParams.get("fileId")?.trim() ?? "";
   if (!fileId) {
@@ -16,6 +19,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const denied = mockApiTokenGuard(request, "POST", { read: "comments:read", write: "comments:write" });
+  if (denied) return denied;
   let body: unknown;
   try {
     body = await request.json();

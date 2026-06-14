@@ -50,14 +50,17 @@ describe("pickCanvasScreenRoots", () => {
     assert.equal(picked[0]!.name, "Default - Real Estate");
   });
 
-  it("imports one primary screen when many frames exist", () => {
+  it("imports every top-level screen when many frames exist", () => {
     const fig = docWithCanvas([
       frame("Thumb", 0, 0, 100, 100),
       frame("Home", 0, 0, 1440, 900),
       frame("Settings", 2000, 0, 390, 844),
     ]);
     const picked = pickCanvasScreenRoots(fig, "0:1", { fileName: "Untitled.fig" });
-    assert.equal(picked.length, 1);
-    assert.equal(picked[0]!.name, "Home");
+    assert.equal(picked.length, 3);
+    assert.deepEqual(
+      picked.map((n) => n.name).sort(),
+      ["Home", "Settings", "Thumb"],
+    );
   });
 });

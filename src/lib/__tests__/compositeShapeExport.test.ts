@@ -51,7 +51,7 @@ describe("compositeShapeExport", () => {
     assert.deepEqual(codeExportChildIds(mask.mg!, maskOrder), ["content"]);
   });
 
-  it("exports subtract boolean as inline SVG with mask punch (not evenodd)", () => {
+  it("exports subtract boolean as inline SVG with Clipper2 path", () => {
     const nodes: Record<string, EditorNode> = {
       sub: shape("sub", "group", {
         parentId: null,
@@ -69,16 +69,14 @@ describe("compositeShapeExport", () => {
     assert.equal(style.clipPath, undefined);
 
     const html = nodeToHtml(nodes.sub!, nodes, childOrder, {}, 0);
-    assert.match(html, /<mask[^>]*>[\s\S]*fill="black"/);
-    assert.match(html, /mask="url\(#pc-bool-export-/);
-    assert.doesNotMatch(html, /fill-rule="evenodd"/);
+    assert.match(html, /<path d="/);
+    assert.doesNotMatch(html, /<mask[^>]*>/);
     assert.doesNotMatch(html, /data-pc-id="base"/);
     assert.doesNotMatch(html, /data-pc-id="hole"/);
 
     const jsx = nodeToJsx(nodes.sub!, nodes, childOrder, {}, 0, { portable: true });
-    assert.match(jsx, /<mask[^>]*>/);
-    assert.match(jsx, /fill="black"/);
-    assert.doesNotMatch(jsx, /fillRule=\{"evenodd"\}/);
+    assert.match(jsx, /<path/);
+    assert.doesNotMatch(jsx, /<mask/);
   });
 
   it("exports mask group with clip-path and content only", () => {
@@ -109,7 +107,7 @@ describe("compositeShapeExport", () => {
     assert.match(clipPathCssFromPathD("M 0 0 L 10 0 Z", "evenodd"), /evenodd/);
   });
 
-  it("exports union as stacked paths without evenodd", () => {
+  it("exports union as single Clipper2 composite path", () => {
     const nodes: Record<string, EditorNode> = {
       u: shape("u", "group", {
         parentId: null,
@@ -124,11 +122,11 @@ describe("compositeShapeExport", () => {
     const childOrder = { u: ["a", "b"] };
     const html = nodeToHtml(nodes.u!, nodes, childOrder, {}, 0);
     const pathCount = (html.match(/<path /g) ?? []).length;
-    assert.ok(pathCount >= 2);
-    assert.doesNotMatch(html, /fill-rule="evenodd"/);
+    assert.equal(pathCount, 1);
+    assert.match(html, /<path d="/);
   });
 
-  it("exports intersect with nested clip paths", () => {
+  it("exports intersect as single Clipper2 composite path", () => {
     const nodes: Record<string, EditorNode> = {
       ix: shape("ix", "group", {
         parentId: null,
@@ -142,12 +140,11 @@ describe("compositeShapeExport", () => {
     };
     const childOrder = { ix: ["a", "b"] };
     const html = nodeToHtml(nodes.ix!, nodes, childOrder, {}, 0);
-    assert.match(html, /<clipPath[^>]*>/);
-    assert.match(html, /clip-path="url\(#pc-bool-export-int-/);
-    assert.doesNotMatch(html, /fill-rule="evenodd"/);
+    assert.match(html, /<path d="/);
+    assert.doesNotMatch(html, /<clipPath[^>]*>/);
   });
 
-  it("exports exclude with per-operand masks", () => {
+  it("exports exclude as single Clipper2 composite path", () => {
     const nodes: Record<string, EditorNode> = {
       ex: shape("ex", "group", {
         parentId: null,
@@ -161,8 +158,7 @@ describe("compositeShapeExport", () => {
     };
     const childOrder = { ex: ["a", "b"] };
     const html = nodeToHtml(nodes.ex!, nodes, childOrder, {}, 0);
-    assert.match(html, /<mask[^>]*>[\s\S]*fill="black"/);
-    assert.match(html, /pc-bool-export-exc-/);
-    assert.doesNotMatch(html, /fill-rule="evenodd"/);
+    assert.match(html, /<path d="/);
+    assert.doesNotMatch(html, /<mask[^>]*>/);
   });
 });

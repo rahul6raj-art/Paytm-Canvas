@@ -14,11 +14,15 @@ import { autoLayoutFromFigmaNode, constraintsFromFigma } from "@/integrations/fi
 import {
   cornerRadiusFromFigmaNode,
   effectsFromApi,
-  gradientFromPaints,
+  primaryFillFromPaints,
   imageRefFromPaints,
-  solidFromPaints,
   strokeFromFigmaNode,
 } from "@/integrations/figma/figma-style-parser";
+import {
+  designTokensFromFigmaVariables,
+  fillTokenIdFromBoundVariables,
+  type FigmaImportTokenBundle,
+} from "@/integrations/figma/figma-token-parser";
 import { applyFigmaTextToNode } from "@/integrations/figma/figma-text-parser";
 import { blendModeFromFigmaApi } from "@/lib/figImport/figImportProperties";
 import { figmaBoundingBox, figmaRelativeBox } from "@/integrations/figma/figma-transform-parser";
@@ -43,6 +47,7 @@ export type FigmaNodeImportCtx = {
   imageRefs: Set<string>;
   figmaToEditor: Map<string, string>;
   componentMasters: Map<string, string>;
+  tokenBundle: FigmaImportTokenBundle;
   seq: number;
 };
 
@@ -157,9 +162,9 @@ function convertFigmaNode(
 
   const { x, y, w, h } = figmaRelativeBox(node, parentBox);
   const id = editorId(ctx, node.id);
-  const solid = solidFromPaints(node.fills);
-  const gradient = gradientFromPaints(node.fills);
+  const fill = primaryFillFromPaints(node.fills);
   const imageRef = imageRefFromPaints(node.fills);
+  const fillTokenId = fillTokenIdFromBoundVariables(node, ctx.tokenBundle.variableIdToTokenId);
 
   const base: EditorNode = {
     id,
@@ -174,9 +179,9 @@ function convertFigmaNode(
     visible: true,
     locked: node.locked === true,
     expanded: true,
-    fillEnabled: Boolean(solid.fill || gradient.fillType || imageRef),
-    ...solid,
-    ...gradient,
+    fillEnabled: Boolean(fill.fill || fill.fillType === "gradient" || imageRef),
+    fillTokenId,
+    ...fill,
     ...strokeFromFigmaNode(node),
     ...autoLayoutFromFigmaNode(node),
     ...constraintsFromFigma(node),
@@ -234,8 +239,10 @@ export function convertFigmaApiToPaytmCraft(
   root: FigmaApiNode,
   fileName: string,
   imageUrlByRef: Record<string, string> = {},
+  variablesMeta?: import("@/integrations/figma/figma-token-parser").FigmaVariablesMeta,
 ): FigmaApiImportResult {
   try {
+    const tokenBundle = designTokensFromFigmaVariables(variablesMeta);
     const ctx: FigmaNodeImportCtx = {
       nodes: {},
       childOrder: { [EDITOR_ROOT_KEY]: [] },
@@ -243,6 +250,7 @@ export function convertFigmaApiToPaytmCraft(
       imageRefs: new Set(),
       figmaToEditor: new Map(),
       componentMasters: new Map(),
+      tokenBundle,
       seq: 0,
     };
 
@@ -273,7 +281,7 @@ export function convertFigmaApiToPaytmCraft(
       nodes: ctx.nodes,
       childOrder: ctx.childOrder,
       assets: ctx.assets,
-      designTokens: {},
+      designTokens: tokenBundle.designTokens,
       selectedIds: converted ? [converted.id] : (ctx.childOrder[EDITOR_ROOT_KEY]?.slice(0, 1) ?? []),
       canvas: {
         zoom: 0.5,

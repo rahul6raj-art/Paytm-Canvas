@@ -1,7 +1,7 @@
 /** Suppresses stray pointer/click events after drag-to-create (avoids selecting the frame below). */
 let suppressUntil = 0;
 
-const SUPPRESS_MS = 500;
+const SUPPRESS_MS = 150;
 
 export function suppressPostCreationPointer(): void {
   suppressUntil = performance.now() + SUPPRESS_MS;

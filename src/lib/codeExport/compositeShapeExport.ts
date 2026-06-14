@@ -1,29 +1,24 @@
 import { fillCss } from "@/lib/color";
 import {
   buildBooleanRenderForGroup,
-  buildMaskClipPathDForGroup,
   isBooleanGroup,
   isMaskGroup,
 } from "@/lib/booleanGeometry";
+import {
+  clipPathCssFromPathD,
+  maskGroupClipId,
+  maskGroupExportDefs,
+} from "@/lib/mask/maskExport";
 import type { EditorNode } from "@/stores/useEditorStore";
 import {
   booleanRenderFillAttr,
   booleanRenderSvgMarkup,
   booleanStrokeAttrParts,
 } from "@/lib/codeExport/booleanRenderSvg";
-import { svgSafeId } from "@/lib/svgMarkupCore";
 
 export type CompositeExportStyle = Record<string, string | number>;
 
-export function clipPathCssFromPathD(
-  d: string,
-  fillRule: "nonzero" | "evenodd" = "nonzero",
-): string {
-  const escaped = d.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-  return fillRule === "evenodd"
-    ? `path(evenodd, '${escaped}')`
-    : `path('${escaped}')`;
-}
+export { clipPathCssFromPathD, maskGroupClipId };
 
 function visibleBooleanChildIds(
   nodeId: string,
@@ -37,7 +32,7 @@ function visibleBooleanChildIds(
 }
 
 /**
- * Inline SVG matching canvas boolean rendering (mask/clip per operation).
+ * Inline SVG matching canvas boolean rendering (Clipper2 composite path).
  */
 export function booleanGroupExportSvgMarkup(
   node: EditorNode,
@@ -61,30 +56,31 @@ export function booleanGroupExportSvgMarkup(
   );
 }
 
-export function maskGroupClipId(groupId: string): string {
-  return `pc-mask-export-clip-${svgSafeId(groupId)}`;
-}
-
 export type MaskGroupClipExport = {
   clipId: string;
   clipD: string;
+  clipRule: "nonzero" | "evenodd";
   clipRef: string;
   defsMarkup: string;
+  usesSvgMask?: boolean;
 };
 
-/** SVG clipPath defs matching canvas mask groups (content clips via url(#id)). */
+/** SVG mask/clipPath defs for mask groups (export fallback uses url ref). */
 export function maskGroupClipDefsMarkup(
   node: EditorNode,
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
 ): MaskGroupClipExport | null {
-  if (!isMaskGroup(node) || !node.maskId) return null;
-  const clipD = buildMaskClipPathDForGroup(node.id, node.maskId, nodes, childOrder);
-  if (!clipD) return null;
-  const clipId = maskGroupClipId(node.id);
-  const escaped = clipD.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-  const defsMarkup = `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" style="position:absolute;overflow:hidden" aria-hidden="true"><defs><clipPath id="${clipId}" clipPathUnits="userSpaceOnUse"><path d="${escaped}"/></clipPath></defs></svg>`;
-  return { clipId, clipD, defsMarkup, clipRef: `url(#${clipId})` };
+  const exported = maskGroupExportDefs(node, nodes, childOrder);
+  if (!exported) return null;
+  return {
+    clipId: exported.clipId,
+    clipD: exported.clipD,
+    clipRule: exported.clipRule,
+    clipRef: exported.clipRef,
+    defsMarkup: exported.defsMarkup,
+    usesSvgMask: exported.usesSvgMask,
+  };
 }
 
 /** Layout-only styles for boolean export wrapper (geometry is the inline SVG). */

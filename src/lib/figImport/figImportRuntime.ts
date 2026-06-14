@@ -1,17 +1,24 @@
+import { startTransition } from "react";
+
 export type FigImportProgress = (message: string) => void;
 
-let importYieldTick = 0;
+import { FIG_IMPORT_YIELD_EVERY_NODES } from "@/lib/figImport/figImportConstants";
 
 export function resetImportYieldTick(): void {
   importYieldTick = 0;
 }
 
+let importYieldTick = 0;
+
 /** Cooperative yield during long .fig tree walks (keeps overlay animation alive). */
-export async function yieldImportTick(every = 16): Promise<void> {
+export async function yieldImportTick(every = FIG_IMPORT_YIELD_EVERY_NODES): Promise<void> {
   importYieldTick += 1;
-  if (importYieldTick % every === 0) {
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  if (importYieldTick % every !== 0) return;
+  if (typeof scheduler !== "undefined" && typeof scheduler.yield === "function") {
+    await scheduler.yield();
+    return;
   }
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
 }
 
 /** Yield so the import overlay can paint before heavy work. */
@@ -37,17 +44,18 @@ export async function waitForNextPaint(maxWaitMs = 250): Promise<void> {
   });
 }
 
-/** Run heavy Zustand apply on the next task so the import overlay can keep animating. */
+/** Run heavy Zustand apply without extra frame delays. */
 export function scheduleFigImportStateApply(apply: () => void): Promise<void> {
   return new Promise((resolve) => {
-    setTimeout(() => {
+    const run = () => {
       apply();
-      if (typeof requestAnimationFrame === "function") {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-      } else {
-        setTimeout(() => resolve(), 16);
-      }
-    }, 0);
+      resolve();
+    };
+    if (typeof startTransition === "function") {
+      startTransition(run);
+    } else {
+      run();
+    }
   });
 }
 
@@ -63,4 +71,22 @@ export function deferFigImportSave(save: () => Promise<void>): void {
   } else {
     setTimeout(run, 100);
   }
+}
+
+/** Yield between document apply and mounting the heavy canvas/layers UI. */
+export async function settleImportedDocumentUi(layerCount: number): Promise<void> {
+  await waitForNextPaint();
+  if (typeof scheduler !== "undefined" && typeof scheduler.yield === "function") {
+    await scheduler.yield();
+  }
+  if (layerCount > 200) {
+    await new Promise<void>((resolve) => {
+      if (typeof requestIdleCallback === "function") {
+        requestIdleCallback(() => resolve(), { timeout: 1500 });
+      } else {
+        setTimeout(resolve, 32);
+      }
+    });
+  }
+  await waitForNextPaint();
 }

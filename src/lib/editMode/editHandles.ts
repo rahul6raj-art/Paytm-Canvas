@@ -2,6 +2,7 @@ import type { EditorNode } from "@/stores/useEditorStore";
 import {
   clampCornerRadii,
   getNodeCornerRadii,
+  resolveCornerRadiusDragMax,
   supportsCornerRadiusHandles,
 } from "@/lib/cornerRadius";
 import type { CornerIndex } from "@/lib/cornerRadiusDrag";
@@ -134,7 +135,7 @@ export function getEditHandles(
           params.ratio,
           node.width,
           node.height,
-          params.cornerRadius,
+          params.outerCornerRadius,
         ),
       },
     );
@@ -213,7 +214,15 @@ export function updateFromHandle(
   switch (kind) {
     case "cornerRadius": {
       if (!supportsCornerRadiusHandles(node) || cornerIndex == null) return null;
-      const maxR = Math.min(node.width, node.height) / 2;
+      const start = getNodeCornerRadii(node);
+      const linkCorners = Boolean(input.shiftKey);
+      const maxR = resolveCornerRadiusDragMax(
+        cornerIndex,
+        start,
+        linkCorners,
+        node.width,
+        node.height,
+      );
       const raw = radiusFromRelativeCornerDrag(
         cornerIndex,
         session?.grabRadius ?? 0,
@@ -225,7 +234,6 @@ export function updateFromHandle(
         node.height,
         maxR,
       );
-      const start = getNodeCornerRadii(node);
       const next: [number, number, number, number] = input.shiftKey
         ? [raw, raw, raw, raw]
         : [...start];

@@ -13,12 +13,60 @@ import {
   isFullEllipseArc,
 } from "@/lib/shapes/ellipseArc";
 import { generatePolygonPoints } from "./pathGenerators";
-import { isPolygonNode, polygonPathDForNode } from "./polygonGeometry";
+import {
+  clampPolygonSides,
+  clampPolygonVertexCornerRadii,
+  DEFAULT_POLYGON_SIDES,
+  isPolygonNode,
+  polygonPathDForNode,
+  polygonPathPoints,
+} from "./polygonGeometry";
 import { getPolygonPreview } from "./polygonDrag";
-import { isStarNode, starPathDForNode } from "./starGeometry";
+import { createRoundedVectorPathSvgD } from "@/lib/geometry";
+import {
+  clampStarPointCount,
+  clampStarRatio,
+  clampStarVertexCornerRadii,
+  DEFAULT_STAR_INNER_RATIO,
+  DEFAULT_STAR_POINTS,
+  isStarNode,
+  maxCornerRadiusAtVertex,
+  starPathDForNode,
+  starPathPoints,
+} from "./starGeometry";
 import { getStarPreview } from "./starDrag";
 
 const CORNER_EPS = 0.75;
+
+function rectCornerEpsilon(width: number, height: number): number {
+  return Math.max(CORNER_EPS, Math.min(Math.max(1, width), Math.max(1, height)) * 0.015);
+}
+
+const RECT_CORNER_TARGETS: readonly { corner: 0 | 1 | 2 | 3; at: (w: number, h: number) => { x: number; y: number } }[] = [
+  { corner: 0, at: (_w, _h) => ({ x: 0, y: 0 }) },
+  { corner: 1, at: (w, _h) => ({ x: w, y: 0 }) },
+  { corner: 2, at: (w, h) => ({ x: w, y: h }) },
+  { corner: 3, at: (_w, h) => ({ x: 0, y: h }) },
+];
+
+/** Map a local anchor position to rectangle corner index (TL, TR, BR, BL). */
+export function classifyPathPointToCorner(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  epsilon = rectCornerEpsilon(width, height),
+): 0 | 1 | 2 | 3 | null {
+  const w = Math.max(1, width);
+  const h = Math.max(1, height);
+  for (const { corner, at } of RECT_CORNER_TARGETS) {
+    const target = at(w, h);
+    if (Math.abs(x - target.x) <= epsilon && Math.abs(y - target.y) <= epsilon) {
+      return corner;
+    }
+  }
+  return null;
+}
 
 /** Four rectangle corners in local space (TL, TR, BR, BL). */
 export function rectCornerPathPoints(w: number, h: number, existing?: PathPoint[]): PathPoint[] {
@@ -150,66 +198,177 @@ export function pathHasCurveHandles(points: PathPoint[] | undefined): boolean {
   return (points ?? []).some((p) => p.handleIn || p.handleOut);
 }
 
-/** Closed path with four rectangle corners (no bezier handles) — corner radius lives on the node. */
+/** Closed path with four rectangle corners — corner radius lives on the node (handles allowed). */
 export function isRoundedRectPath(
   node: Pick<EditorNode, "type" | "width" | "height" | "pathPoints" | "pathClosed">,
 ): boolean {
   if (node.type !== "path" || node.pathClosed === false) return false;
   const pts = node.pathPoints ?? [];
-  if (pts.length !== 4 || pathHasCurveHandles(pts)) return false;
+  if (pts.length !== 4) return false;
   const w = Math.max(1, node.width);
   const h = Math.max(1, node.height);
-  const expected = [
-    { x: 0, y: 0 },
-    { x: w, y: 0 },
-    { x: w, y: h },
-    { x: 0, y: h },
-  ];
-  return expected.every((exp, i) => {
-    const p = pts[i]!;
-    return Math.abs(p.x - exp.x) <= CORNER_EPS && Math.abs(p.y - exp.y) <= CORNER_EPS;
-  });
+  const eps = rectCornerEpsilon(w, h);
+  const assigned = new Set<number>();
+  for (const p of pts) {
+    const corner = classifyPathPointToCorner(p.x, p.y, w, h, eps);
+    if (corner == null || assigned.has(corner)) return false;
+    assigned.add(corner);
+  }
+  return assigned.size === 4;
+}
+
+/** Closed path with exactly four corner anchors (any quadrilateral). */
+export function isFourCornerClosedPath(
+  node: Pick<EditorNode, "type" | "pathPoints" | "pathClosed">,
+): boolean {
+  if (node.type !== "path" || node.pathClosed === false) return false;
+  return (node.pathPoints ?? []).length === 4;
+}
+
+/** Closed straight-segment path with 3+ corner anchors (triangles, quads, etc.). */
+export function isCornerRoundablePath(
+  node: Pick<EditorNode, "type" | "pathPoints" | "pathClosed">,
+): boolean {
+  if (node.type !== "path" || node.pathClosed === false) return false;
+  const pts = node.pathPoints ?? [];
+  return pts.length >= 3 && !pathHasCurveHandles(pts);
 }
 
 export function pathSupportsCornerRadius(
   node: Pick<EditorNode, "type" | "width" | "height" | "pathPoints" | "pathClosed">,
 ): boolean {
-  return isRoundedRectPath(node);
+  return isCornerRoundablePath(node);
 }
 
-/** Map a path point id to corner index (0=TL, 1=TR, 2=BR, 3=BL) for rounded-rect paths. */
+/** Per-vertex corner radii aligned with path point order. */
+export function getPathVertexCornerRadii(
+  node: Pick<EditorNode, "cornerRadius" | "cornerRadii" | "pathPoints">,
+): number[] {
+  const pts = node.pathPoints ?? [];
+  const n = pts.length;
+  if (n === 0) return [];
+  const uniform = Math.max(0, node.cornerRadius ?? 0);
+  const out = Array.from({ length: n }, () => uniform);
+  for (let i = 0; i < n; i++) {
+    const ptRadius = pts[i]?.cornerRadius;
+    if (ptRadius != null) out[i] = Math.max(0, ptRadius);
+    else if (node.cornerRadii?.[i] != null) out[i] = Math.max(0, node.cornerRadii[i]!);
+  }
+  return out;
+}
+
+export function hasPathCornerRadius(
+  node: Pick<EditorNode, "cornerRadius" | "cornerRadii" | "pathPoints" | "type" | "pathClosed">,
+): boolean {
+  if (!isCornerRoundablePath(node)) return false;
+  return getPathVertexCornerRadii(node).some((r) => r > 0);
+}
+
+/** Clamp per-corner radii for an arbitrary closed polygon path. */
+export function clampPathCornerRadii(
+  pathPoints: PathPoint[],
+  radii: readonly number[],
+): number[] {
+  const verts = pathPoints.map((p) => ({ x: p.x, y: p.y }));
+  const n = verts.length;
+  if (n < 3) return [];
+  return Array.from({ length: n }, (_, i) => {
+    const r = Math.max(0, radii[i] ?? 0);
+    const prev = verts[(i - 1 + n) % n]!;
+    const curr = verts[i]!;
+    const next = verts[(i + 1) % n]!;
+    const maxAt = maxCornerRadiusAtVertex(prev, curr, next);
+    return Math.max(0, Math.min(r, maxAt));
+  });
+}
+
+/** Map a path point id to corner index (path point order, or TL/TR/BR/BL for rect-like paths). */
 export function pathPointCornerIndex(
-  node: Pick<EditorNode, "pathPoints">,
+  node: Pick<EditorNode, "pathPoints" | "width" | "height" | "type" | "pathClosed">,
   pointId: string | null | undefined,
-): 0 | 1 | 2 | 3 | null {
+): number | null {
   if (!pointId) return null;
-  const idx = (node.pathPoints ?? []).findIndex((p) => p.id === pointId);
-  if (idx < 0 || idx > 3) return null;
-  return idx as 0 | 1 | 2 | 3;
+  const pts = node.pathPoints ?? [];
+  const idx = pts.findIndex((p) => p.id === pointId);
+  if (idx < 0) return null;
+  if (isRoundedRectPath(node)) {
+    const pt = pts[idx]!;
+    const corner = classifyPathPointToCorner(pt.x, pt.y, node.width, node.height);
+    if (corner != null) return corner;
+  }
+  if (isCornerRoundablePath(node)) return idx;
+  return null;
 }
 
-/** Canvas handle position for adjusting one corner's radius (local coords). */
+/** Inset along the corner bisector for on-canvas handle placement (local coords). */
+export function cornerRadiusDisplayInset(
+  radius: number,
+  minInset: number,
+  width: number,
+  height: number,
+): number {
+  const cap = Math.max(0, Math.min(width, height) / 2 - 0.5);
+  if (radius > 0) return Math.min(radius, cap);
+  return Math.min(Math.max(0, minInset), cap);
+}
+
+/** Canvas handle position for adjusting one corner's radius (local coords, inside the shape). */
 export function cornerRadiusHandlePosition(
   w: number,
   h: number,
   radii: CornerRadii,
   cornerIndex: 0 | 1 | 2 | 3,
+  minInset = 0,
 ): { x: number; y: number } {
   const [tl, tr, br, bl] = clampCornerRadii(radii, w, h);
   const width = Math.max(1, w);
   const height = Math.max(1, h);
   switch (cornerIndex) {
-    case 0:
-      return { x: tl, y: 0 };
-    case 1:
-      return { x: width - tr, y: 0 };
-    case 2:
-      return { x: width, y: height - br };
-    case 3:
-      return { x: 0, y: height - bl };
+    case 0: {
+      const inset = cornerRadiusDisplayInset(tl, minInset, width, height);
+      return { x: inset, y: inset };
+    }
+    case 1: {
+      const inset = cornerRadiusDisplayInset(tr, minInset, width, height);
+      return { x: width - inset, y: inset };
+    }
+    case 2: {
+      const inset = cornerRadiusDisplayInset(br, minInset, width, height);
+      return { x: width - inset, y: height - inset };
+    }
+    case 3: {
+      const inset = cornerRadiusDisplayInset(bl, minInset, width, height);
+      return { x: inset, y: height - inset };
+    }
     default:
       return { x: 0, y: 0 };
   }
+}
+
+/** Live outline for editable paths; flattened import paths keep baked geometry. */
+export function resolvePathOutlineD(
+  node: Pick<
+    EditorNode,
+    | "type"
+    | "width"
+    | "height"
+    | "pathPoints"
+    | "pathClosed"
+    | "cornerRadius"
+    | "cornerRadii"
+    | "polygonSides"
+    | "starPoints"
+    | "starInnerRadius"
+    | "starOuterCornerRadius"
+    | "starInnerCornerRadius"
+    | "flattenedPathData"
+  >,
+  nodeId?: string,
+): string {
+  if (node.type === "path" && (node.pathPoints?.length ?? 0) > 0) {
+    return vectorShapeOutlineD(node, nodeId);
+  }
+  return node.flattenedPathData ?? vectorShapeOutlineD(node, nodeId);
 }
 
 /** SVG path `d` for vector shapes (polygon, star, path). */
@@ -226,6 +385,8 @@ export function vectorShapeOutlineD(
     | "polygonSides"
     | "starPoints"
     | "starInnerRadius"
+    | "starOuterCornerRadius"
+    | "starInnerCornerRadius"
   >,
   nodeId?: string,
 ): string {
@@ -247,6 +408,8 @@ export function vectorShapeOutlineD(
         pointCount: preview.pointCount,
         ratio: preview.ratio,
         cornerRadius: preview.cornerRadius,
+        outerCornerRadius: preview.outerCornerRadius,
+        innerCornerRadius: preview.innerCornerRadius,
       });
     }
     return starPathDForNode(node);
@@ -259,6 +422,20 @@ export function vectorShapeOutlineD(
       getNodeCornerRadii(node),
     );
   }
+  if (isCornerRoundablePath(node)) {
+    const radii = getPathVertexCornerRadii(node);
+    if (radii.some((r) => r > 0)) {
+      const clamped = clampPathCornerRadii(pts, radii);
+      const roundedPts = pts.map((p, i) => ({
+        ...p,
+        cornerRadius: clamped[i] ?? 0,
+      }));
+      return createRoundedVectorPathSvgD({
+        points: roundedPts,
+        closed: node.pathClosed ?? false,
+      });
+    }
+  }
   return pathToSvgD(pts, node.pathClosed ?? false);
 }
 
@@ -270,6 +447,59 @@ export function pathOutlineD(
   return vectorShapeOutlineD(node, nodeId);
 }
 
+type PathFillHitNode = Pick<
+  EditorNode,
+  | "type"
+  | "pathClosed"
+  | "fillEnabled"
+  | "fillType"
+  | "fill"
+  | "fillGradient"
+  | "flattenedPathData"
+  | "pathPoints"
+  | "width"
+  | "height"
+  | "cornerRadius"
+  | "cornerRadii"
+  | "polygonSides"
+  | "starPoints"
+  | "starInnerRadius"
+  | "starOuterCornerRadius"
+  | "starInnerCornerRadius"
+>;
+
+/** Whether pointer hits should include the filled interior (not just stroke). */
+export function pathNodeUsesFillHit(
+  node: Pick<
+    EditorNode,
+    "type" | "pathClosed" | "fillEnabled" | "fillType" | "fill" | "fillGradient"
+  >,
+): boolean {
+  if (node.type === "polygon") return true;
+  if (node.pathClosed) return true;
+  if (node.fillEnabled === false) return false;
+  if (node.fillType === "gradient" || node.fillGradient) return true;
+  const fill = node.fill;
+  return Boolean(fill && fill !== "none" && fill !== "transparent");
+}
+
+/** SVG hit-test path — closes open filled paths the same way SVG fill does. */
+export function vectorShapeHitOutlineD(node: PathFillHitNode, nodeId?: string): string {
+  if (!pathNodeUsesFillHit(node)) {
+    return vectorShapeOutlineD(node, nodeId);
+  }
+  if (node.type === "polygon" || node.pathClosed) {
+    return vectorShapeOutlineD(node, nodeId);
+  }
+  const baked = node.flattenedPathData?.trim();
+  if (baked) return baked;
+  const d = vectorShapeOutlineD(node, nodeId).trim();
+  if (d && (node.pathPoints?.length ?? 0) >= 2 && !/[zZ]\s*$/.test(d)) {
+    return `${d} Z`;
+  }
+  return d;
+}
+
 /** Keep four rectangle anchors; corner radii are stored on the node. */
 export function pathPointsFromCornerRadii(
   node: Pick<EditorNode, "width" | "height" | "pathPoints">,
@@ -279,22 +509,117 @@ export function pathPointsFromCornerRadii(
 }
 
 /** Collapse legacy rounded-rect polygons to four corner anchors. */
-/** Style patch when corner radii change on a rounded-rect path. */
-export function cornerRadiiStylePatch(
-  node: Pick<EditorNode, "width" | "height" | "pathPoints">,
-  radii: CornerRadii,
+function cornerRadiiStyleFromClamped(
+  clamped: number[],
 ): {
   cornerRadius?: number;
-  cornerRadii?: CornerRadii;
-  pathPoints: PathPoint[];
+  cornerRadii?: number[];
 } {
-  const allSame = radii[0] === radii[1] && radii[1] === radii[2] && radii[2] === radii[3];
-  return {
-    ...(allSame
-      ? { cornerRadius: radii[0], cornerRadii: undefined }
-      : { cornerRadius: undefined, cornerRadii: radii }),
-    pathPoints: pathPointsFromCornerRadii(node, radii),
-  };
+  const allSame = clamped.length > 0 && clamped.every((r) => r === clamped[0]);
+  return allSame
+    ? { cornerRadius: clamped[0], cornerRadii: undefined }
+    : { cornerRadius: undefined, cornerRadii: clamped };
+}
+
+/** Style patch when corner radii change on a vector path or rounded rect. */
+export function cornerRadiiStylePatch(
+  node: Pick<
+    EditorNode,
+    | "type"
+    | "width"
+    | "height"
+    | "pathPoints"
+    | "pathClosed"
+    | "polygonSides"
+    | "starPoints"
+    | "starInnerRadius"
+    | "cornerRadius"
+    | "cornerRadii"
+    | "starOuterCornerRadius"
+    | "starInnerCornerRadius"
+  >,
+  radii: readonly number[],
+): {
+  cornerRadius?: number;
+  cornerRadii?: number[];
+  pathPoints?: PathPoint[];
+  starOuterCornerRadius?: number;
+  starInnerCornerRadius?: number;
+  flattenedPathData?: undefined;
+} {
+  if (isPolygonNode(node)) {
+    const sides = clampPolygonSides(node.polygonSides ?? DEFAULT_POLYGON_SIDES);
+    const radiiInput = Array.from({ length: sides }, (_, i) => Math.max(0, radii[i] ?? 0));
+    const clamped = clampPolygonVertexCornerRadii(sides, node.width, node.height, radiiInput);
+    const style = cornerRadiiStyleFromClamped(clamped);
+    if (node.type === "path") {
+      return {
+        ...style,
+        pathPoints: polygonPathPoints(sides, node.width, node.height),
+        flattenedPathData: undefined,
+      };
+    }
+    return style;
+  }
+
+  if (isStarNode(node)) {
+    const pointCount = clampStarPointCount(node.starPoints ?? DEFAULT_STAR_POINTS);
+    const ratio = clampStarRatio(node.starInnerRadius ?? DEFAULT_STAR_INNER_RATIO);
+    const total = pointCount * 2;
+    const radiiInput = Array.from({ length: total }, (_, i) => Math.max(0, radii[i] ?? 0));
+    const clamped = clampStarVertexCornerRadii(
+      pointCount,
+      ratio,
+      node.width,
+      node.height,
+      radiiInput,
+    );
+    const style = cornerRadiiStyleFromClamped(clamped);
+    if (style.cornerRadius != null) {
+      return {
+        ...style,
+        starOuterCornerRadius: style.cornerRadius,
+        starInnerCornerRadius: style.cornerRadius,
+        pathPoints: starPathPoints(pointCount, ratio, node.width, node.height),
+        flattenedPathData: undefined,
+      };
+    }
+    return {
+      ...style,
+      starOuterCornerRadius: undefined,
+      starInnerCornerRadius: undefined,
+      pathPoints: starPathPoints(pointCount, ratio, node.width, node.height),
+      flattenedPathData: undefined,
+    };
+  }
+
+  if (node.type === "rectangle" || node.type === "frame") {
+    const radiiInput = Array.from({ length: 4 }, (_, i) => Math.max(0, radii[i] ?? 0));
+    const clamped = [...clampCornerRadii(radiiInput as CornerRadii, node.width, node.height)];
+    return cornerRadiiStyleFromClamped(clamped);
+  }
+
+  const ptCount = isRoundedRectPath(node) ? 4 : (node.pathPoints?.length ?? 0);
+  const radiiInput = Array.from({ length: ptCount }, (_, i) => Math.max(0, radii[i] ?? 0));
+  const clamped: number[] = isRoundedRectPath(node)
+    ? [...clampCornerRadii(radiiInput as CornerRadii, node.width, node.height)]
+    : clampPathCornerRadii(node.pathPoints ?? [], radiiInput);
+  const style = cornerRadiiStyleFromClamped(clamped);
+  if (isRoundedRectPath(node)) {
+    return {
+      ...style,
+      pathPoints: pathPointsFromCornerRadii(node, clamped as CornerRadii),
+    };
+  }
+  if (isCornerRoundablePath(node)) {
+    const existing = node.pathPoints ?? [];
+    const pathPoints = existing.map((p, i) => ({
+      ...p,
+      cornerRadius: clamped[i] ?? 0,
+    }));
+    return { ...style, pathPoints, flattenedPathData: undefined };
+  }
+  return style;
 }
 
 /** Distance along the corner bisector used for radius (Figma-style). */
@@ -331,6 +656,52 @@ export function radiusFromCornerDrag(
   return Math.max(0, cornerRadiusMetricAtPoint(cornerIndex, localX, localY, width, height));
 }
 
+/**
+ * Inward drag delta for a corner (supports horizontal, vertical, and diagonal drags).
+ * Each corner's "inward" axes point toward the shape center.
+ */
+export function cornerRadiusDragDelta(
+  cornerIndex: 0 | 1 | 2 | 3,
+  grabX: number,
+  grabY: number,
+  moveX: number,
+  moveY: number,
+): number {
+  const dx = moveX - grabX;
+  const dy = moveY - grabY;
+  let signX: 1 | -1;
+  let signY: 1 | -1;
+  switch (cornerIndex) {
+    case 0:
+      signX = 1;
+      signY = 1;
+      break;
+    case 1:
+      signX = -1;
+      signY = 1;
+      break;
+    case 2:
+      signX = -1;
+      signY = -1;
+      break;
+    case 3:
+      signX = 1;
+      signY = -1;
+      break;
+    default:
+      return 0;
+  }
+  const ix = dx * signX;
+  const iy = dy * signY;
+  if (ix >= 0 && iy >= 0) return Math.max(ix, iy);
+  if (ix <= 0 && iy <= 0) return Math.min(ix, iy);
+  if (ix > 0) return ix;
+  if (iy > 0) return iy;
+  if (ix < 0) return ix;
+  if (iy < 0) return iy;
+  return 0;
+}
+
 /** Continuous radius drag from grab point (avoids jump on pointer down). */
 export function radiusFromRelativeCornerDrag(
   cornerIndex: 0 | 1 | 2 | 3,
@@ -343,9 +714,10 @@ export function radiusFromRelativeCornerDrag(
   height: number,
   maxRadius: number,
 ): number {
-  const grabMetric = cornerRadiusMetricAtPoint(cornerIndex, grabX, grabY, width, height);
-  const moveMetric = cornerRadiusMetricAtPoint(cornerIndex, moveX, moveY, width, height);
-  const next = grabRadius + (moveMetric - grabMetric);
+  void width;
+  void height;
+  const delta = cornerRadiusDragDelta(cornerIndex, grabX, grabY, moveX, moveY);
+  const next = grabRadius + delta;
   return Math.min(maxRadius, Math.max(0, next));
 }
 

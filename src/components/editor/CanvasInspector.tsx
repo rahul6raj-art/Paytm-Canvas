@@ -3,6 +3,7 @@
 import { Grid3X3, Ruler } from "lucide-react";
 import { ColorInput } from "./ColorInput";
 import { PropertiesSection } from "./PropertiesSection";
+import { StrokeWidthToolbar } from "./StrokeWidthToolbar";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { CANVAS_WORKSPACE_DARK, DEFAULT_CANVAS_BACKGROUND } from "@/lib/canvasVisual";
 import { cn } from "@/lib/utils";
@@ -25,9 +26,15 @@ export function CanvasInspector() {
   const showRulers = useEditorStore((s) => s.showRulers);
   const toggleGrid = useEditorStore((s) => s.toggleGrid);
   const toggleRulers = useEditorStore((s) => s.toggleRulers);
+  const tool = useEditorStore((s) => s.tool);
 
   return (
-    <div className="py-1">
+    <div>
+      {tool === "pencil" ? (
+        <PropertiesSection title="Pencil" defaultOpen>
+          <StrokeWidthToolbar />
+        </PropertiesSection>
+      ) : null}
       <PropertiesSection title="Canvas">
         <ColorInput
           label="Background"
@@ -56,7 +63,7 @@ export function CanvasInspector() {
           type="button"
           onClick={() => toggleRulers()}
           className={cn(
-            "mt-1 flex h-7 w-full items-center justify-center gap-1.5 rounded border text-[11px] font-medium transition-colors",
+            "mt-1 flex h-7 w-full items-center justify-center gap-1.5 rounded border text-ui font-medium transition-colors",
             showRulers
               ? "border-[rgba(13,153,255,0.45)] bg-[rgba(13,153,255,0.12)] text-[#c4e8ff]"
               : "border-app-border bg-app-field text-app-muted hover:bg-app-hover",
@@ -69,7 +76,7 @@ export function CanvasInspector() {
           type="button"
           onClick={() => toggleGrid()}
           className={cn(
-            "mt-1 flex h-7 w-full items-center justify-center gap-1.5 rounded border text-[11px] font-medium transition-colors",
+            "mt-1 flex h-7 w-full items-center justify-center gap-1.5 rounded border text-ui font-medium transition-colors",
             showGrid
               ? "border-[rgba(13,153,255,0.45)] bg-[rgba(13,153,255,0.12)] text-[#c4e8ff]"
               : "border-app-border bg-app-field text-app-muted hover:bg-app-hover",
@@ -79,9 +86,6 @@ export function CanvasInspector() {
           {showGrid ? "Layout grid on" : "Layout grid off"}
         </button>
       </PropertiesSection>
-      <p className="px-2 pb-3 text-[11px] leading-relaxed text-app-subtle">
-        Background applies to this page&apos;s workspace. Switch pages to set a different color per page.
-      </p>
     </div>
   );
 }

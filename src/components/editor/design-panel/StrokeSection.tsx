@@ -2,53 +2,71 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Eye, EyeOff, Minus, Plus, SlidersHorizontal } from "lucide-react";
+import { SlidersHorizontal } from "lucide-react";
 import { PropertiesSection } from "../PropertiesSection";
-import { OpacityPercentInput } from "../PropertyInput";
-import { normalizeHex, parseHexInputLive } from "@/lib/color";
-import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
-import { useEditorStore } from "@/stores/useEditorStore";
+import { ColorInput } from "../ColorInput";
 import {
-  anchoredMenuStyle,
-  useAnchoredDropdownPosition,
-  useDismissAnchoredDropdown,
-} from "../useAnchoredDropdown";
+  inspectorIconClass,
+  inspectorIconStroke,
+} from "@/lib/inspectorIconStyles";
+import { cn } from "@/lib/utils";
+import { InspectorSectionAddButton, InspectorSegmented } from "./InspectorPrimitives";
+import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
+import { useInspectorValueScrub } from "@/lib/useInspectorValueScrub";
+import {
+  adjacentPanelDialogStyle,
+  useAdjacentPanelDialogPosition,
+} from "../useAdjacentPanelDialogPosition";
+import { useDismissAnchoredDropdown } from "../useAnchoredDropdown";
 import { StrokeAdvancedPanel } from "./StrokeAdvancedPanel";
 import { StrokeEndpointPicker } from "./StrokeEndpointPicker";
-import { cn } from "@/lib/utils";
-import type { StrokeEndpoint } from "@/lib/strokeEndpoints";
+import { appFieldClassCompact } from "@/lib/appFieldStyles";
 import {
   resolveStrokeStyle,
   type StrokeLinecap,
   type StrokeLinejoin,
   type StrokeStyleKind,
 } from "@/lib/stroke";
-import type { StrokeSidesCustom, StrokeSidesMode } from "@/lib/strokeAlign";
-import { StrokeSidesPicker } from "./StrokeSidesPicker";
-import type { StrokePosition } from "@/stores/useEditorStore";
-import { InspectorSegmented } from "./InspectorPrimitives";
-import { GradientFillControls } from "../GradientFillControls";
+import type { StrokeSidesCustom, StrokeSidesCustomColors, StrokeSidesMode } from "@/lib/strokeAlign";
 import {
+  resolveStrokeSideWidths,
+  resolveStrokeSides,
+  strokeSideColorsAreMixed,
+  strokeSideWeightsAreMixed,
+} from "@/lib/strokeAlign";
+import { StrokeSidesPicker } from "./StrokeSidesPicker";
+import { appFieldRadius } from "@/lib/appFieldStyles";
+import type { StrokePosition } from "@/stores/useEditorStore";
+import { useEditorStore } from "@/stores/useEditorStore";
+import {
+  defaultFillGradient,
   effectiveStrokeType,
-  normalizeStrokeGradient,
-  type FillGradient,
+  normalizeFillGradient,
 } from "@/lib/fillGradient";
-import { strokePaintCss } from "@/lib/fillGradient";
+import type { FillType } from "@/lib/gradient/types";
+import {
+  FILL_TYPE_OPTIONS,
+  GradientFillInspectorRow,
+  MediaFillInspectorRow,
+} from "./FillSection";
+import { GradientFillEditorDialog } from "../gradient/GradientFillEditorDialog";
 
-const field =
-  "h-6 min-h-[24px] rounded border border-app-border bg-app-field px-1.5 text-[12px] text-app-field-fg focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40";
+const field = appFieldClassCompact;
 
 export type StrokeStylePatch = {
   strokeWidth?: number;
   strokeColor?: string;
-  strokeType?: "solid" | "gradient";
-  strokeGradient?: FillGradient;
+  strokeType?: FillType;
+  strokeGradient?: import("@/lib/fillGradient").FillGradient;
+  strokeImageAssetId?: string;
+  strokeVideoAssetId?: string;
   strokeOpacity?: number;
   strokeEnabled?: boolean;
   strokeStyle?: StrokeStyleKind;
   strokePosition?: StrokePosition;
   strokeSides?: StrokeSidesMode;
   strokeSidesCustom?: StrokeSidesCustom;
+  strokeSidesCustomColors?: StrokeSidesCustomColors;
   strokeDashLength?: number;
   strokeDashGap?: number;
   strokeLinecap?: StrokeLinecap;
@@ -61,6 +79,16 @@ export type StrokeStylePatch = {
   arrowHead?: boolean;
 };
 
+function mediaStrokeAssetField(
+  kind: "image" | "video",
+  assetId: string,
+): StrokeStylePatch {
+  if (kind === "video") {
+    return { strokeType: "video", strokeVideoAssetId: assetId, strokeEnabled: true };
+  }
+  return { strokeType: "image", strokeImageAssetId: assetId, strokeEnabled: true };
+}
+
 const POSITION_OPTIONS: { value: StrokePosition; label: string }[] = [
   { value: "inside", label: "Inside" },
   { value: "center", label: "Center" },
@@ -68,18 +96,22 @@ const POSITION_OPTIONS: { value: StrokePosition; label: string }[] = [
 ];
 
 export function StrokeSection({
+  nodeId,
   instanceKey,
   locked,
   strokeWidth,
   strokeColor,
-  strokeType = "solid",
+  strokeType,
   strokeGradient,
+  strokeImageAssetId,
+  strokeVideoAssetId,
   strokeOpacity = 1,
   strokeEnabled = true,
   strokeStyle,
   strokePosition,
   strokeSides = "all",
   strokeSidesCustom,
+  strokeSidesCustomColors,
   showSides = false,
   strokeDashLength,
   strokeDashGap,
@@ -92,20 +124,23 @@ export function StrokeSection({
   strokeEndPoint = "none",
   showEndpoints = false,
   onStyle,
-  onApplyStrokeGradient,
 }: {
+  nodeId: string;
   instanceKey: string;
   locked: boolean;
   strokeWidth: number;
   strokeColor: string;
-  strokeType?: "solid" | "gradient";
-  strokeGradient?: FillGradient;
+  strokeType?: FillType;
+  strokeGradient?: import("@/lib/fillGradient").FillGradient;
+  strokeImageAssetId?: string;
+  strokeVideoAssetId?: string;
   strokeOpacity?: number;
   strokeEnabled?: boolean;
   strokeStyle: StrokeStyleKind;
   strokePosition: StrokePosition;
   strokeSides?: StrokeSidesMode;
   strokeSidesCustom?: StrokeSidesCustom;
+  strokeSidesCustomColors?: StrokeSidesCustomColors;
   /** Per-side stroke control (Figma-style) for rectangles and frames. */
   showSides?: boolean;
   strokeDashLength?: number;
@@ -118,73 +153,96 @@ export function StrokeSection({
   strokeStartPoint?: StrokeEndpoint;
   strokeEndPoint?: StrokeEndpoint;
   showEndpoints?: boolean;
-  onStyle: (patch: StrokeStylePatch) => void;
-  onApplyStrokeGradient?: (g: FillGradient, opts?: { skipHistory?: boolean }) => void;
+  onStyle: (patch: StrokeStylePatch, opts?: { skipHistory?: boolean }) => void;
 }) {
-  const hasStroke = strokeWidth > 0;
-  const safeHex = normalizeHex(strokeColor) ?? "#000000";
-  const resolvedStrokeType = effectiveStrokeType({
-    strokeType,
-    strokeGradient,
-    strokeColor,
-  });
-  const normalizedStrokeGradient = normalizeStrokeGradient(strokeGradient, strokeColor);
-  const [hexDraft, setHexDraft] = useState(safeHex.replace("#", "").toUpperCase());
-  const [hexFocused, setHexFocused] = useState(false);
-  const [weightDraft, setWeightDraft] = useState(String(strokeWidth || 1));
+  const [strokeEditorActive, setStrokeEditorActive] = useState(strokeWidth > 0);
+  const [weightDraft, setWeightDraft] = useState(() => String(strokeWidth ?? 0));
+  const [weightFocused, setWeightFocused] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [gradientEditorOpen, setGradientEditorOpen] = useState(false);
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const lastAppliedHexRef = useRef(safeHex);
-  const dirtyHexLiveRef = useRef(false);
   const advancedRef = useRef<HTMLButtonElement>(null);
   const advancedMenuRef = useRef<HTMLDivElement>(null);
-  const advancedPos = useAnchoredDropdownPosition(advancedRef, advancedOpen, 4, {
-    viewportClamp: true,
+  const gradientAnchorRef = useRef<HTMLButtonElement>(null);
+  const mediaAnchorRef = useRef<HTMLButtonElement>(null);
+  const advancedPos = useAdjacentPanelDialogPosition(advancedRef, advancedOpen, {
     width: 228,
+    maxHeight: 360,
   });
   useDismissAnchoredDropdown(advancedOpen, () => setAdvancedOpen(false), advancedRef, advancedMenuRef);
+
+  const assets = useEditorStore((s) => s.assets);
+  const strokeKind = effectiveStrokeType({
+    strokeType,
+    strokeGradient,
+    strokeImageAssetId,
+    strokeVideoAssetId,
+  });
+  const strokeTypeUi: FillType = strokeKind;
+  const mediaStrokeKind: "image" | "video" = strokeKind === "video" ? "video" : "image";
+  const mediaStrokeAssetId =
+    strokeKind === "video" ? strokeVideoAssetId : strokeImageAssetId;
+  const gradient = normalizeFillGradient(strokeGradient, strokeColor || "#000000");
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
   useEffect(() => {
-    if (!hexFocused) {
-      setHexDraft(safeHex.replace("#", "").toUpperCase());
-      lastAppliedHexRef.current = safeHex;
-      dirtyHexLiveRef.current = false;
-    }
-    setWeightDraft(String(strokeWidth || 1));
-  }, [safeHex, strokeWidth, instanceKey, hexFocused]);
+    setStrokeEditorActive(strokeWidth > 0);
+    setGradientEditorOpen(false);
+    setMediaPickerOpen(false);
+  }, [instanceKey]);
 
-  const applyStrokeHex = (hex: string, opts?: { skipHistory?: boolean }) => {
-    if (hex === lastAppliedHexRef.current) return;
-    onStyle({ strokeColor: hex });
-    lastAppliedHexRef.current = hex;
-    if (opts?.skipHistory) dirtyHexLiveRef.current = true;
-  };
+  useEffect(() => {
+    if (strokeWidth > 0) setStrokeEditorActive(true);
+  }, [strokeWidth]);
 
-  const handleHexChange = (raw: string) => {
-    const cleaned = raw.replace(/#/g, "").replace(/[^0-9a-fA-F]/g, "").slice(0, 6);
-    setHexDraft(cleaned.toUpperCase());
-    const n = parseHexInputLive(cleaned);
-    if (n) applyStrokeHex(n, { skipHistory: true });
-  };
+  useEffect(() => {
+    if (strokeKind !== "gradient") setGradientEditorOpen(false);
+  }, [strokeKind]);
 
-  const finishHexEdit = () => {
-    setHexFocused(false);
-    const n = parseHexInputLive(hexDraft) ?? normalizeHex(`#${hexDraft}`);
-    if (n) {
-      applyStrokeHex(n, { skipHistory: true });
-      setHexDraft(n.replace("#", "").toUpperCase());
-    } else {
-      setHexDraft(safeHex.replace("#", "").toUpperCase());
-      lastAppliedHexRef.current = safeHex;
+  useEffect(() => {
+    if (strokeKind === "solid" || strokeKind === "gradient") setMediaPickerOpen(false);
+  }, [strokeKind, instanceKey]);
+
+  const hasStroke = strokeEditorActive;
+
+  const weightsMixed = strokeSideWeightsAreMixed({
+    strokeWidth,
+    strokeSides,
+    strokeSidesCustom,
+  });
+
+  const colorsMixed = strokeSideColorsAreMixed({
+    strokeWidth,
+    strokeSides,
+    strokeSidesCustom,
+    strokeColor,
+    strokeSidesCustomColors,
+  });
+
+  const commitStrokeColor = (hex: string, opts?: { skipHistory?: boolean }) => {
+    const patch: StrokeStylePatch = { strokeColor: hex, strokeType: "solid" };
+    if (strokeSides === "custom") {
+      const sides = resolveStrokeSides({
+        strokeWidth,
+        strokeSides,
+        strokeSidesCustom,
+      });
+      const widths = resolveStrokeSideWidths({
+        strokeWidth,
+        strokeSides,
+        strokeSidesCustom,
+      });
+      const customColors: StrokeSidesCustomColors = { ...(strokeSidesCustomColors ?? {}) };
+      for (const side of ["top", "right", "bottom", "left"] as const) {
+        if (sides[side] && widths[side] > 0) customColors[side] = hex;
+      }
+      patch.strokeSidesCustomColors = customColors;
     }
-    if (dirtyHexLiveRef.current) {
-      useEditorStore.getState().pushHistory();
-      dirtyHexLiveRef.current = false;
-    }
+    onStyle(patch, opts);
   };
 
   const disabled = locked || !strokeEnabled;
@@ -192,31 +250,133 @@ export function StrokeSection({
 
   const parseWeightDraft = () => {
     const n = parseFloat(weightDraft);
-    return Number.isFinite(n) ? n : strokeWidth || 1;
+    return Number.isFinite(n) ? n : (strokeWidth ?? 0);
   };
 
   const commitWeight = (n: number) => {
     const next = Math.min(256, Math.max(0, n));
-    onStyle({ strokeWidth: next });
+    const patch: StrokeStylePatch = { strokeWidth: next };
+    if (strokeSides === "custom") {
+      const sides = resolveStrokeSides({
+        strokeWidth: next,
+        strokeSides,
+        strokeSidesCustom,
+      });
+      const widths = resolveStrokeSideWidths({
+        strokeWidth: next,
+        strokeSides,
+        strokeSidesCustom,
+      });
+      const custom: StrokeSidesCustom = { ...(strokeSidesCustom ?? {}) };
+      for (const side of ["top", "right", "bottom", "left"] as const) {
+        if (sides[side] && widths[side] > 0) custom[side] = next;
+      }
+      patch.strokeSidesCustom = custom;
+    }
+    onStyle(patch);
     setWeightDraft(String(next));
   };
 
+  const weightScrub = useInspectorValueScrub({
+    disabled,
+    value: strokeWidth ?? 0,
+    min: 0,
+    max: 256,
+    onChange: commitWeight,
+  });
+  const { scrubbing: weightScrubbing, scrubActiveRef: weightScrubActiveRef, bindScrubInput: bindWeightScrub } = weightScrub;
+
+  const showMixedWeight =
+    weightsMixed && !weightFocused && !weightScrubbing && !weightScrubActiveRef.current;
+
+  useEffect(() => {
+    if (!weightFocused && !weightScrubbing && !weightScrubActiveRef.current && !weightsMixed) {
+      setWeightDraft(String(strokeWidth ?? 0));
+    }
+  }, [strokeWidth, instanceKey, weightFocused, weightScrubbing, weightScrubActiveRef, weightsMixed, strokeSides, strokeSidesCustom]);
+
+  const firstImageAsset = Object.values(assets).find((a) =>
+    a.mimeType.toLowerCase().startsWith("image/"),
+  );
+  const firstVideoAsset = Object.values(assets).find((a) =>
+    a.mimeType.toLowerCase().startsWith("video/"),
+  );
+
+  const setSolid = () => {
+    onStyle({
+      strokeType: "solid",
+      strokeColor: strokeColor || "#000000",
+      strokeGradient: undefined,
+      strokeEnabled: true,
+    });
+  };
+
+  const setGradient = () => {
+    const g = normalizeFillGradient(strokeGradient, strokeColor || "#000000");
+    onStyle({
+      strokeType: "gradient",
+      strokeGradient: g.stops.length >= 2 ? g : defaultFillGradient(strokeColor || "#000000"),
+      strokeEnabled: true,
+    });
+    setGradientEditorOpen(true);
+  };
+
+  const setImageStroke = () => {
+    const assetId = strokeImageAssetId ?? firstImageAsset?.id;
+    onStyle({
+      strokeType: "image",
+      strokeImageAssetId: assetId,
+      strokeEnabled: true,
+    });
+    if (!assetId) setMediaPickerOpen(true);
+  };
+
+  const setVideoStroke = () => {
+    const assetId = strokeVideoAssetId ?? firstVideoAsset?.id;
+    onStyle({
+      strokeType: "video",
+      strokeVideoAssetId: assetId,
+      strokeEnabled: true,
+    });
+    if (!assetId) setMediaPickerOpen(true);
+  };
+
+  const onStrokeTypeChange = (v: FillType) => {
+    if (v === "solid") setSolid();
+    else if (v === "gradient") setGradient();
+    else if (v === "image") setImageStroke();
+    else if (v === "video") setVideoStroke();
+  };
+
+  const gradientKindLabel =
+    gradient.kind.charAt(0).toUpperCase() + gradient.kind.slice(1);
+
   const addStroke = () => {
+    setStrokeEditorActive(true);
     onStyle({
       strokeWidth: 1,
       strokeColor: strokeColor || "#000000",
+      strokeType: strokeType ?? "solid",
       strokeStyle: strokeStyle || "solid",
       strokeEnabled: true,
       strokeOpacity: strokeOpacity ?? 1,
     });
   };
 
+  const removeStroke = () => {
+    setStrokeEditorActive(false);
+    onStyle({ strokeWidth: 0, strokeEnabled: false });
+  };
+
   const advancedMenu =
     advancedOpen && mounted && hasStroke ? (
       <div
         ref={advancedMenuRef}
-        className="fixed z-[120] overflow-hidden rounded-md border border-app-border bg-app-panel shadow-xl"
-        style={anchoredMenuStyle(advancedPos)}
+        role="dialog"
+        aria-label="Stroke settings"
+        aria-modal="false"
+        className="fixed z-[120] overflow-y-auto overscroll-contain rounded-md border border-app-border bg-app-panel shadow-xl"
+        style={adjacentPanelDialogStyle(advancedPos)}
       >
         <StrokeAdvancedPanel
           instanceKey={instanceKey}
@@ -236,146 +396,118 @@ export function StrokeSection({
     ) : null;
 
   return (
-    <PropertiesSection title="Stroke" defaultOpen>
-      {!hasStroke ? (
-        <button
-          type="button"
-          disabled={locked}
-          onClick={addStroke}
-          className="flex h-7 w-full items-center justify-center gap-1 rounded border border-dashed border-app-border text-[11px] font-medium text-app-muted hover:border-app-muted hover:bg-app-hover hover:text-app-fg disabled:opacity-40"
-        >
-          <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-          Add stroke
-        </button>
-      ) : (
+    <PropertiesSection
+      title="Stroke"
+      headerActions={
+        !hasStroke ? (
+          <InspectorSectionAddButton
+            title="Add stroke"
+            disabled={locked}
+            onClick={addStroke}
+          />
+        ) : null
+      }
+    >
+      {hasStroke ? (
         <div className="space-y-2">
           <InspectorSegmented
-            options={[
-              { value: "solid" as const, label: "Solid" },
-              { value: "gradient" as const, label: "Gradient" },
-            ]}
-            value={resolvedStrokeType}
-            disabled={disabled}
-            onChange={(t) => {
-              if (t === "gradient") {
-                onStyle({
-                  strokeType: "gradient",
-                  strokeGradient: normalizedStrokeGradient,
-                });
-              } else {
-                onStyle({ strokeType: "solid" });
-              }
-            }}
+            options={FILL_TYPE_OPTIONS}
+            value={strokeTypeUi}
+            disabled={locked}
+            scrollable
+            onChange={onStrokeTypeChange}
           />
 
-          {resolvedStrokeType === "solid" ? (
-          <div className="flex items-center gap-1">
-            <input
-              type="color"
-              value={(hexFocused ? parseHexInputLive(hexDraft) : null) ?? safeHex}
-              disabled={disabled}
-              onChange={(e) => {
-                const v = e.target.value.toLowerCase();
-                applyStrokeHex(v);
-                setHexDraft(v.replace("#", "").toUpperCase());
-              }}
-              className="h-6 w-6 shrink-0 cursor-pointer rounded border border-app-border bg-transparent p-0 disabled:opacity-40"
-              aria-label="Stroke color"
-            />
-            <input
-              type="text"
-              disabled={disabled}
-              spellCheck={false}
-              autoComplete="off"
-              maxLength={6}
-              title="6-digit hex — stroke updates when complete"
-              className={cn(field, "min-w-0 flex-1 font-mono uppercase")}
-              value={hexDraft}
-              onFocus={() => setHexFocused(true)}
-              onChange={(e) => handleHexChange(e.target.value)}
-              onBlur={finishHexEdit}
-              onKeyDown={(e) => {
-                handlePanelFieldKeyDown(e, {
-                  onEnter: () => {
-                    finishHexEdit();
-                    e.currentTarget.blur();
-                  },
-                  onEscape: () => {
-                    dirtyHexLiveRef.current = false;
-                    setHexDraft(safeHex.replace("#", "").toUpperCase());
-                    lastAppliedHexRef.current = safeHex;
-                    setHexFocused(false);
-                    e.currentTarget.blur();
-                  },
-                });
-              }}
-            />
+          <div className="mt-2">
+            {strokeKind === "solid" ? (
+              <ColorInput
+                variant="inspectorRow"
+                hex={strokeColor}
+                opacity={strokeOpacity}
+                visible={strokeEnabled}
+                pickerTitle="Stroke color"
+                instanceKey={`${instanceKey}-stroke-color`}
+                disabled={locked}
+                hexMixed={colorsMixed}
+                removeLabel="Remove stroke"
+                onToggleVisible={() => onStyle({ strokeEnabled: !strokeEnabled })}
+                onRemove={removeStroke}
+                onCommitHex={commitStrokeColor}
+                onCommitOpacity={(op) => onStyle({ strokeOpacity: op })}
+              />
+            ) : strokeKind === "gradient" ? (
+              <>
+                <GradientFillInspectorRow
+                  gradient={gradient}
+                  fillOpacity={strokeOpacity}
+                  kindLabel={gradientKindLabel}
+                  visible={strokeEnabled}
+                  disabled={locked}
+                  locked={locked}
+                  editorOpen={gradientEditorOpen}
+                  instanceKey={instanceKey}
+                  anchorRef={gradientAnchorRef}
+                  onOpenEditor={() => setGradientEditorOpen((open) => !open)}
+                  onToggleVisible={() => onStyle({ strokeEnabled: !strokeEnabled })}
+                  onRemove={removeStroke}
+                  onCommitOpacity={(op) => onStyle({ strokeOpacity: op })}
+                />
+                <GradientFillEditorDialog
+                  open={gradientEditorOpen}
+                  onClose={() => setGradientEditorOpen(false)}
+                  anchorRef={gradientAnchorRef}
+                  nodeId={nodeId}
+                  gradient={gradient}
+                  fillOpacity={strokeOpacity}
+                  disabled={locked || !strokeEnabled}
+                  remeasureKey={instanceKey}
+                  onChange={(g, opts) => {
+                    onStyle(
+                      {
+                        strokeType: "gradient",
+                        strokeGradient: g,
+                        strokeEnabled: true,
+                      },
+                      opts,
+                    );
+                  }}
+                />
+              </>
+            ) : (
+              <MediaFillInspectorRow
+                kind={mediaStrokeKind}
+                assetId={mediaStrokeAssetId}
+                assets={assets}
+                fillOpacity={strokeOpacity}
+                visible={strokeEnabled}
+                locked={locked}
+                instanceKey={instanceKey}
+                pickerOpen={mediaPickerOpen}
+                anchorRef={mediaAnchorRef}
+                onTogglePicker={() => setMediaPickerOpen((o) => !o)}
+                onClosePicker={() => setMediaPickerOpen(false)}
+                onToggleVisible={() => onStyle({ strokeEnabled: !strokeEnabled })}
+                onRemove={removeStroke}
+                onCommitOpacity={(op) => onStyle({ strokeOpacity: op })}
+                onSelectAsset={(assetId) => {
+                  onStyle(mediaStrokeAssetField(mediaStrokeKind, assetId));
+                  setMediaPickerOpen(false);
+                }}
+                previewNode={{
+                  fillType: mediaStrokeKind,
+                  fillImageAssetId: mediaStrokeKind === "image" ? mediaStrokeAssetId : undefined,
+                  fillVideoAssetId: mediaStrokeKind === "video" ? mediaStrokeAssetId : undefined,
+                  fillOpacity: strokeOpacity,
+                  fillEnabled: true,
+                }}
+              />
+            )}
           </div>
-          ) : (
-            <div
-              className="h-6 w-full shrink-0 rounded border border-app-border"
-              style={{
-                background: strokePaintCss({
-                  strokeType: "gradient",
-                  strokeGradient: normalizedStrokeGradient,
-                  strokeColor: safeHex,
-                  strokeEnabled,
-                  strokeOpacity,
-                }),
-              }}
-              aria-hidden
-            />
-          )}
-
-          <div className="flex items-center justify-end gap-1">
-            <OpacityPercentInput
-              value={strokeOpacity}
-              disabled={disabled}
-              instanceKey={`${instanceKey}-stroke-op`}
-              className={cn(field, "w-12 shrink-0 flex-none")}
-              onCommit={(op) => onStyle({ strokeOpacity: op })}
-            />
-            <button
-              type="button"
-              disabled={locked}
-              title={strokeEnabled ? "Hide stroke" : "Show stroke"}
-              onClick={() => onStyle({ strokeEnabled: !strokeEnabled })}
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-muted hover:bg-app-hover disabled:opacity-40"
-            >
-              {strokeEnabled ? (
-                <Eye className="h-3.5 w-3.5" strokeWidth={1.75} />
-              ) : (
-                <EyeOff className="h-3.5 w-3.5" strokeWidth={1.75} />
-              )}
-            </button>
-            <button
-              type="button"
-              disabled={locked}
-              onClick={() => onStyle({ strokeWidth: 0, strokeEnabled: false })}
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-muted hover:bg-app-hover hover:text-rose-300 disabled:opacity-40"
-              aria-label="Remove stroke"
-            >
-              <Minus className="h-3.5 w-3.5" strokeWidth={2} />
-            </button>
-          </div>
-
-          {resolvedStrokeType === "gradient" && onApplyStrokeGradient ? (
-            <GradientFillControls
-              gradient={normalizedStrokeGradient}
-              fallbackFill={strokeColor}
-              fillEnabled={strokeEnabled}
-              fillOpacity={strokeOpacity}
-              paintMode="stroke"
-              locked={locked}
-              instanceKey={`${instanceKey}-stroke-grad`}
-              onChange={onApplyStrokeGradient}
-            />
-          ) : null}
 
           {/* Position + sides + weight + advanced */}
           <div className="flex items-end gap-1">
             <div className="min-w-0 flex-1">
-              <div className="mb-0.5 text-[11px] font-medium text-app-subtle">Position</div>
+              <div className="inspector-field-label">Position</div>
               <select
                 disabled={disabled}
                 className={cn(field, "w-full capitalize")}
@@ -391,21 +523,30 @@ export function StrokeSection({
             </div>
             {showSides ? (
               <div className="shrink-0">
-                <div className="mb-0.5 text-[11px] font-medium text-app-subtle">Sides</div>
+                <div className="inspector-field-label">Sides</div>
                 <StrokeSidesPicker
                   disabled={disabled}
                   strokeSides={strokeSides}
                   strokeSidesCustom={strokeSidesCustom}
+                  strokeSidesCustomColors={strokeSidesCustomColors}
+                  strokeColor={strokeColor}
+                  strokeOpacity={strokeOpacity}
                   strokeWidth={strokeWidth}
+                  instanceKey={instanceKey}
                   onChange={onStyle}
                 />
               </div>
             ) : null}
             <div className="min-w-0 flex-1">
-              <div className="mb-0.5 text-[11px] font-medium text-app-subtle">Weight</div>
-              <div className="flex h-6 items-center overflow-hidden rounded border border-app-border bg-app-field focus-within:border-accent focus-within:ring-1 focus-within:ring-accent">
-                <span className="flex h-full w-6 shrink-0 items-center justify-center border-r border-app-border text-app-muted">
-                  <svg width="12" height="8" viewBox="0 0 12 8" aria-hidden>
+              <div className="inspector-field-label">Weight</div>
+              <div
+                className={cn(
+                  "flex h-6 items-center overflow-hidden border border-app-border bg-app-field focus-within:border-accent focus-within:ring-1 focus-within:ring-accent",
+                  appFieldRadius,
+                )}
+              >
+                <span className="flex h-full w-8 shrink-0 items-center justify-center border-r border-app-border text-app-muted">
+                  <svg width="14" height="10" viewBox="0 0 12 8" aria-hidden className="inspector-icon" shapeRendering="geometricPrecision">
                     <line x1={1} y1={4} x2={11} y2={4} stroke="currentColor" strokeWidth={2} />
                   </svg>
                 </span>
@@ -413,13 +554,27 @@ export function StrokeSection({
                   type="text"
                   inputMode="decimal"
                   disabled={disabled}
-                  className="h-full min-w-0 flex-1 border-0 bg-transparent px-1.5 text-[12px] tabular-nums text-app-field-fg focus-visible:outline-none"
-                  value={weightDraft}
+                  aria-label="Stroke weight"
+                  {...bindWeightScrub(
+                    cn(
+                      "h-full min-w-0 flex-1 border-0 bg-transparent px-1.5 text-ui tabular-nums text-app-field-fg focus-visible:outline-none disabled:cursor-not-allowed",
+                      showMixedWeight && "text-app-muted",
+                    ),
+                    weightFocused,
+                  )}
+                  value={showMixedWeight ? "Mixed" : weightDraft}
+                  onFocus={() => {
+                    setWeightFocused(true);
+                    if (weightsMixed) setWeightDraft(String(strokeWidth ?? 0));
+                  }}
                   onChange={(e) => setWeightDraft(e.target.value)}
                   onBlur={() => {
+                    if (weightScrubActiveRef.current) return;
+                    setWeightFocused(false);
+                    if (showMixedWeight) return;
                     const n = parseFloat(weightDraft);
                     if (Number.isFinite(n)) commitWeight(n);
-                    else setWeightDraft(String(strokeWidth));
+                    else setWeightDraft(String(strokeWidth ?? 0));
                   }}
                   onKeyDown={(e) => {
                     handlePanelFieldKeyDown(e, {
@@ -444,7 +599,7 @@ export function StrokeSection({
                 advancedOpen && "border-accent bg-accent/10 text-accent",
               )}
             >
-              <SlidersHorizontal className="h-3.5 w-3.5" strokeWidth={1.75} />
+              <SlidersHorizontal className={inspectorIconClass} strokeWidth={inspectorIconStroke} />
             </button>
           </div>
 
@@ -470,7 +625,7 @@ export function StrokeSection({
             </div>
           ) : null}
         </div>
-      )}
+      ) : null}
       {mounted && advancedMenu ? createPortal(advancedMenu, document.body) : null}
     </PropertiesSection>
   );

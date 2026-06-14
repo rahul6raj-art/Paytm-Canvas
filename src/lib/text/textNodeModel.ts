@@ -41,8 +41,8 @@ export type TextNodeModel = {
 /** New point text hugs content horizontally (Figma default). */
 export const DEFAULT_TEXT_RESIZE_MODE: TextResizeMode = "auto-width";
 
-/** Minimum width for an empty text layer so the caret is easy to click. */
-export const EMPTY_TEXT_PLACEHOLDER_WIDTH = 40;
+/** Inner width reserved for the caret when point text has no content yet. */
+export const EMPTY_TEXT_CARET_INNER_WIDTH = 2;
 export const DEFAULT_TEXT_ALIGN: TextAlign = "left";
 export const MIN_TEXT_BOX = 8;
 
@@ -75,10 +75,10 @@ export function normalizeTextResizeMode(
   value: unknown,
   autoResize?: unknown,
 ): TextResizeMode {
+  if (value === "auto-width" || value === "auto-height" || value === "fixed") return value;
   if (autoResize != null) {
     return autoResizeToTextResizeMode(autoResize);
   }
-  if (value === "auto-width" || value === "auto-height" || value === "fixed") return value;
   return DEFAULT_TEXT_RESIZE_MODE;
 }
 

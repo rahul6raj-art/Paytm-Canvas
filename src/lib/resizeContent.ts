@@ -16,7 +16,7 @@ function uniformScaleFactor(
 }
 
 function shouldScaleTextContent(handle: ResizeHandle, modifiers: ResizeModifiers): boolean {
-  if (isCornerHandle(handle)) return true;
+  // Reflow/wrap on box resize; only scale glyphs on explicit proportional resize (Shift+Option).
   return isProportionalResize(handle, modifiers);
 }
 

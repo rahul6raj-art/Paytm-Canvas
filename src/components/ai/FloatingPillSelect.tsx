@@ -76,7 +76,7 @@ export function FloatingPillSelect({
                 aria-selected={value === o.value}
                 disabled={o.disabled}
                 className={cn(
-                  "block w-full px-3 py-2 text-left text-[12px] transition-colors",
+                  "block w-full px-3 py-2 text-left text-ui transition-colors",
                   value === o.value ? "bg-app-hover font-medium text-app-fg" : "text-app-fg hover:bg-app-hover",
                   o.disabled && "cursor-not-allowed opacity-40",
                 )}
@@ -87,14 +87,14 @@ export function FloatingPillSelect({
                 }}
               >
                 <span className="block truncate">{o.label}</span>
-                {o.hint ? <span className="block truncate text-[10px] text-app-subtle">{o.hint}</span> : null}
+                {o.hint ? <span className="block truncate text-ui text-app-subtle">{o.hint}</span> : null}
               </button>
             ))
           : null}
         {optionGroups
           ? optionGroups.map((g) => (
               <div key={g.label}>
-                <p className="px-3 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wide text-app-subtle">
+                <p className="px-3 pb-0.5 pt-2 section-heading">
                   {g.label}
                 </p>
                 {g.options.map((o) => (
@@ -105,7 +105,7 @@ export function FloatingPillSelect({
                     aria-selected={value === o.value}
                     disabled={o.disabled}
                     className={cn(
-                      "block w-full px-3 py-2 text-left text-[12px] transition-colors",
+                      "block w-full px-3 py-2 text-left text-ui transition-colors",
                       value === o.value ? "bg-app-hover font-medium text-app-fg" : "text-app-fg hover:bg-app-hover",
                       o.disabled && "cursor-not-allowed opacity-40",
                     )}
@@ -117,7 +117,7 @@ export function FloatingPillSelect({
                   >
                     <span className="block truncate">{o.label}</span>
                     {o.hint ? (
-                      <span className="block truncate text-[10px] text-app-subtle">{o.hint}</span>
+                      <span className="block truncate text-ui text-app-subtle">{o.hint}</span>
                     ) : null}
                   </button>
                 ))}
@@ -138,7 +138,7 @@ export function FloatingPillSelect({
         aria-label={label}
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          "inline-flex min-w-0 items-center gap-1.5 rounded-full border border-app-border bg-app-panel py-1 pl-2.5 pr-1.5 text-[12px] font-medium text-app-fg shadow-sm transition-colors",
+          "inline-flex min-w-0 items-center gap-1.5 rounded-full border border-app-border bg-app-panel py-1 pl-2.5 pr-1.5 text-ui font-medium text-app-fg shadow-sm transition-colors",
           "hover:bg-app-hover disabled:cursor-not-allowed disabled:opacity-50",
           open && "border-accent/40 bg-app-hover",
           className,

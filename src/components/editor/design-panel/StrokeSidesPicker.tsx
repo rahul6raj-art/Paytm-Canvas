@@ -1,20 +1,33 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { Check, SlidersHorizontal } from "lucide-react";
+import { Check, RotateCcw, SlidersHorizontal, X } from "lucide-react";
+import { fillCss, normalizeHex } from "@/lib/color";
 import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
+import { useInspectorValueScrub } from "@/lib/useInspectorValueScrub";
+import { appFieldRadius } from "@/lib/appFieldStyles";
 import { cn } from "@/lib/utils";
-import type { StrokeSidesCustom, StrokeSidesMode } from "@/lib/strokeAlign";
+import { inspectorIconClass, inspectorIconStroke } from "@/lib/inspectorIconStyles";
+import type {
+  StrokeSideKey,
+  StrokeSidesCustom,
+  StrokeSidesCustomColors,
+  StrokeSidesMode,
+} from "@/lib/strokeAlign";
 import {
+  resolveStrokeSideColor,
   resolveStrokeSideWidths,
   strokeSidesCustomFromPreset,
 } from "@/lib/strokeAlign";
+import { InspectorColorPickerAside } from "../InspectorColorPickerAside";
+import type { ColorCommitOptions } from "../ColorInput";
 import {
-  anchoredMenuStyle,
-  useAnchoredDropdownPosition,
-  useDismissAnchoredDropdown,
-} from "../useAnchoredDropdown";
+  adjacentPanelDialogStyle,
+  useAdjacentPanelDialogPosition,
+} from "../useAdjacentPanelDialogPosition";
+import { useDismissAnchoredDropdown } from "../useAnchoredDropdown";
+import { useDraggableFloatingPanel } from "../useDraggableFloatingPanel";
 
 type SideOption = { id: StrokeSidesMode; label: string };
 type CustomSide = keyof StrokeSidesCustom;
@@ -36,12 +49,77 @@ const CUSTOM_GRID: { side: CustomSide; mode: StrokeSidesMode }[] = [
 ];
 
 const MENU_WIDTH_PRESETS = 132;
-const MENU_WIDTH_CUSTOM = 168;
+const MENU_WIDTH_CUSTOM = 208;
+
+function SideColorSwatch({
+  side,
+  hex,
+  opacity,
+  disabled,
+  menuRef,
+  onCommit,
+  onOpenChange,
+}: {
+  side: StrokeSideKey;
+  hex: string;
+  opacity: number;
+  disabled: boolean;
+  menuRef: RefObject<HTMLDivElement | null>;
+  onCommit: (hex: string, opts?: ColorCommitOptions) => void;
+  onOpenChange?: (open: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const swatchRef = useRef<HTMLButtonElement>(null);
+  const safe = normalizeHex(hex) ?? "#888888";
+
+  useEffect(() => {
+    onOpenChange?.(open);
+  }, [onOpenChange, open]);
+
+  useDismissAnchoredDropdown(open, () => setOpen(false), swatchRef, undefined, {
+    ignoreRefs: [menuRef],
+  });
+
+  return (
+    <>
+      <button
+        ref={swatchRef}
+        type="button"
+        disabled={disabled}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((o) => !o);
+        }}
+        className={cn(
+          "h-5 w-5 shrink-0 rounded border border-app-border p-px disabled:cursor-not-allowed",
+          open && "border-accent ring-1 ring-accent",
+        )}
+        style={{ background: fillCss(safe, opacity) }}
+        aria-label={`${side} stroke color`}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+      />
+      <InspectorColorPickerAside
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={swatchRef}
+        hostRef={menuRef}
+        hostSide="left"
+        title={`${side} stroke color`}
+        hex={safe}
+        opacity={opacity}
+        disabled={disabled}
+        onCommitHex={onCommit}
+        onCommitOpacity={() => undefined}
+      />
+    </>
+  );
+}
 
 function SideIcon({ mode }: { mode: StrokeSidesMode }) {
   const dash = "stroke-current";
   const solid = "stroke-current";
-  const box = "h-3.5 w-3.5 shrink-0";
+  const box = inspectorIconClass;
   if (mode === "all") {
     return (
       <svg className={box} viewBox="0 0 14 14" aria-hidden>
@@ -81,7 +159,7 @@ function SideIcon({ mode }: { mode: StrokeSidesMode }) {
       </svg>
     );
   }
-  return <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />;
+  return <SlidersHorizontal className={inspectorIconClass} strokeWidth={inspectorIconStroke} />;
 }
 
 function activeLabel(mode: StrokeSidesMode): string {
@@ -92,26 +170,40 @@ function CustomSideField({
   side,
   mode,
   value,
+  color,
+  strokeOpacity,
   disabled,
+  menuRef,
   onChange,
+  onColorChange,
+  onScrubActiveChange,
+  onColorPickerOpenChange,
 }: {
   side: CustomSide;
   mode: StrokeSidesMode;
   value: number;
+  color: string;
+  strokeOpacity: number;
   disabled: boolean;
+  menuRef: RefObject<HTMLDivElement | null>;
   onChange: (side: CustomSide, width: number) => void;
+  onColorChange: (side: CustomSide, hex: string, opts?: ColorCommitOptions) => void;
+  onScrubActiveChange?: (active: boolean) => void;
+  onColorPickerOpenChange?: (open: boolean) => void;
 }) {
   const [draft, setDraft] = useState(String(value));
+  const [focused, setFocused] = useState(false);
 
-  useEffect(() => {
-    setDraft(String(value));
-  }, [value]);
+  const commitWidth = (n: number) => {
+    const w = Math.min(256, Math.max(0, n));
+    onChange(side, w);
+    setDraft(String(w));
+  };
 
   const commit = (raw: string) => {
     const trimmed = raw.trim();
     if (trimmed === "") {
-      onChange(side, 0);
-      setDraft("0");
+      commitWidth(0);
       return;
     }
     const n = Number(trimmed);
@@ -119,23 +211,60 @@ function CustomSideField({
       setDraft(String(value));
       return;
     }
-    const w = Math.max(0, n);
-    onChange(side, w);
-    setDraft(String(w));
+    commitWidth(n);
   };
 
+  const scrub = useInspectorValueScrub({
+    disabled,
+    value,
+    min: 0,
+    max: 256,
+    onChange: commitWidth,
+  });
+  const { scrubbing, scrubActiveRef, bindScrubInput } = scrub;
+
+  useEffect(() => {
+    onScrubActiveChange?.(scrubbing);
+  }, [onScrubActiveChange, scrubbing]);
+
+  useEffect(() => {
+    if (!focused && !scrubbing && !scrubActiveRef.current) setDraft(String(value));
+  }, [value, focused, scrubbing, scrubActiveRef]);
+
   return (
-    <div className="flex h-7 items-center gap-1.5 rounded border border-app-border bg-app-field px-1.5">
+    <div
+      className={cn(
+        "flex h-7 items-center gap-1 border border-app-border bg-app-field px-1",
+        appFieldRadius,
+      )}
+    >
+      <SideColorSwatch
+        side={side}
+        hex={color}
+        opacity={strokeOpacity}
+        disabled={disabled}
+        menuRef={menuRef}
+        onCommit={(hex, opts) => onColorChange(side, hex, opts)}
+        onOpenChange={onColorPickerOpenChange}
+      />
       <SideIcon mode={mode} />
       <input
         type="text"
         inputMode="decimal"
         disabled={disabled}
         aria-label={`${side} stroke width`}
-        className="min-w-0 flex-1 border-0 bg-transparent text-right text-[12px] tabular-nums text-app-field-fg focus-visible:outline-none"
+        {...bindScrubInput(
+          "min-w-0 flex-1 border-0 bg-transparent text-right text-ui tabular-nums text-app-field-fg focus-visible:outline-none disabled:cursor-not-allowed",
+          focused,
+        )}
         value={draft}
+        onFocus={() => setFocused(true)}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => commit(draft)}
+        onBlur={() => {
+          if (scrubActiveRef.current) return;
+          setFocused(false);
+          commit(draft);
+        }}
         onKeyDown={(e) => {
           e.stopPropagation();
           handlePanelFieldKeyDown(e, {
@@ -151,7 +280,6 @@ function CustomSideField({
             },
           });
         }}
-        onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       />
     </div>
@@ -162,14 +290,27 @@ export function StrokeSidesPicker({
   disabled,
   strokeSides,
   strokeSidesCustom,
+  strokeSidesCustomColors,
+  strokeColor,
+  strokeOpacity = 1,
   strokeWidth,
+  instanceKey,
   onChange,
 }: {
   disabled: boolean;
   strokeSides: StrokeSidesMode;
   strokeSidesCustom?: StrokeSidesCustom;
+  strokeSidesCustomColors?: StrokeSidesCustomColors;
+  strokeColor: string;
+  strokeOpacity?: number;
   strokeWidth: number;
-  onChange: (patch: { strokeSides?: StrokeSidesMode; strokeSidesCustom?: StrokeSidesCustom }) => void;
+  instanceKey: string;
+  onChange: (patch: {
+    strokeSides?: StrokeSidesMode;
+    strokeSidesCustom?: StrokeSidesCustom;
+    strokeSidesCustomColors?: StrokeSidesCustomColors;
+    strokeWidth?: number;
+  }) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [showCustomGrid, setShowCustomGrid] = useState(strokeSides === "custom");
@@ -177,20 +318,50 @@ export function StrokeSidesPicker({
   const anchorRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  const blockDismissRef = useRef(false);
+  const colorPickerOpenRef = useRef(false);
+  const scrubActiveRef = useRef(false);
+
+  const setSideScrubActive = (active: boolean) => {
+    scrubActiveRef.current = active;
+    blockDismissRef.current = active || colorPickerOpenRef.current;
+  };
+
+  const setSideColorPickerOpen = (pickerOpen: boolean) => {
+    colorPickerOpenRef.current = pickerOpen;
+    blockDismissRef.current = pickerOpen || scrubActiveRef.current;
+  };
 
   const showGrid = showCustomGrid || strokeSides === "custom";
   const menuWidth = showGrid ? MENU_WIDTH_CUSTOM : MENU_WIDTH_PRESETS;
 
-  const pos = useAnchoredDropdownPosition(anchorRef, open, 4, {
-    viewportClamp: true,
+  const basePosition = useAdjacentPanelDialogPosition(anchorRef, open, {
     width: menuWidth,
-    minHeight: showGrid ? 280 : 200,
     maxHeight: showGrid ? 480 : 360,
     remeasureKey: showGrid,
   });
-  useDismissAnchoredDropdown(open, () => setOpen(false), anchorRef, menuRef);
+  const { position: dragPosition, onHeaderPointerDown, isDragging } = useDraggableFloatingPanel(
+    open,
+    basePosition,
+  );
+  useDismissAnchoredDropdown(open, () => setOpen(false), anchorRef, menuRef, {
+    blockDismissRef,
+  });
 
   useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        setOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [open]);
 
   useEffect(() => {
     if (strokeSides === "custom") setShowCustomGrid(true);
@@ -203,7 +374,7 @@ export function StrokeSidesPicker({
     if (!menu || !grid) return;
     grid.scrollIntoView({ block: "nearest" });
     menu.scrollTop = menu.scrollHeight - menu.clientHeight;
-  }, [open, showGrid, strokeSidesCustom]);
+  }, [open, showGrid]);
 
   const customWidths = resolveStrokeSideWidths({
     strokeSides: "custom",
@@ -213,8 +384,30 @@ export function StrokeSidesPicker({
 
   const patchCustomSide = (side: CustomSide, width: number) => {
     const next: StrokeSidesCustom = { ...(strokeSidesCustom ?? {}) };
-    next[side] = width;
+    next[side] = Math.max(0, width);
     onChange({ strokeSides: "custom", strokeSidesCustom: next });
+    setShowCustomGrid(true);
+  };
+
+  const patchCustomSideColor = (side: CustomSide, hex: string) => {
+    const next: StrokeSidesCustomColors = { ...(strokeSidesCustomColors ?? {}) };
+    next[side] = hex;
+    onChange({ strokeSides: "custom", strokeSidesCustomColors: next });
+    setShowCustomGrid(true);
+  };
+
+  const resetCustomSides = () => {
+    onChange({
+      strokeSides: "custom",
+      strokeSidesCustom: { top: 0, right: 0, bottom: 0, left: 0 },
+      strokeSidesCustomColors: undefined,
+      strokeWidth: 0,
+    });
+  };
+
+  const colorNode = {
+    strokeColor,
+    strokeSidesCustomColors,
   };
 
   const enterCustom = (e: MouseEvent) => {
@@ -232,14 +425,36 @@ export function StrokeSidesPicker({
     open && mounted ? (
       <div
         ref={menuRef}
-        className="fixed z-[120] overflow-y-auto rounded-md border border-app-border bg-app-panel py-1 shadow-xl"
-        style={anchoredMenuStyle(pos)}
+        role="dialog"
+        aria-label="Stroke sides"
+        aria-modal="false"
+        className="fixed z-[120] flex flex-col overflow-hidden rounded-md border border-app-border bg-app-panel shadow-xl"
+        style={adjacentPanelDialogStyle(dragPosition)}
       >
+        <div
+          className={cn(
+            "flex shrink-0 items-center justify-between gap-2 border-b border-app-border px-2.5 py-2",
+            "cursor-grab select-none touch-none active:cursor-grabbing",
+            isDragging && "cursor-grabbing",
+          )}
+          onPointerDown={onHeaderPointerDown}
+        >
+          <div className="inspector-field-label pointer-events-none">Stroke sides</div>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="flex h-7 w-7 items-center justify-center rounded text-app-muted hover:bg-app-hover hover:text-app-fg"
+            aria-label="Close stroke sides"
+          >
+            <X className="h-3.5 w-3.5" strokeWidth={2} />
+          </button>
+        </div>
+        <div className="thin-scroll min-h-0 flex-1 overflow-y-auto py-1">
         {PRESET_OPTIONS.map((opt) => (
           <button
             key={opt.id}
             type="button"
-            className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px] text-app-fg hover:bg-app-hover"
+            className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-ui text-app-fg hover:bg-app-hover"
             onClick={() => {
               onChange({ strokeSides: opt.id });
               setShowCustomGrid(false);
@@ -247,7 +462,7 @@ export function StrokeSidesPicker({
             }}
           >
             <span className="w-4 text-app-muted">
-              {strokeSides === opt.id ? <Check className="h-3.5 w-3.5" strokeWidth={2} /> : null}
+              {strokeSides === opt.id ? <Check className={inspectorIconClass} strokeWidth={inspectorIconStroke} /> : null}
             </span>
             <SideIcon mode={opt.id} />
             <span>{opt.label}</span>
@@ -256,35 +471,55 @@ export function StrokeSidesPicker({
         <div className="my-1 border-t border-app-border" />
         <button
           type="button"
-          className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px] text-app-fg hover:bg-app-hover"
+          className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-ui text-app-fg hover:bg-app-hover"
           onMouseDown={enterCustom}
           onClick={enterCustom}
         >
           <span className="w-4 text-app-muted">
-            {strokeSides === "custom" ? <Check className="h-3.5 w-3.5" strokeWidth={2} /> : null}
+            {strokeSides === "custom" ? <Check className={inspectorIconClass} strokeWidth={inspectorIconStroke} /> : null}
           </span>
           <SideIcon mode="custom" />
           <span>Custom</span>
         </button>
         {showGrid ? (
           <div ref={gridRef} className="border-t border-app-border px-2 pb-2 pt-1.5">
-            <div className="mb-1.5 px-0.5 text-[10px] font-medium uppercase tracking-wide text-app-muted">
-              Side weights (px)
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="text-ui font-medium text-app-muted">Side weights (px)</div>
+              <button
+                type="button"
+                disabled={disabled}
+                title="Reset side weights and colors"
+                aria-label="Reset side weights and colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  resetCustomSides();
+                }}
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-muted hover:bg-app-hover hover:text-app-fg disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <RotateCcw className="h-3.5 w-3.5" strokeWidth={2} />
+              </button>
             </div>
             <div className="grid grid-cols-2 gap-1.5">
               {CUSTOM_GRID.map(({ side, mode }) => (
                 <CustomSideField
-                  key={side}
+                  key={`${instanceKey}-${side}`}
                   side={side}
                   mode={mode}
                   value={customWidths[side]}
+                  color={resolveStrokeSideColor(colorNode, side)}
+                  strokeOpacity={strokeOpacity}
                   disabled={disabled}
+                  menuRef={menuRef}
                   onChange={patchCustomSide}
+                  onColorChange={patchCustomSideColor}
+                  onScrubActiveChange={setSideScrubActive}
+                  onColorPickerOpenChange={setSideColorPickerOpen}
                 />
               ))}
             </div>
           </div>
         ) : null}
+        </div>
       </div>
     ) : null;
 

@@ -1,5 +1,6 @@
 import { effectColorToRgba } from "@/lib/nodeEffects";
-import { effectiveStrokeType, svgStrokePaint, type StrokePaintNode } from "@/lib/fillGradient";
+import { effectiveStrokeType, type StrokePaintNode } from "@/lib/fillGradient";
+import { resolveShapeStrokeAttr } from "@/lib/gradient/svgSceneFill";
 import {
   mergeStrokeIntoNode,
   migrateAllNodeStrokes,
@@ -37,6 +38,8 @@ export type StrokeResolvableNode = Pick<
   | "strokePosition"
   | "strokeType"
   | "strokeGradient"
+  | "strokeImageAssetId"
+  | "strokeVideoAssetId"
   | "strokeStyle"
   | "strokeDashLength"
   | "strokeDashGap"
@@ -74,7 +77,7 @@ export function resolveStrokeColor(node: StrokeResolvableNode): string {
   return strokeSpecColorRgba(resolveStrokeSpec(node));
 }
 
-/** SVG stroke attribute: solid rgba or `url(#gradientId)` when defs are registered. */
+/** SVG stroke attribute: solid rgba, gradient url, image pattern, or none when video underlay is used. */
 export function resolveSvgStrokePaint(
   node: StrokeResolvableNode,
   opts?: {
@@ -82,13 +85,57 @@ export function resolveSvgStrokePaint(
     width: number;
     height: number;
     registerGradient: (id: string, markup: string) => void;
+    assets?: Record<string, import("@/lib/documentPersistence").EditorAsset>;
+    renderScale?: number;
   },
 ): string {
   if (!strokeIsVisible(node)) return "none";
-  if (effectiveStrokeType(node) !== "gradient" || !opts) {
+  if (effectiveStrokeType(node) === "solid" || !opts) {
     return resolveStrokeColor(node);
   }
-  return svgStrokePaint(node, opts);
+  const r = resolveShapeStrokeAttr({
+    node,
+    width: opts.width,
+    height: opts.height,
+    nodeId: opts.gradientId,
+    registerGradient: opts.registerGradient,
+    renderScale: opts.renderScale,
+    assets: opts.assets,
+  });
+  if (r.strokeAttr !== "none") return r.strokeAttr;
+  return resolveStrokeColor(node);
+}
+
+export function resolveSvgStrokeLayers(
+  node: StrokeResolvableNode,
+  opts: {
+    gradientId: string;
+    width: number;
+    height: number;
+    registerGradient: (id: string, markup: string) => void;
+    assets?: Record<string, import("@/lib/documentPersistence").EditorAsset>;
+    renderScale?: number;
+  },
+): { strokePaint: string; underlayMarkup: string } {
+  if (!strokeIsVisible(node)) {
+    return { strokePaint: "none", underlayMarkup: "" };
+  }
+  if (effectiveStrokeType(node) === "solid") {
+    return { strokePaint: resolveStrokeColor(node), underlayMarkup: "" };
+  }
+  const r = resolveShapeStrokeAttr({
+    node,
+    width: opts.width,
+    height: opts.height,
+    nodeId: opts.gradientId,
+    registerGradient: opts.registerGradient,
+    renderScale: opts.renderScale,
+    assets: opts.assets,
+  });
+  return {
+    strokePaint: r.strokeAttr !== "none" ? r.strokeAttr : resolveStrokeColor(node),
+    underlayMarkup: r.underlayMarkup,
+  };
 }
 
 export function strokeIsVisible(node: StrokeResolvableNode): boolean {

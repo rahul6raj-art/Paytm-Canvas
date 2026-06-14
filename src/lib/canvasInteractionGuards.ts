@@ -28,6 +28,7 @@ export function isCanvasChromeTarget(target: EventTarget | null): boolean {
       el.closest("[data-polygon-corner-handle]") ||
       el.closest('[role="menu"]') ||
       el.closest("[data-text-editor]") ||
+      el.closest("[data-gradient-handle]") ||
       el.closest("[data-svg-hit]"),
   );
 }
@@ -65,6 +66,19 @@ export function isCanvasBgCreationTool(
   }
   if (tool === "pen") return true;
   if (tool === "comment" && opts?.isPlacingComment) return true;
+  return false;
+}
+
+/** Containers (frames/groups) still receive drag-to-create, not hit-layer selection. */
+export function isCanvasCreationContainerHit(
+  hitId: string | null,
+  nodes: Record<string, EditorNode>,
+): boolean {
+  if (!hitId) return false;
+  const n = nodes[hitId];
+  if (!n?.visible || n.locked) return false;
+  if (n.type === "frame") return true;
+  if (n.type === "group" && !n.isBooleanGroup && !n.maskId) return true;
   return false;
 }
 

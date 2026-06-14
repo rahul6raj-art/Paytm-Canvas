@@ -1,6 +1,23 @@
-# Paytm Craft — Backend architecture (planned)
+# Paytm Craft — Backend architecture
 
-This document describes the **target** backend shape for Paytm Craft: auth, multi-tenant workspaces, durable files, versioning, collaboration, and media. The **current** web app in this repository remains **local-first** (browser `localStorage`); nothing here is mandatory until services are deployed and the client is wired behind feature flags.
+**Status:** reference — core stack **implemented** (Tracks 4–19); editor remains **local-first** by default.
+
+## Implemented (this repo)
+
+| Component | Package / path | Tracks |
+|-----------|----------------|--------|
+| REST API | `packages/craft-api` (Express + Prisma) | 4–8, 11–12, 19–23 |
+| Realtime sync | `packages/craft-realtime` (Yjs + Postgres) | 4, 7 |
+| Mock API | `src/app/api/v1/*` Route Handlers | 2, 24 |
+| Client modes | `local` / `api` / `remote` via `paytmCraftEnv` | 2–6 |
+| Object storage | MinIO locally; R2/S3 in production | 4, 25 |
+| API contracts | `docs/api-contracts.md` + `verify:api-contracts` | 30 |
+
+See [backend-track.md](./backend-track.md), [tracks.md](./tracks.md), and [deployment.md](./deployment.md).
+
+## Target shape (reference)
+
+Auth, multi-tenant workspaces, durable files, versioning, collaboration, and media. Deploy with `npm run stack:up` + `dev:remote` for the full path.
 
 ## Goals
 
@@ -22,8 +39,8 @@ flowchart LR
     CDN[Static assets]
   end
   subgraph services [Services]
-    API[NestJS API]
-    RT[Hocuspocus / WS]
+    API[craft-api Express]
+    RT[craft-realtime WS]
     R2[(S3 / R2)]
     PG[(Postgres)]
     RD[(Redis)]

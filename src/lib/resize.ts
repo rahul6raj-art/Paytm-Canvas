@@ -163,6 +163,28 @@ function shiftAnchoredResize(handle: ResizeHandle, s: Bounds, px: number, py: nu
   }
 }
 
+/** Half-extent from center along the dragged edge (signed so shrink follows the pointer). */
+function altHalfFromCenter(
+  handle: ResizeHandle,
+  cx: number,
+  cy: number,
+  px: number,
+  py: number,
+): number {
+  switch (handle) {
+    case "e":
+      return Math.max(MIN / 2, px - cx);
+    case "w":
+      return Math.max(MIN / 2, cx - px);
+    case "s":
+      return Math.max(MIN / 2, py - cy);
+    case "n":
+      return Math.max(MIN / 2, cy - py);
+    default:
+      return MIN / 2;
+  }
+}
+
 function altCenterResize(handle: ResizeHandle, s: Bounds, px: number, py: number): Bounds {
   const L = s.x;
   const T = s.y;
@@ -182,13 +204,13 @@ function altCenterResize(handle: ResizeHandle, s: Bounds, px: number, py: number
   switch (handle) {
     case "e":
     case "w": {
-      const halfW = Math.max(MIN / 2, Math.abs(px - cx));
+      const halfW = altHalfFromCenter(handle, cx, cy, px, py);
       const w = 2 * halfW;
       return { x: cx - w / 2, y: T, width: w, height: H };
     }
     case "n":
     case "s": {
-      const halfH = Math.max(MIN / 2, Math.abs(py - cy));
+      const halfH = altHalfFromCenter(handle, cx, cy, px, py);
       const h = 2 * halfH;
       return { x: L, y: cy - h / 2, width: W, height: h };
     }
@@ -198,6 +220,32 @@ function altCenterResize(handle: ResizeHandle, s: Bounds, px: number, py: number
     case "sw":
       return symWH();
   }
+}
+
+/**
+ * Uniform scale from world center using pointer distance ratio (Figma-smooth for Shift+Option).
+ */
+export function centerProportionalScaleFromWorld(
+  startBounds: Bounds,
+  centerWorld: { x: number; y: number },
+  startPointerWorld: { x: number; y: number },
+  currentPointerWorld: { x: number; y: number },
+): Bounds {
+  const d0 = Math.hypot(
+    startPointerWorld.x - centerWorld.x,
+    startPointerWorld.y - centerWorld.y,
+  );
+  const d1 = Math.hypot(
+    currentPointerWorld.x - centerWorld.x,
+    currentPointerWorld.y - centerWorld.y,
+  );
+  const minT = Math.max(MIN / startBounds.width, MIN / startBounds.height);
+  const t = d0 < 1e-6 ? 1 : Math.max(minT, d1 / d0);
+  const w = startBounds.width * t;
+  const h = startBounds.height * t;
+  const cx = startBounds.x + startBounds.width / 2;
+  const cy = startBounds.y + startBounds.height / 2;
+  return { x: cx - w / 2, y: cy - h / 2, width: w, height: h };
 }
 
 function altShiftCenterResize(handle: ResizeHandle, s: Bounds, px: number, py: number): Bounds {
@@ -225,7 +273,7 @@ function shiftAltEdgeResize(handle: ResizeHandle, s: Bounds, px: number, py: num
   switch (handle) {
     case "e":
     case "w": {
-      const halfW = Math.max(MIN / 2, Math.abs(px - cx));
+      const halfW = altHalfFromCenter(handle, cx, cy, px, py);
       let w = Math.max(MIN, 2 * halfW);
       let h = Math.max(MIN, w / ar);
       w = Math.max(MIN, h * ar);
@@ -233,7 +281,7 @@ function shiftAltEdgeResize(handle: ResizeHandle, s: Bounds, px: number, py: num
     }
     case "n":
     case "s": {
-      const halfH = Math.max(MIN / 2, Math.abs(py - cy));
+      const halfH = altHalfFromCenter(handle, cx, cy, px, py);
       let h = Math.max(MIN, 2 * halfH);
       let w = Math.max(MIN, h * ar);
       h = Math.max(MIN, w / ar);

@@ -83,7 +83,7 @@ export function FontSizeInput({
 
   return (
     <div ref={wrapRef} className="relative">
-      <div className="mb-0.5 text-[11px] font-medium leading-4 text-app-subtle">Size</div>
+      <div className="inspector-field-label">Size</div>
       <div className="relative">
         <input
           type="text"
@@ -129,7 +129,7 @@ export function FontSizeInput({
               <button
                 type="button"
                 className={cn(
-                  "flex w-full px-2 py-1 text-left text-[12px] font-mono tabular-nums hover:bg-app-hover",
+                  "flex w-full px-2 py-1 text-left text-ui font-mono tabular-nums hover:bg-app-hover",
                   size === Math.round(value) && "bg-app-hover font-medium text-app-fg",
                 )}
                 onMouseDown={(e) => e.preventDefault()}

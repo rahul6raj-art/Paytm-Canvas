@@ -1,7 +1,5 @@
 "use client";
 
-import { useState } from "react";
-import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ReactNode } from "react";
 
@@ -9,30 +7,34 @@ export function PropertiesSection({
   title,
   children,
   className,
-  defaultOpen = true,
+  headerActions,
+  defaultOpen: _defaultOpen,
+  open: _open,
+  onOpenChange: _onOpenChange,
 }: {
   title: string;
   children: ReactNode;
   className?: string;
-  /** When false, section starts collapsed. */
+  /** @deprecated Sections are always expanded. */
   defaultOpen?: boolean;
+  /** @deprecated Sections are always expanded. */
+  open?: boolean;
+  /** @deprecated Sections are always expanded. */
+  onOpenChange?: (open: boolean) => void;
+  /** Icons or controls on the right side of the section header. */
+  headerActions?: ReactNode;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
-
   return (
-    <section className={cn("border-b border-app-border-subtle", className)}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-1 px-2 py-2 text-left text-[11px] font-semibold text-app-fg transition-colors hover:bg-app-hover"
-      >
-        <ChevronRight
-          className={cn("h-3 w-3 shrink-0 text-app-subtle transition-transform", open && "rotate-90")}
-          strokeWidth={2}
-        />
-        {title}
-      </button>
-      {open && <div className="space-y-1.5 px-2 pb-2 pt-0.5">{children}</div>}
+    <section className={cn("border-b border-app-panel-edge last:border-b-0", className)}>
+      <div className="flex items-center gap-0.5 pr-1">
+        <div className="flex min-w-0 flex-1 items-center px-3 py-2.5 text-ui font-medium text-app-fg">
+          {title}
+        </div>
+        {headerActions ? (
+          <div className="flex shrink-0 items-center gap-0.5">{headerActions}</div>
+        ) : null}
+      </div>
+      <div className="space-y-3 px-3 pb-4 pt-0.5">{children}</div>
     </section>
   );
 }

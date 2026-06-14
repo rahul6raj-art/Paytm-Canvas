@@ -4,7 +4,7 @@ import {
   roundedRectPolygonPoints,
 } from "@/lib/cornerRadius";
 import { buildCompositePathDForGroup } from "@/lib/booleanGeometry";
-import { effectiveStrokeType } from "@/lib/stroke";
+import { effectiveStrokeType } from "@/lib/fillGradient";
 import {
   resolveStrokeSideWidths,
   resolveStrokeSides,
@@ -17,10 +17,7 @@ import {
 import { lineEndpointsFromNode } from "@/lib/shapes/lineGeometry";
 import { generatePolygonPoints } from "@/lib/shapes/pathGenerators";
 import { isPolygonNode, polygonPathDForNode } from "@/lib/shapes/polygonGeometry";
-import {
-  roundedRectStrokeSegments,
-  type StrokeSideSegment,
-} from "@/lib/roundedRectSideStroke";
+import { roundedRectBorderFills, type BorderSideFill } from "@/lib/borderGeometry";
 import { isStarNode, starPathDForNode } from "@/lib/shapes/starGeometry";
 import { prepareTextForDisplay, textAdvancedStyleFromNode } from "@/lib/text/textAdvancedStyle";
 import { layoutText, lineTopY } from "@/lib/text/textMeasure";
@@ -633,23 +630,12 @@ function outlinePerSideRectStroke(node: EditorNode): OutlineStrokeResult | null 
   return resultFromPathParts(parts, spec.color, spec.opacity, fillProps.fillType, fillProps.fillGradient);
 }
 
-function outlineRoundedSideSegments(
+function outlineRoundedBorderFills(
   node: EditorNode,
-  segments: StrokeSideSegment[],
+  fills: BorderSideFill[],
 ): OutlineStrokeResult | null {
   const spec = resolveStrokeSpec(node);
-  const parts: string[] = [];
-  for (const seg of segments) {
-    const pts = tessellateSvgPathD(seg.pathD);
-    if (pts.length < 2) continue;
-    const outline = expandOpenPolylineStroke(pts, {
-      width: seg.width,
-      align: "center",
-      join: spec.join,
-      cap: "butt",
-    });
-    if (outline.length >= 3) parts.push(polylineToPathD(outline));
-  }
+  const parts = fills.map((fill) => polylineToPathD(fill.points));
   const fillProps = fillPropsFromNode(node);
   return resultFromPathParts(parts, spec.color, spec.opacity, fillProps.fillType, fillProps.fillGradient);
 }
@@ -658,12 +644,12 @@ function outlinePerSideStroke(node: EditorNode): OutlineStrokeResult | null {
   if (node.type !== "rectangle" && node.type !== "frame") return null;
   if (!usesPerEdgeStroke(node)) return null;
 
+  const borderFills = roundedRectBorderFills(node);
+  if (borderFills?.length) return outlineRoundedBorderFills(node, borderFills);
+
   if (strokeUsesCssIndividualBorders(node) || strokeUsesAxisAlignedRects(node, node.width, node.height)) {
     return outlinePerSideRectStroke(node);
   }
-
-  const segments = roundedRectStrokeSegments(node);
-  if (segments?.length) return outlineRoundedSideSegments(node, segments);
 
   return outlinePerSideRectStroke(node);
 }
@@ -998,6 +984,7 @@ function clearStrokeFields(): Partial<EditorNode> {
     strokeEndPoint: "none",
     strokeSides: "all",
     strokeSidesCustom: undefined,
+    strokeSidesCustomColors: undefined,
     startArrow: "none",
     endArrow: "none",
     arrowHead: false,

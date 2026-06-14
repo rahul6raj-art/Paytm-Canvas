@@ -24,12 +24,12 @@ export function TemplateCard({ title, description, accent, onUse }: TemplateCard
         </span>
       </button>
       <div className="flex flex-1 flex-col gap-1 p-3">
-        <h3 className="text-[13px] font-semibold text-app-fg">{title}</h3>
-        <p className="line-clamp-2 text-[12px] leading-snug text-app-muted">{description}</p>
+        <h3 className="text-ui-sm font-semibold text-app-fg">{title}</h3>
+        <p className="line-clamp-2 text-ui leading-snug text-app-muted">{description}</p>
         <button
           type="button"
           onClick={onUse}
-          className="mt-2 inline-flex w-fit items-center rounded-lg bg-app-fg px-3 py-1.5 text-[12px] font-medium text-app-bg transition-colors hover:bg-app-muted"
+          className="mt-2 inline-flex w-fit items-center rounded-lg bg-app-fg px-3 py-1.5 text-ui font-medium text-app-bg transition-colors hover:bg-app-muted"
         >
           Use template
         </button>

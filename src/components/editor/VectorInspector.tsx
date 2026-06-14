@@ -12,13 +12,21 @@ import { normalizeHex } from "@/lib/color";
 import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
 import {
   cornerRadiiStylePatch,
+  isRoundedRectPath,
   pathPointCornerIndex,
   pathSupportsCornerRadius,
 } from "@/lib/shapes/shapeToPath";
+import { pathPointSelectionPosition } from "@/lib/pathEditAnchors";
 import type { PathHandleMirroring } from "@/lib/pathHandles";
-import { getNodeCornerRadii } from "@/lib/cornerRadius";
 import { resolveNodeWithDesignTokens } from "@/lib/designTokens";
 import { cn } from "@/lib/utils";
+import {
+  inspectorHeaderActionBtnClass,
+  inspectorIconClass,
+  inspectorIconStroke,
+  inspectorLucideProps,
+  inspectorRowActionBtnClass,
+} from "@/lib/inspectorIconStyles";
 import type { EditorNode, NodeStylePatch } from "@/stores/useEditorStore";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { AlignControls } from "./AlignControls";
@@ -115,25 +123,53 @@ export function VectorInspector({ node }: { node: EditorNode }) {
   const fillOpacity = display.fillOpacity ?? 1;
   const strokeWidth = node.strokeWidth ?? 0;
   const hasStroke = strokeWidth > 0;
-  const selectedPathPointId = useEditorStore((s) => s.selectedPathPointId);
+  const selectedPathPointIds = useEditorStore((s) => s.selectedPathPointIds);
+  const updatePathPoints = useEditorStore((s) => s.updatePathPoints);
   const canCornerRadius = pathSupportsCornerRadius(node);
+  const rectLikePath = isRoundedRectPath(node);
   const focusedCornerIndex = canCornerRadius
-    ? pathPointCornerIndex(node, selectedPathPointId)
+    ? pathPointCornerIndex(node, selectedPathPointIds[0] ?? null)
     : null;
+  const pathCornerLabels = useMemo(
+    () => (node.pathPoints ?? []).map((_, i) => String(i + 1)),
+    [node.pathPoints],
+  );
+  const anchorPos = pathPointSelectionPosition(node.pathPoints, selectedPathPointIds);
 
   const applyCornerStyle = (p: NodeStylePatch) => {
     if (!canCornerRadius) {
       style(p);
       return;
     }
-    const radii = getNodeCornerRadii({ ...node, ...p });
-    style({ ...p, ...cornerRadiiStylePatch(node, radii) });
+    if (p.cornerRadii != null) {
+      const patched = cornerRadiiStylePatch(node, p.cornerRadii);
+      const explicitPerCorner =
+        p.cornerRadius === undefined &&
+        p.cornerRadii.length > 0 &&
+        patched.cornerRadii == null;
+      if (explicitPerCorner) {
+        style({
+          cornerRadius: undefined,
+          cornerRadii: p.cornerRadii.map((r) => Math.max(0, r ?? 0)),
+        });
+        return;
+      }
+      style({ ...p, ...patched });
+      return;
+    }
+    if (p.cornerRadius != null) {
+      const count = (node.pathPoints ?? []).length;
+      const radii = Array.from({ length: count }, () => p.cornerRadius ?? 0);
+      style({ ...p, ...cornerRadiiStylePatch(node, radii) });
+      return;
+    }
+    style(p);
   };
 
   return (
     <div className="pb-2">
-      <div className="border-b border-app-border-subtle px-2 py-2">
-        <h2 className="text-[12px] font-semibold text-app-fg">Vector</h2>
+      <div className="border-b border-app-panel-edge px-2 py-2">
+        <h2 className="text-ui font-semibold text-app-fg">Vector</h2>
       </div>
 
       <PropertiesSection title="Alignment" defaultOpen>
@@ -142,24 +178,73 @@ export function VectorInspector({ node }: { node: EditorNode }) {
 
       <PropertiesSection title="Position" defaultOpen>
         <div className="grid grid-cols-2 gap-1.5">
-          <PropertyNumberInput
-            commitOnInput={false}
-            label="X"
-            value={Math.round(node.x * 100) / 100}
-            instanceKey={`${key}-vx`}
-            disabled={locked}
-            decimals={2}
-            onCommit={(v) => patch({ x: v })}
-          />
-          <PropertyNumberInput
-            commitOnInput={false}
-            label="Y"
-            value={Math.round(node.y * 100) / 100}
-            instanceKey={`${key}-vy`}
-            disabled={locked}
-            decimals={2}
-            onCommit={(v) => patch({ y: v })}
-          />
+          {anchorPos ? (
+            <>
+              <PropertyNumberInput
+                commitOnInput={false}
+                label="X"
+                value={Math.round(anchorPos.x * 100) / 100}
+                instanceKey={`${key}-apx-${selectedPathPointIds.join(",")}`}
+                disabled={locked}
+                decimals={2}
+                onCommit={(v) => {
+                  if (selectedPathPointIds.length === 1) {
+                    updatePathPoints(id, { [selectedPathPointIds[0]!]: { x: v } });
+                    return;
+                  }
+                  const delta = v - anchorPos.x;
+                  const patches: Record<string, { x: number }> = {};
+                  for (const pid of selectedPathPointIds) {
+                    const pt = node.pathPoints?.find((p) => p.id === pid);
+                    if (pt) patches[pid] = { x: pt.x + delta };
+                  }
+                  updatePathPoints(id, patches);
+                }}
+              />
+              <PropertyNumberInput
+                commitOnInput={false}
+                label="Y"
+                value={Math.round(anchorPos.y * 100) / 100}
+                instanceKey={`${key}-apy-${selectedPathPointIds.join(",")}`}
+                disabled={locked}
+                decimals={2}
+                onCommit={(v) => {
+                  if (selectedPathPointIds.length === 1) {
+                    updatePathPoints(id, { [selectedPathPointIds[0]!]: { y: v } });
+                    return;
+                  }
+                  const delta = v - anchorPos.y;
+                  const patches: Record<string, { y: number }> = {};
+                  for (const pid of selectedPathPointIds) {
+                    const pt = node.pathPoints?.find((p) => p.id === pid);
+                    if (pt) patches[pid] = { y: pt.y + delta };
+                  }
+                  updatePathPoints(id, patches);
+                }}
+              />
+            </>
+          ) : (
+            <>
+              <PropertyNumberInput
+                commitOnInput={false}
+                label="X"
+                value={Math.round(node.x * 100) / 100}
+                instanceKey={`${key}-vx`}
+                disabled={locked}
+                decimals={2}
+                onCommit={(v) => patch({ x: v })}
+              />
+              <PropertyNumberInput
+                commitOnInput={false}
+                label="Y"
+                value={Math.round(node.y * 100) / 100}
+                instanceKey={`${key}-vy`}
+                disabled={locked}
+                decimals={2}
+                onCommit={(v) => patch({ y: v })}
+              />
+            </>
+          )}
         </div>
       </PropertiesSection>
 
@@ -195,37 +280,41 @@ export function VectorInspector({ node }: { node: EditorNode }) {
         </div>
       </PropertiesSection>
 
-      {canCornerRadius ? (
-        <PropertiesSection title="Corner radius" defaultOpen>
-          <CornerRadiusControls
-            node={node}
-            instanceKey={`${key}-vec`}
-            locked={locked}
-            focusedCornerIndex={focusedCornerIndex}
-            onStyle={applyCornerStyle}
-          />
-        </PropertiesSection>
-      ) : null}
+      <PropertiesSection title="Corner radius" defaultOpen>
+        <CornerRadiusControls
+          node={node}
+          instanceKey={`${key}-vec`}
+          locked={locked || !canCornerRadius}
+          focusedCornerIndex={focusedCornerIndex}
+          focusedCornerLabel={
+            focusedCornerIndex != null && !rectLikePath
+              ? `Corner ${focusedCornerIndex + 1}`
+              : undefined
+          }
+          cornerLabels={rectLikePath ? undefined : pathCornerLabels}
+          onStyle={applyCornerStyle}
+        />
+      </PropertiesSection>
 
-      <section className="border-b border-app-border-subtle px-2 py-2">
+      <section className="border-b border-app-panel-edge px-2 py-2">
         <div className="mb-1.5 flex items-center justify-between">
-          <span className="text-[11px] font-semibold text-app-fg">Fill</span>
+          <span className="text-ui font-semibold text-app-fg">Fill</span>
           <div className="flex items-center gap-0.5">
             <button
               type="button"
               title="Color styles"
-              className="flex h-6 w-6 items-center justify-center rounded text-app-muted hover:bg-app-hover hover:text-app-fg"
+              className={cn(inspectorHeaderActionBtnClass, "inspector-icon-btn")}
             >
-              <Grid2x2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+              <Grid2x2 {...inspectorLucideProps()} />
             </button>
             <button
               type="button"
               title="Add fill"
               disabled={locked}
-              className="flex h-6 w-6 items-center justify-center rounded text-app-muted hover:bg-app-hover hover:text-app-fg disabled:opacity-40"
+              className={cn(inspectorHeaderActionBtnClass, "inspector-icon-btn")}
               onClick={() => style({ fillEnabled: true, fill: fillHex, fillType: "solid" })}
             >
-              <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
+              <Plus {...inspectorLucideProps()} />
             </button>
           </div>
         </div>
@@ -250,7 +339,7 @@ export function VectorInspector({ node }: { node: EditorNode }) {
           <input
             type="text"
             disabled={locked || !fillEnabled}
-            className="h-6 min-w-0 flex-1 rounded border border-app-border bg-app-panel px-1.5 font-mono text-[11px] uppercase text-app-fg disabled:opacity-40"
+            className="h-6 min-w-0 flex-1 rounded border border-app-border bg-app-panel px-1.5 font-mono text-ui uppercase text-app-fg disabled:opacity-40"
             value={fillHex.replace("#", "")}
             onChange={(e) => {
               const raw = e.target.value.replace(/[^0-9a-f]/gi, "").slice(0, 6);
@@ -269,7 +358,7 @@ export function VectorInspector({ node }: { node: EditorNode }) {
           <input
             type="text"
             disabled={locked || !fillEnabled}
-            className="h-6 w-12 shrink-0 rounded border border-app-border bg-app-panel px-1 text-center text-[11px] text-app-fg disabled:opacity-40"
+            className="h-6 w-12 shrink-0 rounded border border-app-border bg-app-panel px-1 text-center text-ui text-app-fg disabled:opacity-40"
             defaultValue={`${Math.round(fillOpacity * 100)} %`}
             key={`${key}-fo-${Math.round(fillOpacity * 100)}`}
             onBlur={(e) => {
@@ -296,39 +385,35 @@ export function VectorInspector({ node }: { node: EditorNode }) {
             type="button"
             title={fillEnabled ? "Hide fill" : "Show fill"}
             disabled={locked}
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-muted hover:bg-app-hover hover:text-app-fg disabled:opacity-40"
+            className={cn(inspectorRowActionBtnClass, "inspector-icon-btn")}
             onClick={() => style({ fillEnabled: !fillEnabled })}
           >
-            {fillEnabled ? (
-              <Eye className="h-3.5 w-3.5" strokeWidth={1.75} />
-            ) : (
-              <EyeOff className="h-3.5 w-3.5" strokeWidth={1.75} />
-            )}
+            {fillEnabled ? <Eye {...inspectorLucideProps()} /> : <EyeOff {...inspectorLucideProps()} />}
           </button>
           <button
             type="button"
             title="Remove fill"
             disabled={locked}
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-muted hover:bg-app-hover hover:text-app-fg disabled:opacity-40"
+            className={cn(inspectorRowActionBtnClass, "inspector-icon-btn")}
             onClick={() => {
               pushHistory();
               style({ fillEnabled: false });
             }}
           >
-            <Minus className="h-3.5 w-3.5" strokeWidth={1.75} />
+            <Minus className={inspectorIconClass} strokeWidth={inspectorIconStroke} />
           </button>
         </div>
       </section>
 
-      <section className="border-b border-app-border-subtle px-2 py-2">
+      <section className="border-b border-app-panel-edge px-2 py-2">
         <div className="mb-1.5 flex items-center justify-between">
-          <span className="text-[11px] font-semibold text-app-fg">Stroke</span>
+          <span className="text-ui font-semibold text-app-fg">Stroke</span>
           {!hasStroke ? (
             <button
               type="button"
               title="Add stroke"
               disabled={locked}
-              className="flex h-6 w-6 items-center justify-center rounded text-app-muted hover:bg-app-hover hover:text-app-fg disabled:opacity-40"
+              className={cn(inspectorHeaderActionBtnClass, "inspector-icon-btn")}
               onClick={() =>
                 style({
                   strokeWidth: 1,
@@ -337,7 +422,7 @@ export function VectorInspector({ node }: { node: EditorNode }) {
                 })
               }
             >
-              <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
+              <Plus {...inspectorLucideProps()} />
             </button>
           ) : null}
         </div>
@@ -364,7 +449,7 @@ export function VectorInspector({ node }: { node: EditorNode }) {
               <input
                 type="text"
                 disabled={locked}
-                className="h-6 min-w-0 flex-1 rounded border border-app-border bg-app-panel px-1.5 font-mono text-[11px] uppercase text-app-fg disabled:opacity-40"
+                className="h-6 min-w-0 flex-1 rounded border border-app-border bg-app-panel px-1.5 font-mono text-ui uppercase text-app-fg disabled:opacity-40"
                 defaultValue={(node.strokeColor ?? "#000000").replace("#", "")}
                 key={`${key}-sc-${node.strokeColor}`}
                 onBlur={(e) => {
@@ -380,7 +465,7 @@ export function VectorInspector({ node }: { node: EditorNode }) {
               <input
                 type="text"
                 disabled={locked}
-                className="h-6 w-10 shrink-0 rounded border border-app-border bg-app-panel px-1 text-center text-[11px] text-app-fg disabled:opacity-40"
+                className="h-6 w-10 shrink-0 rounded border border-app-border bg-app-panel px-1 text-center text-ui text-app-fg disabled:opacity-40"
                 defaultValue={String(strokeWidth)}
                 key={`${key}-sw-${strokeWidth}`}
                 onBlur={(e) => {
@@ -405,10 +490,10 @@ export function VectorInspector({ node }: { node: EditorNode }) {
                 type="button"
                 title="Remove stroke"
                 disabled={locked}
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-muted hover:bg-app-hover hover:text-app-fg disabled:opacity-40"
+                className={cn(inspectorRowActionBtnClass, "inspector-icon-btn")}
                 onClick={() => style({ strokeWidth: 0 })}
               >
-                <Minus className="h-3.5 w-3.5" strokeWidth={1.75} />
+                <Minus className={inspectorIconClass} strokeWidth={inspectorIconStroke} />
               </button>
             </div>
           </div>

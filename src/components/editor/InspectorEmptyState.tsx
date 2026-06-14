@@ -2,7 +2,10 @@
 
 import { LayoutTemplate, MousePointer2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { canAlignSelection } from "@/lib/alignSelection";
+import { useEditorStore } from "@/stores/useEditorStore";
 import { AlignControls } from "./AlignControls";
+import { SelectionInspectorTools } from "./SelectionInspectorTools";
 
 export function InspectorEmptyState({
   multi,
@@ -19,12 +22,16 @@ export function InspectorEmptyState({
   onAddAutoLayout?: () => void;
   canAddAutoLayout?: boolean;
 }) {
+  const selectedIds = useEditorStore((s) => s.selectedIds);
+  const nodes = useEditorStore((s) => s.nodes);
+  const childOrder = useEditorStore((s) => s.childOrder);
+  const canAlign = canAlignSelection(selectedIds, nodes, childOrder);
   return (
-    <div className="flex min-h-[min(70vh,520px)] min-h-0 flex-col items-center justify-center gap-2 px-4 py-10 text-center">
+    <div className="flex min-h-[min(70vh,520px)] min-h-0 flex-col items-center justify-center gap-3 px-4 py-12 text-center">
       <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-app-border bg-white/[0.03] text-app-subtle">
         <MousePointer2 className="h-5 w-5" strokeWidth={1.5} />
       </div>
-      <p className="text-[12px] font-medium leading-snug text-app-muted">
+      <p className="text-ui font-medium leading-snug text-app-muted">
         {multi && selectedCount != null
           ? `${selectedCount} layer${selectedCount === 1 ? "" : "s"} selected`
           : multi && count != null
@@ -33,18 +40,15 @@ export function InspectorEmptyState({
               ? "Multiple layers selected"
               : "Nothing selected"}
       </p>
-      <p className="max-w-[220px] text-[11px] leading-relaxed text-app-subtle">
-        {multi && (selectedCount ?? 0) > (count ?? 0) && (count ?? 0) < 2
-          ? "Only top-level siblings can be aligned. Deselect nested layers or pick layers that share the same parent."
-          : multi
-            ? "Align layers below, or wrap them in an auto-layout frame (⇧A)."
-            : "Click a frame, shape, or text layer to inspect and edit layout, fill, and typography."}
-      </p>
-      {multi && (count ?? 0) >= 2 ? (
-        <div className="mt-3 w-full max-w-[240px] rounded-md border border-app-border bg-white/[0.02] p-2.5 text-left">
-          <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-app-subtle">
-            Align
-          </div>
+
+      {multi ? (
+        <div className="mt-3 w-full max-w-[280px]">
+          <SelectionInspectorTools />
+        </div>
+      ) : null}
+      {multi && canAlign ? (
+        <div className="mt-4 w-full max-w-[240px] rounded-md border border-app-border bg-white/[0.02] p-3 text-left">
+          <div className="mb-2.5 text-ui font-medium text-app-subtle">Align</div>
           <AlignControls variant="panel" />
         </div>
       ) : null}
@@ -53,7 +57,7 @@ export function InspectorEmptyState({
           type="button"
           onClick={onAddAutoLayout}
           className={cn(
-            "mt-2 flex h-7 items-center justify-center gap-1.5 rounded border px-3 text-[11px] font-medium transition-colors",
+            "mt-2 flex h-7 items-center justify-center gap-1.5 rounded-md border px-3 text-ui font-medium transition-colors",
             "border-app-border bg-app-panel text-app-fg hover:bg-app-hover",
           )}
         >

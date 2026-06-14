@@ -1,3 +1,4 @@
+import { canAlignSelection, canDistributeSelection } from "@/lib/alignSelection";
 import { canAddAutoLayoutToSelection } from "@/lib/autoLayoutSelection";
 import { canCreateComponentFromSelection, findInstanceRoot } from "@/lib/componentModel";
 import { topLevelSelectedIds } from "@/lib/editorGraph";
@@ -43,26 +44,11 @@ function canPasteFromClipboard(s: EditorState) {
 }
 
 function alignEligible(s: EditorState) {
-  const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
-    const n = s.nodes[id];
-    return n && !n.locked && n.visible;
-  });
-  return (
-    tops.length >= 2 &&
-    tops.every((id) => {
-      const n = s.nodes[id];
-      return n && !n.locked && n.visible;
-    })
-  );
+  return canAlignSelection(s.selectedIds, s.nodes, s.childOrder);
 }
 
 function distributeEligible(s: EditorState) {
-  if (!inDesign(s)) return false;
-  const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
-    const n = s.nodes[id];
-    return n && !n.locked && n.visible;
-  });
-  return tops.length >= 3;
+  return inDesign(s) && canDistributeSelection(s.selectedIds, s.nodes);
 }
 
 function hasSelection(s: EditorState) {

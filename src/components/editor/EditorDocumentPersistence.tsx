@@ -15,6 +15,9 @@ import {
   repairNodeHierarchyIfNeeded,
 } from "@/lib/editorGraph";
 import { editorPatchFromPage } from "@/lib/editorPages";
+import { getRouteApiFileId, hydrateEditorFromApiFile } from "@/lib/apiFileHydration";
+import { isPaytmCraftHttpApiMode } from "@/lib/env";
+import { FIG_IMPORT_POST_LAYOUT_NODE_CAP } from "@/lib/figImport/figImportConstants";
 import { getSyncProvider } from "@/lib/syncProviderSingleton";
 import { toPersistSlice, useEditorStore } from "@/stores/useEditorStore";
 
@@ -122,6 +125,9 @@ export function EditorDocumentPersistence() {
         if (!needsNodeHierarchyRepair(state.nodes, state.childOrder)) return;
 
         const wholesaleReplace = state.documentHydrationRevision !== prev.documentHydrationRevision;
+        const nodeCount = Object.keys(state.nodes).length;
+        if (wholesaleReplace && nodeCount > FIG_IMPORT_POST_LAYOUT_NODE_CAP) return;
+
         const pass = ++repairPassRef.current;
         scheduleIdle(() => {
           if (cancelled || pass !== repairPassRef.current) return;
@@ -159,7 +165,8 @@ export function EditorDocumentPersistence() {
           prev.documentSaveStatus === "saving" &&
           (state.documentSaveStatus === "saved" ||
             state.documentSaveStatus === "saved-api" ||
-            state.documentSaveStatus === "api-save-failed")
+            state.documentSaveStatus === "api-save-failed" ||
+            state.documentSaveStatus === "api-conflict")
         ) {
           lastSavedRef.current = persistFingerprint(state);
           return;
@@ -205,6 +212,15 @@ export function EditorDocumentPersistence() {
       scheduleIdle(() => {
         run(() => {
           const afterHydrate = useEditorStore.getState();
+          if (afterHydrate.figImportInProgress) {
+            finishSubscriptions();
+            return;
+          }
+          const nodeCount = Object.keys(afterHydrate.nodes).length;
+          if (nodeCount > FIG_IMPORT_POST_LAYOUT_NODE_CAP) {
+            finishSubscriptions();
+            return;
+          }
           let pagesChanged = false;
           const pages = { ...afterHydrate.pages };
           for (const [pageId, page] of Object.entries(pages)) {
@@ -261,39 +277,77 @@ export function EditorDocumentPersistence() {
         }
       };
 
-      // Import applies synchronously in finalize; wait two frames before fallback restore.
+      const waitForImportedDesign = (attemptsLeft: number) => {
+        const live = useEditorStore.getState();
+        if (hasCanvasRootDesign(live)) {
+          lastSavedRef.current = persistFingerprint(live);
+          return;
+        }
+        if (attemptsLeft <= 0) {
+          finishPostImportHydration();
+          return;
+        }
+        requestAnimationFrame(() => waitForImportedDesign(attemptsLeft - 1));
+      };
+
       if (hasCanvasRootDesign(state)) {
         finishPostImportHydration();
         return;
       }
-      requestAnimationFrame(() => {
-        requestAnimationFrame(finishPostImportHydration);
-      });
+      waitForImportedDesign(12);
     });
 
-    const runHydrationWork = () => {
+    const completeHydration = () => {
+      useEditorStore.setState({ documentHydrating: false });
+      repairPagesInBackground();
+    };
+
+    const runHydrationWork = async () => {
       if (hydrationStartedRef.current) return;
       hydrationStartedRef.current = true;
-      try {
-        if (useEditorStore.getState().figImportInProgress) {
-          skippedHydrationDuringImportRef.current = true;
-        } else {
+
+      if (useEditorStore.getState().figImportInProgress) {
+        skippedHydrationDuringImportRef.current = true;
+        completeHydration();
+        return;
+      }
+
+      const routeFileId = getRouteApiFileId();
+      const st = useEditorStore.getState();
+      const shouldHydrateRoute =
+        isPaytmCraftHttpApiMode() &&
+        routeFileId &&
+        (!st.isApiBackedFile || st.apiFileId !== routeFileId);
+
+      if (shouldHydrateRoute) {
+        try {
+          const ok = await hydrateEditorFromApiFile(routeFileId);
+          if (!ok) {
+            console.warn("[Paytm Craft] API file not found for route:", routeFileId);
+            restoreFromLocalStorage();
+          }
+        } catch (e) {
+          console.warn("[Paytm Craft] API route hydration failed", e);
           restoreFromLocalStorage();
         }
+        completeHydration();
+        return;
+      }
+
+      try {
+        restoreFromLocalStorage();
       } catch (e) {
         console.warn("[Paytm Craft] Failed to restore from browser storage", e);
         clearLocalDocument();
         if (!hasCanvasRootDesign(useEditorStore.getState())) {
           useEditorStore.getState().applySampleDocumentIfEmpty();
         }
-      } finally {
-        useEditorStore.setState({ documentHydrating: false });
       }
-      repairPagesInBackground();
+      completeHydration();
     };
 
     useEditorStore.setState({ documentHydrating: false });
-    cancelTimers.push(scheduleIdle(() => run(runHydrationWork), 80));
+    cancelTimers.push(scheduleIdle(() => run(() => void runHydrationWork()), 80));
 
     const emptyRecovery = window.setTimeout(() => {
       if (cancelled) return;

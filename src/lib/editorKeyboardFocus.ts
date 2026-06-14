@@ -133,12 +133,26 @@ export function shouldYieldShortcutsToTyping(e: KeyboardEvent, target: EventTarg
     if (e.key === "Escape") return false;
     return true;
   }
+  // Figma-style: V/R/P/F… switch tools even when an inspector field still has DOM focus.
+  if (isToolShortcutEvent(e)) return false;
   const field = resolveKeyboardFieldTarget(target);
   if (!field) return false;
   if (shouldAllowNativeFieldClipboard(e, target)) return true;
   if (e.metaKey || e.ctrlKey) return false;
   if (e.key === "Escape") return false;
   if (shouldBlockDeleteSelectionShortcut(e, target)) return true;
+  // Allow canvas nudge/reorder when a single-line field is focused but empty.
+  if (
+    elementTagName(field) === "INPUT" &&
+    !isMultilineEditableElement(field) &&
+    (e.code === "ArrowUp" ||
+      e.code === "ArrowDown" ||
+      e.code === "ArrowLeft" ||
+      e.code === "ArrowRight")
+  ) {
+    const raw = (field as { value?: string }).value ?? "";
+    if (raw.trim() === "") return false;
+  }
   return true;
 }
 
@@ -147,6 +161,32 @@ export function releaseFieldFocusForCanvas(): void {
   const ae = document.activeElement;
   if (ae instanceof HTMLElement && isEditableFieldElement(ae)) {
     ae.blur();
+  }
+}
+
+/** Blur focused chrome buttons/links that steal Space/Enter after toolbar or menu clicks. */
+export function releaseChromeControlFocus(): void {
+  if (typeof document === "undefined") return;
+  const ae = document.activeElement;
+  if (!(ae instanceof HTMLElement)) return;
+  if (isEditableFieldElement(ae)) return;
+  const tag = ae.tagName;
+  if (tag !== "BUTTON" && tag !== "A") return;
+  if (!ae.closest("[data-app-chrome]")) return;
+  ae.blur();
+}
+
+/**
+ * Dashboard-only import overlays share Zustand flags with the editor but are not
+ * mounted in AppShell — clear them on editor entry so shortcuts are not blocked invisibly.
+ */
+export function resetStaleEditorOverlays(): void {
+  const st = useEditorStore.getState();
+  const patch: Partial<EditorState> = {};
+  if (st.importHubOpen) patch.importHubOpen = false;
+  if (st.importWebModalOpen) patch.importWebModalOpen = false;
+  if (Object.keys(patch).length > 0) {
+    useEditorStore.setState(patch);
   }
 }
 
@@ -159,10 +199,34 @@ export function focusCanvasViewport(el: HTMLElement | null | undefined): void {
   }
 }
 
+/** Clear stuck drag/resize body styles that can block clicks and keyboard routing. */
+export function recoverCanvasInteractionState(): void {
+  if (typeof document === "undefined") return;
+  document.body.style.userSelect = "";
+  document.body.style.cursor = "";
+}
+
 /** Blur property fields and move focus to the canvas for global shortcuts. */
 export function activateCanvasForShortcuts(): void {
+  recoverCanvasInteractionState();
   releaseFieldFocusForCanvas();
+  releaseChromeControlFocus();
   if (typeof document !== "undefined") {
     focusCanvasViewport(document.querySelector<HTMLElement>("[data-canvas-viewport]"));
   }
+}
+
+/** Figma-style Escape: return the canvas pointer to the move (V) tool. */
+export function escapeToMovePointer(): void {
+  const st = useEditorStore.getState();
+  if (st.transformInteractionMode !== "none" || st.rotateGeomSnapshot) {
+    useEditorStore.setState({
+      transformInteractionMode: "none",
+      rotateGeomSnapshot: null,
+    });
+  }
+  if (st.tool !== "move") {
+    st.setTool("move");
+  }
+  activateCanvasForShortcuts();
 }

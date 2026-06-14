@@ -13,6 +13,7 @@ import {
 import { useEditorStore, type EditorNode, type LayoutSizingMode } from "@/stores/useEditorStore";
 import type { LayoutMode } from "@/lib/autoLayout";
 import { cn } from "@/lib/utils";
+import { inspectorIconClass, inspectorIconStroke } from "@/lib/inspectorIconStyles";
 import {
   useAnchoredDropdownPosition,
   useDismissAnchoredDropdown,
@@ -154,7 +155,7 @@ function SizingDropdown({
               type="button"
               role="menuitem"
               className={cn(
-                "flex w-full items-start gap-2 px-2 py-1.5 text-left text-[11px] transition-colors",
+                "flex w-full items-start gap-2 px-2 py-1.5 text-left text-ui transition-colors",
                 selected ? "bg-app-hover text-white" : "text-app-fg hover:bg-app-hover",
               )}
               onClick={() => {
@@ -163,12 +164,12 @@ function SizingDropdown({
               }}
             >
               <span className="mt-0.5 flex w-4 shrink-0 justify-center">
-                {selected ? <Check className="h-3.5 w-3.5 text-accent" strokeWidth={2} /> : null}
+                {selected ? <Check className={cn(inspectorIconClass, "text-accent")} strokeWidth={inspectorIconStroke} /> : null}
               </span>
-              <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-80" strokeWidth={1.75} />
+              <Icon className={cn(inspectorIconClass, "mt-0.5 opacity-80")} strokeWidth={inspectorIconStroke} />
               <span>
                 <span className="block font-medium">{opt.label}</span>
-                <span className="block text-[10px] text-[#737373]">{opt.detail}</span>
+                <span className="block text-ui text-[#737373]">{opt.detail}</span>
               </span>
             </button>
           );
@@ -178,7 +179,7 @@ function SizingDropdown({
 
   return (
     <div>
-      <div className="mb-0.5 text-[10px] font-medium text-[#737373]">{label}</div>
+      <div className="mb-0.5 text-ui font-medium text-[#737373]">{label}</div>
       <button
         ref={anchorRef}
         type="button"
@@ -186,13 +187,13 @@ function SizingDropdown({
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          "flex h-6 w-full items-center gap-1.5 rounded border px-2 text-left text-[11px] transition-colors disabled:opacity-40",
+          "flex h-6 w-full items-center gap-1.5 rounded border px-2 text-left text-ui transition-colors disabled:opacity-40",
           "border-app-border bg-app-panel text-app-fg hover:bg-app-hover",
         )}
       >
-        <ActiveIcon className="h-3.5 w-3.5 shrink-0 opacity-80" strokeWidth={1.75} />
+        <ActiveIcon className={cn(inspectorIconClass, "opacity-80")} strokeWidth={inspectorIconStroke} />
         <span className="min-w-0 flex-1 truncate">{active.label}</span>
-        <ChevronDown className="h-3 w-3 shrink-0 opacity-60" />
+        <ChevronDown className={cn(inspectorIconClass, "opacity-60")} strokeWidth={inspectorIconStroke} />
       </button>
       {menu && mounted ? createPortal(menu, document.body) : null}
     </div>

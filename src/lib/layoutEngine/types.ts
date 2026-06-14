@@ -70,7 +70,12 @@ export type LayoutChildPatch = Partial<
 
 export type LayoutAutoNodeResult = {
   children: Record<string, LayoutChildPatch>;
-  parent?: Partial<Pick<LayoutEngineNode, "width" | "height" | "computedWidth" | "computedHeight" | "layoutDirty">>;
+  parent?: Partial<
+    Pick<
+      LayoutEngineNode,
+      "width" | "height" | "computedWidth" | "computedHeight" | "layoutDirty" | "layoutGap"
+    >
+  >;
 };
 
 export const LAYOUT_DEFAULTS = {

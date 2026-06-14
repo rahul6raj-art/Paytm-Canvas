@@ -1,16 +1,20 @@
 import { applyDeepAutoLayout, applyLayoutPatchWithAutoLayout } from "@/lib/autoLayout";
+import { CANVAS_CLICK_SLOP_SCREEN_PX } from "@/lib/canvasInteractionGuards";
 import { screenDeltaToWorld } from "@/lib/canvasCoordinates";
+import { screenPxToWorld } from "@/lib/canvasVisual";
 import { cancelCanvasMarqueeSession } from "@/lib/canvasMarqueeSession";
 import { cancelCanvasNodeDrag } from "@/lib/canvasNodeDrag";
 import { worldPointToParentLocalFromChildOrder } from "@/lib/editorGraph";
 import { flowChildIds } from "@/lib/layoutEngine/layoutAutoNode";
-import { inferAutoLayoutGap } from "@/lib/layoutEngine/inferGap";
+import { freezeAutoLayoutGap, inferAutoLayoutGap } from "@/lib/layoutEngine/inferGap";
 import { computeMinLayoutGap } from "@/lib/layoutEngine/minLayoutGap";
 import { childMainSizing, type LayoutEngineNode } from "@/lib/layoutEngine/types";
 import { useEditorStore, type EditorNode } from "@/stores/useEditorStore";
 import { forEachCoalescedPointerEvent } from "@/lib/smoothPointer";
 import type { PaddingSide } from "./autoLayoutHandles";
 import { computeFillDividerDragPatch } from "./fillDividerDrag";
+import { setAutoLayoutHandleDragActive } from "./autoLayoutDragSession";
+import { mirrorWasmFromStore } from "@/engine/craftEngineAuthorityStructure";
 
 /** Fallback floor when geometry cannot be resolved (e.g. fewer than two flow children). */
 export const LAYOUT_GAP_MIN = -256;
@@ -78,7 +82,14 @@ export function resolveGapAtHandleIndex(
     mode === "horizontal" ? b.x - (a.x + a.width) : b.y - (a.y + a.height);
   const parent = nodes[parentId];
   if (!parent) return sanitizeLayoutGap(raw);
-  return sanitizeLayoutGapForFrame(parentId, nodes, childOrder, raw);
+  const measured = sanitizeLayoutGapForFrame(parentId, nodes, childOrder, raw);
+  if (parent.layoutGapAuto) {
+    return measured;
+  }
+  const configured = resolveStartLayoutGap(parent, nodes, childOrder, mode);
+  // When stored gap lags behind on-canvas spacing, start the drag from what the user sees.
+  if (measured > configured) return measured;
+  return configured;
 }
 
 function primaryAxisAlignBlocksGapEdits(align: string | undefined): boolean {
@@ -201,6 +212,7 @@ function applyLayoutPatchNow(nodeId: string, patch: Record<string, unknown>): vo
     nodes = relayoutAncestorAutoLayoutContainers(nodes, s.childOrder, nodeId);
     return { nodes };
   });
+  mirrorWasmFromStore();
 }
 
 function schedulePatch(nodeId: string, patch: Record<string, unknown>, immediate = false): void {
@@ -238,13 +250,14 @@ type DragSession = {
   mode: "horizontal" | "vertical";
   drag: DragKind;
   clientToWorld: ClientToWorldFn;
+  activated: boolean;
+  startClientX: number;
+  startClientY: number;
 };
 
 let activeDrag: DragSession | null = null;
 
-export function isAutoLayoutHandleDragActive(): boolean {
-  return activeDrag !== null;
-}
+export { isAutoLayoutHandleDragActive } from "./autoLayoutDragSession";
 
 function applySpacingDrag(
   session: DragSession,
@@ -361,7 +374,27 @@ function applyFillDividerDrag(session: DragSession, local: { x: number; y: numbe
   useEditorStore.setState({ nodes: relayouted as typeof st.nodes });
 }
 
+function clickSlopWorld(zoom: number): number {
+  return screenPxToWorld(CANVAS_CLICK_SLOP_SCREEN_PX, zoom);
+}
+
+function ensureHandleDragActivated(
+  session: DragSession,
+  clientX: number,
+  clientY: number,
+): boolean {
+  if (session.activated) return true;
+  const st = useEditorStore.getState();
+  const fdx = screenDeltaToWorld(clientX - session.startClientX, st.zoom);
+  const fdy = screenDeltaToWorld(clientY - session.startClientY, st.zoom);
+  if (Math.hypot(fdx, fdy) < clickSlopWorld(st.zoom)) return false;
+  session.activated = true;
+  st.pushHistory();
+  return true;
+}
+
 function applyDragAtClient(session: DragSession, clientX: number, clientY: number): void {
+  if (!ensureHandleDragActivated(session, clientX, clientY)) return;
   const st = useEditorStore.getState();
   const world = session.clientToWorld(clientX, clientY);
   const local = parentLocalFromWorld(
@@ -377,12 +410,18 @@ function applyDragAtClient(session: DragSession, clientX: number, clientY: numbe
   else applyFillDividerDrag(session, local);
 }
 
-function endDrag(): void {
+function endDrag(session: DragSession): void {
   if (rafId) {
     cancelAnimationFrame(rafId);
-    flushStoreUpdate();
+    rafId = 0;
+    if (session.activated) {
+      flushStoreUpdate();
+    } else {
+      pendingPatch = null;
+    }
   }
   activeDrag = null;
+  setAutoLayoutHandleDragActive(false);
   setPreview(null);
   document.body.style.cursor = "";
 }
@@ -402,7 +441,7 @@ function attachDragPointerListeners(session: DragSession, captureTarget: Element
     window.removeEventListener("pointermove", onMove);
     window.removeEventListener("pointerup", onUp);
     window.removeEventListener("pointercancel", onUp);
-    endDrag();
+    endDrag(session);
   };
 
   window.addEventListener("pointermove", onMove);
@@ -433,7 +472,12 @@ export function beginSpacingDrag(opts: {
   const mode = parent.layoutMode as "horizontal" | "vertical";
 
   const prePatch: Record<string, unknown> = {};
-  if (parent.layoutGapAuto) prePatch.layoutGapAuto = false;
+  const gapFreeze = freezeAutoLayoutGap(
+    parent as LayoutEngineNode,
+    st.nodes as Record<string, LayoutEngineNode>,
+    st.childOrder,
+  );
+  if (gapFreeze) Object.assign(prePatch, gapFreeze);
   if (primaryAxisAlignBlocksGapEdits(parent.primaryAxisAlign)) {
     prePatch.primaryAxisAlign = "start";
   }
@@ -445,8 +489,6 @@ export function beginSpacingDrag(opts: {
   const parent2 = st2.nodes[opts.nodeId];
   if (!parent2) return false;
 
-  const world = opts.clientToWorld(opts.clientX, opts.clientY);
-  const local = parentLocalFromWorld(world.x, world.y, opts.nodeId, st2.nodes, st2.childOrder);
   const gapIndex = opts.gapIndex ?? 0;
   const startGap = resolveGapAtHandleIndex(
     opts.nodeId,
@@ -456,12 +498,14 @@ export function beginSpacingDrag(opts: {
     gapIndex,
   );
 
-  st2.pushHistory();
   const session: DragSession = {
     pointerId: opts.pointerId,
     nodeId: opts.nodeId,
     mode,
     clientToWorld: opts.clientToWorld,
+    activated: false,
+    startClientX: opts.clientX,
+    startClientY: opts.clientY,
     drag: {
       type: "spacing",
       startGap,
@@ -471,8 +515,8 @@ export function beginSpacingDrag(opts: {
     },
   };
   activeDrag = session;
+  setAutoLayoutHandleDragActive(true);
   document.body.style.cursor = mode === "horizontal" ? "ew-resize" : "ns-resize";
-  applyDragAtClient(session, opts.clientX, opts.clientY);
   attachDragPointerListeners(session, opts.captureTarget);
   return true;
 }
@@ -502,12 +546,14 @@ export function beginPaddingDrag(opts: {
           ? parent.paddingBottom ?? 0
           : parent.paddingLeft ?? 0;
 
-  st.pushHistory();
   const session: DragSession = {
     pointerId: opts.pointerId,
     nodeId: opts.nodeId,
     mode,
     clientToWorld: opts.clientToWorld,
+    activated: false,
+    startClientX: opts.clientX,
+    startClientY: opts.clientY,
     drag: {
       type: "padding",
       side: opts.side,
@@ -519,7 +565,7 @@ export function beginPaddingDrag(opts: {
     },
   };
   activeDrag = session;
-  applyDragAtClient(session, opts.clientX, opts.clientY);
+  setAutoLayoutHandleDragActive(true);
   attachDragPointerListeners(session, opts.captureTarget);
   return true;
 }
@@ -543,7 +589,6 @@ export function beginFillDividerDrag(opts: {
   const world = opts.clientToWorld(opts.clientX, opts.clientY);
   const local = parentLocalFromWorld(world.x, world.y, opts.nodeId, st.nodes, st.childOrder);
 
-  st.pushHistory();
   const leftMainSizing = childMainSizing(left as LayoutEngineNode, mode);
   const rightMainSizing = childMainSizing(right as LayoutEngineNode, mode);
   const session: DragSession = {
@@ -551,6 +596,9 @@ export function beginFillDividerDrag(opts: {
     nodeId: opts.nodeId,
     mode,
     clientToWorld: opts.clientToWorld,
+    activated: false,
+    startClientX: opts.clientX,
+    startClientY: opts.clientY,
     drag: {
       type: "fill-divider",
       leftId: opts.leftChildId,
@@ -565,7 +613,7 @@ export function beginFillDividerDrag(opts: {
     },
   };
   activeDrag = session;
-  applyDragAtClient(session, opts.clientX, opts.clientY);
+  setAutoLayoutHandleDragActive(true);
   attachDragPointerListeners(session, opts.captureTarget);
   return true;
 }

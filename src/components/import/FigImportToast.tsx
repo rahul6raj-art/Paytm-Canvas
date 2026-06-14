@@ -37,7 +37,7 @@ export function FigImportToast() {
           className={`mt-0.5 h-5 w-5 shrink-0 ${isWarning ? "text-amber-400" : "text-emerald-500"}`}
           aria-hidden
         />
-        <p className="flex-1 text-[13px] leading-relaxed">{message}</p>
+        <p className="flex-1 text-ui-sm leading-relaxed">{message}</p>
         <button
           type="button"
           className="shrink-0 rounded p-0.5 text-app-subtle hover:bg-app-hover hover:text-app-fg"

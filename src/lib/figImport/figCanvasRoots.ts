@@ -117,7 +117,8 @@ export function pickCanvasScreenRoots(
   const pool = withoutJunk.length > 0 ? withoutJunk : candidates;
 
   if (pool.length === 1) return pool;
-  return [pickLargest(pool)];
+  // Import every top-level screen so multi-frame pages match Figma (not only the largest).
+  return pool;
 }
 
 export function pickCanvasScreenRootIds(

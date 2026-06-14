@@ -1,17 +1,34 @@
 import { getNodeCornerRadii, roundedRectPathD, roundedRectPolygonPoints } from "@/lib/cornerRadius";
 import type { EditorNode } from "@/stores/useEditorStore";
 import { ROOT } from "@/stores/useEditorStore";
-import { getRenderedWorldTopLeft, topLevelSelectedIds } from "@/lib/editorGraph";
+import {
+  getRenderedWorldTopLeft,
+  getNodeWorldMatrixFromChildOrder,
+  layerPanelChildIds,
+  topLevelSelectedIds,
+} from "@/lib/editorGraph";
 import { pathToSvgD, svgPathDToPathPoints } from "@/lib/pathGeometry";
-import { generatePolygonPoints } from "@/lib/shapes/pathGenerators";
+import { effectiveEllipseArc, ellipseArcPathD, ellipseLocalPolygonPoints } from "@/lib/shapes/ellipseArc";
 import { isPolygonNode, polygonVertices } from "@/lib/shapes/polygonGeometry";
 import {
   applyMatrixToPoint,
   getNodeTransformedWorldBounds,
   getNodeWorldMatrix,
 } from "@/lib/transformMath";
+import { clipperApplyBoolean } from "@/lib/geometry/clipperKernel";
+import {
+  buildMaskClipPathDForGroup,
+  isBooleanGroup,
+  isMaskGroup,
+  maskGroupChildHitOrder,
+  type MaskClipPathResult,
+} from "@/lib/mask";
+import { tessellatePathPoints, tessellateSvgPathD } from "@/lib/outlineStroke";
 import { DEFAULT_SHAPE_FILL, editorNodeToShape } from "@/lib/shapes/shapeModel";
 import { worldRect } from "@/lib/tree";
+
+export type { MaskClipPathResult };
+export { isBooleanGroup, isMaskGroup, maskGroupChildHitOrder, buildMaskClipPathDForGroup };
 
 export type BooleanOperation = "union" | "subtract" | "intersect" | "exclude";
 
@@ -56,14 +73,6 @@ export function isBooleanEligibleNode(node: EditorNode | undefined): boolean {
   return false;
 }
 
-export function isMaskGroup(node: EditorNode | undefined): boolean {
-  return Boolean(node?.type === "group" && node.maskId);
-}
-
-export function isBooleanGroup(node: EditorNode | undefined): boolean {
-  return Boolean(node?.type === "group" && node.isBooleanGroup && !node.maskId);
-}
-
 type WorldBounds = { x: number; y: number; width: number; height: number };
 
 function boundsOfPolygonPoints(points: { x: number; y: number }[]): WorldBounds | null {
@@ -87,24 +96,16 @@ function boundsOfPolygonPoints(points: { x: number; y: number }[]): WorldBounds 
   };
 }
 
-function intersectBoundsAabb(a: WorldBounds, b: WorldBounds): WorldBounds | null {
-  const minX = Math.max(a.x, b.x);
-  const minY = Math.max(a.y, b.y);
-  const maxX = Math.min(a.x + a.width, b.x + b.width);
-  const maxY = Math.min(a.y + a.height, b.y + b.height);
-  if (maxX <= minX || maxY <= minY) return null;
-  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
-}
-
 /**
- * World bounds of the visible boolean result (not the union of all operand bounding boxes).
+ * World bounds of the visible boolean result via Clipper2 (not operand AABB heuristics).
  */
 export function boundsForBooleanChildren(
   operation: BooleanOperation,
   childIds: string[],
   nodes: Record<string, EditorNode>,
+  childOrder?: Record<string, string[]>,
 ): WorldBounds {
-  const inputs = shapesToBooleanInput(childIds, nodes);
+  const inputs = shapesToBooleanInput(childIds, nodes, childOrder);
   if (inputs.length === 0) {
     return { x: 0, y: 0, width: 1, height: 1 };
   }
@@ -112,30 +113,15 @@ export function boundsForBooleanChildren(
     return boundsOfPolygonPoints(inputs[0]!.polygon) ?? boundsOfPolygons(inputs);
   }
 
-  switch (operation) {
-    case "subtract": {
-      const topId = childIds[childIds.length - 1]!;
-      const base = inputs.filter((i) => i.id !== topId);
-      return boundsOfPolygons(base.length > 0 ? base : inputs);
-    }
-    case "intersect": {
-      const boxes = inputs
-        .map((i) => boundsOfPolygonPoints(i.polygon))
-        .filter((b): b is WorldBounds => b != null);
-      if (boxes.length === 0) return boundsOfPolygons(inputs);
-      let acc = boxes[0]!;
-      for (let i = 1; i < boxes.length; i++) {
-        const next = intersectBoundsAabb(acc, boxes[i]!);
-        if (!next) return boundsOfPolygons(inputs);
-        acc = next;
-      }
-      return acc;
-    }
-    case "union":
-    case "exclude":
-    default:
-      return boundsOfPolygons(inputs);
+  const result = applyBooleanOperation(operation, inputs);
+  if (result) {
+    return { x: result.x, y: result.y, width: result.width, height: result.height };
   }
+
+  if (operation === "intersect") {
+    return { x: 0, y: 0, width: 0, height: 0 };
+  }
+  return boundsOfPolygons(inputs);
 }
 
 export function getBooleanGroupVisibleWorldBounds(
@@ -148,7 +134,7 @@ export function getBooleanGroupVisibleWorldBounds(
     const wb = getNodeTransformedWorldBounds(groupId, nodes);
     return { x: wb.x, y: wb.y, width: wb.width, height: wb.height };
   }
-  const childIds = (childOrder[groupId] ?? []).filter((cid) => {
+  const childIds = layerPanelChildIds(groupId, nodes, childOrder).filter((cid) => {
     const c = nodes[cid];
     return c && c.visible && !c.locked;
   });
@@ -156,23 +142,12 @@ export function getBooleanGroupVisibleWorldBounds(
     const wb = getNodeTransformedWorldBounds(groupId, nodes);
     return { x: wb.x, y: wb.y, width: Math.max(1, wb.width), height: Math.max(1, wb.height) };
   }
-  return boundsForBooleanChildren(g.booleanOperation ?? "union", childIds, nodes);
+  return boundsForBooleanChildren(g.booleanOperation ?? "union", childIds, nodes, childOrder);
 }
 
 /** Mask groups use visible-region AABB for selection, not a single child transform. */
 export function maskGroupFrameNodeId(_node: EditorNode | undefined): string | null {
   return null;
-}
-
-/** Paint-order for hit tests: masked content above mask shape (Figma). */
-export function maskGroupChildHitOrder(
-  parent: Pick<EditorNode, "type" | "maskId">,
-  childIds: string[],
-): string[] {
-  if (parent.type !== "group" || !parent.maskId) return childIds;
-  const maskId = parent.maskId;
-  const content = childIds.filter((id) => id !== maskId);
-  return [...content, maskId];
 }
 
 export function getBooleanEligibleSelection(
@@ -211,11 +186,8 @@ export function nodeToLocalSvgSubpath(node: EditorNode): string {
     return pathToSvgD(node.pathPoints, node.pathClosed ?? false) || "";
   }
   if (node.type === "ellipse") {
-    const pts = generatePolygonPoints(64, w, h);
-    if (!pts.length) return "";
-    let d = `M ${pts[0]!.x} ${pts[0]!.y}`;
-    for (let i = 1; i < pts.length; i++) d += ` L ${pts[i]!.x} ${pts[i]!.y}`;
-    return `${d} Z`;
+    const arc = effectiveEllipseArc(node);
+    return ellipseArcPathD(w, h, arc.startDeg, arc.sweepDeg, arc.innerRadiusRatio);
   }
   if (node.type === "rectangle") {
     const radii = getNodeCornerRadii(node);
@@ -228,12 +200,14 @@ export function nodeToLocalSvgSubpath(node: EditorNode): string {
 export function shapeNodeToWorldPolygon(
   nodeId: string,
   nodes: Record<string, EditorNode>,
-  opts?: { ellipseSegments?: number },
+  opts?: { ellipseSegments?: number; childOrder?: Record<string, string[]> },
 ): { x: number; y: number }[] {
   const node = nodes[nodeId];
   if (!node) return [];
   const segs = opts?.ellipseSegments ?? 64;
-  const m = getNodeWorldMatrix(nodeId, nodes);
+  const m = opts?.childOrder
+    ? getNodeWorldMatrixFromChildOrder(nodeId, nodes, opts.childOrder)
+    : getNodeWorldMatrix(nodeId, nodes);
   if (!m) return [];
   const localPts = (() => {
     const w = Math.max(1, node.width);
@@ -243,6 +217,14 @@ export function shapeNodeToWorldPolygon(
       return polygonVertices(sides, w, h);
     }
     if (node.type === "path") {
+      if (node.pathPoints?.length && (node.pathClosed ?? false)) {
+        const tess = tessellatePathPoints(node.pathPoints, true);
+        if (tess.length >= 3) return tess;
+      }
+      if (node.flattenedPathData) {
+        const tess = tessellateSvgPathD(node.flattenedPathData);
+        if (tess.length >= 3) return tess;
+      }
       let pts = node.pathPoints ?? [];
       if (pts.length < 3 && node.flattenedPathData) {
         const fromD = svgPathDToPathPoints(node.flattenedPathData);
@@ -262,7 +244,8 @@ export function shapeNodeToWorldPolygon(
       }
     }
     if (node.type === "ellipse") {
-      return generatePolygonPoints(segs, w, h).map((p) => ({ x: p.x, y: p.y }));
+      const arc = effectiveEllipseArc(node);
+      return ellipseLocalPolygonPoints(w, h, arc, segs);
     }
     if (node.type === "rectangle") {
       return roundedRectPolygonPoints(w, h, getNodeCornerRadii(node));
@@ -284,12 +267,13 @@ export function shapeNodeToWorldPolygon(
 export function shapesToBooleanInput(
   ids: string[],
   nodes: Record<string, EditorNode>,
+  childOrder?: Record<string, string[]>,
 ): BooleanInput[] {
   return ids
     .map((id) => {
       const node = nodes[id];
       if (!node || !isBooleanEligibleNode(node)) return null;
-      const polygon = shapeNodeToWorldPolygon(id, nodes);
+      const polygon = shapeNodeToWorldPolygon(id, nodes, { childOrder });
       if (polygon.length < 3) return null;
       return {
         id,
@@ -309,18 +293,15 @@ function polygonToPathD(points: { x: number; y: number }[], originX: number, ori
   return `${d} Z`;
 }
 
-/** Operand order for evenodd subtract: all bases first, topmost (subtracted) shape last. */
+/** Operand paint order — first (bottom) shape is subtract subject when applicable. */
 export function orderedBooleanChildIds(
   childIds: string[],
-  operation: BooleanOperation,
+  _operation: BooleanOperation,
 ): string[] {
-  if (operation !== "subtract" || childIds.length < 2) return childIds;
-  const topId = childIds[childIds.length - 1]!;
-  const rest = childIds.filter((id) => id !== topId);
-  return [...rest, topId];
+  return childIds;
 }
 
-/** World-space polygons → single SVG path `d` in group-local coordinates. */
+/** World-space polygons → single SVG path `d` in group-local coordinates (Clipper2). */
 export function buildCompositePathDForGroup(
   groupId: string,
   childIds: string[],
@@ -328,36 +309,19 @@ export function buildCompositePathDForGroup(
   operation: BooleanOperation,
   childOrder?: Record<string, string[]>,
 ): { d: string; fillRule: "nonzero" | "evenodd"; fill: string } | null {
-  const origin = childOrder
-    ? getRenderedWorldTopLeft(groupId, nodes, childOrder)
-    : (() => {
-        const w = worldRect(groupId, nodes);
-        return { x: w.x, y: w.y };
-      })();
-  const originX = origin.x;
-  const originY = origin.y;
-  const parts: string[] = [];
-  let fill = DEFAULT_SHAPE_FILL;
-
   const ordered = orderedBooleanChildIds(childIds, operation);
-  for (const cid of ordered) {
-    const node = nodes[cid];
-    if (!node) continue;
-    const poly = shapeNodeToWorldPolygon(cid, nodes);
-    if (poly.length < 3) continue;
-    parts.push(polygonToPathD(poly, originX, originY));
-    if (parts.length === 1 && node.fillEnabled !== false) {
-      fill = node.fill ?? fill;
-    }
-  }
+  const inputs = shapesToBooleanInput(ordered, nodes, childOrder);
+  if (inputs.length < 2) return null;
 
-  if (parts.length === 0) return null;
-  if (parts.length < 2 && operation !== "union") return null;
+  const origin = booleanGroupLocalOrigin(groupId, nodes, childOrder);
+  const result = applyBooleanOperation(operation, inputs, { pathOrigin: origin });
+  if (!result) return null;
 
-  const fillRule: "nonzero" | "evenodd" =
-    operation === "subtract" || operation === "exclude" ? "evenodd" : "nonzero";
-
-  return { d: parts.join(" "), fillRule, fill };
+  return {
+    d: result.pathD,
+    fillRule: result.fillRule ?? "nonzero",
+    fill: result.fill,
+  };
 }
 
 export type SubtractCompositePaths = {
@@ -370,7 +334,13 @@ export type BooleanRenderModel =
   | { op: "union"; pathDs: string[]; fill: string }
   | { op: "subtract"; baseD: string; subtractD: string; fill: string }
   | { op: "intersect"; pathDs: string[]; fill: string }
-  | { op: "exclude"; pathDs: string[]; fill: string };
+  | { op: "exclude"; pathDs: string[]; fill: string }
+  | {
+      op: "clipper";
+      pathD: string;
+      fillRule: "nonzero" | "evenodd";
+      fill: string;
+    };
 
 function booleanGroupLocalOrigin(
   groupId: string,
@@ -397,7 +367,7 @@ function collectOperandPathDs(
   for (const cid of childIds) {
     const node = nodes[cid];
     if (!node) continue;
-    const poly = shapeNodeToWorldPolygon(cid, nodes);
+    const poly = shapeNodeToWorldPolygon(cid, nodes, { childOrder });
     if (poly.length < 3) continue;
     pathDs.push(polygonToPathD(poly, originX, originY));
     if (pathDs.length === 1 && node.fillEnabled !== false) {
@@ -433,7 +403,7 @@ export function buildSubtractCompositeForGroup(
 }
 
 /**
- * Canvas/export boolean preview — mask/clip stacking per op (not combined evenodd paths).
+ * Canvas/export boolean preview — Clipper2 for all operand counts (≥2).
  */
 export function buildBooleanRenderForGroup(
   groupId: string,
@@ -442,56 +412,26 @@ export function buildBooleanRenderForGroup(
   operation: BooleanOperation,
   childOrder?: Record<string, string[]>,
 ): BooleanRenderModel | null {
-  if (operation === "subtract") {
-    const sub = buildSubtractCompositeForGroup(groupId, childIds, nodes, childOrder);
-    if (!sub) return null;
-    return { op: "subtract", baseD: sub.baseD, subtractD: sub.subtractD, fill: sub.fill };
-  }
+  const visibleKids = childIds.filter((cid) => {
+    const c = nodes[cid];
+    return c && c.visible && !c.locked;
+  });
+  if (visibleKids.length < 2) return null;
 
-  const collected = collectOperandPathDs(groupId, childIds, nodes, childOrder);
-  if (!collected) return null;
+  const ordered = orderedBooleanChildIds(visibleKids, operation);
+  const inputs = shapesToBooleanInput(ordered, nodes, childOrder);
+  if (inputs.length < 2) return null;
 
-  const { pathDs, fill } = collected;
+  const origin = booleanGroupLocalOrigin(groupId, nodes, childOrder);
+  const clipped = applyBooleanOperation(operation, inputs, { pathOrigin: origin });
+  if (!clipped) return null;
 
-  switch (operation) {
-    case "union":
-      return pathDs.length >= 1 ? { op: "union", pathDs, fill } : null;
-    case "intersect":
-      return pathDs.length >= 2 ? { op: "intersect", pathDs, fill } : null;
-    case "exclude":
-      return pathDs.length >= 2 ? { op: "exclude", pathDs, fill } : null;
-    default:
-      return null;
-  }
-}
-
-/** Mask clip path in group-local coordinates. */
-export function buildMaskClipPathDForGroup(
-  groupId: string,
-  maskChildId: string,
-  nodes: Record<string, EditorNode>,
-  childOrder?: Record<string, string[]>,
-): string | null {
-  const origin = childOrder
-    ? getRenderedWorldTopLeft(groupId, nodes, childOrder)
-    : (() => {
-        const w = worldRect(groupId, nodes);
-        return { x: w.x, y: w.y };
-      })();
-  const poly = shapeNodeToWorldPolygon(maskChildId, nodes);
-  if (poly.length < 3) {
-    const mask = nodes[maskChildId];
-    if (!mask) return null;
-    const wb = getNodeTransformedWorldBounds(maskChildId, nodes);
-    const fallback = [
-      { x: wb.x, y: wb.y },
-      { x: wb.x + wb.width, y: wb.y },
-      { x: wb.x + wb.width, y: wb.y + wb.height },
-      { x: wb.x, y: wb.y + wb.height },
-    ];
-    return polygonToPathD(fallback, origin.x, origin.y);
-  }
-  return polygonToPathD(poly, origin.x, origin.y);
+  return {
+    op: "clipper",
+    pathD: clipped.pathD,
+    fillRule: clipped.fillRule ?? "nonzero",
+    fill: clipped.fill,
+  };
 }
 
 function boundsOfPolygons(inputs: BooleanInput[]): { x: number; y: number; width: number; height: number } {
@@ -516,61 +456,21 @@ function boundsOfPolygons(inputs: BooleanInput[]): { x: number; y: number; width
 }
 
 /**
- * v1 boolean pipeline — builds SVG path data for flatten/export.
- * Replace internals with a real clipper engine later; API stays stable.
+ * Flatten/export boolean pipeline — Clipper2 kernel (same path as canvas preview).
  */
 export function applyBooleanOperation(
   operation: BooleanOperation,
   inputs: BooleanInput[],
+  options?: { pathOrigin?: { x: number; y: number } },
 ): BooleanResult | null {
   if (inputs.length < 2) return null;
-  const bounds = boundsOfPolygons(inputs);
   const fill = inputs[0]!.fill;
-
-  if (operation === "union") {
-    const parts = inputs.map((inp) => polygonToPathD(inp.polygon, bounds.x, bounds.y));
-    return {
-      pathD: parts.join(" "),
-      ...bounds,
-      fill,
-      fillRule: "nonzero",
-    };
-  }
-
-  if (operation === "exclude") {
-    const parts = inputs.map((inp) => polygonToPathD(inp.polygon, bounds.x, bounds.y));
-    return {
-      pathD: parts.join(" "),
-      ...bounds,
-      fill,
-      fillRule: "evenodd",
-    };
-  }
-
-  if (operation === "intersect") {
-    const parts = inputs.map((inp) => polygonToPathD(inp.polygon, bounds.x, bounds.y));
-    return {
-      pathD: parts.join(" "),
-      ...bounds,
-      fill,
-      fillRule: "nonzero",
-    };
-  }
-
-  if (operation === "subtract") {
-    const base = inputs.slice(0, -1);
-    const sub = inputs[inputs.length - 1]!;
-    const baseParts = base.map((inp) => polygonToPathD(inp.polygon, bounds.x, bounds.y));
-    const subPart = polygonToPathD(sub.polygon, bounds.x, bounds.y);
-    return {
-      pathD: `${baseParts.join(" ")} ${subPart}`,
-      ...bounds,
-      fill,
-      fillRule: "evenodd",
-    };
-  }
-
-  return null;
+  return clipperApplyBoolean(
+    operation,
+    inputs.map((inp) => ({ polygon: inp.polygon })),
+    fill,
+    options,
+  );
 }
 
 export function booleanResultToPathNode(
@@ -609,18 +509,12 @@ export function flattenBooleanGroup(
   group: EditorNode,
   childIds: string[],
   nodes: Record<string, EditorNode>,
+  childOrder?: Record<string, string[]>,
 ): BooleanResult | null {
   const op = group.booleanOperation ?? "union";
-  const inputs = shapesToBooleanInput(childIds, nodes);
+  const ordered = orderedBooleanChildIds(childIds, op);
+  const inputs = shapesToBooleanInput(ordered, nodes, childOrder);
   if (inputs.length < 2) return null;
-
-  if (op === "subtract" && inputs.length >= 2) {
-    const topId = childIds[childIds.length - 1]!;
-    const rest = childIds.filter((id) => id !== topId);
-    const reordered = [...rest.map((id) => inputs.find((i) => i.id === id)!), inputs.find((i) => i.id === topId)!];
-    return applyBooleanOperation("subtract", reordered.filter(Boolean));
-  }
-
   return applyBooleanOperation(op, inputs);
 }
 

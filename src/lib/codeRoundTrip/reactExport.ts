@@ -189,7 +189,7 @@ ${pad}</div>\n`;
       ? `${pad}  <svg xmlns="http://www.w3.org/2000/svg" width={0} height={0} style={{ position: 'absolute', overflow: 'hidden' }} aria-hidden>
 ${pad}    <defs>
 ${pad}      <clipPath id=${JSON.stringify(clip.clipId)} clipPathUnits="userSpaceOnUse">
-${pad}        <path d={${JSON.stringify(clip.clipD)}} />
+${pad}        <path d={${JSON.stringify(clip.clipD)}} clipRule={${JSON.stringify(clip.clipRule)}} />
 ${pad}      </clipPath>
 ${pad}    </defs>
 ${pad}  </svg>\n`

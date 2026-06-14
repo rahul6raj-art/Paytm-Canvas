@@ -1,0 +1,149 @@
+{
+  "description": "Golden scene for renderer parity checks (tile raster / WebGL migration).",
+  "rootIds": ["frame-main"],
+  "childOrder": {
+    "__root__": ["frame-main"],
+    "frame-main": ["rect-fill", "poly-shape", "ellipse-glow", "text-label", "path-curve"]
+  },
+  "nodes": {
+    "frame-main": {
+      "id": "frame-main",
+      "type": "frame",
+      "name": "Golden Frame",
+      "parentId": null,
+      "x": 100,
+      "y": 100,
+      "width": 400,
+      "height": 320,
+      "rotation": 0,
+      "visible": true,
+      "locked": false,
+      "expanded": true,
+      "fill": "#ffffff",
+      "fillEnabled": true,
+      "clipChildren": true,
+      "cornerRadius": 12
+    },
+    "rect-fill": {
+      "id": "rect-fill",
+      "type": "rectangle",
+      "name": "Card",
+      "parentId": "frame-main",
+      "x": 24,
+      "y": 24,
+      "width": 160,
+      "height": 120,
+      "rotation": 0,
+      "visible": true,
+      "locked": false,
+      "expanded": true,
+      "fill": "#f97316",
+      "fillEnabled": true,
+      "cornerRadius": 8,
+      "effects": [
+        {
+          "id": "efx-drop-1",
+          "type": "drop-shadow",
+          "visible": true,
+          "x": 0,
+          "y": 6,
+          "blur": 12,
+          "spread": 0,
+          "color": "#000000",
+          "opacity": 0.2
+        }
+      ]
+    },
+    "poly-shape": {
+      "id": "poly-shape",
+      "type": "polygon",
+      "name": "Hexagon",
+      "parentId": "frame-main",
+      "x": 220,
+      "y": 40,
+      "width": 100,
+      "height": 100,
+      "rotation": 0,
+      "visible": true,
+      "locked": false,
+      "expanded": true,
+      "polygonSides": 6,
+      "cornerRadius": 6,
+      "fill": "#18a0fb",
+      "fillEnabled": true,
+      "strokeColor": "#0d5f9f",
+      "strokeWidth": 2,
+      "strokeEnabled": true
+    },
+    "ellipse-glow": {
+      "id": "ellipse-glow",
+      "type": "ellipse",
+      "name": "Orb",
+      "parentId": "frame-main",
+      "x": 48,
+      "y": 180,
+      "width": 88,
+      "height": 88,
+      "rotation": 0,
+      "visible": true,
+      "locked": false,
+      "expanded": true,
+      "fill": "#a855f7",
+      "fillEnabled": true,
+      "effects": [
+        {
+          "id": "efx-blur-1",
+          "type": "layer-blur",
+          "visible": true,
+          "blur": 2
+        }
+      ]
+    },
+    "text-label": {
+      "id": "text-label",
+      "type": "text",
+      "name": "Label",
+      "parentId": "frame-main",
+      "x": 180,
+      "y": 200,
+      "width": 180,
+      "height": 48,
+      "rotation": 0,
+      "visible": true,
+      "locked": false,
+      "expanded": true,
+      "content": "Golden scene",
+      "fontFamily": "Inter, system-ui, sans-serif",
+      "fontSize": 20,
+      "fontWeight": 600,
+      "textColor": "#111111",
+      "fillEnabled": true
+    },
+    "path-curve": {
+      "id": "path-curve",
+      "type": "path",
+      "name": "Curve",
+      "parentId": "frame-main",
+      "x": 24,
+      "y": 180,
+      "width": 120,
+      "height": 80,
+      "rotation": 0,
+      "visible": true,
+      "locked": false,
+      "expanded": true,
+      "fill": "#8b5cf6",
+      "fillEnabled": true,
+      "fillOpacity": 0.85,
+      "strokeColor": "#5b21b6",
+      "strokeWidth": 2,
+      "strokeEnabled": true,
+      "pathClosed": true,
+      "pathPoints": [
+        { "id": "pt-1", "x": 10, "y": 60, "handleOut": { "x": 40, "y": -20 } },
+        { "id": "pt-2", "x": 110, "y": 10, "handleIn": { "x": -30, "y": 0 } },
+        { "id": "pt-3", "x": 60, "y": 70, "handleIn": { "x": 10, "y": -10 } }
+      ]
+    }
+  }
+}

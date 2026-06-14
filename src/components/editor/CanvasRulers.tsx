@@ -79,7 +79,7 @@ export function CanvasRulers({ zoom, pan, viewportRef }: CanvasRulersProps) {
       : null;
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-[55]" aria-hidden data-canvas-rulers>
+    <div className="pointer-events-none absolute inset-0 z-[20]" aria-hidden data-canvas-rulers>
       <div
         className="pointer-events-none absolute left-0 top-0 border-b border-r"
         style={{ width: CANVAS_RULER_SIZE, height: CANVAS_RULER_SIZE, ...rulerSurfaceStyle }}
@@ -112,7 +112,7 @@ export function CanvasRulers({ zoom, pan, viewportRef }: CanvasRulersProps) {
             style={{ left: t.position - CANVAS_RULER_SIZE, transform: "translateX(-50%)" }}
           >
             <span
-              className="mb-0.5 select-none text-[9px] font-medium tabular-nums leading-none"
+              className="mb-0.5 select-none text-ui font-medium tabular-nums leading-none"
               style={{ color: chrome.rulerLabel }}
             >
               {t.label}
@@ -145,16 +145,33 @@ export function CanvasRulers({ zoom, pan, viewportRef }: CanvasRulersProps) {
         {verticalTicks.map((t) => (
           <div
             key={`v-${t.label}-${t.position}`}
-            className="pointer-events-none absolute left-0 flex items-center"
-            style={{ top: t.position - CANVAS_RULER_SIZE, transform: "translateY(-50%)" }}
+            className="pointer-events-none absolute left-0 right-0"
+            style={{ top: t.position - CANVAS_RULER_SIZE, height: 0 }}
           >
-            <div className="ml-auto h-px w-1.5" style={{ backgroundColor: chrome.rulerTick }} />
-            <span
-              className="ml-0.5 select-none text-[9px] font-medium tabular-nums leading-none"
-              style={{ color: chrome.rulerLabel }}
+            <div
+              className="absolute flex items-center justify-center"
+              style={{
+                right: 6,
+                top: "50%",
+                width: 15,
+                transform: "translateY(-50%)",
+              }}
             >
-              {t.label}
-            </span>
+              <span
+                className="select-none whitespace-nowrap text-ui font-medium tabular-nums leading-none"
+                style={{
+                  color: chrome.rulerLabel,
+                  transform: "rotate(-90deg)",
+                  transformOrigin: "center center",
+                }}
+              >
+                {t.label}
+              </span>
+            </div>
+            <div
+              className="absolute right-0 top-1/2 h-px w-1.5 -translate-y-1/2"
+              style={{ backgroundColor: chrome.rulerTick }}
+            />
           </div>
         ))}
       </div>

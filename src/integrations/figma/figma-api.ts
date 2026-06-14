@@ -102,6 +102,7 @@ export interface FigmaFetchResult {
   fileName: string;
   root: FigmaApiNode;
   components: Record<string, { key: string; name: string }>;
+  variablesMeta?: import("@/integrations/figma/figma-token-parser").FigmaVariablesMeta;
 }
 
 type FigmaNodeEntry = NonNullable<NonNullable<FigmaNodesResponse["nodes"][string]>>;
@@ -122,6 +123,23 @@ function resolveFigmaNodeEntry(
     if (entry && canonicalFigmaNodeId(key) === canonical) return entry;
   }
   return null;
+}
+
+/** GET /v1/files/{fileKey}/variables/local — returns null when unavailable (plan/permissions). */
+export async function getFigmaLocalVariables(
+  fileKey: string,
+  token: string,
+): Promise<import("@/integrations/figma/figma-token-parser").FigmaVariablesMeta | null> {
+  try {
+    const data = await figmaGet<{ meta?: import("@/integrations/figma/figma-token-parser").FigmaVariablesMeta }>(
+      `/files/${fileKey}/variables/local`,
+      token,
+    );
+    return data.meta ?? null;
+  } catch (e) {
+    if (e instanceof FigmaApiError && (e.status === 403 || e.status === 404)) return null;
+    throw e;
+  }
 }
 
 /** GET /v1/files/{fileKey} or /v1/files/{fileKey}/nodes */
@@ -150,10 +168,13 @@ export async function getFile(opts: {
 
   if (nodeId) {
     const canonicalId = canonicalFigmaNodeId(nodeId);
-    const data = await figmaGet<FigmaNodesResponse>(
-      `/files/${fileKey}/nodes?ids=${encodeURIComponent(canonicalId)}&${geometry}`,
-      token,
-    );
+    const [data, variablesMeta] = await Promise.all([
+      figmaGet<FigmaNodesResponse>(
+        `/files/${fileKey}/nodes?ids=${encodeURIComponent(canonicalId)}&${geometry}`,
+        token,
+      ),
+      getFigmaLocalVariables(fileKey, token),
+    ]);
     const entry = resolveFigmaNodeEntry(data.nodes ?? {}, canonicalId);
     if (!entry?.document) {
       throw new FigmaApiError(
@@ -165,10 +186,14 @@ export async function getFile(opts: {
       fileName: data.name ?? "Imported Figma",
       root: entry.document,
       components: entry.components ?? {},
+      variablesMeta: variablesMeta ?? undefined,
     };
   }
 
-  const file = await figmaGet<FigmaFileResponse>(`/files/${fileKey}?${geometry}`, token);
+  const [file, variablesMeta] = await Promise.all([
+    figmaGet<FigmaFileResponse>(`/files/${fileKey}?${geometry}`, token),
+    getFigmaLocalVariables(fileKey, token),
+  ]);
   const root = pickDefaultRoot(file.document);
   if (!root) throw new FigmaApiError("No importable content found in this Figma file.");
   return {
@@ -176,6 +201,7 @@ export async function getFile(opts: {
     fileName: file.name ?? "Imported Figma",
     root,
     components: file.components ?? {},
+    variablesMeta: variablesMeta ?? undefined,
   };
 }
 

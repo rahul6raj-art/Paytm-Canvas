@@ -170,3 +170,15 @@ export function layerBlendCanvasStyle(
 ): Pick<CSSProperties, "mixBlendMode" | "isolation"> {
   return layerBlendModeToCss(effectiveLayerBlendMode(node), node);
 }
+
+/** Inline `style` attribute for SVG `<g>` layer blend (scene renderer). */
+export function svgLayerBlendStyleAttr(
+  node: Pick<EditorNode, "type" | "blendMode">,
+): string {
+  const css = layerBlendCanvasStyle(node);
+  const parts: string[] = [];
+  if (css.isolation) parts.push(`isolation:${css.isolation}`);
+  if (css.mixBlendMode) parts.push(`mix-blend-mode:${css.mixBlendMode}`);
+  if (!parts.length) return "";
+  return ` style="${parts.join(";")}"`;
+}
