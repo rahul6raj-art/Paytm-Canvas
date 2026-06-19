@@ -11,7 +11,8 @@ import {
 } from "@/lib/editorGraph";
 import type { EditorNode } from "@/stores/useEditorStore";
 import {
-  rotationDeltaDegrees,
+  pointerAngleRad,
+  shortestAngleDeltaDegrees,
   snapRotationDeltaDegrees,
   snapRotationDegrees,
 } from "./rotateMath";
@@ -30,6 +31,9 @@ export type SingleRotateSession = {
   centerWorld: { x: number; y: number };
   /** Frozen at drag start — rotation must not change size or position. */
   startGeom: { x: number; y: number; width: number; height: number };
+  /** Updated each pointer move — cumulative delta avoids ±360° jumps at atan2 wrap. */
+  lastPointerAngleRad: number;
+  accumulatedDeltaDeg: number;
 };
 
 export type MultiRotateSession = {
@@ -37,6 +41,8 @@ export type MultiRotateSession = {
   startAngle: number;
   centerWorld: { x: number; y: number };
   items: RotateDragItem[];
+  lastPointerAngleRad: number;
+  accumulatedDeltaDeg: number;
 };
 
 export type RotateDragSession = SingleRotateSession | MultiRotateSession;
@@ -58,16 +64,16 @@ export function createSingleRotateSession(
   pointerWorld: { x: number; y: number },
 ): SingleRotateSession {
   const centerWorld = getNodeWorldCenterFromChildOrder(nodeId, nodes, childOrder);
+  const startAngle = pointerAngleRad(pointerWorld, centerWorld);
   return {
     kind: "single",
     id: nodeId,
     startRotation: node.rotation ?? 0,
-    startAngle: Math.atan2(
-      pointerWorld.y - centerWorld.y,
-      pointerWorld.x - centerWorld.x,
-    ),
+    startAngle,
     centerWorld,
     startGeom: { x: node.x, y: node.y, width: node.width, height: node.height },
+    lastPointerAngleRad: startAngle,
+    accumulatedDeltaDeg: 0,
   };
 }
 
@@ -88,15 +94,26 @@ export function createMultiRotateSession(
     startRotation: nodes[id]!.rotation ?? 0,
     startWorldCenter: getNodeWorldCenterFromChildOrder(id, nodes, childOrder),
   }));
+  const startAngle = pointerAngleRad(pointerWorld, centerWorld);
   return {
     kind: "multi",
-    startAngle: Math.atan2(
-      pointerWorld.y - centerWorld.y,
-      pointerWorld.x - centerWorld.x,
-    ),
+    startAngle,
     centerWorld,
     items,
+    lastPointerAngleRad: startAngle,
+    accumulatedDeltaDeg: 0,
   };
+}
+
+function accumulatePointerRotationDelta(
+  session: Pick<SingleRotateSession, "lastPointerAngleRad" | "accumulatedDeltaDeg">,
+  pointerWorld: { x: number; y: number },
+  centerWorld: { x: number; y: number },
+): number {
+  const angle = pointerAngleRad(pointerWorld, centerWorld);
+  session.accumulatedDeltaDeg += shortestAngleDeltaDegrees(session.lastPointerAngleRad, angle);
+  session.lastPointerAngleRad = angle;
+  return session.accumulatedDeltaDeg;
 }
 
 /** Geometric center of a node in world space (transform pivot). */
@@ -124,7 +141,7 @@ export function applySingleRotate(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
 ): { id: string; rotation: number; x: number; y: number } {
-  const delta = rotationDeltaDegrees(pointerWorld, session.centerWorld, session.startAngle);
+  const delta = accumulatePointerRotationDelta(session, pointerWorld, session.centerWorld);
   let next = normalizeRotationDegrees(session.startRotation + delta);
   next = snapRotationDegrees(next, shiftKey);
   const { startGeom } = session;
@@ -143,7 +160,7 @@ export function applyMultiRotatePatches(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
 ): Record<string, { x: number; y: number; rotation: number }> {
-  let delta = rotationDeltaDegrees(pointerWorld, session.centerWorld, session.startAngle);
+  let delta = accumulatePointerRotationDelta(session, pointerWorld, session.centerWorld);
   delta = snapRotationDeltaDegrees(delta, shiftKey);
 
   const patches: Record<string, { x: number; y: number; rotation: number }> = {};
@@ -172,11 +189,10 @@ export function applyMultiRotatePatches(
 /** Live angle label for single-node rotate (absolute rotation). */
 export function singleRotateLabelDegrees(
   session: SingleRotateSession,
-  pointerWorld: { x: number; y: number },
+  _pointerWorld: { x: number; y: number },
   shiftKey: boolean,
 ): number {
-  const delta = rotationDeltaDegrees(pointerWorld, session.centerWorld, session.startAngle);
-  let next = normalizeRotationDegrees(session.startRotation + delta);
+  let next = normalizeRotationDegrees(session.startRotation + session.accumulatedDeltaDeg);
   next = snapRotationDegrees(next, shiftKey);
   return next;
 }
@@ -184,10 +200,9 @@ export function singleRotateLabelDegrees(
 /** Live angle label for multi rotate (delta applied to selection). */
 export function multiRotateLabelDegrees(
   session: MultiRotateSession,
-  pointerWorld: { x: number; y: number },
+  _pointerWorld: { x: number; y: number },
   shiftKey: boolean,
 ): number {
-  let delta = rotationDeltaDegrees(pointerWorld, session.centerWorld, session.startAngle);
-  delta = snapRotationDeltaDegrees(delta, shiftKey);
+  let delta = snapRotationDeltaDegrees(session.accumulatedDeltaDeg, shiftKey);
   return normalizeRotationDegrees(delta);
 }

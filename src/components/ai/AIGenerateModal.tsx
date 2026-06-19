@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { ArrowUp, Code2, Figma, LayoutGrid, Loader2, Wrench, X, Zap } from "lucide-react";
+import { ArrowUp, Code2, Figma, LayoutGrid, Wrench, X, Zap } from "lucide-react";
 import { AIContextAttachments } from "@/components/ai/AIContextAttachments";
 import {
   AIStyleGuideSelect,
@@ -14,7 +14,7 @@ import {
 } from "@/components/ai/AIStyleGuideSelect";
 import { AIModalFrame } from "@/components/ai/AIModalFrame";
 import { FloatingPillSelect } from "@/components/ai/FloatingPillSelect";
-import { extractContextImagesForApi } from "@/lib/aiContextImages";
+import { canUseRichFastPath } from "@/lib/aiGenerateFastPath";
 import {
   buildContextPrompt,
   readyAttachmentCount,
@@ -35,16 +35,14 @@ import {
 } from "@/lib/builtinDesignMd";
 import { useEditorStore } from "@/stores/useEditorStore";
 import {
-  generateDesignFromPromptAsync,
-  type AIGeneratePreview,
-  type AIGenerateResult,
-} from "@/lib/aiMockGenerator";
-import {
-  type AIModelSelectGroup,
-  aiModelSelectGroups,
+  CURSOR_MODEL_OPTIONS,
+  OPENAI_FAST_MODEL_OPTIONS,
+  DEFAULT_AI_MODEL_ID,
   getAIModelById,
   getStoredAIModelId,
-  isOllamaModelId,
+  isCursorModelId,
+  isOpenAIModelId,
+  isValidAIModelId,
   setStoredAIModelId,
 } from "@/lib/aiModels";
 import {
@@ -53,6 +51,7 @@ import {
   useDismissAnchoredDropdown,
 } from "@/components/editor/useAnchoredDropdown";
 import { cn } from "@/lib/utils";
+import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
 
 const PRESETS = [
   "Mobile app",
@@ -64,18 +63,17 @@ const PRESETS = [
   "Design system",
 ] as const;
 
-const LOADING_STEPS = [
-  "Calling model…",
-  "Parsing layout JSON…",
-  "Building canvas…",
-] as const;
+const LLM_LOADING_STEPS = ["Calling model…"] as const;
+const FAST_LOADING_STEPS = ["Applying design tokens…"] as const;
+
 /** Above modal overlay (220) and import overlays (230). */
 const AI_FLOATING_MENU_Z = "z-[500]";
 
 type ModelsApiResponse = {
-  groups?: AIModelSelectGroup[];
-  ollama?: { reachable: boolean; availability?: Record<string, boolean> };
+  defaultModelId?: string;
   openai?: { configured: boolean };
+  cursor?: { configured: boolean };
+  groups?: { label: string; models: { id: string; label: string; description: string }[] }[];
 };
 
 export function AIGenerateModal() {
@@ -83,7 +81,8 @@ export function AIGenerateModal() {
   const open = useEditorStore((s) => s.aiModalOpen);
   const source = useEditorStore((s) => s.aiModalSource);
   const closeAIModal = useEditorStore((s) => s.closeAIModal);
-  const applyGeneratedDesign = useEditorStore((s) => s.applyGeneratedDesign);
+  const queueAIGenerate = useEditorStore((s) => s.queueAIGenerate);
+  const clearAIGenerateError = useEditorStore((s) => s.clearAIGenerateError);
   const openImportFigmaModal = useEditorStore((s) => s.openImportFigmaModal);
   const openCodeRoundTrip = useEditorStore((s) => s.openCodeRoundTrip);
 
@@ -98,15 +97,12 @@ export function AIGenerateModal() {
   });
   const [builtinDesignMd, setBuiltinDesignMd] = useState<AIContextAttachment | null>(null);
   const [modelId, setModelId] = useState(() => getStoredAIModelId());
-  const [loading, setLoading] = useState(false);
-  const [loadStep, setLoadStep] = useState(0);
-  const [result, setResult] = useState<AIGenerateResult | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const [attachments, setAttachments] = useState<AIContextAttachment[]>([]);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [toolsMounted, setToolsMounted] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [modelsMeta, setModelsMeta] = useState<ModelsApiResponse | null>(null);
-  const timersRef = useRef<number[]>([]);
   const toolsButtonRef = useRef<HTMLButtonElement>(null);
   const toolsMenuRef = useRef<HTMLDivElement>(null);
 
@@ -117,32 +113,36 @@ export function AIGenerateModal() {
   });
   useDismissAnchoredDropdown(toolsOpen, () => setToolsOpen(false), toolsButtonRef, toolsMenuRef);
 
-  const clearTimers = useCallback(() => {
-    timersRef.current.forEach((id) => window.clearTimeout(id));
-    timersRef.current = [];
-  }, []);
-
   useEffect(() => {
     if (!open) {
-      setPrompt("");
-      setPreset(undefined);
-      setStyleGuideMode("design-md");
-      setStyleGuideTheme("auto");
-      setBuiltinDesignMd(null);
-      setModelId(getStoredAIModelId());
-      setLoading(false);
-      setLoadStep(0);
-      setResult(null);
-      setGenerateError(null);
-      setModelsMeta(null);
+      setSubmitting(false);
       setToolsOpen(false);
       setAttachments((prev) => {
         revokeAllAttachmentPreviews(prev);
         return [];
       });
-      clearTimers();
+      return;
     }
-  }, [open, clearTimers]);
+
+    const st = useEditorStore.getState();
+    if (st.aiGenerateFailedJob) {
+      const failed = st.aiGenerateFailedJob;
+      setPrompt(failed.prompt);
+      setPreset(failed.preset);
+      setModelId(failed.model);
+      setGenerateError(st.aiGenerateError);
+      clearAIGenerateError();
+    } else {
+      setPrompt("");
+      setPreset(undefined);
+      setGenerateError(null);
+      setStyleGuideMode("design-md");
+      setStyleGuideTheme("auto");
+      setBuiltinDesignMd(null);
+      setModelId(getStoredAIModelId());
+      setModelsMeta(null);
+    }
+  }, [open, clearAIGenerateError]);
 
   useEffect(() => {
     if (!open) return;
@@ -153,12 +153,11 @@ export function AIGenerateModal() {
         setToolsOpen(false);
         return;
       }
-      clearTimers();
       closeAIModal();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, toolsOpen, clearTimers, closeAIModal]);
+  }, [open, toolsOpen, closeAIModal]);
 
   useEffect(() => setToolsMounted(true), []);
 
@@ -190,38 +189,39 @@ export function AIGenerateModal() {
     };
   }, [open]);
 
-  const selectedModel = getAIModelById(modelId);
-
-  const modelOptionGroups = useMemo(() => {
-    const groups = modelsMeta?.groups?.length ? modelsMeta.groups : aiModelSelectGroups();
-    const ollamaReachable = modelsMeta?.ollama?.reachable ?? false;
-    const availability = modelsMeta?.ollama?.availability ?? {};
+  const modelOptions = useMemo(() => {
     const openaiConfigured = modelsMeta?.openai?.configured ?? false;
+    const cursorConfigured = modelsMeta?.cursor?.configured ?? false;
+    const fallbackGroups = [
+      { label: "Fast (recommended)", models: OPENAI_FAST_MODEL_OPTIONS },
+      { label: "Cursor (slower)", models: CURSOR_MODEL_OPTIONS },
+    ];
+    const models = (modelsMeta?.groups ?? fallbackGroups).flatMap((g) => g.models);
 
-    return groups.map((g) => ({
-      label: g.label,
-      options: g.models.map((m) => {
-        let hint: string | undefined = m.description;
-        let disabled = false;
-        if (isOllamaModelId(m.id)) {
-          if (!ollamaReachable) {
-            hint = "Start Ollama (localhost:11434)";
-            disabled = false;
-          } else if (availability[m.id] === false) {
-            hint = `Run: ollama pull ${m.ollamaTag ?? m.label}`;
-          }
-        } else if (!openaiConfigured) {
-          hint = "Set OPENAI_API_KEY in .env.local";
-        }
-        return {
-          value: m.id,
-          label: m.label,
-          hint,
-          disabled,
-        };
-      }),
-    }));
+    return models.map((m) => {
+      let hint: string | undefined;
+      if (isOpenAIModelId(m.id) && !openaiConfigured) {
+        hint = "Set OPENAI_API_KEY in .env.local";
+      } else if (isCursorModelId(m.id) && !cursorConfigured) {
+        hint = "Set CURSOR_API_KEY in .env.local";
+      }
+      return {
+        value: m.id,
+        label: m.label,
+        hint,
+        disabled: false,
+      };
+    });
   }, [modelsMeta]);
+
+  useEffect(() => {
+    if (!open || !modelsMeta) return;
+    if (!isValidAIModelId(modelId)) {
+      const next = modelsMeta.defaultModelId ?? DEFAULT_AI_MODEL_ID;
+      setModelId(next);
+      setStoredAIModelId(next);
+    }
+  }, [open, modelsMeta, modelId]);
 
   useEffect(() => {
     if (!open || !isBuiltinDesignMdId(selectedDesignMdId)) {
@@ -258,80 +258,73 @@ export function AIGenerateModal() {
   const effectiveStyle = effectiveStyleFromTheme(styleGuideTheme);
   const canGenerate = Boolean(prompt.trim() || preset || contextPrompt);
 
-  const runGenerate = useCallback(() => {
-    if (!canGenerate || loading) return;
-    setResult(null);
-    setGenerateError(null);
-    setLoading(true);
-    setLoadStep(0);
-    clearTimers();
+  const hasImageAttachments = useMemo(
+    () => attachments.some((a) => a.kind === "image" && a.status === "ready"),
+    [attachments],
+  );
 
-    const stepTimers = LOADING_STEPS.map((_, i) =>
-      window.setTimeout(() => setLoadStep(i), i * 1200),
-    );
-    timersRef.current.push(...stepTimers);
+  const runGenerate = useCallback(() => {
+    if (!canGenerate || submitting) return;
+    setGenerateError(null);
+    setSubmitting(true);
 
     void (async () => {
       try {
-        const contextImages = await extractContextImagesForApi(allContextAttachments);
-        const gen = await generateDesignFromPromptAsync(prompt, {
+        const useFastPath = canUseRichFastPath({
+          prompt,
+          preset,
+          style: effectiveStyle,
+          model: modelId,
+          contextPrompt: contextPrompt || undefined,
+          contextAttachmentCount: contextCount || undefined,
+        });
+        const initialStep = useFastPath ? FAST_LOADING_STEPS[0]! : LLM_LOADING_STEPS[0]!;
+
+        const { extractContextImagesForApi } = await import("@/lib/aiContextImages");
+        const contextImages = hasImageAttachments
+          ? await extractContextImagesForApi(allContextAttachments)
+          : [];
+
+        queueAIGenerate({
+          prompt,
           preset,
           style: effectiveStyle,
           model: modelId,
           contextPrompt: contextPrompt || undefined,
           contextAttachmentCount: contextCount || undefined,
           contextImages: contextImages.length ? contextImages : undefined,
+          source: source ?? "editor",
+          initialStep,
         });
-        setResult(gen);
+
+        if (source === "dashboard") {
+          router.push("/editor");
+        }
       } catch (err) {
         setGenerateError(err instanceof Error ? err.message : "Generation failed.");
-      } finally {
-        clearTimers();
-        setLoading(false);
-        setLoadStep(0);
+        setSubmitting(false);
       }
     })();
   }, [
     canGenerate,
-    loading,
+    submitting,
     prompt,
     preset,
     effectiveStyle,
     modelId,
     contextPrompt,
     contextCount,
+    hasImageAttachments,
     allContextAttachments,
-    clearTimers,
+    queueAIGenerate,
+    source,
+    router,
   ]);
 
-  const onClose = () => {
-    clearTimers();
-    closeAIModal();
-  };
-
-  const recordHistory = source === "editor";
-
-  const applyReplace = useCallback(() => {
-    if (!result) return;
-    applyGeneratedDesign(result.slice, "replace", { recordHistory });
-    if (source === "dashboard") router.push("/editor");
-    onClose();
-  }, [result, applyGeneratedDesign, recordHistory, source, router]);
-
-  const applyAppend = useCallback(() => {
-    if (!result) return;
-    applyGeneratedDesign(result.slice, "append", { recordHistory });
-    onClose();
-  }, [result, applyGeneratedDesign, recordHistory]);
-
-  const openInEditor = useCallback(() => {
-    if (!result) return;
-    applyGeneratedDesign(result.slice, "replace", { recordHistory: false });
-    router.push("/editor");
-    onClose();
-  }, [result, applyGeneratedDesign, router]);
+  const onClose = () => closeAIModal();
 
   if (!open) return null;
+  if (source === "editor") return null;
 
   const toolsMenu =
     toolsOpen && toolsMounted
@@ -346,9 +339,7 @@ export function AIGenerateModal() {
             )}
             style={{ ...anchoredMenuStyle(toolsMenuPosition), zIndex: 500 }}
           >
-            <p className="px-3 pb-1 pt-2 section-heading">
-              Prompt
-            </p>
+            <p className="px-3 pb-1 pt-2 section-heading">Prompt</p>
             <button
               type="button"
               role="menuitem"
@@ -375,9 +366,7 @@ export function AIGenerateModal() {
               Clear prompt
             </button>
             <div className="my-1 border-t border-app-border-subtle" role="separator" />
-            <p className="px-3 pb-1 pt-1 section-heading">
-              Import
-            </p>
+            <p className="px-3 pb-1 pt-1 section-heading">Import</p>
             <button
               type="button"
               role="menuitem"
@@ -411,19 +400,15 @@ export function AIGenerateModal() {
     <>
       {toolsMenu}
       <div
-      className="fixed inset-0 z-[220] flex items-start justify-center overflow-y-auto bg-black/55 px-4 pb-10 pt-[10vh] backdrop-blur-[2px] sm:pt-[12vh]"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Generate with AI"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        className="relative w-full max-w-xl"
-        onMouseDown={(e) => e.stopPropagation()}
+        className="fixed inset-0 z-[220] flex items-start justify-center overflow-y-auto bg-black/55 px-4 pb-10 pt-[10vh] backdrop-blur-[2px] sm:pt-[12vh]"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Generate with AI"
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
       >
-        {!result ? (
+        <div className="relative w-full max-w-xl" onMouseDown={(e) => e.stopPropagation()}>
           <AIModalFrame>
             <button
               type="button"
@@ -439,7 +424,7 @@ export function AIGenerateModal() {
               onChange={(e) => setPrompt(e.target.value)}
               placeholder="Describe what you want to create"
               rows={3}
-              disabled={loading}
+              disabled={submitting}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
@@ -454,7 +439,7 @@ export function AIGenerateModal() {
               minimalPart="chips"
               floatingMenuZClass={AI_FLOATING_MENU_Z}
               attachments={attachments}
-              disabled={loading}
+              disabled={submitting}
               onChange={setAttachments}
             />
 
@@ -465,14 +450,14 @@ export function AIGenerateModal() {
                   minimalPart="button"
                   floatingMenuZClass={AI_FLOATING_MENU_Z}
                   attachments={attachments}
-                  disabled={loading}
+                  disabled={submitting}
                   onChange={setAttachments}
                 />
 
                 <button
                   ref={toolsButtonRef}
                   type="button"
-                  disabled={loading}
+                  disabled={submitting}
                   aria-haspopup="menu"
                   aria-expanded={toolsOpen}
                   onClick={() => setToolsOpen((v) => !v)}
@@ -487,25 +472,22 @@ export function AIGenerateModal() {
                 </button>
               </div>
 
-              <button
-                type="button"
-                disabled={!canGenerate || loading}
-                onClick={runGenerate}
-                aria-label="Generate"
-                title={loading ? LOADING_STEPS[loadStep] : "Generate"}
-                className={cn(
-                  "flex h-9 w-9 items-center justify-center rounded-full transition-colors",
-                  canGenerate && !loading
-                    ? "bg-accent text-white hover:brightness-110"
-                    : "bg-app-hover text-app-muted",
-                )}
-              >
-                {loading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
-                ) : (
+              <EditorHintWrap title="Generate on canvas">
+                <button
+                  type="button"
+                  disabled={!canGenerate || submitting}
+                  onClick={runGenerate}
+                  aria-label="Generate"
+                  className={cn(
+                    "flex h-9 w-9 items-center justify-center rounded-full transition-colors",
+                    canGenerate && !submitting
+                      ? "bg-accent text-white hover:brightness-110"
+                      : "bg-app-hover text-app-muted",
+                  )}
+                >
                   <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
-                )}
-              </button>
+                </button>
+              </EditorHintWrap>
             </div>
 
             <div className="flex w-full flex-wrap items-center gap-2 border-t border-app-border-subtle bg-app-toolbar-well px-3 py-2.5">
@@ -513,7 +495,7 @@ export function AIGenerateModal() {
                 icon={Zap}
                 label="Screen"
                 value={preset ?? ""}
-                disabled={loading}
+                disabled={submitting}
                 menuZClass={AI_FLOATING_MENU_Z}
                 onChange={(v) => setPreset(v || undefined)}
                 options={[
@@ -522,7 +504,7 @@ export function AIGenerateModal() {
                 ]}
               />
               <AIStyleGuideSelect
-                disabled={loading}
+                disabled={submitting}
                 menuZClass={AI_FLOATING_MENU_Z}
                 mode={styleGuideMode}
                 onModeChange={setStyleGuideMode}
@@ -537,23 +519,17 @@ export function AIGenerateModal() {
                 icon={LayoutGrid}
                 label="Model"
                 value={modelId}
-                disabled={loading}
+                disabled={submitting}
                 menuZClass={AI_FLOATING_MENU_Z}
-                className="ml-auto"
                 onChange={(v) => {
                   setModelId(v);
                   setStoredAIModelId(v);
                 }}
-                optionGroups={modelOptionGroups}
+                options={modelOptions}
               />
             </div>
 
-            {loading ? (
-              <p className="border-t border-app-border-subtle px-4 py-2 text-center text-ui text-app-muted">
-                {LOADING_STEPS[loadStep] ?? LOADING_STEPS[0]} · {selectedModel?.label ?? modelId}
-              </p>
-            ) : null}
-            {styleGuideMode === "design-md" && contextCount === 0 && !loading ? (
+            {styleGuideMode === "design-md" && contextCount === 0 && !submitting ? (
               <p className="border-t border-amber-500/30 bg-amber-500/10 px-4 py-2 text-center text-ui text-amber-100">
                 Add or select a Design.md file in Style Guide so generation uses your brand tokens and typography.
               </p>
@@ -564,99 +540,8 @@ export function AIGenerateModal() {
               </p>
             ) : null}
           </AIModalFrame>
-        ) : (
-          <AIModalFrame>
-            <button
-              type="button"
-              onClick={onClose}
-              className="absolute right-3 top-3 z-10 rounded-lg p-1.5 text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
-              aria-label="Close"
-            >
-              <X className="h-5 w-5" strokeWidth={1.75} />
-            </button>
-            <div className="p-5">
-              <PreviewPanel preview={result.preview} />
-            </div>
-            <div className="flex flex-col gap-2 border-t border-app-border-subtle bg-app-toolbar-well px-4 py-3">
-              {source === "dashboard" ? (
-                <button
-                  type="button"
-                  onClick={openInEditor}
-                  className="w-full rounded-full bg-accent py-2.5 text-ui-sm font-semibold text-white hover:brightness-110"
-                >
-                  Open in editor
-                </button>
-              ) : (
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={applyReplace}
-                    className="flex-1 rounded-full border border-app-border bg-app-panel py-2 text-ui font-semibold text-app-fg transition-colors hover:bg-app-hover"
-                  >
-                    Replace file
-                  </button>
-                  <button
-                    type="button"
-                    onClick={applyAppend}
-                    className="flex-1 rounded-full border border-accent/40 bg-accent/10 py-2 text-ui font-semibold text-accent transition-colors hover:bg-accent/20"
-                  >
-                    Add to file
-                  </button>
-                </div>
-              )}
-              <button
-                type="button"
-                onClick={() => setResult(null)}
-                className="text-center text-ui font-medium text-app-muted hover:text-app-fg"
-              >
-                ← Edit prompt
-              </button>
-            </div>
-          </AIModalFrame>
-        )}
-      </div>
-    </div>
-    </>
-  );
-}
-
-function PreviewPanel({ preview }: { preview: AIGeneratePreview }) {
-  return (
-    <div className="rounded-xl border border-app-border bg-app-inset p-4">
-      <p className="text-sm font-semibold text-app-fg">{preview.fileName}</p>
-      <p className="mt-1 text-ui text-app-muted">{preview.flowLabel}</p>
-      {preview.detectedIntent ? (
-        <p className="mt-1 text-ui text-violet-300">Detected: {preview.detectedIntent}</p>
-      ) : null}
-      {preview.modelLabel ? (
-        <p className="mt-1 text-ui text-app-subtle">
-          {preview.modelLabel}
-          {preview.generationSource === "llm" ? " · from your prompt" : ""}
-          {preview.contextAttachmentCount
-            ? ` · ${preview.contextAttachmentCount} attachment${preview.contextAttachmentCount === 1 ? "" : "s"}`
-            : ""}
-        </p>
-      ) : null}
-      {preview.warning ? (
-        <p className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-ui leading-snug text-amber-100/90">
-          {preview.warning}
-        </p>
-      ) : null}
-      <div className="mt-3 flex flex-wrap items-center gap-3">
-        <span className="text-ui text-app-muted">
-          <span className="font-medium text-app-fg">{preview.frameCount}</span> frames
-        </span>
-        <div className="flex items-center gap-1">
-          {preview.palette.map((c) => (
-            <span
-              key={c}
-              className="h-5 w-5 rounded-md border border-app-border"
-              style={{ backgroundColor: c }}
-              title={c}
-            />
-          ))}
         </div>
       </div>
-    </div>
+    </>
   );
 }

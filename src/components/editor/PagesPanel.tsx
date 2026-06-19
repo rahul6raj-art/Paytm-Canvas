@@ -1,19 +1,22 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Copy, Plus, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Copy, Plus, X } from "lucide-react";
 import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/useEditorStore";
+import { EditorHintWrap } from "./EditorHoverHint";
 
-export function PagesPanel() {
+export function PagesPanel({ embedded = false }: { embedded?: boolean } = {}) {
+  const router = useRouter();
   const pageOrder = useEditorStore((s) => s.pageOrder);
   const pages = useEditorStore((s) => s.pages);
   const activePageId = useEditorStore((s) => s.activePageId);
   const setActivePage = useEditorStore((s) => s.setActivePage);
   const addPage = useEditorStore((s) => s.addPage);
   const duplicatePage = useEditorStore((s) => s.duplicatePage);
-  const deletePage = useEditorStore((s) => s.deletePage);
+  const closePage = useEditorStore((s) => s.closePage);
   const renamePage = useEditorStore((s) => s.renamePage);
 
   const [renameId, setRenameId] = useState<string | null>(null);
@@ -35,19 +38,20 @@ export function PagesPanel() {
   };
 
   return (
-    <div className="border-b border-app-panel-edge px-3 py-2.5">
+    <div className={cn(embedded ? "px-3 py-2" : "border-b border-app-panel-edge px-3 py-2.5")}>
       <div className="mb-2 flex items-center justify-between gap-2 px-1">
         <p className="section-heading">Pages</p>
-        <button
-          type="button"
-          onClick={() => addPage()}
-          className="flex h-7 items-center gap-1 rounded-md border border-app-border px-2 text-ui font-medium text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
-          title="Add page"
-          aria-label="Add page"
-        >
-          <Plus className="h-3.5 w-3.5 shrink-0" strokeWidth={2.25} />
-          <span>Add</span>
-        </button>
+        <EditorHintWrap title="Add page">
+          <button
+            type="button"
+            onClick={() => addPage()}
+            className="flex h-7 items-center gap-1 rounded-md border border-app-border px-2 text-ui font-medium text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
+            aria-label="Add page"
+          >
+            <Plus className="h-3.5 w-3.5 shrink-0" strokeWidth={2.25} />
+            <span>Add</span>
+          </button>
+        </EditorHintWrap>
       </div>
       <div className="space-y-px">
         {pageOrder.map((pageId) => {
@@ -108,45 +112,47 @@ export function PagesPanel() {
               </button>
               {!renaming && (
                 <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100">
-                  <button
-                    type="button"
-                    onClick={() => duplicatePage(pageId)}
-                    className="flex h-5 w-5 items-center justify-center rounded text-app-subtle hover:bg-app-hover hover:text-app-fg"
-                    title="Duplicate page"
-                    aria-label={`Duplicate ${page.name}`}
-                  >
-                    <Copy className="h-3 w-3" strokeWidth={2} />
-                  </button>
-                  {pageOrder.length > 1 && (
+                  <EditorHintWrap title="Duplicate page">
+                    <button
+                      type="button"
+                      onClick={() => duplicatePage(pageId)}
+                      className="flex h-5 w-5 items-center justify-center rounded text-app-subtle hover:bg-app-hover hover:text-app-fg"
+                      aria-label={`Duplicate ${page.name}`}
+                    >
+                      <Copy className="h-3 w-3" strokeWidth={2} />
+                    </button>
+                  </EditorHintWrap>
+                  <EditorHintWrap title="Close page">
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        deletePage(pageId);
+                        const { emptied } = closePage(pageId);
+                        if (emptied) router.push("/dashboard");
                       }}
-                      className="flex h-5 w-5 items-center justify-center rounded text-app-subtle hover:bg-red-500/20 hover:text-red-300"
-                      title="Delete page"
-                      aria-label={`Delete ${page.name}`}
+                      className="flex h-5 w-5 items-center justify-center rounded text-app-subtle hover:bg-app-hover hover:text-app-fg"
+                      aria-label={`Close ${page.name}`}
                     >
-                      <Trash2 className="h-3 w-3" strokeWidth={2} />
+                      <X className="h-3 w-3" strokeWidth={2} />
                     </button>
-                  )}
+                  </EditorHintWrap>
                 </div>
               )}
             </div>
           );
         })}
       </div>
-      <button
-        type="button"
-        onClick={() => addPage()}
-        className="mt-1.5 flex h-7 w-full items-center gap-2 rounded px-2 text-left text-ui-sm font-medium text-[#8a8a8a] transition-colors hover:bg-white/[0.05] hover:text-app-fg"
-        title="Add new page"
-        aria-label="Add new page"
-      >
-        <Plus className="h-3.5 w-3.5 shrink-0" strokeWidth={2.25} />
-        <span>Add page</span>
-      </button>
+      <EditorHintWrap title="Add new page">
+        <button
+          type="button"
+          onClick={() => addPage()}
+          className="mt-1.5 flex h-7 w-full items-center gap-2 rounded px-2 text-left text-ui-sm font-medium text-[#8a8a8a] transition-colors hover:bg-white/[0.05] hover:text-app-fg"
+          aria-label="Add new page"
+        >
+          <Plus className="h-3.5 w-3.5 shrink-0" strokeWidth={2.25} />
+          <span>Add page</span>
+        </button>
+      </EditorHintWrap>
     </div>
   );
 }

@@ -1,4 +1,8 @@
 import { CANVAS_VISUAL } from "@/lib/canvasVisual";
+import { readThemePreference, resolveTheme } from "@/lib/theme";
+
+export const CANVAS_FOREGROUND_LIGHT = "#000000";
+export const CANVAS_FOREGROUND_DARK = "#ffffff";
 
 export type CanvasChromeForeground = {
   frameLabel: string;
@@ -47,7 +51,7 @@ export function isDarkCanvasBackground(backgroundColor: string): boolean {
 const LIGHT_CHROME: CanvasChromeForeground = {
   frameLabel: CANVAS_VISUAL.frameLabel,
   frameLabelMuted: CANVAS_VISUAL.frameLabelMuted,
-  defaultText: "#0f172a",
+  defaultText: CANVAS_FOREGROUND_LIGHT,
   renameInputBg: "#ffffff",
   renameInputText: "#111111",
   renameInputBorder: "rgba(13,153,255,0.55)",
@@ -60,7 +64,7 @@ const LIGHT_CHROME: CanvasChromeForeground = {
 const DARK_CHROME: CanvasChromeForeground = {
   frameLabel: "#e8e8e8",
   frameLabelMuted: "#a3a3a3",
-  defaultText: "#f8fafc",
+  defaultText: CANVAS_FOREGROUND_DARK,
   renameInputBg: "#2c2c2c",
   renameInputText: "#f8fafc",
   renameInputBorder: "rgba(24,160,251,0.65)",
@@ -72,4 +76,17 @@ const DARK_CHROME: CanvasChromeForeground = {
 
 export function canvasChromeForeground(backgroundColor: string): CanvasChromeForeground {
   return isDarkCanvasBackground(backgroundColor) ? DARK_CHROME : LIGHT_CHROME;
+}
+
+/** Resolved app theme from `<html class="dark">` (falls back to stored preference on SSR). */
+export function readResolvedAppTheme(): "light" | "dark" {
+  if (typeof document !== "undefined") {
+    return document.documentElement.classList.contains("dark") ? "dark" : "light";
+  }
+  return resolveTheme(readThemePreference());
+}
+
+/** Default stroke/text on canvas: black in light UI, white in dark UI. */
+export function defaultCanvasForegroundColor(theme: "light" | "dark" = readResolvedAppTheme()): string {
+  return theme === "dark" ? CANVAS_FOREGROUND_DARK : CANVAS_FOREGROUND_LIGHT;
 }

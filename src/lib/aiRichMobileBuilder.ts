@@ -5,6 +5,20 @@ import {
   type ExtractedDesignTokens,
 } from "@/lib/aiDesignTokens";
 import { extractScreenTitle, type ScreenIntent } from "@/lib/aiScreenIntent";
+import {
+  extractGenericScreenSummary,
+  extractProductNameFromPrompt,
+  isActivityTrackingPrompt,
+} from "@/lib/aiPromptExtract";
+import { measureFlatContentHeight } from "@/lib/aiRichContentHeight";
+import {
+  activityIconForName,
+  iconBadge,
+  quickActionIcon,
+  statIconForLabel,
+  type RichIconKey,
+} from "@/lib/aiRichIcons";
+import { organizeRichScreenHierarchy } from "@/lib/aiRichStructure";
 import type { EditorPersistSlice } from "@/lib/documentPersistence";
 import { wrapPersistSliceWithPages } from "@/lib/documentPersistence";
 import type { AIGenerateResult } from "@/lib/aiMockGenerator";
@@ -15,15 +29,18 @@ import type { EditorNode } from "@/stores/useEditorStore";
 const ROOT = EDITOR_ROOT_KEY;
 const TAB_BAR_H = 64;
 const STICKY_FOOTER_H = 88;
+const MIN_SCREEN_HEIGHT = 280;
 
 const RICH_SCREEN_INTENTS = new Set<ScreenIntent>([
   "mobile_home",
+  "activity_tracking",
   "checkout",
   "profile",
   "auth",
   "recharge",
   "send_money",
   "transactions",
+  "generic_mobile",
 ]);
 
 export type RichMobileBuildOptions = {
@@ -164,9 +181,9 @@ const TRANSACTIONS = [
 
 const TABS = ["Home", "UPI", "Services", "Wealth", "Profile"];
 
-function makeLayout(tokens: ExtractedDesignTokens): MobileLayout {
+function makeLayout(tokens: ExtractedDesignTokens, height = MIN_SCREEN_HEIGHT): MobileLayout {
   const w = tokens.shellWidth;
-  const h = tokens.shellHeight;
+  const h = height;
   const gutter = tokens.gutter;
   return {
     w,
@@ -181,6 +198,15 @@ function makeLayout(tokens: ExtractedDesignTokens): MobileLayout {
     radiusControl: tokens.radiusControl,
     scrollH: h - TAB_BAR_H,
   };
+}
+
+function tintForAccent(tokens: ExtractedDesignTokens, accent: string): string {
+  if (accent === tokens.primaryStrong || accent === tokens.brandPrimary || accent === tokens.primaryMedium) {
+    return tokens.primaryWeak;
+  }
+  if (accent === tokens.notice) return tokens.noticeWeak;
+  if (accent === tokens.positive) return "#dbf0e2";
+  return tokens.surface3;
 }
 
 function colWidth(layout: MobileLayout, cols: number, gap = layout.gridGap): number {
@@ -242,6 +268,44 @@ function rect(
   return id;
 }
 
+/** Per-corner radii: top-left, top-right, bottom-right, bottom-left. */
+function rectRadii(
+  ctx: BuildCtx,
+  parentId: string,
+  name: string,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  fill: string,
+  radii: [number, number, number, number],
+  stroke?: string,
+): string {
+  const id = nid(ctx, "r");
+  const uniform = radii.every((r) => r === radii[0]);
+  ctx.nodes[id] = {
+    id,
+    parentId,
+    type: "rectangle",
+    name,
+    x,
+    y,
+    width: w,
+    height: h,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    expanded: true,
+    fill,
+    cornerRadius: uniform ? radii[0] : undefined,
+    cornerRadii: uniform ? undefined : [...radii],
+    strokeColor: stroke ?? ctx.tokens.hairline,
+    strokeWidth: stroke ? 1 : 0,
+  };
+  addChild(ctx, parentId, id);
+  return id;
+}
+
 function ellipse(ctx: BuildCtx, parentId: string, name: string, x: number, y: number, size: number, fill: string): string {
   const id = nid(ctx, "e");
   ctx.nodes[id] = {
@@ -277,6 +341,8 @@ function text(
   color: string,
   lineHeight: number,
   align: "left" | "center" | "right" = "left",
+  verticalAlign: "top" | "middle" | "bottom" = "top",
+  resizeMode: "auto-width" | "auto-height" | "fixed" = "auto-width",
 ): string {
   const id = nid(ctx, "t");
   ctx.nodes[id] = {
@@ -299,9 +365,47 @@ function text(
     fontFamily: ctx.tokens.fontFamily,
     lineHeight: lineHeight / size,
     textAlign: align,
+    verticalAlign,
+    textResizeMode: resizeMode,
+    autoResize: resizeMode === "fixed" ? "none" : resizeMode === "auto-height" ? "height" : "width-height",
   };
   addChild(ctx, parentId, id);
   return id;
+}
+
+/** Center text horizontally and vertically inside a fixed box (grid cells, buttons, tabs). */
+function boxText(
+  ctx: BuildCtx,
+  parentId: string,
+  name: string,
+  boxX: number,
+  boxY: number,
+  boxW: number,
+  boxH: number,
+  content: string,
+  size: number,
+  weight: number,
+  color: string,
+  lineHeightPx: number,
+  align: "left" | "center" | "right" = "center",
+): string {
+  return text(
+    ctx,
+    parentId,
+    name,
+    boxX,
+    boxY,
+    boxW,
+    boxH,
+    content,
+    size,
+    weight,
+    color,
+    lineHeightPx,
+    align,
+    "middle",
+    "fixed",
+  );
 }
 
 function sectionBlock(ctx: BuildCtx, y: number, label: string): number {
@@ -326,7 +430,8 @@ function sectionBlock(ctx: BuildCtx, y: number, label: string): number {
 
 function buildStatusBar(ctx: BuildCtx, y: number): number {
   const { layout, tokens } = ctx;
-  rect(ctx, ctx.contentId, "Status bar", 0, y, layout.w, 44, tokens.canvas, 0);
+  const shellR = layout.radiusCard;
+  rectRadii(ctx, ctx.contentId, "Status bar", 0, y, layout.w, 44, tokens.canvas, [shellR, shellR, 0, 0]);
   text(
     ctx,
     ctx.contentId,
@@ -355,22 +460,7 @@ function buildHeader(ctx: BuildCtx, y: number, userName: string): number {
   const textX = avatarX + avatar + layout.gridGap;
   const textW = layout.w - textX - layout.gutter - icon * 2 - layout.gridGap * 2;
 
-  ellipse(ctx, ctx.contentId, "Avatar", avatarX, y + 8, avatar, tokens.primaryWeak);
-  text(
-    ctx,
-    ctx.contentId,
-    "Avatar initial",
-    avatarX + 12,
-    y + 20,
-    20,
-    tokens.titleLine,
-    userName[0] ?? "R",
-    tokens.titleSize,
-    700,
-    tokens.brandSecondary,
-    tokens.titleLine,
-    "center",
-  );
+  iconBadge(ctx, ctx.contentId, "Avatar", avatarX, y + 8, avatar, "profile", tokens.brandPrimary, tokens.onPrimary);
   text(
     ctx,
     ctx.contentId,
@@ -403,9 +493,9 @@ function buildHeader(ctx: BuildCtx, y: number, userName: string): number {
   const qrX = layout.w - layout.gutter - icon;
   const bellX = qrX - layout.gridGap - icon;
   ellipse(ctx, ctx.contentId, "Notifications", bellX, y + 12, icon, tokens.surface3);
-  text(ctx, ctx.contentId, "Bell", bellX + 8, y + 18, 16, 16, "🔔", 12, 400, tokens.ink, 16, "center");
+  boxText(ctx, ctx.contentId, "Bell", bellX, y + 12, icon, icon, "🔔", 14, 400, tokens.ink, 16);
   ellipse(ctx, ctx.contentId, "QR", qrX, y + 12, icon, tokens.primaryMedium);
-  text(ctx, ctx.contentId, "QR icon", qrX + 8, y + 18, 16, 16, "▦", 12, 700, tokens.onPrimary, 16, "center");
+  boxText(ctx, ctx.contentId, "QR icon", qrX, y + 12, icon, icon, "▦", 14, 700, tokens.onPrimary, 16);
 
   return y + rowH + 8;
 }
@@ -455,37 +545,22 @@ function buildQuickActions(ctx: BuildCtx, y: number, actions = DEFAULT_QUICK_ACT
       tokens.positive,
       tokens.notice,
     ];
+    const accent = colors[i % colors.length]!;
     const ix = centerInCell(x, cellW, icon);
-    ellipse(ctx, ctx.contentId, label, ix, iy, icon, colors[i % colors.length]!);
-    text(
-      ctx,
-      ctx.contentId,
-      `${label} glyph`,
-      ix + 16,
-      iy + 14,
-      16,
-      20,
-      label.slice(0, 1),
-      tokens.bodySize,
-      700,
-      tokens.onPrimary,
-      tokens.bodyLine,
-      "center",
-    );
-    text(
+    iconBadge(ctx, ctx.contentId, label, ix, iy, icon, quickActionIcon(label), accent, tokens.onPrimary);
+    boxText(
       ctx,
       ctx.contentId,
       label,
       x,
-      iy + icon + 8,
+      iy + icon + 6,
       cellW,
-      tokens.captionLine + 8,
+      tokens.captionLine + 10,
       label,
       tokens.captionSize,
       600,
       tokens.ink,
       tokens.captionLine,
-      "center",
     );
   });
   return cy + rowH * rows;
@@ -517,20 +592,19 @@ function buildBalanceCard(ctx: BuildCtx, y: number, userName: string): number {
   const ctaX = x + layout.contentW - pad - ctaW;
   const ctaY = y + cardH - pad - ctaH;
   rect(ctx, ctx.contentId, "Add money CTA", ctaX, ctaY, ctaW, ctaH, tokens.primaryStrong, tokens.radiusControl);
-  text(
+  boxText(
     ctx,
     ctx.contentId,
     "Add money label",
     ctaX,
-    ctaY + 10,
+    ctaY,
     ctaW,
-    tokens.bodyLine,
+    ctaH,
     "Add Money",
     tokens.bodySize,
     600,
     tokens.onPrimary,
     tokens.bodyLine,
-    "center",
   );
   return y + cardH;
 }
@@ -598,20 +672,19 @@ function buildRechargeGrid(ctx: BuildCtx, y: number): number {
     const iy = cy + row * (cellH + gap);
     const ix = centerInCell(x, cellW, icon);
     ellipse(ctx, ctx.contentId, `${label} icon`, ix, iy, icon, i % 2 === 0 ? tokens.primaryWeak : tokens.noticeWeak);
-    text(
+    boxText(
       ctx,
       ctx.contentId,
       label,
       x,
-      iy + icon + 6,
+      iy + icon + 4,
       cellW,
-      tokens.captionLine + 4,
+      tokens.captionLine + 8,
       label,
       tokens.captionSize,
       600,
       tokens.ink,
       tokens.captionLine,
-      "center",
     );
   });
   return cy + (cellH + gap) * 2 - gap;
@@ -677,20 +750,19 @@ function buildTravel(ctx: BuildCtx, y: number): number {
     const x = colX(layout, i, cols, gap);
     rect(ctx, ctx.contentId, label, x, cy, cellW, cellH, tokens.canvas, layout.radiusCard, tokens.hairline);
     rect(ctx, ctx.contentId, `${label} banner`, x + 8, cy + 8, cellW - 16, 44, tokens.brandSecondary, tokens.radiusControl);
-    text(
+    boxText(
       ctx,
       ctx.contentId,
       label,
       x + 8,
-      cy + 56,
+      cy + 52,
       cellW - 16,
-      tokens.subtextLine,
+      tokens.subtextLine + 8,
       label,
       tokens.subtextSize,
       600,
       tokens.ink,
       tokens.subtextLine,
-      "center",
     );
   });
   return cy + cellH;
@@ -735,7 +807,8 @@ function buildBottomNav(ctx: BuildCtx): void {
   const { layout, tokens } = ctx;
   const y = layout.scrollH;
   const tabW = layout.w / TABS.length;
-  rect(ctx, ctx.frameId, "Tab bar", 0, y, layout.w, TAB_BAR_H, tokens.canvas, 0, tokens.hairline);
+  const shellR = layout.radiusCard;
+  rectRadii(ctx, ctx.frameId, "Tab bar", 0, y, layout.w, TAB_BAR_H, tokens.canvas, [0, 0, shellR, shellR], tokens.hairline);
 
   TABS.forEach((tab, i) => {
     const x = i * tabW;
@@ -754,20 +827,19 @@ function buildBottomNav(ctx: BuildCtx): void {
         layout.radiusControl,
       );
     }
-    text(
+    boxText(
       ctx,
       ctx.frameId,
       tab,
       x,
-      y + (active ? 12 : 14),
+      y + 6,
       tabW,
-      tokens.subtextLine,
+      28,
       tab,
       tokens.captionSize,
       active ? 700 : 500,
       active ? tokens.primaryStrong : tokens.muted,
       tokens.captionLine,
-      "center",
     );
     const dot = 6;
     ellipse(
@@ -782,6 +854,160 @@ function buildBottomNav(ctx: BuildCtx): void {
   });
 }
 
+function extractQuotedOrPattern(prompt: string, patterns: RegExp[], fallback: string): string {
+  for (const p of patterns) {
+    const m = prompt.match(p);
+    if (m?.[1]?.trim()) return m[1].trim();
+  }
+  return fallback;
+}
+
+function extractAuthCopy(prompt: string) {
+  return {
+    welcome: extractQuotedOrPattern(
+      prompt,
+      [
+        /(?:welcome|headline|title)[:\s]+["']([^"']+)["']/i,
+        /(?:welcome|headline)[:\s]+([^\n.]{4,48})/i,
+      ],
+      /login|sign\s*in/i.test(prompt) ? "Welcome back" : "Welcome",
+    ),
+    subtitle: extractQuotedOrPattern(
+      prompt,
+      [/(?:subtitle|subhead|description)[:\s]+["']([^"']+)["']/i, /(?:subtitle|subhead)[:\s]+([^\n.]{4,64})/i],
+      "Sign in to continue securely",
+    ),
+    primaryCta: extractQuotedOrPattern(
+      prompt,
+      [/(?:button|cta|primary)[:\s]+["']([^"']+)["']/i, /(?:button|cta)[:\s]+([^\n.]{2,24})/i],
+      "Continue",
+    ),
+    footer: extractQuotedOrPattern(
+      prompt,
+      [/(?:footer|link|secondary)[:\s]+["']([^"']+)["']/i],
+      "New user? Create account",
+    ),
+  };
+}
+
+function extractFormFieldsFromPrompt(prompt: string): string[] {
+  const fields: string[] = [];
+  for (const m of prompt.matchAll(/(?:^|\n)\s*[-•*]?\s*(?:field|input)[:\s]+([^\n,]{2,32})/gi)) {
+    fields.push(m[1]!.trim());
+  }
+  const keywords = [
+    "Mobile number",
+    "Phone number",
+    "Email",
+    "Password",
+    "Enter OTP",
+    "OTP",
+    "Username",
+    "Search",
+  ];
+  for (const kw of keywords) {
+    if (new RegExp(`\\b${kw.replace(/\s+/g, "\\s+")}\\b`, "i").test(prompt)) {
+      fields.push(kw);
+    }
+  }
+  const unique = [...new Set(fields.map((f) => f.replace(/\benter\s+/i, "").trim()))];
+  if (unique.length === 0 && /login|sign\s*in|auth|otp/i.test(prompt)) {
+    return ["Mobile number", "Enter OTP"];
+  }
+  return unique.slice(0, 4);
+}
+
+function extractListItemsFromPrompt(prompt: string): string[] {
+  const items: string[] = [];
+  for (const m of prompt.matchAll(/(?:^|\n)\s*[-•*]\s+([A-Za-z][^\n]{2,40})/g)) {
+    const line = m[1]!.trim();
+    if (!/^(field|input|button|cta|title|headline)/i.test(line)) items.push(line);
+  }
+  return items.slice(0, 5);
+}
+
+function extractHeadlineFromPrompt(prompt: string, fallback: string): string {
+  const product = extractProductNameFromPrompt(prompt);
+  if (product) return product;
+
+  return extractQuotedOrPattern(
+    prompt,
+    [
+      /(?:headline|title|screen title)[:\s]+["']([^"']+)["']/i,
+      /(?:design|create|build)\s+(?:a\s+)?(?:modern\s+)?(.{4,48}?)\s+(?:screen|page|login)/i,
+    ],
+    fallback === "Mobile Screen" ? "Overview" : fallback,
+  );
+}
+
+function extractSubheadFromPrompt(prompt: string): string | undefined {
+  const sub = extractQuotedOrPattern(
+    prompt,
+    [/(?:subtitle|subhead|tagline)[:\s]+["']([^"']+)["']/i],
+    "",
+  );
+  return sub || undefined;
+}
+
+function buildInputField(ctx: BuildCtx, y: number, label: string): number {
+  const { layout, tokens } = ctx;
+  rect(ctx, ctx.contentId, `${label} field`, layout.gutter, y, layout.contentW, 48, tokens.canvas, tokens.radiusControl, tokens.hairline);
+  text(
+    ctx,
+    ctx.contentId,
+    `${label} placeholder`,
+    layout.gutter + 16,
+    y + 14,
+    layout.contentW - 32,
+    tokens.bodyLine,
+    label,
+    tokens.bodySize,
+    400,
+    tokens.muted,
+    tokens.bodyLine,
+  );
+  return y + 64;
+}
+
+function centeredLabel(
+  ctx: BuildCtx,
+  parentId: string,
+  name: string,
+  boxX: number,
+  boxY: number,
+  boxW: number,
+  boxH: number,
+  content: string,
+  size: number,
+  weight: number,
+  color: string,
+  lineHeightPx: number,
+): string {
+  return boxText(ctx, parentId, name, boxX, boxY, boxW, boxH, content, size, weight, color, lineHeightPx);
+}
+
+function buildPrimaryCta(ctx: BuildCtx, y: number, label: string, icon: RichIconKey = "workout"): number {
+  const { layout, tokens } = ctx;
+  const btnH = 52;
+  rect(ctx, ctx.contentId, "Primary CTA", layout.gutter, y, layout.contentW, btnH, tokens.primaryStrong, tokens.radiusControl);
+  iconBadge(ctx, ctx.contentId, "Primary CTA", layout.gutter + 16, y + 10, 32, icon, tokens.primaryMedium, tokens.onPrimary);
+  centeredLabel(
+    ctx,
+    ctx.contentId,
+    "Primary CTA label",
+    layout.gutter + 52,
+    y,
+    layout.contentW - 68,
+    btnH,
+    label,
+    tokens.bodySize,
+    600,
+    tokens.onPrimary,
+    tokens.bodyLine,
+  );
+  return y + btnH + 16;
+}
+
 function extractAmountFromPrompt(prompt: string): string {
   return prompt.match(/₹[\d,]+(?:\.\d{2})?/)?.[0] ?? "₹1,249";
 }
@@ -793,8 +1019,15 @@ function extractMerchantFromPrompt(prompt: string): string {
   return m?.[1]?.trim() ?? "Swiggy";
 }
 
-function createRichCtx(tokens: ExtractedDesignTokens, title: string, scrollHeight?: number): BuildCtx {
-  const layout = { ...makeLayout(tokens), scrollH: scrollHeight ?? makeLayout(tokens).scrollH };
+function createRichCtx(
+  tokens: ExtractedDesignTokens,
+  title: string,
+  frameHeight?: number,
+): BuildCtx {
+  const layout = makeLayout(tokens, frameHeight ?? MIN_SCREEN_HEIGHT);
+  if (frameHeight != null) {
+    layout.scrollH = frameHeight - TAB_BAR_H;
+  }
   let counter = 0;
   const ctx: BuildCtx = {
     nodes: {},
@@ -803,7 +1036,7 @@ function createRichCtx(tokens: ExtractedDesignTokens, title: string, scrollHeigh
     tokens,
     layout,
     frameId: "ai-rich-frame",
-    contentId: "ai-rich-scroll",
+    contentId: "ai-rich-frame",
   };
 
   ctx.nodes[ctx.frameId] = {
@@ -819,31 +1052,17 @@ function createRichCtx(tokens: ExtractedDesignTokens, title: string, scrollHeigh
     visible: true,
     locked: false,
     expanded: true,
-    fill: tokens.wash,
+    fill: tokens.canvas,
     strokeColor: tokens.hairline,
     strokeWidth: 1,
-    cornerRadius: 0,
+    cornerRadius: tokens.radiusCard,
+    clipChildren: true,
+    layoutMode: "vertical",
+    layoutGap: 0,
+    layoutSizingHorizontal: "fixed",
+    layoutSizingVertical: "hug",
   };
   ctx.childOrder[ROOT] = [ctx.frameId];
-
-  ctx.nodes[ctx.contentId] = {
-    id: ctx.contentId,
-    parentId: ctx.frameId,
-    type: "frame",
-    name: "Scroll content",
-    x: 0,
-    y: 0,
-    width: layout.w,
-    height: layout.scrollH,
-    rotation: 0,
-    visible: true,
-    locked: false,
-    expanded: true,
-    fill: tokens.wash,
-    cornerRadius: 0,
-    clipChildren: true,
-  };
-  addChild(ctx, ctx.frameId, ctx.contentId);
   return ctx;
 }
 
@@ -853,10 +1072,26 @@ function finalizeRichResult(
   flowLabel: string,
 ): AIGenerateResult {
   const title = options.title?.trim() || ctx.nodes[ctx.frameId]?.name || "Screen";
+
+  const contentHeight = measureFlatContentHeight(ctx.nodes, ctx.frameId);
+  ctx.layout.h = contentHeight;
+  ctx.nodes[ctx.frameId] = {
+    ...ctx.nodes[ctx.frameId]!,
+    height: contentHeight,
+  };
+
+  const structured = organizeRichScreenHierarchy(ctx.nodes, ctx.childOrder, ctx.frameId, {
+    w: ctx.layout.w,
+    h: ctx.layout.h,
+    gutter: ctx.layout.gutter,
+    sectionGap: ctx.layout.sectionGap,
+    gridGap: ctx.layout.gridGap,
+  });
+
   const slice: EditorPersistSlice = wrapPersistSliceWithPages({
     fileName: `${title} · AI`,
-    nodes: ctx.nodes,
-    childOrder: ctx.childOrder,
+    nodes: structured.nodes,
+    childOrder: structured.childOrder,
     assets: {},
     designTokens: {},
     selectedIds: [ctx.frameId],
@@ -886,41 +1121,39 @@ function finalizeRichResult(
 function buildNavHeader(ctx: BuildCtx, y: number, title: string): number {
   const { layout, tokens } = ctx;
   rect(ctx, ctx.contentId, "Nav header", 0, y, layout.w, 56, tokens.canvas, 0);
-  text(ctx, ctx.contentId, "Back", layout.gutter, y + 18, 40, 24, "←", tokens.titleSize, 600, tokens.brandSecondary, tokens.titleLine);
-  text(
+  iconBadge(ctx, ctx.contentId, "Back", layout.gutter, y + 10, 36, "back", tokens.surface3, tokens.brandSecondary);
+  boxText(
     ctx,
     ctx.contentId,
     "Screen title",
     layout.gutter + 40,
-    y + 16,
+    y + 10,
     layout.contentW - 80,
-    tokens.titleLine,
+    36,
     title,
     tokens.titleSize,
     700,
     tokens.ink,
     tokens.titleLine,
-    "center",
   );
   return y + 56;
 }
 
 function buildCheckoutSteps(ctx: BuildCtx, y: number): number {
   const { layout, tokens } = ctx;
-  text(
+  boxText(
     ctx,
     ctx.contentId,
     "Steps",
     layout.gutter,
     y,
     layout.contentW,
-    tokens.subtextLine,
+    tokens.subtextLine + 8,
     "Cart  →  Pay  →  Done",
     tokens.subtextSize,
     500,
     tokens.muted,
     tokens.subtextLine,
-    "center",
   );
   return y + tokens.subtextLine + layout.headerToCard;
 }
@@ -943,7 +1176,20 @@ function buildStickyPayCta(ctx: BuildCtx, label: string): void {
   const y = layout.h - STICKY_FOOTER_H;
   rect(ctx, ctx.frameId, "Pay dock", 0, y, layout.w, STICKY_FOOTER_H, tokens.canvas, 0, tokens.hairline);
   rect(ctx, ctx.frameId, "Pay CTA", layout.gutter, y + 16, layout.contentW, 52, tokens.primaryStrong, tokens.radiusControl);
-  text(ctx, ctx.frameId, "Pay CTA label", layout.gutter, y + 30, layout.contentW, tokens.bodyLine, label, tokens.bodySize, 600, tokens.onPrimary, tokens.bodyLine, "center");
+  boxText(
+    ctx,
+    ctx.frameId,
+    "Pay CTA label",
+    layout.gutter,
+    y + 16,
+    layout.contentW,
+    52,
+    label,
+    tokens.bodySize,
+    600,
+    tokens.onPrimary,
+    tokens.bodyLine,
+  );
 }
 
 export function buildRichCheckoutScreen(options: RichMobileBuildOptions): AIGenerateResult {
@@ -979,7 +1225,20 @@ export function buildRichCheckoutScreen(options: RichMobileBuildOptions): AIGene
   ellipse(ctx, ctx.contentId, "UPI icon", ctx.layout.gutter + ctx.layout.cardPad, cy + 16, 40, tokens.brandPrimary);
   text(ctx, ctx.contentId, "UPI label", ctx.layout.gutter + ctx.layout.cardPad + 52, cy + 18, 200, tokens.bodyLine, "Paytm UPI", tokens.bodySize, 600, tokens.ink, tokens.bodyLine);
   text(ctx, ctx.contentId, "UPI meta", ctx.layout.gutter + ctx.layout.cardPad + 52, cy + 18 + tokens.bodyLine + 2, 220, tokens.subtextLine, "rahul@paytm · Primary", tokens.subtextSize, 400, tokens.muted, tokens.subtextLine);
-  text(ctx, ctx.contentId, "UPI check", ctx.layout.gutter + ctx.layout.contentW - ctx.layout.cardPad - 24, cy + 26, 24, 24, "✓", tokens.bodySize, 700, tokens.brandPrimary, tokens.bodyLine, "center");
+  boxText(
+    ctx,
+    ctx.contentId,
+    "UPI check",
+    ctx.layout.gutter + ctx.layout.contentW - ctx.layout.cardPad - 24,
+    cy + 16,
+    24,
+    40,
+    "✓",
+    tokens.bodySize,
+    700,
+    tokens.brandPrimary,
+    tokens.bodyLine,
+  );
   cy += 72 + 12;
   rect(ctx, ctx.contentId, "Balance option", ctx.layout.gutter, cy, ctx.layout.contentW, 64, tokens.canvas, ctx.layout.radiusControl, tokens.hairline);
   text(ctx, ctx.contentId, "Balance label", ctx.layout.gutter + ctx.layout.cardPad, cy + 20, 200, tokens.bodyLine, "Paytm Wallet", tokens.bodySize, 500, tokens.ink, tokens.bodyLine);
@@ -1012,8 +1271,24 @@ export function buildRichProfileScreen(options: RichMobileBuildOptions): AIGener
   y = buildNavHeader(ctx, y, title);
 
   rect(ctx, ctx.contentId, "Profile card", ctx.layout.gutter, y, ctx.layout.contentW, 120, tokens.canvas, ctx.layout.radiusCard, tokens.hairline);
-  ellipse(ctx, ctx.contentId, "Avatar", ctx.layout.gutter + ctx.layout.cardPad, y + 24, 72, tokens.primaryWeak);
-  text(ctx, ctx.contentId, "Avatar initial", ctx.layout.gutter + ctx.layout.cardPad + 26, y + 46, 24, tokens.titleLine, userName[0] ?? "R", tokens.displaySize, 700, tokens.brandSecondary, tokens.displayLine, "center");
+  const avatarX = ctx.layout.gutter + ctx.layout.cardPad;
+  const avatarY = y + 24;
+  const avatarSize = 72;
+  ellipse(ctx, ctx.contentId, "Avatar", avatarX, avatarY, avatarSize, tokens.primaryWeak);
+  boxText(
+    ctx,
+    ctx.contentId,
+    "Avatar initial",
+    avatarX,
+    avatarY,
+    avatarSize,
+    avatarSize,
+    userName[0] ?? "R",
+    tokens.displaySize,
+    700,
+    tokens.brandSecondary,
+    tokens.displayLine,
+  );
   text(ctx, ctx.contentId, "Name", ctx.layout.gutter + ctx.layout.cardPad + 88, y + 36, 200, tokens.titleLine, userName, tokens.titleSize, 700, tokens.ink, tokens.titleLine);
   text(ctx, ctx.contentId, "Phone", ctx.layout.gutter + ctx.layout.cardPad + 88, y + 36 + tokens.titleLine + 4, 220, tokens.subtextLine, "+91 98765 43210", tokens.subtextSize, 400, tokens.muted, tokens.subtextLine);
   y += 120 + ctx.layout.sectionGap;
@@ -1033,27 +1308,371 @@ export function buildRichProfileScreen(options: RichMobileBuildOptions): AIGener
 export function buildRichAuthScreen(options: RichMobileBuildOptions): AIGenerateResult {
   const tokens = options.tokens;
   const title = options.title?.trim() || extractScreenTitle(options.prompt, "auth");
+  const copy = extractAuthCopy(options.prompt);
+  const fields = extractFormFieldsFromPrompt(options.prompt);
   const ctx = createRichCtx(tokens, title);
 
   let y = 0;
   y = buildStatusBar(ctx, y);
   ellipse(ctx, ctx.contentId, "Brand logo", ctx.layout.gutter, y + 24, 56, tokens.brandPrimary);
-  text(ctx, ctx.contentId, "Welcome", ctx.layout.gutter, y + 96, ctx.layout.contentW, tokens.displayLine, "Welcome back", tokens.displaySize, 700, tokens.ink, tokens.displayLine);
-  text(ctx, ctx.contentId, "Subtitle", ctx.layout.gutter, y + 96 + tokens.displayLine + 8, ctx.layout.contentW, tokens.bodyLine, "Sign in to continue securely", tokens.bodySize, 400, tokens.muted, tokens.bodyLine);
+  text(
+    ctx,
+    ctx.contentId,
+    "Welcome",
+    ctx.layout.gutter,
+    y + 96,
+    ctx.layout.contentW,
+    tokens.displayLine,
+    copy.welcome,
+    tokens.displaySize,
+    700,
+    tokens.ink,
+    tokens.displayLine,
+  );
+  text(
+    ctx,
+    ctx.contentId,
+    "Subtitle",
+    ctx.layout.gutter,
+    y + 96 + tokens.displayLine + 8,
+    ctx.layout.contentW,
+    tokens.bodyLine,
+    copy.subtitle,
+    tokens.bodySize,
+    400,
+    tokens.muted,
+    tokens.bodyLine,
+  );
 
   y += 168;
-  rect(ctx, ctx.contentId, "Phone field", ctx.layout.gutter, y, ctx.layout.contentW, 48, tokens.canvas, tokens.radiusControl, tokens.hairline);
-  text(ctx, ctx.contentId, "Phone placeholder", ctx.layout.gutter + 16, y + 14, 200, tokens.bodyLine, "Mobile number", tokens.bodySize, 400, tokens.muted, tokens.bodyLine);
-  y += 64;
-  rect(ctx, ctx.contentId, "OTP field", ctx.layout.gutter, y, ctx.layout.contentW, 48, tokens.canvas, tokens.radiusControl, tokens.hairline);
-  text(ctx, ctx.contentId, "OTP placeholder", ctx.layout.gutter + 16, y + 14, 160, tokens.bodyLine, "Enter OTP", tokens.bodySize, 400, tokens.muted, tokens.bodyLine);
-  y += 72;
-  rect(ctx, ctx.contentId, "Continue CTA", ctx.layout.gutter, y, ctx.layout.contentW, 52, tokens.primaryStrong, tokens.radiusControl);
-  text(ctx, ctx.contentId, "Continue label", ctx.layout.gutter, y + 16, ctx.layout.contentW, tokens.bodyLine, "Continue", tokens.bodySize, 600, tokens.onPrimary, tokens.bodyLine, "center");
-  text(ctx, ctx.contentId, "Signup link", ctx.layout.gutter, y + 72, ctx.layout.contentW, tokens.bodyLine, "New user? Create account", tokens.subtextSize, 500, tokens.primaryMedium, tokens.subtextLine, "center");
+  for (const field of fields) {
+    y = buildInputField(ctx, y, field);
+  }
+  y = buildPrimaryCta(ctx, y, copy.primaryCta);
+  boxText(
+    ctx,
+    ctx.contentId,
+    "Signup link",
+    ctx.layout.gutter,
+    y + 8,
+    ctx.layout.contentW,
+    tokens.bodyLine + 8,
+    copy.footer,
+    tokens.subtextSize,
+    500,
+    tokens.primaryMedium,
+    tokens.subtextLine,
+  );
 
   const count = Object.keys(ctx.nodes).length;
   return finalizeRichResult(ctx, { ...options, title }, `Rich auth · ${count} layers`);
+}
+
+function buildStatTile(
+  ctx: BuildCtx,
+  x: number,
+  y: number,
+  w: number,
+  label: string,
+  value: string,
+  accent: string,
+): void {
+  const { tokens } = ctx;
+  const tileH = 96;
+  const tileBg = tintForAccent(tokens, accent);
+  rect(ctx, ctx.contentId, `${label} stat`, x, y, w, tileH, tileBg, tokens.radiusControl, tokens.hairline);
+  iconBadge(
+    ctx,
+    ctx.contentId,
+    label,
+    x + 12,
+    y + 12,
+    28,
+    statIconForLabel(label),
+    accent,
+    tokens.onPrimary,
+  );
+  text(ctx, ctx.contentId, `${label} value`, x + 12, y + 48, w - 24, tokens.titleLine, value, tokens.titleSize, 700, tokens.ink, tokens.titleLine);
+  text(ctx, ctx.contentId, `${label} label`, x + 12, y + 48 + tokens.titleLine + 2, w - 24, tokens.subtextLine, label, tokens.subtextSize, 500, tokens.muted, tokens.subtextLine);
+}
+
+function buildWeeklyBars(ctx: BuildCtx, y: number): number {
+  const { layout, tokens } = ctx;
+  const chartH = 96;
+  rect(ctx, ctx.contentId, "Weekly chart", layout.gutter, y, layout.contentW, chartH + 36, tokens.canvas, tokens.radiusCard, tokens.hairline);
+  iconBadge(
+    ctx,
+    ctx.contentId,
+    "Chart",
+    layout.gutter + tokens.cardPad,
+    y + 10,
+    24,
+    "chart",
+    tokens.primaryWeak,
+    tokens.brandSecondary,
+  );
+  text(
+    ctx,
+    ctx.contentId,
+    "Weekly chart title",
+    layout.gutter + tokens.cardPad + 32,
+    y + 12,
+    layout.contentW - tokens.cardPad * 2 - 32,
+    tokens.bodyLine,
+    "This week",
+    tokens.bodySize,
+    600,
+    tokens.ink,
+    tokens.bodyLine,
+  );
+
+  const bars = [0.45, 0.72, 0.55, 0.9, 0.62, 0.78, 0.5];
+  const barW = (layout.contentW - tokens.cardPad * 2 - 6 * 8) / 7;
+  const baseY = y + chartH + 8;
+  bars.forEach((pct, i) => {
+    const bx = layout.gutter + tokens.cardPad + i * (barW + 8);
+    const bh = Math.max(12, pct * 56);
+    rect(ctx, ctx.contentId, `Bar ${i}`, bx, baseY - bh, barW, bh, i === 3 ? tokens.primaryStrong : tokens.primaryWeak, 4);
+  });
+  return y + chartH + 36 + layout.sectionGap;
+}
+
+const DEFAULT_ACTIVITIES = [
+  { name: "Morning Run", detail: "5.2 km · 32 min", time: "7:10 AM" },
+  { name: "Evening Walk", detail: "3.1 km · 38 min", time: "6:45 PM" },
+  { name: "Yoga Session", detail: "Stretch · 25 min", time: "8:00 PM" },
+];
+
+export function buildRichActivityTrackingScreen(options: RichMobileBuildOptions): AIGenerateResult {
+  const tokens = options.tokens;
+  const title = options.title?.trim() || extractScreenTitle(options.prompt, "activity_tracking");
+  const headline = extractProductNameFromPrompt(options.prompt) ?? "Today's Activity";
+  const ctx = createRichCtx(tokens, title);
+
+  let y = 0;
+  y = buildStatusBar(ctx, y);
+  y = buildNavHeader(ctx, y, title);
+
+  text(
+    ctx,
+    ctx.contentId,
+    "Today headline",
+    ctx.layout.gutter,
+    y + 8,
+    ctx.layout.contentW,
+    tokens.displayLine,
+    headline,
+    tokens.displaySize,
+    700,
+    tokens.ink,
+    tokens.displayLine,
+  );
+  text(
+    ctx,
+    ctx.contentId,
+    "Today date",
+    ctx.layout.gutter,
+    y + 8 + tokens.displayLine + 4,
+    ctx.layout.contentW,
+    tokens.bodyLine,
+    "Tuesday, 17 Jun",
+    tokens.bodySize,
+    400,
+    tokens.muted,
+    tokens.bodyLine,
+  );
+  y += tokens.displayLine + tokens.bodyLine + 20;
+
+  const tileW = (ctx.layout.contentW - ctx.layout.gridGap * 2) / 3;
+  buildStatTile(ctx, ctx.layout.gutter, y, tileW, "Steps", "8,432", tokens.primaryStrong);
+  buildStatTile(ctx, ctx.layout.gutter + tileW + ctx.layout.gridGap, y, tileW, "Calories", "420", tokens.notice);
+  buildStatTile(ctx, ctx.layout.gutter + (tileW + ctx.layout.gridGap) * 2, y, tileW, "Minutes", "48", tokens.positive);
+  y += 96 + ctx.layout.sectionGap;
+
+  y = buildWeeklyBars(ctx, y);
+
+  y = sectionBlock(ctx, y, "Recent activity");
+  const rowH = 64;
+  DEFAULT_ACTIVITIES.forEach((activity, i) => {
+    const iy = y + i * (rowH + 8);
+    rect(ctx, ctx.contentId, activity.name, ctx.layout.gutter, iy, ctx.layout.contentW, rowH, tokens.canvas, tokens.radiusControl, tokens.hairline);
+    iconBadge(
+      ctx,
+      ctx.contentId,
+      activity.name,
+      ctx.layout.gutter + ctx.layout.cardPad,
+      iy + 12,
+      40,
+      activityIconForName(activity.name),
+      tokens.primaryWeak,
+      tokens.brandSecondary,
+    );
+    text(
+      ctx,
+      ctx.contentId,
+      activity.name,
+      ctx.layout.gutter + ctx.layout.cardPad + 52,
+      iy + 14,
+      ctx.layout.contentW - 120,
+      tokens.bodyLine,
+      activity.name,
+      tokens.bodySize,
+      600,
+      tokens.ink,
+      tokens.bodyLine,
+    );
+    text(
+      ctx,
+      ctx.contentId,
+      `${activity.name} detail`,
+      ctx.layout.gutter + ctx.layout.cardPad + 52,
+      iy + 14 + tokens.bodyLine + 2,
+      ctx.layout.contentW - 120,
+      tokens.subtextLine,
+      activity.detail,
+      tokens.subtextSize,
+      400,
+      tokens.muted,
+      tokens.subtextLine,
+    );
+    text(
+      ctx,
+      ctx.contentId,
+      `${activity.name} time`,
+      ctx.layout.gutter + ctx.layout.contentW - ctx.layout.cardPad - 56,
+      iy + 22,
+      48,
+      tokens.subtextLine,
+      activity.time,
+      tokens.captionSize,
+      500,
+      tokens.moderate,
+      tokens.captionLine,
+      "right",
+    );
+  });
+  y += DEFAULT_ACTIVITIES.length * (rowH + 8) + 8;
+
+  buildPrimaryCta(ctx, y, "Start workout");
+
+  const count = Object.keys(ctx.nodes).length;
+  return finalizeRichResult(ctx, { ...options, title }, `Rich activity · ${count} layers`);
+}
+
+export function buildRichGenericMobileScreen(options: RichMobileBuildOptions): AIGenerateResult {
+  const tokens = options.tokens;
+  const title = options.title?.trim() || extractScreenTitle(options.prompt, "generic_mobile");
+  const headline = extractHeadlineFromPrompt(options.prompt, title);
+  const subhead = extractSubheadFromPrompt(options.prompt);
+  const fields = extractFormFieldsFromPrompt(options.prompt);
+  const listItems = extractListItemsFromPrompt(options.prompt);
+  const cta = extractQuotedOrPattern(
+    options.prompt,
+    [/(?:button|cta|primary)[:\s]+["']([^"']+)["']/i],
+    "Continue",
+  );
+  const ctx = createRichCtx(tokens, title);
+
+  let y = 0;
+  y = buildStatusBar(ctx, y);
+  y = buildNavHeader(ctx, y, title);
+
+  text(
+    ctx,
+    ctx.contentId,
+    "Hero headline",
+    ctx.layout.gutter,
+    y + 16,
+    ctx.layout.contentW,
+    tokens.displayLine,
+    headline,
+    tokens.displaySize,
+    700,
+    tokens.ink,
+    tokens.displayLine,
+  );
+  if (subhead) {
+    text(
+      ctx,
+      ctx.contentId,
+      "Hero subhead",
+      ctx.layout.gutter,
+      y + 16 + tokens.displayLine + 8,
+      ctx.layout.contentW,
+      tokens.bodyLine,
+      subhead,
+      tokens.bodySize,
+      400,
+      tokens.muted,
+      tokens.bodyLine,
+    );
+    y += tokens.displayLine + tokens.bodyLine + 24;
+  } else {
+    y += tokens.displayLine + 24;
+  }
+
+  if (fields.length > 0) {
+    for (const field of fields) {
+      y = buildInputField(ctx, y, field);
+    }
+    y = buildPrimaryCta(ctx, y, cta);
+  } else {
+    rect(
+      ctx,
+      ctx.contentId,
+      "Hero card",
+      ctx.layout.gutter,
+      y,
+      ctx.layout.contentW,
+      120,
+      tokens.canvas,
+      tokens.radiusCard,
+      tokens.hairline,
+    );
+    text(
+      ctx,
+      ctx.contentId,
+      "Card body",
+      ctx.layout.gutter + tokens.cardPad,
+      y + tokens.cardPad,
+      ctx.layout.contentW - tokens.cardPad * 2,
+      tokens.bodyLine * 2,
+      extractGenericScreenSummary(options.prompt, title),
+      tokens.bodySize,
+      400,
+      tokens.moderate,
+      tokens.bodyLine,
+    );
+    y += 136;
+    y = buildPrimaryCta(ctx, y, cta);
+  }
+
+  if (listItems.length > 0) {
+    y += 8;
+    y = sectionBlock(ctx, y, "Details");
+    const rowH = 52;
+    listItems.forEach((item, i) => {
+      const iy = y + i * (rowH + 8);
+      rect(ctx, ctx.contentId, item, ctx.layout.gutter, iy, ctx.layout.contentW, rowH, tokens.canvas, tokens.radiusControl, tokens.hairline);
+      text(
+        ctx,
+        ctx.contentId,
+        `${item} label`,
+        ctx.layout.gutter + tokens.cardPad,
+        iy + 16,
+        ctx.layout.contentW - tokens.cardPad * 2,
+        tokens.bodyLine,
+        item,
+        tokens.bodySize,
+        500,
+        tokens.ink,
+        tokens.bodyLine,
+      );
+    });
+  }
+
+  const count = Object.keys(ctx.nodes).length;
+  return finalizeRichResult(ctx, { ...options, title }, `Rich mobile · ${count} layers`);
 }
 
 export function supportsRichScreen(intent: ScreenIntent): boolean {
@@ -1079,6 +1698,13 @@ export function buildRichScreenForIntent(intent: ScreenIntent, options: RichMobi
       });
     case "auth":
       return buildRichAuthScreen(options);
+    case "activity_tracking":
+      return buildRichActivityTrackingScreen(options);
+    case "generic_mobile":
+      if (isActivityTrackingPrompt(options.prompt)) {
+        return buildRichActivityTrackingScreen(options);
+      }
+      return buildRichGenericMobileScreen(options);
     default:
       return null;
   }

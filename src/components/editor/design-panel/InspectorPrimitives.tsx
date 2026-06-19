@@ -1,15 +1,16 @@
 "use client";
 
-import { Plus } from "lucide-react";
+import { ChevronDown, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { inspectorControlHeightClass } from "@/lib/appFieldStyles";
+import { appFieldClass, appFieldClassCompact, inspectorControlHeightClass } from "@/lib/appFieldStyles";
 import {
   inspectorHeaderActionBtnClass,
   inspectorIconClass,
   inspectorIconStroke,
   inspectorLucideProps,
 } from "@/lib/inspectorIconStyles";
-import type { ReactNode, Ref } from "react";
+import type { ButtonHTMLAttributes, ReactNode, Ref } from "react";
+import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
 
 export function InspectorSegmented<T extends string>({
   options,
@@ -54,6 +55,53 @@ export function InspectorSegmented<T extends string>({
   );
 }
 
+/** Inset `<select>` with a chevron (native arrow hidden via `appearance-none`). */
+export function InspectorInsetSelect({
+  value,
+  onChange,
+  disabled,
+  children,
+  "aria-label": ariaLabel,
+  className,
+  shellClassName,
+  compact = true,
+}: {
+  value: string;
+  onChange: (ev: React.ChangeEvent<HTMLSelectElement>) => void;
+  disabled?: boolean;
+  children: ReactNode;
+  "aria-label"?: string;
+  className?: string;
+  shellClassName?: string;
+  compact?: boolean;
+}) {
+  const shell = compact ? appFieldClassCompact : appFieldClass;
+  return (
+    <div className={cn(shell, "relative", shellClassName)}>
+      <select
+        disabled={disabled}
+        value={value}
+        onChange={onChange}
+        aria-label={ariaLabel}
+        className={cn(
+          "h-full w-full min-w-0 cursor-pointer appearance-none border-0 bg-transparent py-0 pl-0 pr-6 text-ui text-app-field-fg focus:outline-none disabled:cursor-not-allowed",
+          className,
+        )}
+      >
+        {children}
+      </select>
+      <ChevronDown
+        className={cn(
+          inspectorIconClass,
+          "pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-app-muted",
+        )}
+        strokeWidth={inspectorIconStroke}
+        aria-hidden
+      />
+    </div>
+  );
+}
+
 export function InspectorLabelRow({
   label,
   children,
@@ -71,6 +119,45 @@ export function InspectorLabelRow({
   );
 }
 
+/** Icon/action button with Figma-style hover hint instead of native title. */
+export function InspectorHintIconButton({
+  title,
+  disabled,
+  onClick,
+  className,
+  pressed,
+  children,
+  buttonRef,
+  hintSide = "top",
+  ...rest
+}: {
+  title: string;
+  disabled?: boolean;
+  onClick?: () => void;
+  className?: string;
+  pressed?: boolean;
+  children: ReactNode;
+  buttonRef?: Ref<HTMLButtonElement>;
+  hintSide?: "top" | "bottom" | "left" | "right";
+} & Omit<ButtonHTMLAttributes<HTMLButtonElement>, "title" | "children">) {
+  return (
+    <EditorHintWrap title={title} disabled={disabled} hintSide={hintSide}>
+      <button
+        ref={buttonRef}
+        type="button"
+        disabled={disabled}
+        aria-label={title}
+        aria-pressed={pressed}
+        onClick={onClick}
+        className={className}
+        {...rest}
+      >
+        {children}
+      </button>
+    </EditorHintWrap>
+  );
+}
+
 export function InspectorSectionAddButton({
   title,
   disabled,
@@ -85,17 +172,18 @@ export function InspectorSectionAddButton({
   className?: string;
 }) {
   return (
-    <button
-      ref={buttonRef}
-      type="button"
-      disabled={disabled}
-      title={title}
-      aria-label={title}
-      onClick={onClick}
-      className={cn(inspectorHeaderActionBtnClass, className)}
-    >
-      <Plus {...inspectorLucideProps()} />
-    </button>
+    <EditorHintWrap title={title} disabled={disabled}>
+      <button
+        ref={buttonRef}
+        type="button"
+        disabled={disabled}
+        aria-label={title}
+        onClick={onClick}
+        className={cn(inspectorHeaderActionBtnClass, className)}
+      >
+        <Plus {...inspectorLucideProps()} />
+      </button>
+    </EditorHintWrap>
   );
 }
 

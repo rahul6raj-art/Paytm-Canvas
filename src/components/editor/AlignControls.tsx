@@ -1,32 +1,33 @@
 "use client";
 
-import {
-  AlignCenterHorizontal,
-  AlignCenterVertical,
-  AlignEndHorizontal,
-  AlignHorizontalDistributeCenter,
-  AlignLeft,
-  AlignRight,
-  AlignStartHorizontal,
-  AlignVerticalDistributeCenter,
-} from "lucide-react";
+import type { ComponentType } from "react";
 import { useEditorStore, type AlignDirection } from "@/stores/useEditorStore";
 import { canAlignSelection, canDistributeSelection } from "@/lib/alignSelection";
 import { cn } from "@/lib/utils";
-import { inspectorIconClass, inspectorIconStroke } from "@/lib/inspectorIconStyles";
+import {
+  DistributeHorizontallyIcon,
+  DistributeVerticalSpacingIcon,
+  LayerAlignBottomIcon,
+  LayerAlignHorizontalCenterIcon,
+  LayerAlignLeftIcon,
+  LayerAlignRightIcon,
+  LayerAlignTopIcon,
+  LayerAlignVerticalCenterIcon,
+} from "./design-panel/InspectorSettingIcons";
 import { SelectionAlignmentGrid } from "./SelectionAlignmentGrid";
+import { EditorHintWrap } from "./EditorHoverHint";
 
 const ALIGN_BUTTONS: {
   direction: AlignDirection;
   label: string;
-  Icon: typeof AlignLeft;
+  Icon: ComponentType<{ className?: string }>;
 }[] = [
-  { direction: "left", label: "Align left edges", Icon: AlignLeft },
-  { direction: "center-h", label: "Align horizontal centers", Icon: AlignCenterVertical },
-  { direction: "right", label: "Align right edges", Icon: AlignRight },
-  { direction: "top", label: "Align top edges", Icon: AlignStartHorizontal },
-  { direction: "center-v", label: "Align vertical centers", Icon: AlignCenterHorizontal },
-  { direction: "bottom", label: "Align bottom edges", Icon: AlignEndHorizontal },
+  { direction: "left", label: "Align left edges", Icon: LayerAlignLeftIcon },
+  { direction: "center-h", label: "Align horizontal centers", Icon: LayerAlignHorizontalCenterIcon },
+  { direction: "right", label: "Align right edges", Icon: LayerAlignRightIcon },
+  { direction: "top", label: "Align top edges", Icon: LayerAlignTopIcon },
+  { direction: "center-v", label: "Align vertical centers", Icon: LayerAlignVerticalCenterIcon },
+  { direction: "bottom", label: "Align bottom edges", Icon: LayerAlignBottomIcon },
 ];
 
 type AlignControlsProps = {
@@ -81,17 +82,17 @@ export function AlignControls({ variant = "panel", className, onAction }: AlignC
           aria-label="Align selection"
         >
           {ALIGN_BUTTONS.map(({ direction, label, Icon }) => (
-            <button
-              key={direction}
-              type="button"
-              title={label}
-              aria-label={label}
-              disabled={!canAlign}
-              className={btnClass}
-              onClick={() => runAlign(direction)}
-            >
-              <Icon className={inspectorIconClass} strokeWidth={inspectorIconStroke} />
-            </button>
+            <EditorHintWrap key={direction} title={label} disabled={!canAlign}>
+              <button
+                type="button"
+                aria-label={label}
+                disabled={!canAlign}
+                className={btnClass}
+                onClick={() => runAlign(direction)}
+              >
+                <Icon />
+              </button>
+            </EditorHintWrap>
           ))}
         </div>
       ) : (
@@ -104,28 +105,30 @@ export function AlignControls({ variant = "panel", className, onAction }: AlignC
       )}
 
       <div className={cn("flex gap-1", compact && "mt-0.5")}>
-        <button
-          type="button"
-          title="Distribute horizontal spacing"
-          aria-label="Distribute horizontal spacing"
-          disabled={!canDistribute}
-          className={cn(btnClass, compact ? "h-7 flex-1" : "h-8 flex-1 gap-1.5 text-ui")}
-          onClick={() => runDistribute("horizontal")}
-        >
-          <AlignHorizontalDistributeCenter className={inspectorIconClass} strokeWidth={inspectorIconStroke} />
-          {!compact ? <span>Distribute H</span> : null}
-        </button>
-        <button
-          type="button"
-          title="Distribute vertical spacing"
-          aria-label="Distribute vertical spacing"
-          disabled={!canDistribute}
-          className={cn(btnClass, compact ? "h-7 flex-1" : "h-8 flex-1 gap-1.5 text-ui")}
-          onClick={() => runDistribute("vertical")}
-        >
-          <AlignVerticalDistributeCenter className={inspectorIconClass} strokeWidth={inspectorIconStroke} />
-          {!compact ? <span>Distribute V</span> : null}
-        </button>
+        <EditorHintWrap title="Distribute horizontal spacing" disabled={!canDistribute}>
+          <button
+            type="button"
+            aria-label="Distribute horizontal spacing"
+            disabled={!canDistribute}
+            className={cn(btnClass, compact ? "h-7 flex-1" : "h-8 flex-1 gap-1.5 text-ui")}
+            onClick={() => runDistribute("horizontal")}
+          >
+            <DistributeHorizontallyIcon />
+            {!compact ? <span>Distribute H</span> : null}
+          </button>
+        </EditorHintWrap>
+        <EditorHintWrap title="Distribute vertical spacing" disabled={!canDistribute}>
+          <button
+            type="button"
+            aria-label="Distribute vertical spacing"
+            disabled={!canDistribute}
+            className={cn(btnClass, compact ? "h-7 flex-1" : "h-8 flex-1 gap-1.5 text-ui")}
+            onClick={() => runDistribute("vertical")}
+          >
+            <DistributeVerticalSpacingIcon />
+            {!compact ? <span>Distribute V</span> : null}
+          </button>
+        </EditorHintWrap>
       </div>
     </div>
   );

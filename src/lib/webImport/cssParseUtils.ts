@@ -68,7 +68,7 @@ const WEB_FONT_ALIASES: Record<string, string> = {
 
 import { preserveImportFontFamily } from "@/lib/text/textFontManager";
 
-/** Preserve imported web font family names; use Inter only as fallback in the stack. */
+/** Map CSS font stacks to loadable faces while preserving the original family name. */
 export function resolveImportFontFamily(stack: string | undefined): string {
   if (!stack?.trim()) return "Inter, system-ui, sans-serif";
   const families = stack
@@ -77,6 +77,10 @@ export function resolveImportFontFamily(stack: string | undefined): string {
     .filter(Boolean);
   for (const fam of families) {
     const key = fam.toLowerCase();
+    const alias = WEB_FONT_ALIASES[key];
+    if (alias) {
+      return `${alias}, ${fam}, system-ui, sans-serif`;
+    }
     if (!GENERIC_FONT_FAMILIES.has(key)) {
       return preserveImportFontFamily(fam);
     }

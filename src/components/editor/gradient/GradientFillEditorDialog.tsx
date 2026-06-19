@@ -103,28 +103,25 @@ export function GradientFillEditorDialog({
         role="dialog"
         aria-label="Gradient editor"
         aria-modal="false"
-        className="fixed z-[120] flex flex-col overflow-hidden rounded-lg border border-app-border bg-[#2a2a2a] shadow-xl"
+        data-editor-shell
+        className="editor-inspector-dialog fixed z-[120]"
         style={adjacentPanelDialogStyle(dragPosition)}
       >
         <div
-          className={cn(
-            "flex shrink-0 items-center justify-between gap-2 border-b border-app-border px-3 py-2",
-            "cursor-grab select-none touch-none active:cursor-grabbing",
-            isDragging && "cursor-grabbing",
-          )}
+          className={cn("editor-inspector-dialog-header", isDragging && "cursor-grabbing")}
           onPointerDown={onHeaderPointerDown}
         >
           <div className="inspector-field-label pointer-events-none">Gradient</div>
           <button
             type="button"
             onClick={onClose}
-            className="flex h-7 w-7 items-center justify-center rounded text-app-muted hover:bg-app-hover hover:text-app-fg"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
             aria-label="Close gradient editor"
           >
             <X className="h-3.5 w-3.5" strokeWidth={2} />
           </button>
         </div>
-        <div className="thin-scroll min-h-0 flex-1 overflow-y-auto px-3 py-2.5">
+        <div className="editor-inspector-dialog-body">
           <GradientFillEditor
             embedded={false}
             nodeId={nodeId}

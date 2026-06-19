@@ -1,4 +1,4 @@
-import { convertSvgPathToVector } from "@/lib/svgImport/convertSvgPathToVector";
+import { convertSvgPathToVector, translatePathSegments } from "@/lib/svgImport/convertSvgPathToVector";
 import { absoluteSegmentsToPathD, parseSvgPathToAbsolute } from "@/lib/svgImport/parseSvgPath";
 import { parseTransformList } from "@/lib/svgImport/parseTransform";
 import type { SvgElement } from "@/lib/svgImport/parseSvg";
@@ -112,7 +112,12 @@ export function clipDefToCombinedPathD(
     const worldM = multiplyMatrix(multiplyMatrix(rootMatrix, defM), childM);
     const localized = convertSvgPathToVector(pathD, worldM, rootMatrix, "nonzero", warnings);
     if (localized?.flattenedPathData) {
-      parts.push(localized.flattenedPathData);
+      const segs = parseSvgPathToAbsolute(localized.flattenedPathData);
+      parts.push(
+        absoluteSegmentsToPathD(
+          translatePathSegments(segs, localized.x, localized.y),
+        ),
+      );
     } else if (localized?.pathPoints && localized.pathPoints.length >= 2) {
       parts.push(pathD);
     }

@@ -15,16 +15,16 @@ export const COMMENTS_PANEL_WIDTH = 240;
 
 /** Left sidebar — wide enough for layer rows + pages header without clipping. */
 export const LEFT_SIDEBAR_BOUNDS: PanelWidthBounds = {
-  min: 240,
-  max: 520,
-  default: 260,
+  min: 252,
+  max: 560,
+  default: 288,
 };
 
 /** Design / prototype / inspect properties panel. */
 export const RIGHT_PANEL_BOUNDS: PanelWidthBounds = {
-  min: 280,
-  max: 520,
-  default: 300,
+  min: 300,
+  max: 560,
+  default: 336,
 };
 
 /** Code tab needs extra width for monospace preview. */

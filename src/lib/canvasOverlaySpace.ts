@@ -1,4 +1,5 @@
 import { worldToViewport } from "@/lib/canvasCoordinates";
+import { snapScreenToDevicePixel } from "@/lib/crispRender";
 import { screenPxToWorld } from "@/lib/canvasVisual";
 import type { Matrix2D } from "@/lib/transformMath";
 import { matrixToCssTransform } from "@/lib/transformMath";
@@ -10,8 +11,32 @@ export type OverlaySpace = {
   zoom: number;
 };
 
+function overlayDpr(): number {
+  return typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+}
+
+/** Snap overlay coordinates to the device pixel grid (Figma-style crisp chrome). */
 export function snapOverlayPx(v: number): number {
-  return Math.round(v);
+  return snapScreenToDevicePixel(v, overlayDpr());
+}
+
+/** Axis-aligned 1px stroke rect inset so hairlines land on device pixels. */
+export function crispOverlayHairlineRect(rect: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}): { x: number; y: number; width: number; height: number } {
+  const x = snapOverlayPx(rect.x);
+  const y = snapOverlayPx(rect.y);
+  const right = snapOverlayPx(rect.x + rect.width);
+  const bottom = snapOverlayPx(rect.y + rect.height);
+  return {
+    x: x + 0.5,
+    y: y + 0.5,
+    width: Math.max(0, right - x - 1),
+    height: Math.max(0, bottom - y - 1),
+  };
 }
 
 export function worldPointToOverlay(
@@ -40,11 +65,12 @@ export function worldRectToOverlay(
 ): { x: number; y: number; width: number; height: number } {
   if (!space.screenSpace) return rect;
   const tl = worldPointToOverlay(rect.x, rect.y, space);
+  const br = worldPointToOverlay(rect.x + rect.width, rect.y + rect.height, space);
   return {
     x: tl.x,
     y: tl.y,
-    width: snapOverlayPx(rect.width * space.zoom),
-    height: snapOverlayPx(rect.height * space.zoom),
+    width: Math.max(0, br.x - tl.x),
+    height: Math.max(0, br.y - tl.y),
   };
 }
 

@@ -34,6 +34,7 @@ import {
 import { worldPointToOverlay, snapOverlayPx, type OverlaySpace } from "@/lib/canvasOverlaySpace";
 import { useCanvasOverlaySpace } from "./useCanvasOverlaySpace";
 import { CanvasEditValueBadge } from "./CanvasEditValueBadge";
+import { EditorHintWrap } from "./EditorHoverHint";
 
 const CORNERS: CornerIndex[] = [0, 1, 2, 3];
 
@@ -215,21 +216,21 @@ export function CornerRadiusHandles() {
         const world = localToWorld(id!, local, nodes, childOrder);
         const screen = worldPointToOverlay(world.x, world.y, overlay);
         return (
-          <button
-            key={cornerIndex}
-            type="button"
-            data-corner-radius-handle={cornerIndex}
-            aria-label={`Corner radius ${["top-left", "top-right", "bottom-right", "bottom-left"][cornerIndex]}`}
-            title="Drag to adjust corner radius"
-            className="pointer-events-auto absolute z-[31] touch-none will-change-transform"
-            style={{
-              ...dotStyle,
-              left: screen.x - dotOff,
-              top: screen.y - dotOff,
-              transition: cornerPreview?.nodeId === id ? "none" : undefined,
-            }}
-            onPointerDown={makePointerDown(cornerIndex)}
-          />
+          <EditorHintWrap key={cornerIndex} title="Drag to adjust corner radius" anchorClassName="contents">
+            <button
+              type="button"
+              data-corner-radius-handle={cornerIndex}
+              aria-label={`Corner radius ${["top-left", "top-right", "bottom-right", "bottom-left"][cornerIndex]}`}
+              className="pointer-events-auto absolute z-[31] touch-none will-change-transform"
+              style={{
+                ...dotStyle,
+                left: screen.x - dotOff,
+                top: screen.y - dotOff,
+                transition: cornerPreview?.nodeId === id ? "none" : undefined,
+              }}
+              onPointerDown={makePointerDown(cornerIndex)}
+            />
+          </EditorHintWrap>
         );
       })}
       {radiusBadge ? (

@@ -8,10 +8,16 @@ import {
   textResizePatch,
   wrapWidthForResizeMode,
 } from "./textNodeModel";
-import { layoutTextCanonical, canonicalToTextLayout } from "./canonicalTextLayout";
+import { layoutTextCanonical, canonicalToTextLayout, clearCanonicalTextLayoutCache } from "./canonicalTextLayout";
 import { layoutText } from "./textMeasure";
 import type { EditorNode } from "@/stores/useEditorStore";
 import { resolveTextTypo } from "@/lib/textTypography";
+import { nodeForTextLayout } from "./textNodeModel";
+import {
+  ensureTextModeForExplicitWidth,
+} from "./ensureTextModeForExplicitWidth";
+import { ensureTextModeForExplicitHeight } from "./ensureTextModeForExplicitHeight";
+import { setTextResizeMode } from "./setTextResizeMode";
 import {
   DEFAULT_TEXT_ADVANCED_STYLE,
   prepareTextForDisplay,
@@ -34,10 +40,11 @@ export function computeTextBoxSize(
     mode,
   );
   const displayText = prepareTextForDisplay(text, style);
+  const layoutNode = node != null ? nodeForTextLayout({ ...node, content: text }) : null;
   const layout =
-    node != null
+    layoutNode != null
       ? (() => {
-          const canonical = layoutTextCanonical({ ...node, content: text });
+          const canonical = layoutTextCanonical(layoutNode, { bypassCache: true });
           return canonical ? canonicalToTextLayout(canonical) : layoutText(displayText, wrapWidth, typo, style);
         })()
       : layoutText(displayText, wrapWidth, typo, style);
@@ -64,10 +71,10 @@ export function computeTextBoxSize(
       height: Math.max(MIN_TEXT_BOX, layout.height + TEXT_BOX_PAD_Y * 2),
     };
   }
-  // Fixed width; height still follows wrapped / multiline content.
+  // Fixed (NONE): both axes are user-controlled; text wraps inside and may overflow.
   return {
     width: Math.max(MIN_TEXT_BOX, currentWidth),
-    height: Math.max(MIN_TEXT_BOX, layout.height + TEXT_BOX_PAD_Y * 2),
+    height: Math.max(MIN_TEXT_BOX, currentHeight),
   };
 }
 
@@ -100,8 +107,7 @@ export function textLayoutPatchForNode(
 
   const size = computeTextBoxSize(text, typo, mode, node.width, node.height, style, node);
   if (mode === "fixed") {
-    if (size.height === node.height) return null;
-    return { height: size.height };
+    return null;
   }
   if (size.width === node.width && size.height === node.height) return null;
   return {
@@ -119,12 +125,16 @@ export const TEXT_LAYOUT_AFFECTING_KEYS = new Set<keyof EditorNode>([
   "lineHeight",
   "letterSpacing",
   "textResizeMode",
+  "autoResize",
+  "textAlign",
+  "verticalAlign",
   "textCase",
   "listStyle",
   "paragraphSpacing",
   "verticalTrim",
   "textTruncate",
   "width",
+  "height",
 ]);
 
 export function patchAffectsTextLayout(patch: Partial<EditorNode>): boolean {
@@ -139,19 +149,40 @@ export function withTextLayoutPatch(
   patch: Partial<EditorNode>,
 ): Partial<EditorNode> {
   if (node.type !== "text") return patch;
-  let next = patch;
-  // Only user narrowing (resize / inspector) should wrap; content-driven auto-width growth must stay hug-width.
-  if (
-    (node.textResizeMode ?? "auto-width") === "auto-width" &&
-    patch.width != null &&
-    patch.width < node.width &&
-    !("content" in patch)
-  ) {
-    next = { ...next, ...textResizePatch("auto-height") };
-  }
+
   if (patch.textResizeMode != null) {
-    next = { ...next, ...textResizePatch(patch.textResizeMode) };
+    const modePatch = setTextResizeMode(node, patch.textResizeMode);
+    const extras: Partial<EditorNode> = { ...patch };
+    delete extras.textResizeMode;
+    delete extras.autoResize;
+    if (modePatch.width != null) delete extras.width;
+    if (modePatch.height != null) delete extras.height;
+    if (Object.keys(extras).length === 0) return modePatch;
+    return withTextLayoutPatch({ ...node, ...modePatch }, extras);
   }
+
+  let next = patch;
+
+  if (patch.width != null && !("content" in patch)) {
+    const merged = { ...node, ...patch };
+    const modePatch = ensureTextModeForExplicitWidth(merged, "inspector", {
+      previousWidth: node.width,
+    });
+    if (Object.keys(modePatch).length > 0) {
+      next = { ...next, ...modePatch };
+    }
+  }
+
+  if (patch.height != null && patch.width == null && !("content" in patch)) {
+    const merged = { ...node, ...next };
+    const modePatch = ensureTextModeForExplicitHeight(merged, "inspector", {
+      previousHeight: node.height,
+    });
+    if (Object.keys(modePatch).length > 0) {
+      next = { ...next, ...modePatch };
+    }
+  }
+
   if (patch.textTruncate === "end") {
     const mode = next.textResizeMode ?? node.textResizeMode ?? "auto-width";
     if (mode !== "fixed") {

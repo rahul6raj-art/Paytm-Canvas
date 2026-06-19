@@ -1,5 +1,6 @@
 import type { CraftEngineSyncState } from "@/engine/craftEngineIncrementalSync";
 import type { CraftEngineInstance } from "@/engine/craftEngineTypes";
+import { readCraftEngine } from "@/engine/craftEngineMutation";
 
 let activeEngine: CraftEngineInstance | null = null;
 let activeSyncState: CraftEngineSyncState | null = null;
@@ -51,9 +52,5 @@ export function getActiveCraftEngine(): CraftEngineInstance | null {
 /** Deepest paintable node at world coordinates via WASM (undefined if engine not ready). */
 export function craftEngineHitTest(worldX: number, worldY: number): string | undefined {
   if (!activeEngine) return undefined;
-  try {
-    return activeEngine.hitTest(worldX, worldY);
-  } catch {
-    return undefined;
-  }
+  return readCraftEngine(() => activeEngine!.hitTest(worldX, worldY), undefined);
 }

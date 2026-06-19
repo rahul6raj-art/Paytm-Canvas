@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { DEFAULT_MOCK_WORKSPACE, getActiveMockWorkspace, getMockCurrentUser, subscribeMockAuth } from "@/lib/mockAuth";
 import { isPaytmCraftRemoteMode } from "@/lib/env";
 import { signOutRemoteSession } from "@/lib/remoteAuthSession";
+import { EditorHintWrap } from "./EditorHoverHint";
 
 export function EditorMenuBarTrailing() {
   const router = useRouter();
@@ -56,16 +57,17 @@ export function EditorMenuBarTrailing() {
 
   return (
     <div className="ml-auto flex shrink-0 items-center gap-1 border-l border-app-border-subtle pl-1.5">
-      <Button
-        variant="toolbar"
-        type="button"
-        className="h-6 gap-1 border border-app-border-subtle px-1.5 text-ui font-medium shadow-none md:px-2"
-        title="Present prototype"
-        onClick={() => openPrototypePreview()}
-      >
-        <Play className="h-3 w-3 shrink-0" strokeWidth={2} />
-        <span className="hidden md:inline">Present</span>
-      </Button>
+      <EditorHintWrap hintLabel="Present prototype" hintSide="bottom">
+        <Button
+          variant="toolbar"
+          type="button"
+          className="h-6 gap-1 border border-app-border-subtle px-1.5 text-ui font-medium shadow-none md:px-2"
+          onClick={() => openPrototypePreview()}
+        >
+          <Play className="h-3 w-3 shrink-0" strokeWidth={2} />
+          <span className="hidden md:inline">Present</span>
+        </Button>
+      </EditorHintWrap>
       <Button
         variant="primary"
         className="h-6 gap-1 px-2 text-ui font-semibold shadow-sm md:px-2.5"
@@ -76,23 +78,24 @@ export function EditorMenuBarTrailing() {
       </Button>
       <ThemeToggle size="sm" />
       <div className="relative shrink-0" ref={accountMenuRef}>
-        <button
-          type="button"
-          title="Account"
-          aria-label="Account menu"
-          aria-expanded={accountMenuOpen}
-          onClick={() => setAccountMenuOpen((o) => !o)}
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-app-border bg-app-toolbar-well text-ui font-bold text-white shadow-inner transition-colors hover:border-white/[0.2] hover:bg-app-hover"
-          style={{
-            boxShadow: `inset 0 0 0 1px hsl(${currentUser.avatarHue} 65% 42% / 0.35)`,
-          }}
-        >
-          {currentUser.initials}
-        </button>
+        <EditorHintWrap hintLabel="Account" hintSide="bottom">
+          <button
+            type="button"
+            aria-label="Account menu"
+            aria-expanded={accountMenuOpen}
+            onClick={() => setAccountMenuOpen((o) => !o)}
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-app-border bg-app-toolbar-well text-ui font-bold text-white shadow-inner transition-colors hover:border-white/[0.2] hover:bg-app-hover"
+            style={{
+              boxShadow: `inset 0 0 0 1px hsl(${currentUser.avatarHue} 65% 42% / 0.35)`,
+            }}
+          >
+            {currentUser.initials}
+          </button>
+        </EditorHintWrap>
         {accountMenuOpen ? (
           <div
             role="menu"
-            className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border border-app-border bg-app-surface py-1 shadow-lg"
+            className="absolute right-0 top-full z-50 mt-1 w-56 editor-floating-menu border border-app-border bg-app-surface py-1 shadow-lg"
           >
             <div className="border-b border-app-border-subtle px-3 py-2">
               <p className="truncate text-ui font-semibold text-app-fg">{currentUser.name}</p>
@@ -134,51 +137,58 @@ export function EditorMenuBarTrailing() {
         ) : null}
       </div>
       <div className="hidden items-center gap-1 border-l border-app-border-subtle pl-1 sm:flex">
-        <Button
-          variant="toolbar"
-          type="button"
-          className="h-6 gap-1 border border-app-border bg-app-toolbar-well px-1.5 text-ui font-medium text-app-fg shadow-none hover:bg-app-hover xl:px-2"
-          title="Help and demo checklist"
-          aria-label="Help"
-          onClick={() => openHelpDemoChecklist()}
+        <EditorHintWrap hintLabel="Help and demo checklist" hintSide="bottom">
+          <Button
+            variant="toolbar"
+            type="button"
+            className="h-6 gap-1 border border-app-border bg-app-toolbar-well px-1.5 text-ui font-medium text-app-fg shadow-none hover:bg-app-hover xl:px-2"
+            aria-label="Help"
+            onClick={() => openHelpDemoChecklist()}
+          >
+            <CircleHelp className="h-3 w-3 shrink-0" strokeWidth={2} />
+            <span className="hidden xl:inline">Help</span>
+          </Button>
+        </EditorHintWrap>
+        <EditorHintWrap hintLabel="Generate design with AI (mock)" hintSide="bottom">
+          <Button
+            variant="toolbar"
+            type="button"
+            className="h-6 gap-1 border border-violet-500/25 bg-violet-500/10 px-1.5 text-ui font-medium text-violet-100 shadow-none hover:bg-violet-500/20 xl:px-2"
+            onClick={() => openAIModal("editor")}
+          >
+            <Sparkles className="h-3 w-3 shrink-0" strokeWidth={2} />
+            <span className="hidden xl:inline">AI</span>
+          </Button>
+        </EditorHintWrap>
+        <EditorHintWrap hintLabel="Plugins marketplace" hintSide="bottom">
+          <Button
+            variant="toolbar"
+            type="button"
+            className="hidden h-6 gap-1 border border-app-border bg-app-toolbar-well px-1.5 text-ui font-medium text-app-fg shadow-none hover:bg-app-hover lg:flex xl:px-2"
+            onClick={() => openPluginMarketplace()}
+          >
+            <Plug2 className="h-3 w-3 shrink-0" strokeWidth={2} />
+            <span className="hidden xl:inline">Plugins</span>
+          </Button>
+        </EditorHintWrap>
+        <EditorHintWrap
+          hintLabel={showPresence ? "Turn mock presence off" : "Turn mock presence on"}
+          hintSide="bottom"
         >
-          <CircleHelp className="h-3 w-3 shrink-0" strokeWidth={2} />
-          <span className="hidden xl:inline">Help</span>
-        </Button>
-        <Button
-          variant="toolbar"
-          type="button"
-          className="h-6 gap-1 border border-violet-500/25 bg-violet-500/10 px-1.5 text-ui font-medium text-violet-100 shadow-none hover:bg-violet-500/20 xl:px-2"
-          title="Generate design with AI (mock)"
-          onClick={() => openAIModal("editor")}
-        >
-          <Sparkles className="h-3 w-3 shrink-0" strokeWidth={2} />
-          <span className="hidden xl:inline">AI</span>
-        </Button>
-        <Button
-          variant="toolbar"
-          type="button"
-          className="hidden h-6 gap-1 border border-app-border bg-app-toolbar-well px-1.5 text-ui font-medium text-app-fg shadow-none hover:bg-app-hover lg:flex xl:px-2"
-          title="Plugins marketplace"
-          onClick={() => openPluginMarketplace()}
-        >
-          <Plug2 className="h-3 w-3 shrink-0" strokeWidth={2} />
-          <span className="hidden xl:inline">Plugins</span>
-        </Button>
-        <button
-          type="button"
-          title={showPresence ? "Turn mock presence off" : "Turn mock presence on (simulated collaborators)"}
-          onClick={() => togglePresence()}
-          className={cn(
-            "hidden h-6 items-center gap-1 rounded-md border px-1.5 text-ui font-medium transition-colors lg:flex",
-            showPresence
-              ? "border-[rgba(13,153,255,0.35)] bg-[rgba(13,153,255,0.12)] text-white"
-              : "border-app-border bg-app-toolbar-well text-app-muted hover:bg-app-hover hover:text-app-fg",
-          )}
-        >
-          <Users className="h-3 w-3 shrink-0" strokeWidth={2} />
-          <span className="hidden xl:inline">Presence</span>
-        </button>
+          <button
+            type="button"
+            onClick={() => togglePresence()}
+            className={cn(
+              "hidden h-6 items-center gap-1 rounded-md border px-1.5 text-ui font-medium transition-colors lg:flex",
+              showPresence
+                ? "border-[rgba(13,153,255,0.35)] bg-[rgba(13,153,255,0.12)] text-white"
+                : "border-app-border bg-app-toolbar-well text-app-muted hover:bg-app-hover hover:text-app-fg",
+            )}
+          >
+            <Users className="h-3 w-3 shrink-0" strokeWidth={2} />
+            <span className="hidden xl:inline">Presence</span>
+          </button>
+        </EditorHintWrap>
         {showPresence ? (
           <span className="hidden whitespace-nowrap text-ui tabular-nums text-app-subtle xl:inline">
             {presenceUsers.length > 0 ? `${presenceUsers.length} online` : "Live"}

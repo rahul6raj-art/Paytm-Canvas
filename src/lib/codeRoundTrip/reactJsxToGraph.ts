@@ -24,6 +24,7 @@ import { DEFAULT_FRAME_FILL, DEFAULT_SHAPE_FILL } from "@/lib/shapes/shapeModel"
 import type { EditorNode, NodeKind } from "@/stores/useEditorStore";
 import { sanitizeComponentName } from "./reactStyle";
 import type { ReactStyleRecord } from "./reactStyle";
+import { placeScreenFrameOnCanvas } from "@/lib/codeExport/frameRelativeExport";
 import { finalizeImportedGraph } from "./finalizeImportedGraph";
 import { placeholderSizeForComponent } from "./reactComponentPlaceholders";
 import { parseNodeKindFromPcAttrs } from "@/lib/codeExport/pcMetadata";
@@ -38,7 +39,7 @@ import {
 } from "./reactJsxImportExpand";
 import { reactStyleToNodePatch } from "./reactStyleImport";
 import type { CodeRoundTripPayloadV1 } from "./types";
-import { CODE_PAYLOAD_END, CODE_PAYLOAD_START } from "./types";
+import { formatCodeRoundTripPayloadBlock } from "./types";
 
 const INTRINSIC_TAGS = new Set([
   "div",
@@ -253,8 +254,20 @@ function nodeKindForTag(tag: string, shape: string | undefined, hasText: boolean
   return "rectangle";
 }
 
-function defaultSizeForKind(kind: NodeKind, tag: string): { width: number; height: number } {
-  if (kind === "text") return { width: 120, height: 24 };
+function defaultSizeForKind(
+  kind: NodeKind,
+  tag: string,
+  textContent?: string,
+): { width: number; height: number } {
+  if (kind === "text") {
+    const lower = tag.toLowerCase();
+    const len = textContent?.length ?? 8;
+    if (lower === "h1") return { width: Math.min(358, Math.max(200, len * 16)), height: 40 };
+    if (["h2", "h3", "h4", "h5", "h6"].includes(lower)) {
+      return { width: Math.min(358, Math.max(160, len * 12)), height: 32 };
+    }
+    return { width: Math.min(358, Math.max(120, len * 8)), height: 24 };
+  }
   if (kind === "image") return { width: 120, height: 120 };
   if (!isIntrinsicTag(tag)) return placeholderSizeForComponent(tag);
   return { width: 160, height: 48 };
@@ -384,11 +397,11 @@ function buildNode(
     reactStyleToNodePatch(attrs.style),
     classNameToNodePatch(attrs.className),
   );
-  let defaults = defaultSizeForKind(kind, tag);
+  let defaults = defaultSizeForKind(kind, tag, textContent || undefined);
   const iconSize = !intrinsic && kind === "frame" ? iconSizeFromClassName(attrs.className) : null;
   if (!intrinsic && kind === "frame") {
     if (iconSize) defaults = iconSize;
-    else if (/^[A-Z]/.test(tag)) defaults = { width: 20, height: 20 };
+    else if (/^[A-Z]/.test(tag)) defaults = placeholderSizeForComponent(tag);
   }
 
   const node: EditorNode = {
@@ -410,6 +423,8 @@ function buildNode(
         ? undefined
         : iconSize
           ? "#e8ecf0"
+          : !intrinsic && kind === "frame"
+            ? "#eef2f6"
           : kind === "frame"
             ? DEFAULT_FRAME_FILL
             : DEFAULT_SHAPE_FILL),
@@ -439,6 +454,10 @@ function buildNode(
   if (iconSize || (!intrinsic && kind === "frame" && /^[A-Z]/.test(tag))) {
     node.layoutSizingHorizontal = "fixed";
     node.layoutSizingVertical = "fixed";
+    if (["Checkbox", "Badge", "Icon"].includes(tag)) {
+      node.width = defaults.width;
+      node.height = defaults.height;
+    }
     if (iconSize) {
       node.width = iconSize.width;
       node.height = iconSize.height;
@@ -656,6 +675,31 @@ function findComponentJsx(ast: File): { componentName: string; jsx: JSXElement |
   return null;
 }
 
+function detectWrongEntryFile(source: string): string | null {
+  const t = source.trim();
+  if (/createRoot\s*\(/.test(t) && /\.render\s*\(/.test(t)) {
+    return [
+      "This file is the app entry (main.tsx), not a screen with layout JSX.",
+      "",
+      "Push a screen component instead, for example:",
+      "  src/screens/PMLHomePage/PMLHomePage.tsx",
+      "  src/screens/PMLStocksPage/PMLStocksPage.tsx",
+    ].join("\n");
+  }
+
+  const hasJsxReturn = /\breturn\s*\(?\s*</.test(t) || /=>\s*\(?\s*</.test(t);
+  const onlyReExports = /export\s+\{[^}]+\}\s+from\s+['"]/.test(t) && !hasJsxReturn;
+  if (onlyReExports) {
+    return [
+      "This file only re-exports other modules — it has no JSX to import.",
+      "",
+      "Push the actual screen .tsx file (the one with return ( <div>…</div> )).",
+    ].join("\n");
+  }
+
+  return null;
+}
+
 function detectIncompletePaste(source: string): string | null {
   const t = source.trim();
   const hasComponent =
@@ -685,7 +729,7 @@ function detectIncompletePaste(source: string): string | null {
   return null;
 }
 
-function extractSourceHeader(source: string): string {
+export function extractSourceHeader(source: string): string {
   const lines = source.split("\n");
   const header: string[] = [];
   for (const line of lines) {
@@ -708,6 +752,9 @@ export function importReactFromJsx(source: string, opts?: { fileName?: string })
 
   const pasteIssue = detectIncompletePaste(source);
   if (pasteIssue) return { ok: false, error: pasteIssue };
+
+  const entryIssue = detectWrongEntryFile(source);
+  if (entryIssue) return { ok: false, error: entryIssue };
 
   let ast: File;
   try {
@@ -749,22 +796,23 @@ export function importReactFromJsx(source: string, opts?: { fileName?: string })
   const nestedMaps = collectModuleNestedMaps(ast, constants);
   const ctx: BuildCtx = { nodes: {}, childOrder: {}, componentMap, constants, arrays, nestedMaps };
   const rootId = buildNode(component.jsx, null, ctx, 0);
+  const exportRootIds = [rootId];
+  ctx.childOrder[EDITOR_ROOT_KEY] = exportRootIds;
   ctx.nodes = finalizeImportedGraph(ctx.nodes, ctx.childOrder);
+  ctx.nodes = placeScreenFrameOnCanvas(ctx.nodes, exportRootIds);
   const root = ctx.nodes[rootId];
   if (!root) {
     return { ok: false, error: "Failed to build layer tree from JSX." };
   }
 
-  root.parentId = null;
-  ctx.nodes[rootId] = { ...root, x: 0, y: 0 };
-
   const componentName = sanitizeComponentName(
     opts?.fileName?.replace(/\.[^.]+$/, "") ?? component.componentName,
   );
-  root.name = root.name || componentName;
-
-  const exportRootIds = [rootId];
-  ctx.childOrder[EDITOR_ROOT_KEY] = exportRootIds;
+  ctx.nodes[rootId] = {
+    ...root,
+    parentId: null,
+    name: root.name || componentName,
+  };
 
   const sourceHeader = extractSourceHeader(source);
 
@@ -789,7 +837,7 @@ export function importReactFromJsx(source: string, opts?: { fileName?: string })
     selectedIds: exportRootIds,
     zoom: 1,
     pan: { x: 0, y: 0 },
-    showGrid: true,
+    showGrid: false,
     showRulers: false,
     canvasBackgroundColor: DEFAULT_CANVAS_BACKGROUND,
     comments: [],
@@ -816,9 +864,7 @@ export function buildReactSourceFromPayload(payload: CodeRoundTripPayloadV1, bod
  * Layers map 1:1 via data-pc-id and the payload block below.
  */
 
-${CODE_PAYLOAD_START}
-${payloadJson}
-${CODE_PAYLOAD_END}
+${formatCodeRoundTripPayloadBlock(payloadJson)}
 
 ${header}${useClient}export function ${payload.componentName}() {
   return (

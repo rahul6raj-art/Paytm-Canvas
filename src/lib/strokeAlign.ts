@@ -377,6 +377,15 @@ export function shouldUseAlignedPathStroke(
   return (node.strokePosition ?? "center") !== "center";
 }
 
+/** Open vector paths render stroke as filled outline geometry (freehand, pen paths). */
+export function shouldUseOutlinedOpenPathStroke(
+  node: Pick<EditorNode, "type" | "strokeSides">,
+  closed: boolean,
+): boolean {
+  if (closed || node.type !== "path") return false;
+  return !usesPerEdgeStroke(node);
+}
+
 export function fullEllipsePathD(width: number, height: number): string {
   const rx = Math.max(0, width) / 2;
   const ry = Math.max(0, height) / 2;

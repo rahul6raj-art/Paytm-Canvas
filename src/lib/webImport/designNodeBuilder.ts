@@ -26,7 +26,9 @@ function codeFields(node: DomSnapshotNode): Pick<DesignNode, "codeClassName" | "
 
 function isTextDomNode(node: DomSnapshotNode): boolean {
   const tag = node.tagName.toLowerCase();
+  const cls = (node.className ?? "").toLowerCase();
   if (INPUT_TAGS.has(tag) || tag === "button" || tag === "img" || tag === "svg") return false;
+  if (cls.includes("badge") || cls.includes("chip") || cls.includes("tag")) return false;
   if (!TEXT_TAGS.has(tag)) return false;
   if (!isImportableTextContent(node.text, {
     className: node.className,
@@ -88,6 +90,13 @@ export function buildDesignTree(root: DomSnapshotNode): DesignNode {
       layout,
       style,
       typography: isText || role === "button" ? resolvedTypography : undefined,
+      cssLayoutHints: isText
+        ? {
+            width: node.styles.width,
+            maxWidth: node.styles.maxWidth,
+            whiteSpace: node.styles.whiteSpace,
+          }
+        : undefined,
       // Buttons are not text nodes, but their label must survive so control
       // frames can render it. Inputs use placeholder/value instead.
       text: isText || role === "button" ? node.text : undefined,

@@ -135,11 +135,11 @@ function wrapParagraph(
     if (!token) continue;
     const candidate = line + token;
     const candidateWidth = measureStringWidth(ctx, candidate, typo.letterSpacing);
-    if (candidateWidth <= maxWidth || !line) {
+    if (candidateWidth <= maxWidth) {
       line = candidate;
       continue;
     }
-    flush();
+    if (line) flush();
     if (measureStringWidth(ctx, token, typo.letterSpacing) <= maxWidth) {
       line = token;
     } else {
@@ -303,4 +303,45 @@ export function getCaretRect(
   }
 
   return { x: 0, y: 0, height: layout.lineHeightPx };
+}
+
+/** Caret height centered on glyph metrics within a line box. */
+export function measureTypoCaretBox(
+  typo: ResolvedTextTypo,
+  lineHeightPx: number,
+): { offsetY: number; height: number } {
+  if (typeof document === "undefined") {
+    const height = Math.min(lineHeightPx, typo.fontSize);
+    return { offsetY: (lineHeightPx - height) / 2, height };
+  }
+  const ctx = getTextMeasureContext();
+  ctx.font = buildFontString(typo);
+  const m = ctx.measureText("Hg");
+  const ascent = m.fontBoundingBoxAscent ?? m.actualBoundingBoxAscent ?? typo.fontSize * 0.82;
+  const descent = m.fontBoundingBoxDescent ?? m.actualBoundingBoxDescent ?? typo.fontSize * 0.18;
+  const height = Math.min(lineHeightPx, Math.max(1, ascent + descent));
+  return { offsetY: Math.max(0, (lineHeightPx - height) / 2), height };
+}
+
+/** Map a caret index to canvas draw coordinates (handles canonical caret stops). */
+export function resolveCaretDrawRect(
+  index: number,
+  layout: TextLayout,
+  typo: ResolvedTextTypo,
+  innerW: number,
+  align: TextAlign,
+  padX: number,
+  padY: number,
+  blockOffsetY: number,
+): { x: number; y: number; height: number } {
+  const caret = getCaretRect(index, layout, typo, innerW, align);
+  const { offsetY, height } = measureTypoCaretBox(typo, layout.lineHeightPx);
+  if (layout.caretStops?.length) {
+    return { x: caret.x, y: caret.y + offsetY, height };
+  }
+  return {
+    x: caret.x + padX,
+    y: caret.y + padY + blockOffsetY + offsetY,
+    height,
+  };
 }

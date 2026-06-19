@@ -2,20 +2,23 @@
 
 import type { ReactNode } from "react";
 import {
-  AlignCenter,
-  AlignJustify,
-  AlignLeft,
-  AlignRight,
   List,
   ListOrdered,
   Minus,
   Strikethrough,
   Underline,
 } from "lucide-react";
+import {
+  TextAlignCenterIcon,
+  TextAlignJustifyIcon,
+  TextAlignLeftIcon,
+  TextAlignRightIcon,
+} from "./InspectorSettingIcons";
 import { appFieldClass } from "@/lib/appFieldStyles";
 import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
 import { inspectorIconClass, inspectorIconStroke } from "@/lib/inspectorIconStyles";
+import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
 import type { EditorNode, NodeStylePatch } from "@/stores/useEditorStore";
 import type {
   TextCaseMode,
@@ -40,22 +43,22 @@ function IconToggleGroup<T extends string>({
   return (
     <div className="flex rounded-md border border-app-border bg-app-inset p-0.5">
       {options.map((opt) => (
-        <button
-          key={opt.value}
-          type="button"
-          title={opt.title}
-          aria-label={opt.label}
-          disabled={disabled}
-          onClick={() => onChange(opt.value)}
-          className={cn(
-            "flex h-6 min-w-[26px] flex-1 items-center justify-center rounded-[5px] text-app-muted transition-colors disabled:opacity-40",
-            value === opt.value
-              ? "bg-app-panel text-app-fg shadow-sm"
-              : "hover:bg-app-hover hover:text-app-fg",
-          )}
-        >
-          {opt.icon}
-        </button>
+        <EditorHintWrap key={opt.value} title={opt.title} disabled={disabled}>
+          <button
+            type="button"
+            aria-label={opt.label}
+            disabled={disabled}
+            onClick={() => onChange(opt.value)}
+            className={cn(
+              "flex h-6 min-w-[26px] flex-1 items-center justify-center rounded-[5px] text-app-muted transition-colors disabled:opacity-40",
+              value === opt.value
+                ? "bg-app-panel text-app-fg shadow-sm"
+                : "hover:bg-app-hover hover:text-app-fg",
+            )}
+          >
+            {opt.icon}
+          </button>
+        </EditorHintWrap>
       ))}
     </div>
   );
@@ -121,10 +124,10 @@ const ALIGN_OPTIONS: readonly {
   title: string;
   icon: ReactNode;
 }[] = [
-  { value: "left", label: "Align left", title: "Align left", icon: <AlignLeft className={inspectorIconClass} strokeWidth={inspectorIconStroke} /> },
-  { value: "center", label: "Align center", title: "Align center", icon: <AlignCenter className={inspectorIconClass} strokeWidth={inspectorIconStroke} /> },
-  { value: "right", label: "Align right", title: "Align right", icon: <AlignRight className={inspectorIconClass} strokeWidth={inspectorIconStroke} /> },
-  { value: "justify", label: "Justify", title: "Justify", icon: <AlignJustify className={inspectorIconClass} strokeWidth={inspectorIconStroke} /> },
+  { value: "left", label: "Align left", title: "Align left", icon: <TextAlignLeftIcon /> },
+  { value: "center", label: "Align center", title: "Align center", icon: <TextAlignCenterIcon /> },
+  { value: "right", label: "Align right", title: "Align right", icon: <TextAlignRightIcon /> },
+  { value: "justify", label: "Justify", title: "Justify", icon: <TextAlignJustifyIcon /> },
 ];
 
 export function TextStyleSection({
@@ -132,11 +135,13 @@ export function TextStyleSection({
   instanceKey,
   locked,
   onPatch,
+  includeAlignment = true,
 }: {
   node: EditorNode;
   instanceKey: string;
   locked: boolean;
   onPatch: (p: NodeStylePatch) => void;
+  includeAlignment?: boolean;
 }) {
   const textDecoration = node.textDecoration ?? "none";
   const textCase = node.textCase ?? "none";
@@ -146,14 +151,16 @@ export function TextStyleSection({
 
   return (
     <div className="mt-1.5 space-y-2">
-      <StyleRow label="Alignment">
-        <IconToggleGroup
-          options={ALIGN_OPTIONS}
-          value={node.textAlign ?? "left"}
-          onChange={(v) => onPatch({ textAlign: v })}
-          disabled={locked}
-        />
-      </StyleRow>
+      {includeAlignment ? (
+        <StyleRow label="Alignment">
+          <IconToggleGroup
+            options={ALIGN_OPTIONS}
+            value={node.textAlign ?? "left"}
+            onChange={(v) => onPatch({ textAlign: v })}
+            disabled={locked}
+          />
+        </StyleRow>
+      ) : null}
 
       <StyleRow label="Decoration">
         <IconToggleGroup<TextDecorationMode>

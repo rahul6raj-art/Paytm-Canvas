@@ -9,7 +9,7 @@ import {
   applyAlignToNodes,
   applyDistributeToNodes,
   canAlignSelection,
-  suspendAutoLayoutForManualPosition,
+  detachForManualPositionInAutoLayout,
 } from "@/lib/alignSelection";
 import { getRenderedWorldBounds } from "@/lib/editorGraph";
 import { layoutFromLineEndpoints } from "@/lib/shapes/lineGeometry";
@@ -198,8 +198,8 @@ describe("applyDistributeToNodes", () => {
   });
 });
 
-describe("suspendAutoLayoutForManualPosition", () => {
-  it("disables auto-layout on the shared parent", () => {
+describe("detachForManualPositionInAutoLayout", () => {
+  it("detaches flow children but keeps parent auto layout enabled", () => {
     const nodes: Record<string, EditorNode> = {
       parent: {
         ...rect("parent", 0, 0, 200, 200),
@@ -211,8 +211,10 @@ describe("suspendAutoLayoutForManualPosition", () => {
       b: { ...rect("b", 60, 0, 40, 40), parentId: "parent" },
     };
     const childOrder = { [EDITOR_ROOT_KEY]: ["parent"], parent: ["a", "b"] };
-    const out = suspendAutoLayoutForManualPosition(nodes, childOrder, ["a", "b"]);
-    assert.equal(out.parent?.layoutMode, "none");
+    const out = detachForManualPositionInAutoLayout(nodes, childOrder, ["a", "b"]);
+    assert.equal(out.parent?.layoutMode, "horizontal");
+    assert.equal(out.a?.layoutPositioning, "absolute");
+    assert.equal(out.b?.layoutPositioning, "absolute");
   });
 });
 
@@ -287,7 +289,9 @@ describe("alignNodesInDocument", () => {
     };
     const childOrder = { [EDITOR_ROOT_KEY]: ["parent"], parent: ["a", "b"] };
     const out = alignNodesInDocument(nodes, childOrder, ["a", "b"], "top");
-    assert.equal(out.parent?.layoutMode, "none");
+    assert.equal(out.parent?.layoutMode, "horizontal");
+    assert.equal(out.a?.layoutPositioning, "absolute");
+    assert.equal(out.b?.layoutPositioning, "absolute");
     const ba = getRenderedWorldBounds("a", out, childOrder);
     const bb = getRenderedWorldBounds("b", out, childOrder);
     assert.ok(Math.abs(ba.y - bb.y) < 0.5);
@@ -306,5 +310,37 @@ describe("alignNodesInDocumentToGrid", () => {
     const bb = getRenderedWorldBounds("b", out, childOrder);
     assert.equal(ba.x, bb.x);
     assert.equal(ba.y, bb.y);
+  });
+
+  it("align-left grid cell only moves horizontal axis", () => {
+    const nodes: Record<string, EditorNode> = {
+      circle: { ...rect("circle", 200, 40, 80, 80), type: "ellipse", name: "Circle" },
+      box: rect("box", 80, 160, 120, 60),
+    };
+    const childOrder = childOrderRoot(["circle", "box"]);
+    const beforeCircle = getRenderedWorldBounds("circle", nodes, childOrder);
+    const beforeBox = getRenderedWorldBounds("box", nodes, childOrder);
+    const out = alignNodesInDocumentToGrid(nodes, childOrder, ["circle", "box"], 1, 0);
+    const afterCircle = getRenderedWorldBounds("circle", out, childOrder);
+    const afterBox = getRenderedWorldBounds("box", out, childOrder);
+    assert.equal(afterCircle.x, afterBox.x);
+    assert.ok(Math.abs(afterCircle.y - beforeCircle.y) < 0.5);
+    assert.ok(Math.abs(afterBox.y - beforeBox.y) < 0.5);
+  });
+
+  it("align-top grid cell only moves vertical axis", () => {
+    const nodes: Record<string, EditorNode> = {
+      a: rect("a", 40, 80, 40, 30),
+      b: rect("b", 120, 140, 30, 20),
+    };
+    const childOrder = childOrderRoot(["a", "b"]);
+    const beforeA = getRenderedWorldBounds("a", nodes, childOrder);
+    const beforeB = getRenderedWorldBounds("b", nodes, childOrder);
+    const out = alignNodesInDocumentToGrid(nodes, childOrder, ["a", "b"], 0, 1);
+    const afterA = getRenderedWorldBounds("a", out, childOrder);
+    const afterB = getRenderedWorldBounds("b", out, childOrder);
+    assert.equal(afterA.y, afterB.y);
+    assert.ok(Math.abs(afterA.x - beforeA.x) < 0.5);
+    assert.ok(Math.abs(afterB.x - beforeB.x) < 0.5);
   });
 });

@@ -28,6 +28,12 @@ import { placeholderSizeForComponent } from "@/lib/codeRoundTrip/reactComponentP
 import { sanitizeComponentName } from "@/lib/codeRoundTrip/reactStyle";
 import { reactStyleToNodePatch } from "@/lib/codeRoundTrip/reactStyleImport";
 import {
+  isUsableCodeRoundTripPayload,
+  parseCodeRoundTripPayload,
+  sliceFromCodeRoundTripPayload,
+} from "@/lib/codeRoundTrip/reactImport";
+import type { CodeRoundTripLink } from "@/lib/craftBridge/types";
+import {
   ellipseHasCustomArc,
   parseEllipseArcPcAttrs,
   PC_ARC_RATIO_ATTR,
@@ -93,8 +99,30 @@ export type HtmlImportResult =
       slice: EditorPersistSlice;
       componentName: string;
       message: string;
+      sourceHeader?: string;
+      codeRoundTripLink?: CodeRoundTripLink | null;
     }
   | { ok: false; error: string };
+
+/** Preserve &lt;link&gt; / key &lt;meta&gt; lines from imported HTML for export round-trip. */
+export function extractHtmlSourceHeader(source: string): string | undefined {
+  const headMatch = source.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
+  if (!headMatch) return undefined;
+  const head = headMatch[1] ?? "";
+  const lines: string[] = [];
+  for (const m of head.matchAll(/<meta[^>]+>/gi)) {
+    const tag = m[0]!;
+    if (/charset|viewport/i.test(tag)) lines.push(tag);
+  }
+  for (const m of head.matchAll(/<link[^>]+rel=["']stylesheet["'][^>]*>/gi)) {
+    lines.push(m[0]!);
+  }
+  for (const m of head.matchAll(/<link[^>]+href=["'][^"']+\.css["'][^>]*>/gi)) {
+    const tag = m[0]!;
+    if (!lines.includes(tag)) lines.push(tag);
+  }
+  return lines.length > 0 ? lines.join("\n") : undefined;
+}
 
 function isIntrinsicHtmlTag(tag: string): boolean {
   return INTRINSIC_HTML.has(tag.toLowerCase());
@@ -377,6 +405,19 @@ export function importHtmlFromString(
     return { ok: false, error: "Paste HTML or upload an .html file." };
   }
 
+  const payload = parseCodeRoundTripPayload(trimmed);
+  if (isUsableCodeRoundTripPayload(payload)) {
+    const slice = sliceFromCodeRoundTripPayload(payload!, { fileName: opts?.fileName });
+    return {
+      ok: true,
+      slice,
+      componentName: payload!.componentName,
+      sourceHeader: payload!.sourceHeader ?? extractHtmlSourceHeader(trimmed),
+      codeRoundTripLink: payload!.codeRoundTripLink ?? null,
+      message: `Imported ${Object.keys(payload!.nodes).length} layers from HTML (${payload!.componentName}).`,
+    };
+  }
+
   const parsed = parseHtmlImportTree(trimmed);
   if (!parsed.ok) {
     return { ok: false, error: parsed.error };
@@ -431,14 +472,14 @@ export function importHtmlFromString(
     exportRootIds = [wrapId];
   }
 
+  ctx.childOrder[EDITOR_ROOT_KEY] = exportRootIds;
+
   if (preserveExactLayout) {
     ctx.nodes = placeScreenFrameOnCanvas(ctx.nodes, exportRootIds);
   } else {
     ctx.nodes = finalizeImportedGraph(ctx.nodes, ctx.childOrder);
     ctx.nodes = placeScreenFrameOnCanvas(ctx.nodes, exportRootIds);
   }
-
-  ctx.childOrder[EDITOR_ROOT_KEY] = exportRootIds;
 
   const rootNode = ctx.nodes[exportRootIds[0]!];
   const componentName = sanitizeComponentName(
@@ -457,17 +498,19 @@ export function importHtmlFromString(
     selectedIds: exportRootIds,
     zoom: 1,
     pan: { x: 0, y: 0 },
-    showGrid: true,
+    showGrid: false,
     showRulers: false,
     canvasBackgroundColor: DEFAULT_CANVAS_BACKGROUND,
     comments: [],
   });
 
   const count = Object.keys(ctx.nodes).length;
+  const sourceHeader = extractHtmlSourceHeader(trimmed);
   return {
     ok: true,
     slice,
     componentName,
+    sourceHeader,
     message: preserveExactLayout
       ? `Imported ${count} layer(s) with 1:1 layout (${componentName}).`
       : `Converted HTML to ${count} editable layer(s) (${componentName}).`,

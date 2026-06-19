@@ -6,6 +6,7 @@ import { Check, RotateCcw, Trash2, X } from "lucide-react";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { isNonEmptyCommentBody } from "@/lib/comments";
 import { Button } from "@/components/ui/button";
+import { EditorHintWrap } from "./EditorHoverHint";
 
 function useCommentPopoverPosition(activeId: string | null, worldX: number, worldY: number) {
   const zoom = useEditorStore((s) => s.zoom);
@@ -161,11 +162,12 @@ export function CommentPopover() {
         onPointerDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-start gap-2 border-b border-white/10 px-3 py-2">
-          <div
-            className="mt-0.5 h-7 w-7 shrink-0 rounded-full border border-white/10"
-            style={{ backgroundColor: comment.author.color }}
-            title={comment.author.name}
-          />
+          <EditorHintWrap title={comment.author.name}>
+            <div
+              className="mt-0.5 h-7 w-7 shrink-0 rounded-full border border-white/10"
+              style={{ backgroundColor: comment.author.color }}
+            />
+          </EditorHintWrap>
           <div className="min-w-0 flex-1">
             <div className="text-ui font-semibold text-white">{comment.author.name}</div>
             <div className="text-ui text-app-subtle">
@@ -175,14 +177,16 @@ export function CommentPopover() {
               })}
             </div>
           </div>
-          <button
-            type="button"
-            className="rounded p-1 text-[#a3a3a3] hover:bg-white/10 hover:text-app-fg"
-            title="Close"
-            onClick={finalizeClose}
-          >
-            <X className="h-4 w-4" strokeWidth={2} />
-          </button>
+          <EditorHintWrap title="Close">
+            <button
+              type="button"
+              className="rounded p-1 text-[#a3a3a3] hover:bg-white/10 hover:text-app-fg"
+              aria-label="Close"
+              onClick={finalizeClose}
+            >
+              <X className="h-4 w-4" strokeWidth={2} />
+            </button>
+          </EditorHintWrap>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">

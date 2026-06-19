@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/useEditorStore";
+import { EditorHintWrap } from "./EditorHoverHint";
 
 export function DocumentTitleField() {
   const fileName = useEditorStore((s) => s.fileName);
@@ -63,20 +64,21 @@ export function DocumentTitleField() {
   }
 
   return (
-    <button
-      type="button"
-      title="Click to rename page"
-      aria-label={`Page title: ${displayName}. Click to rename.`}
-      onClick={() => {
-        setDraft(fileName);
-        setEditing(true);
-      }}
-      className={cn(
-        "min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-ui-sm font-medium leading-tight text-app-fg",
-        "transition-colors hover:bg-app-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
-      )}
-    >
-      {displayName}
-    </button>
+    <EditorHintWrap title="Click to rename page">
+      <button
+        type="button"
+        aria-label={`Page title: ${displayName}. Click to rename.`}
+        onClick={() => {
+          setDraft(fileName);
+          setEditing(true);
+        }}
+        className={cn(
+          "min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-ui-sm font-medium leading-tight text-app-fg",
+          "transition-colors hover:bg-app-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
+        )}
+      >
+        {displayName}
+      </button>
+    </EditorHintWrap>
   );
 }

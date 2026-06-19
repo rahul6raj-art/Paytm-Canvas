@@ -35,7 +35,7 @@ import {
 import { inferAutoLayoutGap, type LayoutMode, type LayoutNode } from "@/lib/autoLayout";
 import { LAYOUT_GAP_MAX, sanitizeLayoutGapForFrame } from "@/lib/autoLayout/spacingPaddingDrag";
 import { computeMinLayoutGap } from "@/lib/layoutEngine/minLayoutGap";
-import { appFieldClass, appFieldRadius, inspectorControlHeightClass } from "@/lib/appFieldStyles";
+import { appFieldInnerClass, appFieldInnerClassCompact, appFieldRadius, appFieldShellClass, appFieldShellClassCompact, inspectorControlHeightClass, inspectorRowGapClass, inspectorTwoColGridClass } from "@/lib/appFieldStyles";
 import {
   inspectorFieldIconSlotClass,
   inspectorIconClass,
@@ -49,6 +49,8 @@ import {
 import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { useInspectorValueScrub } from "@/lib/useInspectorValueScrub";
 import { cn } from "@/lib/utils";
+import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
+import { useEditorStore } from "@/stores/useEditorStore";
 import type {
   CrossAxisAlign,
   EditorNode,
@@ -166,8 +168,8 @@ function AutoLayoutGapField({
   };
 
   const inputClass = cn(
-    appFieldClass,
-    "min-w-0 flex-1 rounded-none border-0 bg-transparent px-2 py-0 shadow-none font-mono tabular-nums focus-visible:ring-0",
+    appFieldInnerClass,
+    "font-mono tabular-nums",
   );
 
   const menu =
@@ -176,7 +178,7 @@ function AutoLayoutGapField({
         ref={menuRef}
         role="listbox"
         aria-label="Gap mode"
-        className="fixed z-[120] w-[168px] overflow-hidden rounded-md border border-app-border bg-app-panel py-1 shadow-xl"
+        className="fixed z-[120] w-[168px] overflow-hidden editor-floating-menu"
         style={anchoredMenuStyle(position)}
       >
         <button
@@ -197,7 +199,7 @@ function AutoLayoutGapField({
             {...gapInputProps}
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
-            className={cn(inputClass, "h-6 rounded border border-app-border bg-app-field px-1.5")}
+            className={cn(inputClass, appFieldInnerClassCompact, "h-6 px-1.5")}
           />
         </button>
         <button
@@ -226,10 +228,7 @@ function AutoLayoutGapField({
     <>
       <div
         className={cn(
-          "flex min-w-0 items-center overflow-hidden border border-app-border bg-app-field",
-          inspectorControlHeightClass,
-          appFieldRadius,
-          "shadow-[inset_0_1px_0_0_hsl(var(--app-inset-highlight)/var(--app-inset-highlight-opacity))]",
+          appFieldShellClass,
           locked && "opacity-45",
         )}
       >
@@ -251,25 +250,26 @@ function AutoLayoutGapField({
             {...bindScrubInput(inputClass, focused)}
           />
         )}
-        <button
-          ref={chevronRef}
-          type="button"
-          disabled={locked}
-          aria-haspopup="listbox"
-          aria-expanded={menuOpen}
-          aria-label="Gap mode"
-          title="Gap mode"
-          onClick={() => setMenuOpen((v) => !v)}
-          className={cn(
-            "flex h-full w-7 shrink-0 items-center justify-center border-l border-app-border text-app-muted transition-colors",
-            locked ? "opacity-45" : "hover:bg-app-hover hover:text-app-fg",
-          )}
-        >
-          <ChevronDown
-            className={cn(inspectorIconClass, "transition-transform", menuOpen && "rotate-180")}
-            strokeWidth={inspectorIconStroke}
-          />
-        </button>
+        <EditorHintWrap title="Gap mode" disabled={locked}>
+          <button
+            ref={chevronRef}
+            type="button"
+            disabled={locked}
+            aria-haspopup="listbox"
+            aria-expanded={menuOpen}
+            aria-label="Gap mode"
+            onClick={() => setMenuOpen((v) => !v)}
+            className={cn(
+              "flex h-full w-7 shrink-0 items-center justify-center border-l border-app-border text-app-muted transition-colors",
+              locked ? "opacity-45" : "hover:bg-app-hover hover:text-app-fg",
+            )}
+          >
+            <ChevronDown
+              className={cn(inspectorIconClass, "transition-transform", menuOpen && "rotate-180")}
+              strokeWidth={inspectorIconStroke}
+            />
+          </button>
+        </EditorHintWrap>
       </div>
       {mounted && menu ? createPortal(menu, document.body) : null}
     </>
@@ -295,6 +295,12 @@ export function AutoLayoutInspectorPanel({
   childOrder: Record<string, string[]>;
   updateLayout: (id: string, patch: Partial<EditorNode>) => void;
 }) {
+  const designTokens = useEditorStore((s) => s.designTokens);
+  const gapTokenName =
+    node.projectSpacingTokenIds?.layoutGap &&
+    designTokens[node.projectSpacingTokenIds.layoutGap]
+      ? designTokens[node.projectSpacingTokenIds.layoutGap]!.name
+      : null;
   const paddingLeft = node.paddingLeft ?? 0;
   const paddingRight = node.paddingRight ?? 0;
   const paddingTop = node.paddingTop ?? 0;
@@ -359,30 +365,37 @@ export function AutoLayoutInspectorPanel({
               role="group"
               aria-label="Flow"
             >
-            <button
-              type="button"
-              disabled={locked}
-              title="Horizontal"
-              aria-label="Horizontal"
-              onClick={() => updateLayout(frameId, { layoutMode: "horizontal" })}
-              className={layoutToggleBtn(layoutHorizontal)}
-            >
-              <LayoutDirectionRowIcon />
-            </button>
-            <button
-              type="button"
-              disabled={locked}
-              title="Vertical"
-              aria-label="Vertical"
-              onClick={() => updateLayout(frameId, { layoutMode: "vertical" })}
-              className={layoutToggleBtn(!layoutHorizontal)}
-            >
-              <LayoutDirectionColumnIcon />
-            </button>
+            <EditorHintWrap title="Horizontal" disabled={locked}>
+              <button
+                type="button"
+                disabled={locked}
+                aria-label="Horizontal"
+                onClick={() => updateLayout(frameId, { layoutMode: "horizontal" })}
+                className={layoutToggleBtn(layoutHorizontal)}
+              >
+                <LayoutDirectionRowIcon />
+              </button>
+            </EditorHintWrap>
+            <EditorHintWrap title="Vertical" disabled={locked}>
+              <button
+                type="button"
+                disabled={locked}
+                aria-label="Vertical"
+                onClick={() => updateLayout(frameId, { layoutMode: "vertical" })}
+                className={layoutToggleBtn(!layoutHorizontal)}
+              >
+                <LayoutDirectionColumnIcon />
+              </button>
+            </EditorHintWrap>
           </div>
           </div>
           <div>
-            <div className="inspector-field-label mb-0.5">Gap</div>
+            <div className="inspector-field-label mb-0.5">
+              Gap
+              {gapTokenName ? (
+                <span className="ml-1 font-normal text-app-muted">· {gapTokenName}</span>
+              ) : null}
+            </div>
             <AutoLayoutGapField
             layoutMode={layoutMode}
             node={node}
@@ -429,7 +442,7 @@ export function AutoLayoutInspectorPanel({
                 Close
               </button>
             </div>
-            <div className="grid grid-cols-2 gap-1">
+            <div className={inspectorTwoColGridClass}>
               <PropertyNumberInput
                 commitOnInput={false}
                 label="Padding left"
@@ -479,8 +492,8 @@ export function AutoLayoutInspectorPanel({
         ) : (
           <>
             <div className="inspector-field-label mb-0.5">Padding</div>
-            <div className="flex items-center gap-1">
-            <div className="grid min-w-0 flex-1 grid-cols-2 gap-1">
+            <div className={cn("flex items-center", inspectorRowGapClass)}>
+            <div className={cn("grid min-w-0 flex-1 grid-cols-2", inspectorRowGapClass)}>
               <PropertyNumberInput
                 commitOnInput={false}
                 label="Horizontal padding"
@@ -510,19 +523,20 @@ export function AutoLayoutInspectorPanel({
                 }}
               />
             </div>
-            <button
-              type="button"
-              disabled={locked}
-              title="Individual padding"
-              aria-label="Individual padding"
-              onClick={() => setPaddingExpanded(true)}
-              className={cn(
-                "flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-app-border bg-app-field text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg disabled:opacity-40",
-                hasIndividualPadding && "border-accent/40 text-accent",
-              )}
-            >
-              <PaddingExtendedIcon />
-            </button>
+            <EditorHintWrap title="Individual padding" disabled={locked}>
+              <button
+                type="button"
+                disabled={locked}
+                aria-label="Individual padding"
+                onClick={() => setPaddingExpanded(true)}
+                className={cn(
+                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-app-border bg-app-inset text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg disabled:opacity-40",
+                  hasIndividualPadding && "border-accent/40 text-accent",
+                )}
+              >
+                <PaddingExtendedIcon />
+              </button>
+            </EditorHintWrap>
           </div>
           </>
         )}
@@ -568,21 +582,21 @@ export function AutoLayoutInspectorPanel({
               const cur = (node.primaryAxisAlign ?? "start") as PrimaryAxisAlign;
               const active = cur === v;
               return (
-                <button
-                  key={v}
-                  type="button"
-                  title={title}
-                  disabled={locked}
-                  onClick={() => updateLayout(frameId, { primaryAxisAlign: v })}
-                  className={cn(
-                    "flex h-6 w-8 items-center justify-center rounded border transition-colors disabled:opacity-40",
-                    active
-                      ? "border-accent/45 bg-accent/15 text-white"
-                      : "border-app-border text-app-muted hover:bg-app-hover",
-                  )}
-                >
-                  <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
-                </button>
+                <EditorHintWrap key={v} title={title} disabled={locked}>
+                  <button
+                    type="button"
+                    disabled={locked}
+                    onClick={() => updateLayout(frameId, { primaryAxisAlign: v })}
+                    className={cn(
+                      "flex h-6 w-8 items-center justify-center rounded border transition-colors disabled:opacity-40",
+                      active
+                        ? "border-accent/45 bg-accent/15 text-white"
+                        : "border-app-border text-app-muted hover:bg-app-hover",
+                    )}
+                  >
+                    <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  </button>
+                </EditorHintWrap>
               );
             })}
           </div>
@@ -604,25 +618,25 @@ export function AutoLayoutInspectorPanel({
               const cur = (node.counterAxisAlign ?? "start") as CrossAxisAlign;
               const active = cur === v;
               return (
-                <button
-                  key={v}
-                  type="button"
-                  title={title}
-                  disabled={locked}
-                  onClick={() => updateLayout(frameId, { counterAxisAlign: v })}
-                  className={cn(
-                    "flex h-6 w-8 items-center justify-center rounded border transition-colors disabled:opacity-40",
-                    active
-                      ? "border-accent/45 bg-accent/15 text-white"
-                      : "border-app-border text-app-muted hover:bg-app-hover",
-                  )}
-                >
-                  <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
-                </button>
+                <EditorHintWrap key={v} title={title} disabled={locked}>
+                  <button
+                    type="button"
+                    disabled={locked}
+                    onClick={() => updateLayout(frameId, { counterAxisAlign: v })}
+                    className={cn(
+                      "flex h-6 w-8 items-center justify-center rounded border transition-colors disabled:opacity-40",
+                      active
+                        ? "border-accent/45 bg-accent/15 text-white"
+                        : "border-app-border text-app-muted hover:bg-app-hover",
+                    )}
+                  >
+                    <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  </button>
+                </EditorHintWrap>
               );
             })}
           </div>
-          <div className="grid grid-cols-2 gap-1">
+          <div className={inspectorTwoColGridClass}>
             <PropertyNumberInput
               commitOnInput={false}
               label="Min W"

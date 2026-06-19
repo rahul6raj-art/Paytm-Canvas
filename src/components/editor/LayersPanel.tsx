@@ -29,12 +29,21 @@ import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
 import { ROOT, useEditorStore, type EditorNode } from "@/stores/useEditorStore";
 import { findInstanceRoot } from "@/lib/componentModel";
-import { isAncestorOf, layerPanelChildIds } from "@/lib/editorGraph";
+import {
+  childOrderIndexFromLayerPanelInsertBefore,
+  isAncestorOf,
+  layerPanelChildIds,
+  layerPanelDisplayChildIds,
+} from "@/lib/editorGraph";
 import { BOOLEAN_OPERATION_LABELS, isMaskGroup } from "@/lib/booleanGeometry";
 import { didPointerExitElement } from "@/lib/domPointer";
 import { isAutoLayoutContainer, type LayoutMode } from "@/lib/layoutEngine/types";
 import { AutoLayoutFrameLayerIcon } from "@/components/editor/AutoLayoutFrameLayerIcon";
 import { PathLayerIcon } from "@/components/editor/PathLayerIcon";
+import { LayersPanelPagesSection } from "@/components/editor/LayersPanelPagesSection";
+import { SidebarSectionSplitHandle } from "@/components/editor/SidebarSectionSplitHandle";
+import { useLayersPanelPagesSplit } from "@/components/editor/useLayersPanelPagesSplit";
+import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
 
 function autoLayoutLayerIconMode(
   node: Pick<EditorNode, "layoutMode">,
@@ -103,10 +112,10 @@ function Tree({
 }) {
   const childOrder = useEditorStore((s) => s.childOrder);
   const nodes = useEditorStore((s) => s.nodes);
-  const ids = layerPanelChildIds(parentId, nodes, childOrder);
+  const ids = layerPanelDisplayChildIds(parentId, nodes, childOrder);
 
   return (
-    <>
+    <div className="space-y-[8px]">
       {ids.map((id, index) => {
         const node = nodes[id];
         if (!node) return null;
@@ -131,7 +140,7 @@ function Tree({
           />
         );
       })}
-    </>
+    </div>
   );
 }
 
@@ -260,11 +269,11 @@ function LayerRow({
           openContextMenu(node.id, e.clientX, e.clientY);
         }}
         className={cn(
-          "group flex h-7 items-center gap-0.5 rounded pr-1 text-ui-sm transition-colors",
+          "group flex h-8 items-center gap-0.5 rounded-lg pr-1 text-ui-sm transition-colors",
           active
-            ? "bg-[rgba(24,160,251,0.14)] text-app-fg"
+            ? "bg-[color:var(--pc-canvas-selection-muted)] text-app-fg"
             : "text-app-fg hover:bg-app-hover",
-          nestHighlight && "bg-[rgba(24,160,251,0.1)]",
+          nestHighlight && "bg-[color:var(--pc-canvas-selection-fill)]",
         )}
         style={{ paddingLeft: 6 + depth * 14 }}
       >
@@ -276,24 +285,25 @@ function LayerRow({
           />
         ) : null}
         {hasKids ? (
-          <button
-            type="button"
-            className={cn(
-              "flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-subtle transition-opacity hover:bg-app-hover hover:text-app-fg",
-              panelHovered ? "opacity-100" : "pointer-events-none opacity-0",
-            )}
-            onClick={(e) => {
-              e.stopPropagation();
-              toggleExpanded(node.id);
-            }}
-            title={node.expanded ? "Collapse" : "Expand"}
-          >
-            {node.expanded ? (
-              <ChevronDown className="h-3.5 w-3.5" strokeWidth={2} />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5" strokeWidth={2} />
-            )}
-          </button>
+          <EditorHintWrap title={node.expanded ? "Collapse" : "Expand"}>
+            <button
+              type="button"
+              className={cn(
+                "flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-subtle transition-opacity hover:bg-app-hover hover:text-app-fg",
+                panelHovered ? "opacity-100" : "pointer-events-none opacity-0",
+              )}
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleExpanded(node.id);
+              }}
+            >
+              {node.expanded ? (
+                <ChevronDown className="h-3.5 w-3.5" strokeWidth={2} />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5" strokeWidth={2} />
+              )}
+            </button>
+          </EditorHintWrap>
         ) : (
           <span className="w-6 shrink-0" />
         )}
@@ -304,28 +314,31 @@ function LayerRow({
         >
           <KindIcon node={node} />
           {remotePeers.length > 0 ? (
-            <span
-              className="flex shrink-0 items-center gap-0.5"
-              title={remotePeers.map((p) => p.name).join(", ")}
-            >
-              {remotePeers.map((p) => (
-                <span
-                  key={p.id}
-                  className="h-2 w-2 shrink-0 rounded-full border border-black/50 ring-1 ring-black/20"
-                  style={{ backgroundColor: p.color }}
-                />
-              ))}
-            </span>
+            <EditorHintWrap title={remotePeers.map((p) => p.name).join(", ")}>
+              <span className="flex shrink-0 items-center gap-0.5">
+                {remotePeers.map((p) => (
+                  <span
+                    key={p.id}
+                    className="h-2 w-2 shrink-0 rounded-full border border-black/50 ring-1 ring-black/20"
+                    style={{ backgroundColor: p.color }}
+                  />
+                ))}
+              </span>
+            </EditorHintWrap>
           ) : null}
           {node.isComponent ? (
-            <span title="Component source" className="shrink-0 text-violet-300">
-              <Component className="h-3 w-3" strokeWidth={1.75} />
-            </span>
+            <EditorHintWrap title="Component source">
+              <span className="shrink-0 text-violet-300">
+                <Component className="h-3 w-3" strokeWidth={1.75} />
+              </span>
+            </EditorHintWrap>
           ) : null}
           {instRoot ? (
-            <span title="Component instance" className="shrink-0 text-violet-200/90">
-              <Boxes className="h-3 w-3" strokeWidth={1.75} />
-            </span>
+            <EditorHintWrap title="Component instance">
+              <span className="shrink-0 text-violet-200/90">
+                <Boxes className="h-3 w-3" strokeWidth={1.75} />
+              </span>
+            </EditorHintWrap>
           ) : null}
           {isRenaming ? (
             <input
@@ -381,34 +394,36 @@ function LayerRow({
             </span>
           )}
         </button>
-        <button
-          type="button"
-          className={cn(
-            "flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-subtle transition-opacity hover:bg-app-hover hover:text-app-fg",
-            active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
-          )}
-          onClick={(e) => {
-            e.stopPropagation();
-            toggleVisible(node.id);
-          }}
-          title="Visibility"
-        >
-          {node.visible ? <Eye className="h-3.5 w-3.5" strokeWidth={1.75} /> : <EyeOff className="h-3.5 w-3.5" strokeWidth={1.75} />}
-        </button>
-        <button
-          type="button"
-          className={cn(
-            "flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-subtle transition-opacity hover:bg-app-hover hover:text-app-fg",
-            active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
-          )}
-          onClick={(e) => {
-            e.stopPropagation();
-            toggleLock(node.id);
-          }}
-          title="Lock"
-        >
-          {node.locked ? <Lock className="h-3.5 w-3.5" strokeWidth={1.75} /> : <Unlock className="h-3.5 w-3.5" strokeWidth={1.75} />}
-        </button>
+        <EditorHintWrap title="Visibility">
+          <button
+            type="button"
+            className={cn(
+              "flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-subtle transition-opacity hover:bg-app-hover hover:text-app-fg",
+              active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+            )}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleVisible(node.id);
+            }}
+          >
+            {node.visible ? <Eye className="h-3.5 w-3.5" strokeWidth={1.75} /> : <EyeOff className="h-3.5 w-3.5" strokeWidth={1.75} />}
+          </button>
+        </EditorHintWrap>
+        <EditorHintWrap title="Lock">
+          <button
+            type="button"
+            className={cn(
+              "flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-subtle transition-opacity hover:bg-app-hover hover:text-app-fg",
+              active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+            )}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleLock(node.id);
+            }}
+          >
+            {node.locked ? <Lock className="h-3.5 w-3.5" strokeWidth={1.75} /> : <Unlock className="h-3.5 w-3.5" strokeWidth={1.75} />}
+          </button>
+        </EditorHintWrap>
       </div>
       {showChildren ? (
         <Tree
@@ -425,12 +440,24 @@ function LayerRow({
   );
 }
 
-export function LayersPanel() {
+export function LayersPanel({ hideHeader = false }: { hideHeader?: boolean }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const pageOrder = useEditorStore((s) => s.pageOrder);
+  const pagesSplitEnabled = pageOrder.length > 0;
+  const {
+    containerRef,
+    pagesHeight,
+    showSplit,
+    onResizeStart: onPagesSplitStart,
+    onResize: onPagesSplit,
+    onResizeEnd: onPagesSplitEnd,
+  } = useLayersPanelPagesSplit(pagesSplitEnabled);
   const [dragId, setDragId] = useState<string | null>(null);
   const [indicator, setIndicator] = useState<DropInd>(null);
   const [lineTop, setLineTop] = useState<number | null>(null);
   const [panelHovered, setPanelHovered] = useState(false);
+  const [pagesSectionOpen, setPagesSectionOpen] = useState(true);
+  const [layersSectionOpen, setLayersSectionOpen] = useState(true);
   const figImportBusy = useEditorStore((s) => s.figImportInProgress);
   const figImportStatus = useEditorStore((s) => s.figImportStatus);
   const childOrder = useEditorStore((s) => s.childOrder);
@@ -486,18 +513,24 @@ export function LayersPanel() {
       return;
     }
     const sc = scrollRef.current;
-    const ids = useEditorStore.getState().childOrder[indicator.parentId] ?? [];
+    const displayIds = layerPanelDisplayChildIds(
+      indicator.parentId,
+      useEditorStore.getState().nodes,
+      useEditorStore.getState().childOrder,
+    );
     const i = indicator.insertBefore;
     let top: number | null = null;
-    if (i < ids.length) {
-      const el = sc.querySelector(`[data-layer-row="${layerRowKey(indicator.parentId, ids[i]!)}"]`);
+    if (i < displayIds.length) {
+      const el = sc.querySelector(`[data-layer-row="${layerRowKey(indicator.parentId, displayIds[i]!)}"]`);
       if (el) {
         const sr = sc.getBoundingClientRect();
         const er = el.getBoundingClientRect();
         top = er.top - sr.top + sc.scrollTop;
       }
-    } else if (ids.length > 0) {
-      const el = sc.querySelector(`[data-layer-row="${layerRowKey(indicator.parentId, ids[ids.length - 1]!)}"]`);
+    } else if (displayIds.length > 0) {
+      const el = sc.querySelector(
+        `[data-layer-row="${layerRowKey(indicator.parentId, displayIds[displayIds.length - 1]!)}"]`,
+      );
       if (el) {
         const sr = sc.getBoundingClientRect();
         const er = el.getBoundingClientRect();
@@ -543,7 +576,12 @@ export function LayersPanel() {
       moveNodeToParent(id, indicator.targetId, nextLen);
     } else {
       useEditorStore.getState().pushHistory();
-      moveNodeToParent(id, indicator.parentId, indicator.insertBefore);
+      const displayIds = layerPanelDisplayChildIds(indicator.parentId, nodes, childOrder);
+      const childIndex = childOrderIndexFromLayerPanelInsertBefore(
+        displayIds.filter((sid) => sid !== id).length,
+        indicator.insertBefore,
+      );
+      moveNodeToParent(id, indicator.parentId, childIndex);
     }
 
     setDragId(null);
@@ -559,23 +597,69 @@ export function LayersPanel() {
 
   return (
     <div
+      ref={containerRef}
       className="flex min-h-0 flex-1 flex-col"
       onPointerEnter={() => setPanelHovered(true)}
       onPointerLeave={() => setPanelHovered(false)}
     >
-      <div className="section-heading flex h-8 shrink-0 items-center gap-1.5 border-b border-app-panel-edge px-3">
-        <Layers className="h-3.5 w-3.5 text-app-subtle" strokeWidth={2} />
-        Layers
-      </div>
+      {!hideHeader ? (
+        <div className="section-heading flex h-9 shrink-0 items-center gap-2 border-b border-app-panel-edge px-3.5">
+          <Layers className="size-icon-ui text-app-subtle" strokeWidth={2} />
+          Pages
+        </div>
+      ) : null}
+      {pagesSplitEnabled ? (
+        <div
+          className="flex min-h-0 shrink-0 flex-col overflow-hidden"
+          style={pagesSectionOpen ? { height: pagesHeight } : undefined}
+        >
+          <LayersPanelPagesSection
+            open={pagesSectionOpen}
+            onOpenChange={setPagesSectionOpen}
+          />
+        </div>
+      ) : null}
+      {showSplit ? (
+        <SidebarSectionSplitHandle
+          showSectionDivider
+          hintLabel="Resize pages and layers"
+          onResizeStart={onPagesSplitStart}
+          onResize={onPagesSplit}
+          onResizeEnd={onPagesSplitEnd}
+        />
+      ) : null}
       <div
-        ref={scrollRef}
-        className="thin-scroll relative min-h-0 flex-1 overflow-y-auto py-0.5"
-        onDragOver={onDragOverScroll}
-        onDrop={onDrop}
+        className={cn(
+          "flex min-h-0 min-w-0 flex-col overflow-hidden",
+          layersSectionOpen && "flex-1",
+        )}
       >
+        <button
+          type="button"
+          aria-expanded={layersSectionOpen}
+          aria-label={layersSectionOpen ? "Collapse Layers" : "Expand Layers"}
+          onClick={() => setLayersSectionOpen((v) => !v)}
+          className="flex w-full shrink-0 items-center justify-between px-3.5 pb-0.5 pt-2 text-left transition-colors hover:bg-app-hover"
+        >
+          <span className="section-heading">Layers</span>
+          <ChevronDown
+            className={cn(
+              "h-3.5 w-3.5 shrink-0 text-app-subtle transition-transform duration-200",
+              layersSectionOpen ? "rotate-180" : "rotate-0",
+            )}
+            strokeWidth={2}
+          />
+        </button>
+        {layersSectionOpen ? (
+        <div
+          ref={scrollRef}
+          className="thin-scroll relative min-h-0 flex-1 overflow-y-auto px-2 py-1"
+          onDragOver={onDragOverScroll}
+          onDrop={onDrop}
+        >
         {lineTop != null && indicator?.kind === "reorder" ? (
           <div
-            className="pointer-events-none absolute right-1 left-1 z-10 h-px bg-accent shadow-[0_0_0_1px_rgba(13,153,255,0.35)]"
+            className="pointer-events-none absolute right-2 left-2 z-10 h-px bg-[color:var(--pc-canvas-selection)]"
             style={{ top: lineTop }}
           />
         ) : null}
@@ -605,13 +689,15 @@ export function LayersPanel() {
           />
         )}
         {!figImportBusy && layersTreeReady && (childOrder[ROOT] ?? []).length === 0 ? (
-          <div className="mx-2 mt-4 rounded-lg border border-dashed border-app-border bg-white/[0.02] px-3 py-6 text-center">
-            <Layers className="mx-auto mb-2 h-8 w-8 text-[#4a4a4a]" strokeWidth={1.25} />
-            <p className="text-ui font-medium text-app-muted">No layers yet</p>
+          <div className="mx-3 mt-8 px-2 py-8 text-center">
+            <Layers className="mx-auto mb-3 h-9 w-9 text-app-subtle/70" strokeWidth={1.25} />
+            <p className="text-ui font-medium text-app-muted">No frames yet</p>
             <p className="mt-1 text-ui leading-relaxed text-app-subtle">
-              Press <span className="font-medium text-app-subtle">F</span> for a frame or use the toolbar to add shapes and text.
+              Press <span className="font-medium text-app-fg">F</span> to create one.
             </p>
           </div>
+        ) : null}
+        </div>
         ) : null}
       </div>
     </div>

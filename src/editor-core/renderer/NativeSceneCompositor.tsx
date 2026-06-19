@@ -25,6 +25,7 @@ import {
   registerCraftEngine,
   registerCraftEngineSyncState,
 } from "@/engine/craftEngineRegistry";
+import { runCraftEngineAccess } from "@/engine/craftEngineMutation";
 import type { CraftEngineInstance } from "@/engine/craftEngineTypes";
 import { cn } from "@/lib/utils";
 
@@ -67,32 +68,66 @@ export function NativeSceneCompositor({
   const transformInteractionMode = useEditorStore((s) => s.transformInteractionMode);
   const isMovingSelection = useEditorStore((s) => s.isMovingSelection);
 
-  const resizeEngine = useCallback(() => {
-    const engine = engineRef.current;
-    const viewport = viewportRef.current;
-    if (!engine || !viewport) return;
-    const rect = viewport.getBoundingClientRect();
-    const dpr = readDevicePixelRatio();
-    const w = Math.max(1, Math.round(rect.width));
-    const h = Math.max(1, Math.round(rect.height));
-    engine.resize(w, h, dpr);
-  }, [viewportRef]);
+  const frameRafRef = useRef(0);
+  const pendingResizeRef = useRef(false);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
+
+  const runEngineFrame = useCallback(
+    (shouldResize: boolean) => {
+      runCraftEngineAccess(() => {
+        const engine = engineRef.current;
+        if (!engine) return;
+
+        const viewport = viewportRef.current;
+        const observer = resizeObserverRef.current;
+        if (observer && viewport) observer.unobserve(viewport);
+
+        try {
+          if (shouldResize && viewport) {
+            const rect = viewport.getBoundingClientRect();
+            const dpr = readDevicePixelRatio();
+            const w = Math.max(1, Math.round(rect.width));
+            const h = Math.max(1, Math.round(rect.height));
+            engine.resize(w, h, dpr);
+          }
+
+          engine.setViewport(pan.x, pan.y, zoom);
+          try {
+            engine.render();
+          } catch (e) {
+            console.warn("[craft-engine] render failed", e);
+          }
+        } finally {
+          if (observer && viewport) observer.observe(viewport);
+        }
+      });
+    },
+    [viewportRef, pan.x, pan.y, zoom],
+  );
+
+  const scheduleEngineFrame = useCallback(
+    (includeResize = false) => {
+      if (includeResize) pendingResizeRef.current = true;
+      if (frameRafRef.current !== 0) return;
+
+      frameRafRef.current = requestAnimationFrame(() => {
+        frameRafRef.current = 0;
+        const shouldResize = pendingResizeRef.current;
+        pendingResizeRef.current = false;
+        runEngineFrame(shouldResize);
+      });
+    },
+    [runEngineFrame],
+  );
+
+  const resizeEngine = useCallback(() => scheduleEngineFrame(true), [scheduleEngineFrame]);
+
+  const drawFrame = useCallback(() => scheduleEngineFrame(false), [scheduleEngineFrame]);
 
   const documentSlice = useMemo(
     () => craftEngineDocumentFromStore({ nodes, childOrder, rootIds, assets }),
     [nodes, childOrder, rootIds, assets],
   );
-
-  const drawFrame = useCallback(() => {
-    const engine = engineRef.current;
-    if (!engine) return;
-    engine.setViewport(pan.x, pan.y, zoom);
-    try {
-      engine.render();
-    } catch (e) {
-      console.warn("[craft-engine] render failed", e);
-    }
-  }, [pan.x, pan.y, zoom]);
 
   const runDocumentSync = useCallback(async () => {
     const engine = engineRef.current;
@@ -125,13 +160,15 @@ export function NativeSceneCompositor({
       return;
     }
     try {
-      const mode = syncCraftEngineDocument(engine, documentSlice, syncStateRef.current, {
-        forceFull,
-        wasmBootstrap,
+      runCraftEngineAccess(() => {
+        const mode = syncCraftEngineDocument(engine, documentSlice, syncStateRef.current, {
+          forceFull,
+          wasmBootstrap,
+        });
+        if (mode === "bootstrap") {
+          wasmBootstrappedRef.current = true;
+        }
       });
-      if (mode === "bootstrap") {
-        wasmBootstrappedRef.current = true;
-      }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       console.warn("[craft-engine] document sync failed", e);
@@ -140,7 +177,9 @@ export function NativeSceneCompositor({
       registerCraftEngineSyncState(syncStateRef.current);
       wasmBootstrappedRef.current = false;
       try {
-        syncCraftEngineDocument(engine, documentSlice, syncStateRef.current, { forceFull: true });
+        runCraftEngineAccess(() => {
+          syncCraftEngineDocument(engine, documentSlice, syncStateRef.current, { forceFull: true });
+        });
         setSyncWarning(null);
       } catch (retryErr) {
         const retryMessage = retryErr instanceof Error ? retryErr.message : String(retryErr);
@@ -192,6 +231,9 @@ export function NativeSceneCompositor({
 
     return () => {
       cancelled = true;
+      cancelAnimationFrame(frameRafRef.current);
+      frameRafRef.current = 0;
+      pendingResizeRef.current = false;
       engineRef.current = null;
       registerCraftEngine(null);
       registerCraftEngineSyncState(null);
@@ -206,9 +248,8 @@ export function NativeSceneCompositor({
 
   useEffect(() => {
     if (!engineReady) return;
-    resizeEngine();
-    drawFrame();
-  }, [engineReady, resizeEngine, drawFrame]);
+    scheduleEngineFrame(true);
+  }, [engineReady, scheduleEngineFrame]);
 
   useEffect(() => {
     if (wasApplyingHistoryRef.current && !isApplyingHistory) {
@@ -255,12 +296,15 @@ export function NativeSceneCompositor({
     const viewport = viewportRef.current;
     if (!viewport || !engineReady) return;
     const observer = new ResizeObserver(() => {
-      resizeEngine();
-      drawFrame();
+      scheduleEngineFrame(true);
     });
+    resizeObserverRef.current = observer;
     observer.observe(viewport);
-    return () => observer.disconnect();
-  }, [viewportRef, engineReady, resizeEngine, drawFrame]);
+    return () => {
+      observer.disconnect();
+      if (resizeObserverRef.current === observer) resizeObserverRef.current = null;
+    };
+  }, [viewportRef, engineReady, scheduleEngineFrame]);
 
   return (
     <>

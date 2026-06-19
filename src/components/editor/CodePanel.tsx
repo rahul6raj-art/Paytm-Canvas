@@ -4,7 +4,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { Copy, Check, Upload, RefreshCw, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { exportSelectionCode } from "@/lib/codeExport";
-import { importCodeSource } from "@/lib/codeImport";
+import { parseCodeToCanvasSlice } from "@/lib/codeImport/importCodeToCanvas";
 import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
 
@@ -28,6 +28,7 @@ export function CodePanel() {
   const codePanelFormat = useEditorStore((s) => s.codePanelFormat);
   const setCodePanelFormat = useEditorStore((s) => s.setCodePanelFormat);
   const setCodeRoundTripSourceHeader = useEditorStore((s) => s.setCodeRoundTripSourceHeader);
+  const setCodeRoundTripLink = useEditorStore((s) => s.setCodeRoundTripLink);
   const applyGeneratedDesign = useEditorStore((s) => s.applyGeneratedDesign);
 
   const [section, setSection] = useState<PanelSection>("export");
@@ -62,6 +63,7 @@ export function CodePanel() {
   }, [exported.code]);
 
   const setRightPanelTab = useEditorStore((s) => s.setRightPanelTab);
+  const openCodeRoundTrip = useEditorStore((s) => s.openCodeRoundTrip);
 
   const onApplyImport = useCallback(async () => {
     setImportError(null);
@@ -70,7 +72,7 @@ export function CodePanel() {
     try {
       let result;
       try {
-        result = importCodeSource(importSource, codePanelFormat);
+        result = await parseCodeToCanvasSlice(importSource, codePanelFormat);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         setImportError(`Import failed: ${msg}`);
@@ -85,7 +87,12 @@ export function CodePanel() {
         zoomToFit: true,
       });
       setCodeRoundTripSourceHeader(result.sourceHeader ?? null);
-      setImportStatus(result.message);
+      if (result.codeRoundTripLink) {
+        setCodeRoundTripLink(result.codeRoundTripLink);
+      }
+      setImportStatus(
+        `${result.message} (${result.layerCount} layers — use View → Zoom to fit if the frame is off-screen.)`,
+      );
       setRightPanelTab("design");
       setSection("export");
     } finally {
@@ -97,6 +104,7 @@ export function CodePanel() {
     importMode,
     applyGeneratedDesign,
     setCodeRoundTripSourceHeader,
+    setCodeRoundTripLink,
     setRightPanelTab,
   ]);
 
@@ -223,6 +231,18 @@ export function CodePanel() {
               <code className="text-[#b4b4b4]">class</code>
               {codePanelFormat === "react" ? " / className" : ""}.
             </p>
+            {codePanelFormat === "react" ? (
+              <button
+                type="button"
+                onClick={() => openCodeRoundTrip("import")}
+                className="w-full rounded-lg border border-sky-500/35 bg-sky-500/10 px-3 py-2 text-left text-ui leading-relaxed text-sky-100/95 hover:bg-sky-500/15"
+              >
+                <span className="font-semibold">Capture live preview</span>
+                <span className="mt-0.5 block text-app-muted">
+                  Run your app, paste a localhost URL — real colors and typography (not in this panel).
+                </span>
+              </button>
+            ) : null}
 
             <div className="flex flex-wrap items-center gap-2">
               <button

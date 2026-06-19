@@ -2,8 +2,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { EditorNode } from "@/stores/useEditorStore";
 import {
+  canCreateComponentFromSelection,
   componentMatchesSearchQuery,
   filterComponentLibraryGroups,
+  findInstanceRoot,
   groupComponentMasters,
 } from "@/lib/componentModel";
 
@@ -50,5 +52,27 @@ describe("component library search", () => {
     assert.equal(componentMatchesSearchQuery(node, "state"), true);
     assert.equal(componentMatchesSearchQuery(node, "chip"), true);
     assert.equal(componentMatchesSearchQuery(node, "foo"), false);
+  });
+});
+
+describe("findInstanceRoot", () => {
+  it("returns null when the parent chain is broken", () => {
+    const nodes: Record<string, EditorNode> = {
+      child: {
+        ...master({ id: "child", name: "Child" }),
+        parentId: "missing-parent",
+      },
+    };
+    assert.equal(findInstanceRoot(nodes, "child"), null);
+    assert.equal(findInstanceRoot(nodes, "also-missing"), null);
+  });
+});
+
+describe("canCreateComponentFromSelection", () => {
+  it("does not throw when selection references missing nodes", () => {
+    const nodes: Record<string, EditorNode> = {
+      frame: master({ id: "frame", name: "Frame" }),
+    };
+    assert.equal(canCreateComponentFromSelection(["frame", "ghost-id"], nodes), false);
   });
 });

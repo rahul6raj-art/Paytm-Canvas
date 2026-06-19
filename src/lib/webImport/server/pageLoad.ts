@@ -1,5 +1,6 @@
 import type { Page } from "playwright";
 import { IMPORT_WEB_LIMITS } from "@/lib/webImport/types";
+import { prepareDomForImportExtract } from "@/lib/webImport/server/prepareDomForImportExtract";
 
 const POST_LOAD_SETTLE_MS = 4_000;
 const LOAD_STATE_TIMEOUT_MS = 15_000;
@@ -22,12 +23,31 @@ export async function loadPageForImport(
       if (!hasContent) throw formatLoadError(err, opts.url);
     }
     await page.waitForLoadState("load", { timeout: LOAD_STATE_TIMEOUT_MS }).catch(() => undefined);
+    await waitForReactPreviewScreen(page, opts.url);
   } else {
     await page.setContent(opts.html, { waitUntil: "domcontentloaded", timeout });
     await page.waitForLoadState("load", { timeout: LOAD_STATE_TIMEOUT_MS }).catch(() => undefined);
   }
 
   await settlePage(page, POST_LOAD_SETTLE_MS);
+  await prepareDomForImportExtract(page);
+}
+
+async function waitForReactPreviewScreen(page: Page, url: string): Promise<void> {
+  let selector: string | null = null;
+  try {
+    const parsed = new URL(url);
+    const screen = parsed.searchParams.get("screen")?.trim();
+    if (screen) {
+      selector = `.pml-${screen.replace(/[^a-z0-9-]/gi, "")}`;
+    }
+  } catch {
+    selector = null;
+  }
+  if (!selector) selector = ".pml-signup, .pml-home, .pml-onboarding, [class*='pml-']";
+
+  await page.waitForSelector(selector, { timeout: 12_000 }).catch(() => undefined);
+  await page.waitForLoadState("networkidle", { timeout: 4_000 }).catch(() => undefined);
 }
 
 async function pageHasRenderableContent(page: Page): Promise<boolean> {

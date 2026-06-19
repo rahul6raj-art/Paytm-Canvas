@@ -8,6 +8,7 @@ import {
   topLevelSelectedIds,
   worldOriginToNodeXYFromChildOrder,
 } from "@/lib/editorGraph";
+import { idsToDetachForAutoLayoutDrag } from "@/lib/autoLayoutDrag";
 import { findInstanceRoot } from "@/lib/componentModel";
 import { lineEndpointsPatchFromLayout } from "@/lib/shapes/lineGeometry";
 import { applyMatrixToPoint, type RectBounds } from "@/lib/transformMath";
@@ -154,24 +155,31 @@ export function canAlignSelection(
   return false;
 }
 
-/** When every selected layer shares an auto-layout parent, disable layout so manual x/y sticks. */
-export function suspendAutoLayoutForManualPosition(
+/** Detach flow children to absolute positioning before manual align (keeps parent auto layout). */
+export function detachForManualPositionInAutoLayout(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
   nodeIds: string[],
 ): Record<string, EditorNode> {
   if (nodeIds.length === 0) return nodes;
-  const parentOf = buildParentMapFromChildOrder(childOrder);
-  const parentIds = new Set<string | null>();
-  for (const id of nodeIds) {
-    if (!parentOf.has(id)) return nodes;
-    parentIds.add(parentOf.get(id) ?? null);
+  const toDetach = idsToDetachForAutoLayoutDrag(nodeIds, nodes, nodes);
+  if (toDetach.length === 0) return nodes;
+  let next = { ...nodes };
+  for (const id of toDetach) {
+    const n = next[id];
+    if (!n) continue;
+    next[id] = { ...n, layoutPositioning: "absolute", layoutDirty: true };
   }
-  if (parentIds.has(null) || parentIds.size !== 1) return nodes;
-  const parentId = [...parentIds][0]!;
-  const parent = nodes[parentId];
-  if (!parent || (parent.layoutMode ?? "none") === "none") return nodes;
-  return { ...nodes, [parentId]: { ...parent, layoutMode: "none" } };
+  return next;
+}
+
+/** @deprecated Use detachForManualPositionInAutoLayout — disabling auto layout breaks stacks. */
+export function suspendAutoLayoutForManualPosition(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  nodeIds: string[],
+): Record<string, EditorNode> {
+  return detachForManualPositionInAutoLayout(nodes, childOrder, nodeIds);
 }
 
 /** Keep instance override x/y in sync when overrides already pin position. */
@@ -342,7 +350,7 @@ export function applyDistributeToNodes(
   return next;
 }
 
-/** Parents to relayout after manual position — skip auto-layout frames (they would undo align). */
+/** Parents to relayout after manual position (including auto-layout frames). */
 export function relayoutParentKeysAfterManualPosition(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
@@ -354,8 +362,6 @@ export function relayoutParentKeysAfterManualPosition(
   for (const id of nodeIds) {
     const parentId = parentOf.get(id) ?? null;
     if (!parentId) continue;
-    const parent = nodes[parentId];
-    if (parent && (parent.layoutMode ?? "none") !== "none") continue;
     keys.add(parentListKey(parentId));
   }
   return keys;
@@ -372,22 +378,38 @@ export function alignNodesInDocument(
   if (nodeIds.length === 1 && !alignParentIdForSelection(nodeIds, nodes, childOrder)) {
     return nodes;
   }
-  let next = suspendAutoLayoutForManualPosition(nodes, childOrder, nodeIds);
+  let next = detachForManualPositionInAutoLayout(nodes, childOrder, nodeIds);
   next = applyAlignToNodes(next, childOrder, nodeIds, direction);
   next = syncInstancePositionOverrides(next, nodeIds);
   return next;
 }
 
-export function alignDirectionForGridCell(
-  row: number,
-  col: number,
-): { horizontal: AlignDirection; vertical: AlignDirection } {
-  const horizontal: AlignDirection = col === 0 ? "left" : col === 1 ? "center-h" : "right";
-  const vertical: AlignDirection = row === 0 ? "top" : row === 1 ? "center-v" : "bottom";
-  return { horizontal, vertical };
+export type GridAlignAxes = {
+  horizontal?: AlignDirection;
+  vertical?: AlignDirection;
+};
+
+/**
+ * Map a 3×3 alignment grid cell to axis directions (Figma-style).
+ * Corners align both axes; edge-centre cells align one axis only; centre aligns both.
+ */
+export function alignDirectionForGridCell(row: number, col: number): GridAlignAxes {
+  if (row === 1 && col === 1) {
+    return { horizontal: "center-h", vertical: "center-v" };
+  }
+  if (row === 1) {
+    return { horizontal: col === 0 ? "left" : "right" };
+  }
+  if (col === 1) {
+    return { vertical: row === 0 ? "top" : "bottom" };
+  }
+  return {
+    horizontal: col === 0 ? "left" : "right",
+    vertical: row === 0 ? "top" : "bottom",
+  };
 }
 
-/** Align selection to a 3×3 grid position (horizontal + vertical in one pass). */
+/** Align selection to a 3×3 grid position (one or both axes per cell). */
 export function alignNodesInDocumentToGrid(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
@@ -396,8 +418,9 @@ export function alignNodesInDocumentToGrid(
   col: number,
 ): Record<string, EditorNode> {
   const { horizontal, vertical } = alignDirectionForGridCell(row, col);
-  let next = alignNodesInDocument(nodes, childOrder, nodeIds, horizontal);
-  next = alignNodesInDocument(next, childOrder, nodeIds, vertical);
+  let next = nodes;
+  if (horizontal) next = alignNodesInDocument(next, childOrder, nodeIds, horizontal);
+  if (vertical) next = alignNodesInDocument(next, childOrder, nodeIds, vertical);
   return next;
 }
 
@@ -409,7 +432,7 @@ export function distributeNodesInDocument(
   axis: "horizontal" | "vertical",
 ): Record<string, EditorNode> {
   if (nodeIds.length < 3) return nodes;
-  let next = suspendAutoLayoutForManualPosition(nodes, childOrder, nodeIds);
+  let next = detachForManualPositionInAutoLayout(nodes, childOrder, nodeIds);
   next = applyDistributeToNodes(next, childOrder, nodeIds, axis);
   next = syncInstancePositionOverrides(next, nodeIds);
   return next;

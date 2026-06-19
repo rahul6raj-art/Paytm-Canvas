@@ -13,6 +13,7 @@ import {
 import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { cn } from "@/lib/utils";
+import { EditorHintWrap } from "./EditorHoverHint";
 
 export function StrokeWidthToolbar() {
   const tool = useEditorStore((s) => s.tool);
@@ -61,19 +62,19 @@ export function StrokeWidthToolbar() {
     setPencilStrokeWidth(next);
   };
 
-  const title =
+  const hintLabel =
     tool === "pencil" && strokeTargets.length === 0
-      ? "Freehand brush size — [ ] to adjust"
+      ? "Freehand brush size"
       : singleFreehand
-        ? "Freehand stroke weight — [ ] to adjust"
-        : "Stroke weight — [ ] to adjust";
+        ? "Freehand stroke weight"
+        : "Stroke weight";
 
   return (
-    <div
-      className="flex h-8 items-center gap-0.5 rounded-md border border-app-border bg-app-toolbar-well px-0.5"
-      title={title}
-      aria-label={title}
-    >
+    <EditorHintWrap hintLabel={hintLabel} hintShortcut="[ ]" hintSide="bottom">
+      <div
+        className="flex h-8 items-center gap-0.5 rounded-md border border-app-border bg-app-toolbar-well px-0.5"
+        aria-label={`${hintLabel} — [ ] to adjust`}
+      >
       <button
         type="button"
         className="flex h-7 w-7 items-center justify-center rounded text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
@@ -124,6 +125,7 @@ export function StrokeWidthToolbar() {
       <span className="sr-only">
         Stroke weight between {STROKE_WIDTH_MIN} and {STROKE_WIDTH_MAX}
       </span>
-    </div>
+      </div>
+    </EditorHintWrap>
   );
 }

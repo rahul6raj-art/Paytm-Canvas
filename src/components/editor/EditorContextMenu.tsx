@@ -3,6 +3,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useEditorStore } from "@/stores/useEditorStore";
+import {
+  useCanExportToLinkedSource,
+  useExportToLinkedSource,
+} from "@/lib/craftBridge/useExportToLinkedSource";
 import { topLevelSelectedIds } from "@/lib/editorGraph";
 import { hasEditorClipboardContent } from "@/lib/editorClipboardAvailability";
 import {
@@ -58,6 +62,11 @@ export function EditorContextMenu() {
   const enterObjectEditMode = useEditorStore((s) => s.enterObjectEditMode);
   const useSelectionAsMask = useEditorStore((s) => s.useSelectionAsMask);
   const releaseMask = useEditorStore((s) => s.releaseMask);
+  const canUpdateSource = useCanExportToLinkedSource();
+  const exportToLinkedSource = useExportToLinkedSource();
+  const codeRoundTripLink = useEditorStore((s) => s.codeRoundTripLink);
+  const openCodeRoundTrip = useEditorStore((s) => s.openCodeRoundTrip);
+  const setSelection = useEditorStore((s) => s.setSelection);
 
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -150,7 +159,32 @@ export function EditorContextMenu() {
       ? [{ type: "item", id: "mask-rel", label: "Release mask", onSelect: () => releaseMask(nodeId) }]
       : [];
 
+    const isCodeFrame =
+      editorMode === "design" && (node.type === "frame" || node.type === "group");
+    const codeItems: Item[] = isCodeFrame
+      ? [
+          {
+            type: "item" as const,
+            id: "send-to-code",
+            label: "Send to code",
+            hint: canUpdateSource
+              ? codeRoundTripLink?.sourcePath?.split("/").pop()
+              : "Link source",
+            onSelect: () => {
+              setSelection([nodeId]);
+              void (async () => {
+                const result = await exportToLinkedSource();
+                if (result.ok) return;
+                openCodeRoundTrip("export");
+              })();
+            },
+          },
+          { type: "sep" as const },
+        ]
+      : [];
+
     const items: Item[] = [
+      ...codeItems,
       {
         type: "item",
         id: "rename",
@@ -411,6 +445,11 @@ export function EditorContextMenu() {
     useSelectionAsMask,
     releaseMask,
     clipboardReady,
+    canUpdateSource,
+    exportToLinkedSource,
+    openCodeRoundTrip,
+    setSelection,
+    codeRoundTripLink?.sourcePath,
   ]);
 
   useLayoutEffect(() => {
@@ -459,7 +498,7 @@ export function EditorContextMenu() {
   return createPortal(
     <div
       ref={menuRef}
-      className="fixed z-[200] min-w-[200px] rounded-md border border-app-border bg-app-panel py-0.5 shadow-xl"
+      className="fixed z-[200] min-w-[200px] editor-floating-menu border border-app-border bg-app-panel py-0.5 shadow-xl"
       style={{ left: 0, top: 0 }}
       role="menu"
     >

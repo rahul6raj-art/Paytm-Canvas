@@ -6,6 +6,7 @@ import {
   CANVAS_RULER_SIZE,
 } from "@/lib/canvasRulers";
 import { useCanvasChromeForeground } from "@/hooks/useCanvasChromeForeground";
+import { useCanvasRulerLeftInset } from "@/hooks/useCanvasRulerLeftInset";
 import { startRulerGuideDragSession } from "@/lib/rulerGuideDrag";
 import { worldToViewport } from "@/lib/canvasCoordinates";
 import { useEditorStore } from "@/stores/useEditorStore";
@@ -20,12 +21,15 @@ export function CanvasRulers({ zoom, pan, viewportRef }: CanvasRulersProps) {
   const editorMode = useEditorStore((s) => s.editorMode);
   const layoutGuideDraft = useEditorStore((s) => s.layoutGuideDraft);
   const chrome = useCanvasChromeForeground();
+  const leftInset = useCanvasRulerLeftInset();
   const [size, setSize] = useState({ width: 0, height: 0 });
 
   const rulerSurfaceStyle = {
     backgroundColor: chrome.rulerBg,
     borderColor: chrome.rulerBorder,
   } as const;
+
+  const horizontalOrigin = leftInset + CANVAS_RULER_SIZE;
 
   useLayoutEffect(() => {
     const el = viewportRef.current;
@@ -40,8 +44,8 @@ export function CanvasRulers({ zoom, pan, viewportRef }: CanvasRulersProps) {
   }, [viewportRef]);
 
   const horizontalTicks = useMemo(
-    () => buildRulerTicks(size.width, pan.x, zoom, CANVAS_RULER_SIZE),
-    [size.width, pan.x, zoom],
+    () => buildRulerTicks(size.width, pan.x, zoom, horizontalOrigin),
+    [size.width, pan.x, zoom, horizontalOrigin],
   );
 
   const verticalTicks = useMemo(
@@ -64,10 +68,12 @@ export function CanvasRulers({ zoom, pan, viewportRef }: CanvasRulersProps) {
       viewportEl: viewport,
       pan,
       zoom,
+      leftInset,
     });
   };
 
   if (size.width < 1 || size.height < 1) return null;
+  if (horizontalOrigin >= size.width) return null;
 
   const draftH =
     layoutGuideDraft?.axis === "v"
@@ -81,25 +87,30 @@ export function CanvasRulers({ zoom, pan, viewportRef }: CanvasRulersProps) {
   return (
     <div className="pointer-events-none absolute inset-0 z-[20]" aria-hidden data-canvas-rulers>
       <div
-        className="pointer-events-none absolute left-0 top-0 border-b border-r"
-        style={{ width: CANVAS_RULER_SIZE, height: CANVAS_RULER_SIZE, ...rulerSurfaceStyle }}
+        className="pointer-events-none absolute top-0 border-b border-r"
+        style={{
+          left: leftInset,
+          width: CANVAS_RULER_SIZE,
+          height: CANVAS_RULER_SIZE,
+          ...rulerSurfaceStyle,
+        }}
       />
       <div
         data-ruler-zone="horizontal"
         className="pointer-events-auto absolute top-0 cursor-row-resize border-b"
         style={{
-          left: CANVAS_RULER_SIZE,
-          width: size.width - CANVAS_RULER_SIZE,
+          left: horizontalOrigin,
+          width: size.width - horizontalOrigin,
           height: CANVAS_RULER_SIZE,
           ...rulerSurfaceStyle,
         }}
         onPointerDown={(e) => onRulerPointerDown("h", e)}
       >
-        {draftH != null && draftH >= CANVAS_RULER_SIZE ? (
+        {draftH != null && draftH >= horizontalOrigin ? (
           <div
             className="pointer-events-none absolute bottom-0 top-0 w-0.5"
             style={{
-              left: draftH - CANVAS_RULER_SIZE,
+              left: draftH - horizontalOrigin,
               transform: "translateX(-50%)",
               backgroundColor: "#9747ff",
             }}
@@ -109,7 +120,7 @@ export function CanvasRulers({ zoom, pan, viewportRef }: CanvasRulersProps) {
           <div
             key={`h-${t.label}-${t.position}`}
             className="pointer-events-none absolute bottom-0 flex flex-col items-center"
-            style={{ left: t.position - CANVAS_RULER_SIZE, transform: "translateX(-50%)" }}
+            style={{ left: t.position - horizontalOrigin, transform: "translateX(-50%)" }}
           >
             <span
               className="mb-0.5 select-none text-ui font-medium tabular-nums leading-none"
@@ -123,8 +134,9 @@ export function CanvasRulers({ zoom, pan, viewportRef }: CanvasRulersProps) {
       </div>
       <div
         data-ruler-zone="vertical"
-        className="pointer-events-auto absolute left-0 cursor-col-resize border-r"
+        className="pointer-events-auto absolute cursor-col-resize border-r"
         style={{
+          left: leftInset,
           top: CANVAS_RULER_SIZE,
           width: CANVAS_RULER_SIZE,
           height: size.height - CANVAS_RULER_SIZE,

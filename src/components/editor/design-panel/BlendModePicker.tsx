@@ -18,6 +18,7 @@ import {
   inspectorLucideProps,
 } from "@/lib/inspectorIconStyles";
 import { cn } from "@/lib/utils";
+import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
 import {
   anchoredMenuStyle,
   useAnchoredDropdownPosition,
@@ -45,7 +46,7 @@ export function BlendModePicker({ node, disabled, onChange, variant = "default" 
   const position = useAnchoredDropdownPosition(anchorRef, open, 4, {
     viewportClamp: true,
     maxHeight: 400,
-    width: 200,
+    width: 220,
   });
   useDismissAnchoredDropdown(open, () => setOpen(false), anchorRef, menuRef);
 
@@ -57,7 +58,12 @@ export function BlendModePicker({ node, disabled, onChange, variant = "default" 
         ref={menuRef}
         role="listbox"
         aria-label="Blend mode"
-        className="fixed z-[120] w-[200px] overflow-y-auto overscroll-contain rounded-md border border-app-border bg-app-panel py-1 shadow-xl"
+        data-editor-shell
+        className={cn(
+          "editor-floating-menu editor-menu-dropdown fixed min-w-[220px] overflow-y-auto overscroll-contain",
+          "border border-app-border bg-app-surface py-1 shadow-xl thin-scroll",
+          "z-[120]",
+        )}
         style={anchoredMenuStyle(position)}
       >
         {groups.map((group, gi) => (
@@ -72,8 +78,8 @@ export function BlendModePicker({ node, disabled, onChange, variant = "default" 
                   role="option"
                   aria-selected={selected}
                   className={cn(
-                    "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-ui text-app-fg transition-colors hover:bg-app-hover",
-                    selected && "bg-app-hover",
+                    "editor-menu-dropdown-item !justify-start gap-2.5",
+                    selected && "bg-app-inset font-medium text-app-fg",
                   )}
                   onClick={() => {
                     onChange(mode);
@@ -81,9 +87,11 @@ export function BlendModePicker({ node, disabled, onChange, variant = "default" 
                   }}
                 >
                   <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-                    {selected ? <Check className={inspectorIconClass} strokeWidth={inspectorIconStroke} /> : null}
+                    {selected ? (
+                      <Check className={cn(inspectorIconClass, "text-app-fg")} strokeWidth={inspectorIconStroke} />
+                    ) : null}
                   </span>
-                  <span>{LAYER_BLEND_MODE_LABELS[mode]}</span>
+                  <span className="min-w-0 flex-1 truncate">{LAYER_BLEND_MODE_LABELS[mode]}</span>
                 </button>
               );
             })}
@@ -105,26 +113,30 @@ export function BlendModePicker({ node, disabled, onChange, variant = "default" 
 
   return (
     <>
-      <button
-        ref={anchorRef}
-        type="button"
-        disabled={disabled}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-label={variant === "icon" ? `Blend mode: ${label}` : undefined}
+      <EditorHintWrap
         title={variant === "icon" ? `Blend: ${label}` : undefined}
-        onClick={() => setOpen((v) => !v)}
-        className={triggerClass}
+        disabled={disabled}
       >
-        {variant === "icon" ? (
-          <Droplet {...inspectorLucideProps()} />
-        ) : (
-          <>
-            <span className="truncate">{label}</span>
-            <ChevronDown className={cn(inspectorIconClass, "text-app-muted")} strokeWidth={inspectorIconStroke} />
-          </>
-        )}
-      </button>
+        <button
+          ref={anchorRef}
+          type="button"
+          disabled={disabled}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-label={variant === "icon" ? `Blend mode: ${label}` : undefined}
+          onClick={() => setOpen((v) => !v)}
+          className={triggerClass}
+        >
+          {variant === "icon" ? (
+            <Droplet {...inspectorLucideProps()} />
+          ) : (
+            <>
+              <span className="truncate">{label}</span>
+              <ChevronDown className={cn(inspectorIconClass, "text-app-muted")} strokeWidth={inspectorIconStroke} />
+            </>
+          )}
+        </button>
+      </EditorHintWrap>
       {mounted && menu ? createPortal(menu, document.body) : null}
     </>
   );

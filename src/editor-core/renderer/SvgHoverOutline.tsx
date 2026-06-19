@@ -2,12 +2,21 @@
 
 import { useMemo } from "react";
 import { CANVAS_VISUAL } from "@/lib/canvasVisual";
-import { worldPointToOverlay } from "@/lib/canvasOverlaySpace";
-import { getRenderedWorldBounds } from "@/lib/editorGraph";
+import {
+  worldPointToOverlay,
+  worldRectToOverlay,
+  crispOverlayHairlineRect,
+} from "@/lib/canvasOverlaySpace";
+import { getRenderedWorldBounds, getNodeTransformedWorldCornersFromChildOrder } from "@/lib/editorGraph";
 import { compositeSelectionBoundsId } from "@/lib/compositeSelection";
-import { getNodeTransformedWorldCorners } from "@/lib/transformMath";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { useCanvasOverlaySpace } from "@/components/editor/useCanvasOverlaySpace";
+
+const OVERLAY_STROKE = {
+  strokeWidth: 1,
+  vectorEffect: "non-scaling-stroke" as const,
+  shapeRendering: "crispEdges" as const,
+};
 
 /** Hover ring in viewport pixels — constant 1px stroke at any zoom. */
 export function SvgHoverOutline() {
@@ -24,7 +33,7 @@ export function SvgHoverOutline() {
   const ringColor =
     editorMode === "inspect" ? CANVAS_VISUAL.inspectHover : CANVAS_VISUAL.hoverOutline;
 
-  const outlinePoints = useMemo(() => {
+  const outline = useMemo(() => {
     if (!hoveredCanvasId || editingTextId || pathEditModeNodeId) return null;
     if (selectedIds.includes(hoveredCanvasId)) return null;
     const node = nodes[hoveredCanvasId];
@@ -35,17 +44,18 @@ export function SvgHoverOutline() {
       selectedIds,
     });
 
-    const corners = getNodeTransformedWorldCorners(outlineId, nodes);
+    const corners = getNodeTransformedWorldCornersFromChildOrder(outlineId, nodes, childOrder);
     if (corners) {
-      return corners.map((c) => worldPointToOverlay(c.x, c.y, overlay));
+      return {
+        kind: "polygon" as const,
+        points: corners.map((c) => worldPointToOverlay(c.x, c.y, overlay)),
+      };
     }
     const wr = getRenderedWorldBounds(outlineId, nodes, childOrder);
-    return [
-      worldPointToOverlay(wr.x, wr.y, overlay),
-      worldPointToOverlay(wr.x + wr.width, wr.y, overlay),
-      worldPointToOverlay(wr.x + wr.width, wr.y + wr.height, overlay),
-      worldPointToOverlay(wr.x, wr.y + wr.height, overlay),
-    ];
+    return {
+      kind: "rect" as const,
+      rect: crispOverlayHairlineRect(worldRectToOverlay(wr, overlay)),
+    };
   }, [
     hoveredCanvasId,
     selectedIds,
@@ -57,7 +67,7 @@ export function SvgHoverOutline() {
     overlay,
   ]);
 
-  if (!outlinePoints) return null;
+  if (!outline) return null;
 
   return (
     <svg
@@ -66,13 +76,24 @@ export function SvgHoverOutline() {
       height="100%"
       aria-hidden
     >
-      <polygon
-        points={outlinePoints.map((p) => `${p.x},${p.y}`).join(" ")}
-        fill="none"
-        stroke={ringColor}
-        strokeWidth={1}
-        vectorEffect="non-scaling-stroke"
-      />
+      {outline.kind === "rect" ? (
+        <rect
+          x={outline.rect.x}
+          y={outline.rect.y}
+          width={outline.rect.width}
+          height={outline.rect.height}
+          fill="none"
+          stroke={ringColor}
+          {...OVERLAY_STROKE}
+        />
+      ) : (
+        <polygon
+          points={outline.points.map((p) => `${p.x},${p.y}`).join(" ")}
+          fill="none"
+          stroke={ringColor}
+          {...OVERLAY_STROKE}
+        />
+      )}
     </svg>
   );
 }

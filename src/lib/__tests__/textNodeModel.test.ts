@@ -9,13 +9,15 @@ describe("textNodeModel", () => {
     assert.equal(autoResizeToTextResizeMode("width-height"), "auto-width");
     assert.equal(autoResizeToTextResizeMode("height"), "auto-height");
     assert.equal(autoResizeToTextResizeMode("fixed"), "fixed");
+    assert.equal(autoResizeToTextResizeMode("none"), "fixed");
     assert.equal(textResizeModeToAutoResize("auto-height"), "height");
+    assert.equal(textResizeModeToAutoResize("fixed"), "none");
   });
 
   it("textResizePatch keeps fields in sync", () => {
     assert.deepEqual(textResizePatch("fixed"), {
       textResizeMode: "fixed",
-      autoResize: "fixed",
+      autoResize: "none",
     });
   });
 

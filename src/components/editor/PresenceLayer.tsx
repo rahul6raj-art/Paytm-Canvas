@@ -5,6 +5,7 @@ import { useEditorStore } from "@/stores/useEditorStore";
 import { worldRect } from "@/lib/tree";
 import { initialsFromName } from "@/lib/presence";
 import { cn } from "@/lib/utils";
+import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
 
 function CursorGlyph({ color }: { color: string }) {
   return (
@@ -60,13 +61,14 @@ export function PresenceLayer() {
             className="absolute inset-0 rounded-[2px] border-2 border-dashed opacity-90"
             style={{ borderColor: r.color }}
           />
-          <div
-            className="absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full border border-black/40 px-1 text-ui font-bold text-white shadow-sm"
-            style={{ backgroundColor: r.color }}
-            title={r.name}
-          >
-            {initialsFromName(r.name)}
-          </div>
+          <EditorHintWrap title={r.name} anchorClassName="contents">
+            <div
+              className="absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full border border-black/40 px-1 text-ui font-bold text-white shadow-sm"
+              style={{ backgroundColor: r.color }}
+            >
+              {initialsFromName(r.name)}
+            </div>
+          </EditorHintWrap>
         </div>
       ))}
 

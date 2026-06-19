@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown, Combine } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { useEditorStore } from "@/stores/useEditorStore";
 import {
   BOOLEAN_OPERATION_LABELS,
@@ -21,8 +21,13 @@ import {
 } from "./useAnchoredDropdown";
 import {
   BooleanMenuIcon,
+  BooleanMenuIconSlot,
   BooleanOperationIconSlot,
+  BooleanFlattenIcon,
+  EditObjectIcon,
+  UseAsMaskIcon,
 } from "./design-panel/BooleanOperationIcons";
+import { EditorHintWrap } from "./EditorHoverHint";
 
 const row =
   "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-ui text-app-fg hover:bg-app-hover disabled:cursor-not-allowed disabled:opacity-35";
@@ -79,7 +84,7 @@ export function BooleanOperationsDropdown({
       <div
         ref={menuRef}
         role="menu"
-        className="fixed z-[120] min-w-[220px] overflow-hidden rounded-md border border-app-border bg-app-panel py-1 shadow-xl"
+        className="fixed z-[120] min-w-[220px] overflow-hidden editor-floating-menu border border-app-border bg-app-panel py-1 shadow-xl"
         style={{ left: position.left, top: position.top }}
       >
         <div className="section-heading px-2.5 py-1">Boolean</div>
@@ -115,7 +120,9 @@ export function BooleanOperationsDropdown({
             setOpen(false);
           }}
         >
-          <span className="h-4 w-4 shrink-0" aria-hidden />
+          <BooleanMenuIconSlot>
+            <BooleanFlattenIcon />
+          </BooleanMenuIconSlot>
           <span className="min-w-0 flex-1">Flatten</span>
           <span className="font-mono text-ui text-app-subtle">⌘⌥F</span>
         </button>
@@ -129,7 +136,9 @@ export function BooleanOperationsDropdown({
             setOpen(false);
           }}
         >
-          <span className="h-4 w-4 shrink-0" aria-hidden />
+          <BooleanMenuIconSlot>
+            <EditObjectIcon />
+          </BooleanMenuIconSlot>
           <span className="min-w-0 flex-1">Edit object</span>
         </button>
         <div className="my-1 h-px bg-app-hover" />
@@ -143,7 +152,9 @@ export function BooleanOperationsDropdown({
             setOpen(false);
           }}
         >
-          <span className="h-4 w-4 shrink-0" aria-hidden />
+          <BooleanMenuIconSlot>
+            <UseAsMaskIcon />
+          </BooleanMenuIconSlot>
           <span className="min-w-0 flex-1">Use as mask</span>
           <span className="font-mono text-ui text-app-subtle">⌘⌥M</span>
         </button>
@@ -156,27 +167,28 @@ export function BooleanOperationsDropdown({
     return (
       <>
         <div ref={anchorRef} className="inline-flex">
-          <button
-            type="button"
-            title="Boolean operations"
-            aria-label="Boolean operations"
-            aria-expanded={open}
-            aria-haspopup="menu"
-            onClick={() => setOpen((v) => !v)}
-            disabled={!enabled}
-            className={cn(
-              inspectorHeaderActionBtnClass,
-              "gap-0.5",
-              open && "bg-app-hover text-app-fg",
-              enabled && "text-app-muted",
-            )}
-          >
-            <BooleanMenuIcon />
-            <ChevronDown
-              className={cn(inspectorIconClass, "h-3 w-3 opacity-70")}
-              strokeWidth={inspectorIconStroke}
-            />
-          </button>
+          <EditorHintWrap title="Boolean operations" disabled={!enabled}>
+            <button
+              type="button"
+              aria-label="Boolean operations"
+              aria-expanded={open}
+              aria-haspopup="menu"
+              onClick={() => setOpen((v) => !v)}
+              disabled={!enabled}
+              className={cn(
+                inspectorHeaderActionBtnClass,
+                "gap-0.5",
+                open && "bg-app-hover text-app-fg",
+                enabled && "text-app-muted",
+              )}
+            >
+              <BooleanMenuIcon />
+              <ChevronDown
+                className={cn(inspectorIconClass, "h-3 w-3 opacity-70")}
+                strokeWidth={inspectorIconStroke}
+              />
+            </button>
+          </EditorHintWrap>
         </div>
         {menu ? createPortal(menu, document.body) : null}
       </>
@@ -186,21 +198,22 @@ export function BooleanOperationsDropdown({
   return (
     <>
       <div ref={anchorRef} className="inline-flex">
-        <button
-          type="button"
-          title="Boolean operations"
-          aria-label="Boolean operations"
-          aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
-          className={cn(
-            "flex h-8 items-center gap-1 rounded-md border border-transparent px-2 text-app-muted transition-colors hover:border-app-border hover:bg-app-hover hover:text-app-fg",
-            open && "border-app-border bg-app-hover text-white",
-            enabled && "text-app-muted",
-          )}
-        >
-          <Combine className="h-4 w-4" strokeWidth={1.75} />
-          <span className="hidden text-ui font-medium lg:inline">Boolean</span>
-        </button>
+        <EditorHintWrap title="Boolean operations" hintSide="bottom">
+          <button
+            type="button"
+            aria-label="Boolean operations"
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+            className={cn(
+              "flex h-8 items-center gap-1 rounded-md border border-transparent px-2 text-app-muted transition-colors hover:border-app-border hover:bg-app-hover hover:text-app-fg",
+              open && "border-app-border bg-app-hover text-white",
+              enabled && "text-app-muted",
+            )}
+          >
+            <BooleanMenuIcon className="h-4 w-4" />
+            <span className="hidden text-ui font-medium lg:inline">Boolean</span>
+          </button>
+        </EditorHintWrap>
       </div>
       {menu ? createPortal(menu, document.body) : null}
     </>

@@ -122,7 +122,7 @@ export function FontSizeInput({
         <ul
           role="listbox"
           aria-label="Font size presets"
-          className="absolute z-50 mt-0.5 max-h-52 w-full overflow-y-auto rounded-md border border-app-border bg-app-panel py-0.5 shadow-lg"
+          className="absolute z-50 mt-0.5 max-h-52 w-full overflow-y-auto editor-floating-menu py-0.5"
         >
           {presetSizes.map((size) => (
             <li key={size} role="option" aria-selected={size === Math.round(value)}>

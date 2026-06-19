@@ -1,13 +1,14 @@
 "use client";
 
-import { TopToolbar } from "./TopToolbar";
-import { PageTabsBar } from "./PageTabsBar";
+import { PanelLeft } from "lucide-react";
 import { LeftSidebar } from "./LeftSidebar";
+import { EditorHintWrap } from "./EditorHoverHint";
 import { Canvas } from "./Canvas";
 import { CanvasToolRail } from "./CanvasToolRail";
+import { CanvasFloatingZoom } from "./CanvasFloatingZoom";
+import { CanvasFloatingPageName } from "./CanvasFloatingPageName";
 import { RightPropertiesPanel } from "./RightPropertiesPanel";
-import { ZoomControls } from "./ZoomControls";
-import { CanvasDebugReadout } from "./CanvasDebugReadout";
+import { EditorRightActionsCard } from "./EditorRightActionsCard";
 import { EditorKeyboardShortcuts } from "./EditorKeyboardShortcuts";
 import { EditorContextMenu } from "./EditorContextMenu";
 
@@ -18,16 +19,20 @@ import { CommentPopover } from "./CommentPopover";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { EditorMockPresence } from "./EditorMockPresence";
 import { EditorRealtimeSync } from "./EditorRealtimeSync";
-import { PresenceActivityFeed } from "./PresenceActivityFeed";
 import { CommandMenu } from "./CommandMenu";
 import { ShortcutOverlay } from "./ShortcutOverlay";
 import { AIGenerateModal } from "@/components/ai/AIGenerateModal";
+import { AIGenerateCanvasController } from "@/components/ai/AIGenerateCanvasController";
 import { PluginMarketplace } from "@/components/plugins/PluginMarketplace";
 import { PluginRunner } from "@/components/plugins/PluginRunner";
 import { ShareModal } from "./ShareModal";
 import { WorkspaceTeamModals } from "./WorkspaceTeamModals";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { CodeRoundTripModal } from "@/components/code/CodeRoundTripModal";
+import { CraftBridgeImportListener } from "@/components/craftBridge/CraftBridgeImportListener";
+import { CraftBridgeSourceWatcher } from "@/components/craftBridge/CraftBridgeSourceWatcher";
+import { CraftBridgeConflictBanner } from "@/components/craftBridge/CraftBridgeConflictBanner";
+import { CraftBridgeSyncToast } from "@/components/craftBridge/CraftBridgeSyncToast";
 import { TextEditPortal } from "./TextEditPortal";
 import { UiChromeHiddenHint } from "./UiChromeHiddenHint";
 import { FigImportOverlay } from "@/components/import/FigImportOverlay";
@@ -44,7 +49,7 @@ import { displayCanvasBackground } from "@/lib/canvasVisual";
 import { canAcceptFigFileDrop, figFileFromDataTransfer } from "@/lib/figImport";
 import { activateCanvasForShortcuts, isEditableFieldElement, resetStaleEditorOverlays } from "@/lib/editorKeyboardFocus";
 import { cn } from "@/lib/utils";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, Suspense, useState } from "react";
 import {
   RIGHT_CODE_PANEL_BOUNDS,
   RIGHT_PANEL_BOUNDS,
@@ -101,7 +106,7 @@ function CanvasWorkspaceChrome() {
 
   return (
     <div
-      className="relative min-h-0 min-w-0 flex-1 overflow-visible"
+      className="absolute inset-0 z-0 overflow-visible"
       data-canvas-workspace
       onDragOverCapture={onWorkspaceDragOverCapture}
       onDropCapture={onWorkspaceDropCapture}
@@ -145,10 +150,10 @@ function EditorChromeRightColumn() {
   );
 
   return (
-    <div className="flex min-h-0 shrink-0">
+    <div className="absolute inset-y-0 right-0 z-30 flex min-h-0 shrink-0">
       {commentsPanelOpen ? <CommentsPanel /> : null}
       <div
-        className="relative flex h-full min-h-0 shrink-0 flex-col overflow-hidden"
+        className="editor-sidebar-shell relative flex h-full min-h-0 shrink-0 flex-col gap-2 overflow-hidden p-2"
         style={{ width, minWidth: bounds.min }}
       >
         <ResizablePanelEdge
@@ -156,8 +161,9 @@ function EditorChromeRightColumn() {
           onResizeStart={onResizeStart}
           onResize={onResize}
           onResizeEnd={onResizeEnd}
-          className="hover:bg-accent/30"
+          className="pointer-events-auto hover:bg-accent/30"
         />
+        <EditorRightActionsCard />
         <RightPropertiesPanel />
       </div>
     </div>
@@ -166,31 +172,33 @@ function EditorChromeRightColumn() {
 
 function AppShellChrome() {
   const uiChromeVisible = useEditorStore((s) => s.uiChromeVisible);
+  const [leftSidebarVisible, setLeftSidebarVisible] = useState(true);
 
   return (
-    <>
-      {uiChromeVisible ? <TopToolbar /> : null}
-      <div className="relative flex min-h-0 flex-1 overflow-visible">
-        {!uiChromeVisible ? <UiChromeHiddenHint /> : null}
-        {uiChromeVisible ? <LeftSidebar /> : null}
-        <CanvasWorkspaceChrome />
-        {uiChromeVisible ? <EditorChromeRightColumn /> : null}
-      </div>
-      {uiChromeVisible ? (
-        <footer className="flex h-10 shrink-0 items-stretch border-t border-app-border bg-chrome-raised text-ui text-app-subtle shadow-app-raised">
-          <PageTabsBar />
-          <div className="flex shrink-0 items-center gap-3 border-l border-app-border px-3">
-            <ZoomControls />
-            <CanvasDebugReadout />
-            <PresenceActivityFeed />
-            <div className="flex shrink-0 items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              <span>Ready</span>
-            </div>
-          </div>
-        </footer>
+    <div className="relative min-h-0 flex-1 overflow-visible">
+      <CanvasWorkspaceChrome />
+      {!uiChromeVisible ? <UiChromeHiddenHint /> : null}
+      {uiChromeVisible && leftSidebarVisible ? (
+        <LeftSidebar onToggleSidebar={() => setLeftSidebarVisible(false)} />
       ) : null}
-    </>
+      {uiChromeVisible && !leftSidebarVisible ? (
+        <EditorHintWrap title="Show sidebar" anchorClassName="contents">
+          <button
+            type="button"
+            aria-label="Show sidebar"
+            onClick={() => setLeftSidebarVisible(true)}
+            className="editor-sidebar-section absolute left-2 top-2 z-40 flex h-9 w-9 items-center justify-center text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
+          >
+            <PanelLeft className="size-icon-ui" strokeWidth={1.75} />
+          </button>
+        </EditorHintWrap>
+      ) : null}
+      {uiChromeVisible ? <EditorChromeRightColumn /> : null}
+      {uiChromeVisible ? <CanvasFloatingZoom /> : null}
+      {uiChromeVisible ? (
+        <CanvasFloatingPageName leftSidebarVisible={leftSidebarVisible} />
+      ) : null}
+    </div>
   );
 }
 
@@ -202,10 +210,18 @@ export function AppShell() {
 
   return (
     <div
+      data-editor-shell
       className={cn(
-        "flex h-dvh flex-col overflow-hidden bg-chrome font-sans text-app-fg",
+        "flex h-dvh flex-col overflow-hidden bg-transparent font-sans text-app-fg",
       )}
       onPointerDownCapture={(e) => {
+        const target = e.target;
+        if (target instanceof Element && target.closest("[data-canvas-floating-page-name]")) {
+          return;
+        }
+        if (target instanceof Element && target.closest("[data-left-sidebar]")) {
+          return;
+        }
         if (!isEditableFieldElement(e.target)) {
           activateCanvasForShortcuts();
         }
@@ -213,9 +229,16 @@ export function AppShell() {
     >
       <EditorMockPresence />
       <EditorRealtimeSync />
+      <CraftBridgeSourceWatcher />
+      <CraftBridgeConflictBanner />
+      <CraftBridgeSyncToast />
+      <Suspense fallback={null}>
+        <CraftBridgeImportListener />
+      </Suspense>
       <CommandMenu />
       <ShortcutOverlay />
       <AIGenerateModal />
+      <AIGenerateCanvasController />
       <CodeRoundTripModal />
       <PluginMarketplace />
       <ShareModal />

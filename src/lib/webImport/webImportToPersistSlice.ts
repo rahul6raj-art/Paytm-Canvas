@@ -5,6 +5,8 @@ import type { EditorNode } from "@/stores/useEditorStore";
 import type { ImportWebResponse, ImportWebSceneNode } from "@/lib/webImport/types";
 import { buildScreenshotReferenceLayer } from "@/lib/webImport/screenshotReferenceLayer";
 import { finalizeWebImportGraph } from "@/lib/webImport/finalizeWebImportGraph";
+import { clearCanonicalTextLayoutCache } from "@/lib/text/canonicalTextLayout";
+import { bumpTextLayoutEpoch } from "@/lib/text/textLayoutEpoch";
 
 function sceneNodeToEditor(
   node: ImportWebSceneNode,
@@ -54,6 +56,11 @@ function sceneNodeToEditor(
     imageFitMode: node.imageFitMode,
     pathPoints: node.pathPoints,
     pathClosed: node.pathClosed,
+    pathFillRule: node.pathFillRule,
+    flattenedPathData: node.flattenedPathData,
+    strokeLinecap: node.strokeLinecap,
+    strokeLinejoin: node.strokeLinejoin,
+    strokeOpacity: node.strokeOpacity,
     layoutMode: node.layoutMode,
     layoutGap: node.layoutGap,
     layoutWrap: node.layoutWrap,
@@ -156,6 +163,8 @@ export function importWebResponseToPersistSlice(response: ImportWebResponse): Ed
     for (const [id, n] of Object.entries(finalizedNodes)) {
       nodes[id] = n;
     }
+    clearCanonicalTextLayoutCache();
+    bumpTextLayoutEpoch();
 
     if (response.screenshot && response.mode === "editable_with_reference") {
       const refAssetId = "asset-screenshot-ref";

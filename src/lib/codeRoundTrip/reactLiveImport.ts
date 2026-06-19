@@ -142,7 +142,7 @@ export async function importReactFromLivePreview(
       slice,
       componentName,
       sourceHeader,
-      message: `Captured ${count} layers from live preview (MagicPath-style). Layout and styles match the running app.`,
+      message: `Captured ${count} editable layers from live preview (no background screenshot).`,
     };
   } finally {
     if (progressTimer) clearInterval(progressTimer);

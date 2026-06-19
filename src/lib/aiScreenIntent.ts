@@ -1,8 +1,10 @@
 import { isRichMobileHomeIntent } from "@/lib/aiDesignTokens";
+import { extractProductNameFromPrompt, isActivityTrackingPrompt } from "@/lib/aiPromptExtract";
 import type { AIRoutedFlow } from "@/lib/aiMockGenerator";
 
 export type ScreenIntent =
   | "mobile_home"
+  | "activity_tracking"
   | "auth"
   | "checkout"
   | "dashboard"
@@ -66,6 +68,9 @@ function detectExplicitIntentFromPrompt(prompt: string): ScreenIntent | null {
 
 /** Classify screen from user prompt, attachments, and Screen preset. */
 export function detectScreenIntent(prompt: string, preset?: string, contextPrompt?: string): ScreenIntent {
+  // Activity/fitness screens beat Paytm-style home and generic LLM fallbacks.
+  if (isActivityTrackingPrompt(prompt)) return "activity_tracking";
+
   const explicit = detectExplicitIntentFromPrompt(prompt);
   if (explicit && explicit !== "mobile_home") return explicit;
 
@@ -124,6 +129,8 @@ export function screenIntentLabel(intent: ScreenIntent): string {
   switch (intent) {
     case "mobile_home":
       return "Mobile home";
+    case "activity_tracking":
+      return "Activity tracking";
     case "auth":
       return "Auth / onboarding";
     case "checkout":
@@ -163,6 +170,7 @@ export function intentToRoutedFlow(intent: ScreenIntent, prompt: string, preset?
     case "recharge":
       return "checkout";
     case "mobile_home":
+    case "activity_tracking":
       return "mobile";
     default:
       return routeFlowFromUserPrompt(prompt, preset);
@@ -184,6 +192,9 @@ export function routeFlowFromUserPrompt(prompt: string, preset?: string): AIRout
 }
 
 export function extractScreenTitle(prompt: string, intent: ScreenIntent): string {
+  const product = extractProductNameFromPrompt(prompt);
+  if (product) return product;
+
   const quoted = prompt.match(/(?:title|screen name|called|named)[:\s]+["']([^"']{2,48})["']/i);
   if (quoted?.[1]) return quoted[1].trim();
 
@@ -219,6 +230,10 @@ export function extractScreenTitle(prompt: string, intent: ScreenIntent): string
       return /paytm/i.test(prompt) ? "Paytm Passbook" : "Transactions";
     case "mobile_home":
       return /paytm/i.test(prompt) ? "Paytm Home" : "Home";
+    case "activity_tracking": {
+      const product = extractProductNameFromPrompt(prompt);
+      return product ?? "Activity Tracking";
+    }
     default:
       return /paytm/i.test(prompt) ? "Paytm Screen" : "Mobile Screen";
   }

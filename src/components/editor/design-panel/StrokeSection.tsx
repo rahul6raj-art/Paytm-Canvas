@@ -20,7 +20,12 @@ import {
 import { useDismissAnchoredDropdown } from "../useAnchoredDropdown";
 import { StrokeAdvancedPanel } from "./StrokeAdvancedPanel";
 import { StrokeEndpointPicker } from "./StrokeEndpointPicker";
-import { appFieldClassCompact } from "@/lib/appFieldStyles";
+import {
+  appFieldClass,
+  appFieldInnerClass,
+  appFieldShellClass,
+  inspectorRowGapClass,
+} from "@/lib/appFieldStyles";
 import {
   resolveStrokeStyle,
   type StrokeLinecap,
@@ -35,7 +40,7 @@ import {
   strokeSideWeightsAreMixed,
 } from "@/lib/strokeAlign";
 import { StrokeSidesPicker } from "./StrokeSidesPicker";
-import { appFieldRadius } from "@/lib/appFieldStyles";
+import { DimensionFieldsIconButton } from "./DimensionFieldsIconButton";
 import type { StrokePosition } from "@/stores/useEditorStore";
 import { useEditorStore } from "@/stores/useEditorStore";
 import {
@@ -51,7 +56,7 @@ import {
 } from "./FillSection";
 import { GradientFillEditorDialog } from "../gradient/GradientFillEditorDialog";
 
-const field = appFieldClassCompact;
+const field = appFieldClass;
 
 export type StrokeStylePatch = {
   strokeWidth?: number;
@@ -353,8 +358,9 @@ export function StrokeSection({
 
   const addStroke = () => {
     setStrokeEditorActive(true);
+    setWeightDraft("0");
     onStyle({
-      strokeWidth: 1,
+      strokeWidth: 0,
       strokeColor: strokeColor || "#000000",
       strokeType: strokeType ?? "solid",
       strokeStyle: strokeStyle || "solid",
@@ -375,7 +381,8 @@ export function StrokeSection({
         role="dialog"
         aria-label="Stroke settings"
         aria-modal="false"
-        className="fixed z-[120] overflow-y-auto overscroll-contain rounded-md border border-app-border bg-app-panel shadow-xl"
+        data-editor-shell
+        className="editor-inspector-dialog fixed z-[120] overflow-y-auto overscroll-contain"
         style={adjacentPanelDialogStyle(advancedPos)}
       >
         <StrokeAdvancedPanel
@@ -409,7 +416,7 @@ export function StrokeSection({
       }
     >
       {hasStroke ? (
-        <div className="space-y-2">
+        <>
           <InspectorSegmented
             options={FILL_TYPE_OPTIONS}
             value={strokeTypeUi}
@@ -505,7 +512,7 @@ export function StrokeSection({
           </div>
 
           {/* Position + sides + weight + advanced */}
-          <div className="flex items-end gap-1">
+          <div className={cn("flex items-end", inspectorRowGapClass)}>
             <div className="min-w-0 flex-1">
               <div className="inspector-field-label">Position</div>
               <select
@@ -541,8 +548,8 @@ export function StrokeSection({
               <div className="inspector-field-label">Weight</div>
               <div
                 className={cn(
-                  "flex h-6 items-center overflow-hidden border border-app-border bg-app-field focus-within:border-accent focus-within:ring-1 focus-within:ring-accent",
-                  appFieldRadius,
+                  appFieldShellClass,
+                  "focus-within:border-accent focus-within:ring-1 focus-within:ring-accent",
                 )}
               >
                 <span className="flex h-full w-8 shrink-0 items-center justify-center border-r border-app-border text-app-muted">
@@ -556,10 +563,7 @@ export function StrokeSection({
                   disabled={disabled}
                   aria-label="Stroke weight"
                   {...bindWeightScrub(
-                    cn(
-                      "h-full min-w-0 flex-1 border-0 bg-transparent px-1.5 text-ui tabular-nums text-app-field-fg focus-visible:outline-none disabled:cursor-not-allowed",
-                      showMixedWeight && "text-app-muted",
-                    ),
+                    cn(appFieldInnerClass, "tabular-nums", showMixedWeight && "text-app-muted"),
                     weightFocused,
                   )}
                   value={showMixedWeight ? "Mixed" : weightDraft}
@@ -572,7 +576,12 @@ export function StrokeSection({
                     if (weightScrubActiveRef.current) return;
                     setWeightFocused(false);
                     if (showMixedWeight) return;
-                    const n = parseFloat(weightDraft);
+                    const trimmed = weightDraft.trim();
+                    if (trimmed === "") {
+                      commitWeight(0);
+                      return;
+                    }
+                    const n = parseFloat(trimmed);
                     if (Number.isFinite(n)) commitWeight(n);
                     else setWeightDraft(String(strokeWidth ?? 0));
                   }}
@@ -588,23 +597,21 @@ export function StrokeSection({
                 />
               </div>
             </div>
-            <button
-              ref={advancedRef}
-              type="button"
-              disabled={disabled}
+            <DimensionFieldsIconButton
+              buttonRef={advancedRef}
               title="Stroke settings"
+              ariaLabel="Stroke settings"
+              pressed={advancedOpen}
+              active={advancedOpen}
+              disabled={disabled}
               onClick={() => setAdvancedOpen((o) => !o)}
-              className={cn(
-                "mb-0 flex h-6 w-6 shrink-0 items-center justify-center rounded border border-app-border bg-app-panel text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg disabled:opacity-40",
-                advancedOpen && "border-accent bg-accent/10 text-accent",
-              )}
             >
               <SlidersHorizontal className={inspectorIconClass} strokeWidth={inspectorIconStroke} />
-            </button>
+            </DimensionFieldsIconButton>
           </div>
 
           {showEndpoints ? (
-            <div className="flex gap-1">
+            <div className={cn("flex", inspectorRowGapClass)}>
               <StrokeEndpointPicker
                 label="Start point"
                 value={strokeStartPoint}
@@ -624,7 +631,7 @@ export function StrokeSection({
               />
             </div>
           ) : null}
-        </div>
+        </>
       ) : null}
       {mounted && advancedMenu ? createPortal(advancedMenu, document.body) : null}
     </PropertiesSection>

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { getRenderedWorldTopLeft } from "@/lib/editorGraph";
 import { pathToSvgD } from "@/lib/pathGeometry";
 import { useEditorStore } from "@/stores/useEditorStore";
 
@@ -17,10 +16,14 @@ describe("pencil stroke", () => {
     const n0 = s1.nodes[id];
     assert.ok(n0);
     assert.equal(n0.type, "path");
+    assert.equal(n0.name, "Vector 1");
     assert.equal(n0.pathPoints?.length, 1);
 
     for (let i = 1; i <= 10; i++) {
-      store.extendPencilStrokeCoalesced([{ x: 100 + i * 10, y: 100 + i * 5 }]);
+      const t = (i / 10) * Math.PI;
+      store.extendPencilStrokeCoalesced([
+        { x: 100 + Math.cos(t) * 80, y: 100 + Math.sin(t) * 80 },
+      ]);
     }
 
     const s2 = useEditorStore.getState();
@@ -37,11 +40,9 @@ describe("pencil stroke", () => {
     const finished = s3.nodes[id];
     assert.ok(finished);
     assert.ok((finished.pathPoints?.length ?? 0) >= 2);
-    const origin = getRenderedWorldTopLeft(id, s3.nodes, s3.childOrder);
     const d = pathToSvgD(finished.pathPoints ?? [], false);
     assert.ok(d.length > 0);
-    assert.equal(origin.x, 100);
-    assert.equal(origin.y, 100);
+    assert.match(d, / C /, "finished pencil stroke should use smooth cubic segments");
   });
 
   it("keeps a tap-only stroke as a visible mark", () => {

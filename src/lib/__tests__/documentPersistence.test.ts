@@ -2,8 +2,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import {
+  hasInMemoryWorkspaceContent,
   isBrokenOrphanedLocalDocument,
   isOversizedLocalDocumentRaw,
+  shouldPreserveInMemoryPages,
+  shouldRestoreLocalDocument,
   type PaytmCraftDocument,
 } from "@/lib/documentPersistence";
 
@@ -42,5 +45,26 @@ describe("isOversizedLocalDocumentRaw", () => {
   it("flags payloads above the safe load limit", () => {
     assert.equal(isOversizedLocalDocumentRaw("x".repeat(5_000_000)), true);
     assert.equal(isOversizedLocalDocumentRaw("{}"), false);
+  });
+});
+
+describe("dashboard/editor page sync helpers", () => {
+  it("preserves in-memory pages when a new tab was added on the dashboard", () => {
+    const local = minimalDoc({}, { [EDITOR_ROOT_KEY]: [] });
+    local.pages = [{ id: "page-1", name: "Page 1", nodes: {}, childOrder: { [EDITOR_ROOT_KEY]: [] }, selectedIds: [], zoom: 1, pan: { x: 0, y: 0 }, showGrid: true, showRulers: false, canvasBackgroundColor: "#fff", layoutGuides: [] }];
+    local.activePageId = "page-1";
+
+    const memory = {
+      pageOrder: ["page-1", "page-2"],
+      pages: {
+        "page-1": { id: "page-1", name: "Page 1", nodes: {}, childOrder: { [EDITOR_ROOT_KEY]: [] }, selectedIds: [], zoom: 1, pan: { x: 0, y: 0 }, showGrid: true, showRulers: false, canvasBackgroundColor: "#fff", layoutGuides: [] },
+        "page-2": { id: "page-2", name: "Page 2", nodes: {}, childOrder: { [EDITOR_ROOT_KEY]: [] }, selectedIds: [], zoom: 1, pan: { x: 0, y: 0 }, showGrid: true, showRulers: false, canvasBackgroundColor: "#fff", layoutGuides: [] },
+      },
+      childOrder: { [EDITOR_ROOT_KEY]: [] },
+    };
+
+    assert.equal(shouldPreserveInMemoryPages(memory, local), true);
+    assert.equal(shouldRestoreLocalDocument(memory, local), false);
+    assert.equal(hasInMemoryWorkspaceContent(memory), true);
   });
 });

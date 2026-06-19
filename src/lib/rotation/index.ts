@@ -19,3 +19,10 @@ export {
   type RotateDragSession,
   type SingleRotateSession,
 } from "./rotateSelection";
+export {
+  applyRotateGeometryLock,
+  isRotateGeometryLockActive,
+  rotateGeomSnapshotForNode,
+  type RotateGeomLockState,
+  type RotateGeomSnapshot,
+} from "./rotateGeometryLock";

@@ -15,6 +15,8 @@ import { buildSvgScene } from "@/lib/svgSceneMarkup";
 import { useEditorStore } from "@/stores/useEditorStore";
 import type { SceneRendererProps } from "./RendererTypes";
 import { TextFidelityDebugOverlay } from "@/components/editor/TextFidelityDebugOverlay";
+import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
+import { getTextLayoutEpoch, subscribeTextLayoutEpoch } from "@/lib/text/textLayoutEpoch";
 
 const SCENE_SIZE = 6000;
 
@@ -39,6 +41,7 @@ export function SvgSceneRenderer({
     getEllipseArcPreview,
     () => null,
   );
+  const textLayoutEpoch = useSyncExternalStore(subscribeTextLayoutEpoch, getTextLayoutEpoch, () => 0);
 
   const nodesForScene = useMemo(() => {
     if (!interactionPreview || transformInteractionMode !== "resize") return nodes;
@@ -51,6 +54,9 @@ export function SvgSceneRenderer({
     [editingTextId],
   );
 
+  const activeDragPreview =
+    interactionPreview && dragPreview?.movingIds.length ? dragPreview : undefined;
+
   const scene = useMemo(
     () =>
       buildSvgScene({
@@ -61,7 +67,7 @@ export function SvgSceneRenderer({
         designTokens,
         excludeNodeIds,
         zoom,
-        dragPreview: interactionPreview && dragPreview?.movingIds.length ? dragPreview : undefined,
+        dragPreview: activeDragPreview,
         ellipseArcPreview,
         objectEditModeNodeId,
         selectedIds,
@@ -74,11 +80,11 @@ export function SvgSceneRenderer({
       designTokens,
       excludeNodeIds,
       zoom,
-      interactionPreview,
-      dragPreview,
+      activeDragPreview,
       ellipseArcPreview,
       objectEditModeNodeId,
       selectedIds,
+      textLayoutEpoch,
     ],
   );
 
@@ -101,19 +107,18 @@ export function SvgSceneRenderer({
       </svg>
 
       {showDebugBadge ? (
-        <div
-          className="absolute right-3 top-3 z-50 max-w-[220px] rounded border border-[#18a0fb]/40 bg-white/95 px-2 py-1 text-micro font-medium text-[#333] shadow-sm"
-          title="Experimental SVG scene renderer (NEXT_PUBLIC_PAYTM_CRAFT_RENDERER=svg)"
-        >
-          <div className="text-[#18a0fb]">SVG renderer</div>
-          <div className="mt-0.5 tabular-nums text-[#666]">{scene.renderedNodeCount} nodes</div>
-          {uniqueWarnings.length > 0 ? (
-            <div className="mt-1 text-nano font-normal leading-tight text-amber-700">
-              {uniqueWarnings.slice(0, 3).join(" · ")}
-              {uniqueWarnings.length > 3 ? ` (+${uniqueWarnings.length - 3})` : ""}
-            </div>
-          ) : null}
-        </div>
+        <EditorHintWrap title="Experimental SVG scene renderer (NEXT_PUBLIC_PAYTM_CRAFT_RENDERER=svg)">
+          <div className="absolute right-3 top-3 z-50 max-w-[220px] rounded border border-[#18a0fb]/40 bg-white/95 px-2 py-1 text-micro font-medium text-[#333] shadow-sm">
+            <div className="text-[#18a0fb]">SVG renderer</div>
+            <div className="mt-0.5 tabular-nums text-[#666]">{scene.renderedNodeCount} nodes</div>
+            {uniqueWarnings.length > 0 ? (
+              <div className="mt-1 text-nano font-normal leading-tight text-amber-700">
+                {uniqueWarnings.slice(0, 3).join(" · ")}
+                {uniqueWarnings.length > 3 ? ` (+${uniqueWarnings.length - 3})` : ""}
+              </div>
+            ) : null}
+          </div>
+        </EditorHintWrap>
       ) : null}
       <TextFidelityDebugOverlay />
     </>

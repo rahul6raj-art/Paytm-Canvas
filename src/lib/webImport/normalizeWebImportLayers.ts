@@ -1,6 +1,13 @@
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import { parseColor } from "@/lib/webImport/cssParseUtils";
+import { textLayoutPatchForNode } from "@/lib/text/textLayout";
+import { textResizePatch } from "@/lib/text/textNodeModel";
 import type { EditorNode } from "@/stores/useEditorStore";
+import { isPhoneShellBottomChrome } from "@/lib/webImport/phoneShellBottomChrome";
+import {
+  isPhoneShellClassName,
+  isPhoneShellScrollClassName,
+} from "@/lib/webImport/phoneShellViewport";
 
 const GENERIC_WRAPPER = /^(div|card|section|main|article|form|span|wrapper|top-)/i;
 const SEMANTIC_NAME =
@@ -37,6 +44,11 @@ function isPassThroughWrapper(node: EditorNode, children: EditorNode[]): boolean
   if (node.clipChildren && node.fillEnabled && node.fill && node.fill !== "#ffffff") {
     return false;
   }
+
+  if (/\bcard\b/i.test(node.codeClassName ?? "")) return false;
+  if ((node.cornerRadius ?? 0) > 0) return false;
+  if (node.cornerRadii?.some((r) => (r ?? 0) > 0)) return false;
+  if (/^card$/i.test(node.name.trim())) return false;
 
   const fill = node.fill?.toLowerCase();
   if (node.fillEnabled && fill && fill !== "#ffffff" && fill !== "white") return false;
@@ -152,6 +164,178 @@ function isEmailFieldText(text: string): boolean {
   return /\benter your email\b/i.test(text);
 }
 
+function importedTextLineHeightPx(node: EditorNode): number {
+  const fontSize = node.fontSize ?? 14;
+  const lineHeight = node.lineHeight;
+  if (typeof lineHeight !== "number") return fontSize * 1.2;
+  // DOM import stores unitless CSS ratios (e.g. 1.27), not px.
+  return lineHeight <= 4 ? fontSize * lineHeight : lineHeight;
+}
+
+/** Re-measure imported text so short labels are not clipped to narrow DOM boxes. */
+export function normalizeWebImportTextNodes(nodes: Record<string, EditorNode>): void {
+  for (const [id, n] of Object.entries(nodes)) {
+    if (n.type !== "text") continue;
+    const content = n.content?.trim();
+    if (!content) continue;
+
+    const fontSize = n.fontSize ?? 14;
+    const lineH = importedTextLineHeightPx(n);
+    const estW = Math.ceil(content.length * fontSize * 0.58) + 8;
+    const singleLine = n.height <= lineH * 1.6;
+    const clipped = singleLine && estW > n.width + 2;
+
+    let next: EditorNode;
+    if (clipped) {
+      next = { ...n, ...textResizePatch("auto-width") };
+      const layoutPatch = expandImportedTextLayout(next, content);
+      if (layoutPatch) next = { ...next, ...layoutPatch };
+    } else {
+      next = { ...n, ...textResizePatch("auto-height") };
+      try {
+        const layoutPatch = textLayoutPatchForNode(next, content);
+        if (layoutPatch?.width && layoutPatch.width > next.width + 1) {
+          next = {
+            ...next,
+            width: layoutPatch.width,
+            ...textResizePatch("auto-width"),
+          };
+        }
+        if (layoutPatch?.height && layoutPatch.height > next.height) {
+          next = { ...next, height: layoutPatch.height };
+        }
+      } catch {
+        if (estW > next.width + 1) {
+          next = { ...next, width: estW, ...textResizePatch("auto-width") };
+        }
+      }
+    }
+    nodes[id] = next;
+  }
+}
+
+/** Fill-only SVG paths must not pick up visible center strokes from defaults. */
+export function normalizeWebImportSvgPaths(nodes: Record<string, EditorNode>): void {
+  for (const [id, n] of Object.entries(nodes)) {
+    if (n.type !== "path") continue;
+    const patch: Partial<EditorNode> = {};
+    const hasFill = n.fillEnabled !== false && Boolean(n.fill);
+    const hasStroke =
+      n.strokeEnabled !== false &&
+      (n.strokeWidth ?? 0) > 0 &&
+      Boolean(n.strokeColor);
+
+    if (hasFill && hasStroke) {
+      patch.strokeEnabled = false;
+      patch.strokeWidth = 0;
+    } else if ((n.strokeWidth ?? 0) <= 0 || n.strokeEnabled === false) {
+      patch.strokeEnabled = false;
+      patch.strokeWidth = 0;
+    }
+    if (hasFill) {
+      patch.fillEnabled = true;
+    }
+    if (Object.keys(patch).length > 0) {
+      nodes[id] = { ...n, ...patch };
+    }
+  }
+}
+
+function expandImportedTextLayout(
+  node: EditorNode,
+  content: string,
+): Partial<EditorNode> | null {
+  try {
+    const layoutPatch = textLayoutPatchForNode(node, content);
+    if (!layoutPatch?.width || layoutPatch.width <= node.width) return layoutPatch;
+    return { ...layoutPatch, ...textResizePatch(node.textResizeMode ?? "auto-width") };
+  } catch {
+    const charW = (node.fontSize ?? 14) * 0.58;
+    const estW = Math.ceil(content.length * charW) + 8;
+    if (estW <= node.width) return { ...textResizePatch("auto-width") };
+    return { width: estW, ...textResizePatch("auto-width") };
+  }
+}
+
+/** Expand `.pml-home__scroll` (and similar) to fit below-the-fold sections. */
+export function expandWebImportScrollFrames(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): void {
+  for (const [id, kids] of Object.entries(childOrder)) {
+    const parent = nodes[id];
+    if (!parent || (parent.type !== "frame" && parent.type !== "group")) continue;
+    const cls = parent.codeClassName ?? "";
+    if (!/__scroll\b/.test(cls)) continue;
+    let maxY = 0;
+    for (const cid of kids) {
+      const c = nodes[cid];
+      if (!c || c.visible === false) continue;
+      maxY = Math.max(maxY, c.y + c.height);
+    }
+    if (maxY <= parent.height) continue;
+    nodes[id] = {
+      ...parent,
+      height: Math.ceil(maxY),
+      clipChildren: false,
+    };
+  }
+}
+
+/** Phone shells do not clip on canvas — full scroll content stays visible. */
+export function disableClipOnScrollContainers(nodes: Record<string, EditorNode>): void {
+  for (const [id, node] of Object.entries(nodes)) {
+    const cls = node.codeClassName ?? "";
+    if (
+      /__scroll\b/.test(cls) ||
+      /\bpml-(?:home|more|stocks|signup|onboarding)\b/.test(cls)
+    ) {
+      nodes[id] = { ...node, clipChildren: false };
+    }
+  }
+}
+
+/** Keep decorative layers (glows, blurs) visible when children extend outside parent bounds. */
+export function preserveWebImportOverflowEffects(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): void {
+  for (const [parentId, kids] of Object.entries(childOrder)) {
+    const parent = nodes[parentId];
+    if (!parent || parent.clipChildren === false || kids.length === 0) continue;
+    if (
+      isPhoneShellClassName(parent.codeClassName) ||
+      isPhoneShellScrollClassName(parent.codeClassName)
+    ) {
+      continue;
+    }
+
+    let needsNoClip = false;
+    for (const cid of kids) {
+      const c = nodes[cid];
+      if (!c?.visible) continue;
+      const extendsOutside =
+        c.x < -1 ||
+        c.y < -1 ||
+        c.x + c.width > parent.width + 1 ||
+        c.y + c.height > parent.height + 1;
+      if (!extendsOutside) continue;
+      if (
+        (c.effects?.length ?? 0) > 0 ||
+        c.fillGradient ||
+        (c.opacity ?? 1) < 0.98 ||
+        c.name.toLowerCase().includes("glow")
+      ) {
+        needsNoClip = true;
+        break;
+      }
+    }
+    if (needsNoClip) {
+      nodes[parentId] = { ...parent, clipChildren: false };
+    }
+  }
+}
+
 /** Web import uses browser-measured absolute geometry — disable flex reflow. */
 export function stripWebImportAutoLayout(nodes: Record<string, EditorNode>): void {
   for (const [id, n] of Object.entries(nodes)) {
@@ -223,10 +407,6 @@ export function trimFramesToChildBounds(
       nodes[id] = {
         ...parent,
         height: contentH,
-        paddingTop: 0,
-        paddingRight: 0,
-        paddingBottom: 0,
-        paddingLeft: 0,
       };
     }
   }
@@ -237,24 +417,61 @@ export function fixOverlappingStackedSiblings(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
 ): void {
-  for (const [, kids] of Object.entries(childOrder)) {
+  for (const [parentId, kids] of Object.entries(childOrder)) {
     if (kids.length < 2) continue;
+    const parent = nodes[parentId];
+    if (isSvgIconSubpathStack(parent, kids, nodes)) continue;
     const sorted = [...kids].filter((id) => nodes[id]?.visible !== false);
     sorted.sort((a, b) => (nodes[a]?.y ?? 0) - (nodes[b]?.y ?? 0));
     for (let i = 1; i < sorted.length; i++) {
       const prev = nodes[sorted[i - 1]!]!;
       const curId = sorted[i]!;
       const cur = nodes[curId]!;
+      if (
+        isPhoneShellBottomChrome(cur.codeClassName, cur.codeJsxTag) ||
+        isPhoneShellBottomChrome(prev.codeClassName, prev.codeJsxTag)
+      ) {
+        continue;
+      }
       const prevBottom = prev.y + prev.height;
       const kids = childOrder[curId] ?? [];
       const kidsStartAtOrigin =
         kids.length === 0 ||
         kids.every((cid) => (nodes[cid]?.y ?? 0) <= 2);
-      if (cur.y < prevBottom - 1 && kidsStartAtOrigin) {
+      // Same-row flex children share a Y but are not a vertical stack — skip them.
+      const xOverlap =
+        Math.max(0, Math.min(prev.x + prev.width, cur.x + cur.width) - Math.max(prev.x, cur.x));
+      const minW = Math.min(prev.width, cur.width);
+      const columnAligned = minW > 0 && xOverlap > minW * 0.25;
+      if (cur.y < prevBottom - 1 && kidsStartAtOrigin && columnAligned) {
         nodes[curId] = { ...cur, y: prevBottom };
       }
     }
   }
+}
+
+const SVG_ICON_VECTOR_TYPES = new Set<EditorNode["type"]>([
+  "path",
+  "rectangle",
+  "ellipse",
+  "line",
+  "polygon",
+]);
+
+/** SVG icons decompose into overlapping path layers — never reflow them as a vertical stack. */
+function isSvgIconSubpathStack(
+  parent: EditorNode | undefined,
+  kids: string[],
+  nodes: Record<string, EditorNode>,
+): boolean {
+  if (!parent) return false;
+  if (parent.name === "Svg") return true;
+  if (parent.width > 72 || parent.height > 72) return false;
+  const visible = kids
+    .map((id) => nodes[id])
+    .filter((n): n is EditorNode => Boolean(n && n.visible !== false));
+  if (visible.length < 2) return false;
+  return visible.every((n) => SVG_ICON_VECTOR_TYPES.has(n.type));
 }
 
 const FOOTER_LINK_FILL = /^#256bfa$/i;

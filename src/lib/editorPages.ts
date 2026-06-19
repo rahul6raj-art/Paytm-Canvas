@@ -5,7 +5,7 @@ import type { EditorNode, LayoutGuide } from "@/stores/useEditorStore";
 
 export const ROOT = EDITOR_ROOT_KEY;
 
-export interface EditorPage {
+export interface EditorSubPage {
   id: string;
   name: string;
   nodes: Record<string, EditorNode>;
@@ -19,7 +19,25 @@ export interface EditorPage {
   layoutGuides: LayoutGuide[];
 }
 
-export interface EditorPageSnapshot {
+export interface EditorPage {
+  id: string;
+  name: string;
+  nodes: Record<string, EditorNode>;
+  childOrder: Record<string, string[]>;
+  zoom: number;
+  pan: { x: number; y: number };
+  showGrid: boolean;
+  showRulers: boolean;
+  canvasBackgroundColor: string;
+  selectedIds: string[];
+  layoutGuides: LayoutGuide[];
+  /** Canvas screens within this master page (sidebar Pages list). */
+  subPages?: Record<string, EditorSubPage>;
+  subPageOrder?: string[];
+  activeSubPageId?: string;
+}
+
+export interface EditorSubPageSnapshot {
   id: string;
   name: string;
   nodes: Record<string, EditorNode>;
@@ -36,8 +54,41 @@ export interface EditorPageSnapshot {
   };
 }
 
+export interface EditorPageSnapshot {
+  id: string;
+  name: string;
+  nodes: Record<string, EditorNode>;
+  childOrder: Record<string, string[]>;
+  selectedIds?: string[];
+  layoutGuides?: LayoutGuide[];
+  subPages?: EditorSubPageSnapshot[];
+  activeSubPageId?: string;
+  canvas?: {
+    zoom: number;
+    panX: number;
+    panY: number;
+    showGrid: boolean;
+    showRulers?: boolean;
+    backgroundColor?: string;
+  };
+}
+
+type CanvasPatch = Pick<
+  ActivePageSlice,
+  | "nodes"
+  | "childOrder"
+  | "zoom"
+  | "pan"
+  | "showGrid"
+  | "showRulers"
+  | "canvasBackgroundColor"
+  | "selectedIds"
+  | "layoutGuides"
+>;
+
 type ActivePageSlice = {
   activePageId: string;
+  activeSubPageId?: string;
   pages: Record<string, EditorPage>;
   pageOrder: string[];
   nodes: Record<string, EditorNode>;
@@ -51,60 +102,31 @@ type ActivePageSlice = {
   layoutGuides: LayoutGuide[];
 };
 
-export function captureActivePage(state: ActivePageSlice): EditorPage {
-  const existing = state.pages[state.activePageId];
+function canvasFieldsFromSub(sub: EditorSubPage): CanvasPatch {
   return {
-    id: state.activePageId,
-    name: existing?.name ?? "Page 1",
-    nodes: state.nodes,
-    childOrder: state.childOrder,
-    zoom: state.zoom,
-    pan: state.pan,
-    showGrid: state.showGrid,
-    showRulers: state.showRulers,
-    canvasBackgroundColor: state.canvasBackgroundColor,
-    selectedIds: state.selectedIds,
-    layoutGuides: state.layoutGuides,
+    nodes: sub.nodes,
+    childOrder: sub.childOrder,
+    zoom: sub.zoom,
+    pan: sub.pan,
+    showGrid: sub.showGrid,
+    showRulers: sub.showRulers,
+    canvasBackgroundColor: sub.canvasBackgroundColor,
+    selectedIds: sub.selectedIds,
+    layoutGuides: sub.layoutGuides ?? [],
   };
 }
 
-export function pagesWithActiveCaptured(state: ActivePageSlice): {
-  pages: Record<string, EditorPage>;
-  pageOrder: string[];
-} {
-  const active = captureActivePage(state);
+function mirrorSubToPageRoot(page: EditorPage, sub: EditorSubPage): EditorPage {
   return {
-    pages: { ...state.pages, [state.activePageId]: active },
-    pageOrder: state.pageOrder,
+    ...page,
+    ...canvasFieldsFromSub(sub),
+    subPages: page.subPages,
+    subPageOrder: page.subPageOrder,
+    activeSubPageId: sub.id,
   };
 }
 
-export function editorPatchFromPage(page: EditorPage): Pick<
-  ActivePageSlice,
-  | "nodes"
-  | "childOrder"
-  | "zoom"
-  | "pan"
-  | "showGrid"
-  | "showRulers"
-  | "canvasBackgroundColor"
-  | "selectedIds"
-  | "layoutGuides"
-> {
-  return {
-    nodes: page.nodes,
-    childOrder: page.childOrder,
-    zoom: page.zoom,
-    pan: page.pan,
-    showGrid: page.showGrid,
-    showRulers: page.showRulers,
-    canvasBackgroundColor: page.canvasBackgroundColor,
-    selectedIds: page.selectedIds,
-    layoutGuides: page.layoutGuides ?? [],
-  };
-}
-
-export function createEmptyPage(id: string, name: string): EditorPage {
+export function createEmptySubPage(id: string, name: string): EditorSubPage {
   return {
     id,
     name,
@@ -120,6 +142,119 @@ export function createEmptyPage(id: string, name: string): EditorPage {
   };
 }
 
+export function ensurePageHasSubPages(page: EditorPage): EditorPage {
+  if (page.subPageOrder?.length && page.subPages && page.activeSubPageId) {
+    const activeSub = page.subPages[page.activeSubPageId];
+    if (activeSub) return mirrorSubToPageRoot(page, activeSub);
+  }
+
+  const subId = `${page.id}-sp-1`;
+  const sub = createEmptySubPage(subId, "Page 1");
+  sub.nodes = page.nodes;
+  sub.childOrder = page.childOrder;
+  sub.zoom = page.zoom;
+  sub.pan = { ...page.pan };
+  sub.showGrid = page.showGrid;
+  sub.showRulers = page.showRulers;
+  sub.canvasBackgroundColor = page.canvasBackgroundColor;
+  sub.selectedIds = page.selectedIds;
+  sub.layoutGuides = page.layoutGuides ?? [];
+
+  return {
+    ...page,
+    subPages: { [subId]: sub },
+    subPageOrder: [subId],
+    activeSubPageId: subId,
+    ...canvasFieldsFromSub(sub),
+  };
+}
+
+export function resolveActiveSubPage(page: EditorPage, activeSubPageId?: string): EditorSubPage {
+  const ensured = ensurePageHasSubPages(page);
+  const subId = activeSubPageId ?? ensured.activeSubPageId ?? ensured.subPageOrder?.[0];
+  if (!subId) {
+    return createEmptySubPage(`${page.id}-sp-fallback`, "Page 1");
+  }
+  return ensured.subPages?.[subId] ?? createEmptySubPage(subId, "Page 1");
+}
+
+export function captureActivePage(state: ActivePageSlice): EditorPage {
+  const existing = state.pages[state.activePageId];
+  const base = existing
+    ? ensurePageHasSubPages(existing)
+    : createEmptyPage(state.activePageId, "Page 1");
+  const subId = state.activeSubPageId ?? base.activeSubPageId ?? base.subPageOrder?.[0];
+  if (!subId) return base;
+
+  const updatedSub: EditorSubPage = {
+    id: subId,
+    name: base.subPages?.[subId]?.name ?? "Page 1",
+    nodes: state.nodes,
+    childOrder: state.childOrder,
+    zoom: state.zoom,
+    pan: state.pan,
+    showGrid: state.showGrid,
+    showRulers: state.showRulers,
+    canvasBackgroundColor: state.canvasBackgroundColor,
+    selectedIds: state.selectedIds,
+    layoutGuides: state.layoutGuides,
+  };
+
+  return mirrorSubToPageRoot(
+    {
+      ...base,
+      id: state.activePageId,
+      name: existing?.name ?? base.name,
+      subPages: { ...base.subPages, [subId]: updatedSub },
+      subPageOrder: base.subPageOrder ?? [subId],
+    },
+    updatedSub,
+  );
+}
+
+export function pagesWithActiveCaptured(state: ActivePageSlice): {
+  pages: Record<string, EditorPage>;
+  pageOrder: string[];
+} {
+  const active = captureActivePage(state);
+  return {
+    pages: { ...state.pages, [state.activePageId]: active },
+    pageOrder: state.pageOrder,
+  };
+}
+
+export function editorPatchFromPage(page: EditorPage): CanvasPatch {
+  const sub = resolveActiveSubPage(page, page.activeSubPageId);
+  return canvasFieldsFromSub(sub);
+}
+
+export function editorPatchFromSubPage(sub: EditorSubPage): CanvasPatch {
+  return canvasFieldsFromSub(sub);
+}
+
+export function createEmptyPage(id: string, name: string): EditorPage {
+  const sub = createEmptySubPage(`${id}-sp-1`, "Page 1");
+  return mirrorSubToPageRoot(
+    {
+      id,
+      name,
+      subPages: { [sub.id]: sub },
+      subPageOrder: [sub.id],
+      activeSubPageId: sub.id,
+      nodes: {},
+      childOrder: { [EDITOR_ROOT_KEY]: [] },
+      zoom: DEFAULT_CANVAS_ZOOM,
+      pan: { x: 40, y: 24 },
+      showGrid: false,
+      showRulers: false,
+      canvasBackgroundColor: DEFAULT_CANVAS_BACKGROUND,
+      selectedIds: [],
+      layoutGuides: [],
+    },
+    sub,
+  );
+}
+
 export function nextPageName(pages: Record<string, EditorPage>, pageOrder: string[]): string {
   const used = new Set(pageOrder.map((id) => pages[id]?.name).filter(Boolean));
   let n = pageOrder.length + 1;
@@ -131,21 +266,60 @@ export function nextPageName(pages: Record<string, EditorPage>, pageOrder: strin
   return candidate;
 }
 
-export function pageToSnapshot(page: EditorPage): EditorPageSnapshot {
+export function nextSubPageName(
+  subPages: Record<string, EditorSubPage>,
+  subPageOrder: string[],
+): string {
+  const used = new Set(subPageOrder.map((id) => subPages[id]?.name).filter(Boolean));
+  let n = subPageOrder.length + 1;
+  let candidate = `Page ${n}`;
+  while (used.has(candidate)) {
+    n += 1;
+    candidate = `Page ${n}`;
+  }
+  return candidate;
+}
+
+function subPageToSnapshot(sub: EditorSubPage): EditorSubPageSnapshot {
   return {
-    id: page.id,
-    name: page.name,
-    nodes: page.nodes,
-    childOrder: page.childOrder,
-    selectedIds: page.selectedIds,
-    layoutGuides: page.layoutGuides?.length ? page.layoutGuides : undefined,
+    id: sub.id,
+    name: sub.name,
+    nodes: sub.nodes,
+    childOrder: sub.childOrder,
+    selectedIds: sub.selectedIds,
+    layoutGuides: sub.layoutGuides?.length ? sub.layoutGuides : undefined,
     canvas: {
-      zoom: page.zoom,
-      panX: page.pan.x,
-      panY: page.pan.y,
-      showGrid: page.showGrid,
-      showRulers: page.showRulers,
-      backgroundColor: page.canvasBackgroundColor,
+      zoom: sub.zoom,
+      panX: sub.pan.x,
+      panY: sub.pan.y,
+      showGrid: sub.showGrid,
+      showRulers: sub.showRulers,
+      backgroundColor: sub.canvasBackgroundColor,
+    },
+  };
+}
+
+export function pageToSnapshot(page: EditorPage): EditorPageSnapshot {
+  const ensured = ensurePageHasSubPages(page);
+  const activeSub = resolveActiveSubPage(ensured, ensured.activeSubPageId);
+  const subPages =
+    ensured.subPageOrder?.map((id) => ensured.subPages?.[id]).filter(Boolean) ?? [];
+  return {
+    id: ensured.id,
+    name: ensured.name,
+    nodes: activeSub.nodes,
+    childOrder: activeSub.childOrder,
+    selectedIds: activeSub.selectedIds,
+    layoutGuides: activeSub.layoutGuides?.length ? activeSub.layoutGuides : undefined,
+    subPages: subPages.length > 0 ? subPages.map((sub) => subPageToSnapshot(sub!)) : undefined,
+    activeSubPageId: ensured.activeSubPageId,
+    canvas: {
+      zoom: activeSub.zoom,
+      panX: activeSub.pan.x,
+      panY: activeSub.pan.y,
+      showGrid: activeSub.showGrid,
+      showRulers: activeSub.showRulers,
+      backgroundColor: activeSub.canvasBackgroundColor,
     },
   };
 }
@@ -164,10 +338,10 @@ function repairPageHierarchy(
   return repairNodeHierarchyIfNeeded(nodes, childOrder);
 }
 
-export function pageFromSnapshot(
-  snap: EditorPageSnapshot,
+function subPageFromSnapshot(
+  snap: EditorSubPageSnapshot,
   opts?: PageFromSnapshotOptions,
-): EditorPage {
+): EditorSubPage {
   const repaired = opts?.skipHierarchyRepair
     ? { nodes: snap.nodes, childOrder: snap.childOrder }
     : repairPageHierarchy(snap.nodes, snap.childOrder);
@@ -186,6 +360,61 @@ export function pageFromSnapshot(
   };
 }
 
+export function pageFromSnapshot(
+  snap: EditorPageSnapshot,
+  opts?: PageFromSnapshotOptions,
+): EditorPage {
+  if (snap.subPages && snap.subPages.length > 0) {
+    const subPages: Record<string, EditorSubPage> = {};
+    for (const subSnap of snap.subPages) {
+      subPages[subSnap.id] = subPageFromSnapshot(subSnap, opts);
+    }
+    const subPageOrder = snap.subPages.map((s) => s.id);
+    const activeSubPageId =
+      snap.activeSubPageId && subPages[snap.activeSubPageId]
+        ? snap.activeSubPageId
+        : subPageOrder[0]!;
+    const activeSub = subPages[activeSubPageId]!;
+    return mirrorSubToPageRoot(
+      {
+        id: snap.id,
+        name: snap.name,
+        subPages,
+        subPageOrder,
+        activeSubPageId,
+        nodes: {},
+        childOrder: { [EDITOR_ROOT_KEY]: [] },
+        zoom: activeSub.zoom,
+        pan: activeSub.pan,
+        showGrid: activeSub.showGrid,
+        showRulers: activeSub.showRulers,
+        canvasBackgroundColor: activeSub.canvasBackgroundColor,
+        selectedIds: activeSub.selectedIds,
+        layoutGuides: activeSub.layoutGuides,
+      },
+      activeSub,
+    );
+  }
+
+  const repaired = opts?.skipHierarchyRepair
+    ? { nodes: snap.nodes, childOrder: snap.childOrder }
+    : repairPageHierarchy(snap.nodes, snap.childOrder);
+  const legacyPage: EditorPage = {
+    id: snap.id,
+    name: snap.name,
+    nodes: repaired.nodes,
+    childOrder: repaired.childOrder,
+    selectedIds: snap.selectedIds ?? [],
+    zoom: snap.canvas?.zoom ?? DEFAULT_CANVAS_ZOOM,
+    pan: { x: snap.canvas?.panX ?? 40, y: snap.canvas?.panY ?? 24 },
+    showGrid: snap.canvas?.showGrid ?? false,
+    showRulers: snap.canvas?.showRulers ?? false,
+    canvasBackgroundColor: snap.canvas?.backgroundColor ?? DEFAULT_CANVAS_BACKGROUND,
+    layoutGuides: snap.layoutGuides ?? [],
+  };
+  return ensurePageHasSubPages(legacyPage);
+}
+
 export function initialPagesFromCanvas(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
@@ -196,11 +425,16 @@ export function initialPagesFromCanvas(
     showRulers?: boolean;
     canvasBackgroundColor?: string;
   },
-): Pick<ActivePageSlice, "pages" | "pageOrder" | "activePageId"> {
+): {
+  pages: Record<string, EditorPage>;
+  pageOrder: string[];
+  activePageId: string;
+  activeSubPageId: string;
+} {
   const id = `page-${Date.now()}`;
-  const page: EditorPage = {
-    id,
-    name: "Page 1",
+  const subId = `${id}-sp-1`;
+  const sub: EditorSubPage = {
+    ...createEmptySubPage(subId, "Page 1"),
     nodes,
     childOrder,
     zoom: opts?.zoom ?? DEFAULT_CANVAS_ZOOM,
@@ -208,13 +442,31 @@ export function initialPagesFromCanvas(
     showGrid: opts?.showGrid ?? false,
     showRulers: opts?.showRulers ?? false,
     canvasBackgroundColor: opts?.canvasBackgroundColor ?? DEFAULT_CANVAS_BACKGROUND,
-    selectedIds: [],
-    layoutGuides: [],
   };
+  const page = mirrorSubToPageRoot(
+    {
+      id,
+      name: "Page 1",
+      subPages: { [subId]: sub },
+      subPageOrder: [subId],
+      activeSubPageId: subId,
+      nodes,
+      childOrder,
+      zoom: sub.zoom,
+      pan: sub.pan,
+      showGrid: sub.showGrid,
+      showRulers: sub.showRulers,
+      canvasBackgroundColor: sub.canvasBackgroundColor,
+      selectedIds: [],
+      layoutGuides: [],
+    },
+    sub,
+  );
   return {
     pages: { [id]: page },
     pageOrder: [id],
     activePageId: id,
+    activeSubPageId: subId,
   };
 }
 
@@ -226,6 +478,7 @@ export function pagesFromDocumentSnapshots(
   pages: Record<string, EditorPage>;
   pageOrder: string[];
   activePageId: string;
+  activeSubPageId: string;
   activePage: EditorPage;
 } {
   const pages: Record<string, EditorPage> = {};
@@ -240,10 +493,13 @@ export function pagesFromDocumentSnapshots(
     pages[activeId] = empty;
     if (!pageOrder.includes(activeId)) pageOrder.push(activeId);
   }
+  const activePage = ensurePageHasSubPages(pages[activeId]!);
+  pages[activeId] = activePage;
   return {
     pages,
     pageOrder,
     activePageId: activeId,
-    activePage: pages[activeId]!,
+    activeSubPageId: activePage.activeSubPageId ?? activePage.subPageOrder?.[0] ?? `${activeId}-sp-1`,
+    activePage,
   };
 }

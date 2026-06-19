@@ -1,17 +1,14 @@
 import type { EditorNode } from "@/stores/useEditorStore";
 import { getNodeWorldInverseMatrixFromChildOrder } from "@/lib/editorGraph";
 import { applyMatrixToPoint } from "@/lib/transformMath";
-import { resolveTextTypo } from "@/lib/textTypography";
-import { layoutDisplayText } from "@/lib/text/textAdvancedStyle";
-import type { TextLayout } from "@/lib/text/textMeasure";
+import { textLayoutForEditorNode } from "@/lib/text/canonicalTextLayout";
 import {
   MIN_TEXT_BOX,
   normalizeTextResizeMode,
   textInnerHeight,
-  textInnerWidth,
-  wrapWidthForResizeMode,
 } from "@/lib/text/textNodeModel";
 import { verticalContentOffsetY } from "@/lib/text/textVerticalAlign";
+import type { TextLayout } from "@/lib/text/textMeasure";
 
 /** Hit test in node-local coordinates (unrotated box). */
 export function hitTestTextLocal(
@@ -28,9 +25,9 @@ export function hitTestTextLocal(
   if (localX < 0 || localY < 0 || localX > w || localY > h) return false;
 
   const mode = normalizeTextResizeMode(node.textResizeMode, node.autoResize);
-  const typo = resolveTextTypo(node);
-  const wrapWidth = wrapWidthForResizeMode(w, mode);
-  const { layout } = layoutDisplayText(node.content ?? "", wrapWidth, node as EditorNode);
+  const prepared = textLayoutForEditorNode(node as EditorNode);
+  const layout = prepared?.layout;
+  if (!layout) return localX >= 0 && localX <= w && localY >= 0 && localY <= h;
   const innerH = textInnerHeight(h);
   const offsetY = verticalContentOffsetY(layout.height, innerH, node.verticalAlign);
   const contentTop = offsetY;

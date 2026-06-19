@@ -5,6 +5,7 @@ import { useEditorStore } from "@/stores/useEditorStore";
 import type { DesignToken } from "@/lib/designTokens";
 import { isColorValue } from "@/lib/designTokens";
 import { cn } from "@/lib/utils";
+import { EditorHintWrap } from "./EditorHoverHint";
 
 export function getColorDesignTokens(tokens: Record<string, DesignToken>): DesignToken[] {
   return Object.values(tokens)
@@ -45,24 +46,24 @@ export function LibraryColorPickerMenu({
           if (!isColorValue(v)) return null;
           const active = activeTokenId === token.id;
           return (
-            <button
-              key={token.id}
-              type="button"
-              title={`${token.name} · ${v.hex}`}
-              onClick={() => onPick(token.id)}
-              className={cn(
-                "aspect-square min-h-[32px] rounded-md border transition-all hover:scale-105 hover:shadow-md",
-                active
-                  ? "border-accent ring-2 ring-accent/40"
-                  : "border-white/[0.15] hover:border-white/30",
-              )}
-              style={{
-                backgroundColor: v.hex,
-                opacity: v.opacity ?? 1,
-              }}
-            >
-              <span className="sr-only">{token.name}</span>
-            </button>
+            <EditorHintWrap key={token.id} title={`${token.name} · ${v.hex}`}>
+              <button
+                type="button"
+                onClick={() => onPick(token.id)}
+                className={cn(
+                  "aspect-square min-h-[32px] rounded-md border transition-all hover:scale-105 hover:shadow-md",
+                  active
+                    ? "border-accent ring-2 ring-accent/40"
+                    : "border-white/[0.15] hover:border-white/30",
+                )}
+                style={{
+                  backgroundColor: v.hex,
+                  opacity: v.opacity ?? 1,
+                }}
+              >
+                <span className="sr-only">{token.name}</span>
+              </button>
+            </EditorHintWrap>
           );
         })}
     </div>
@@ -88,7 +89,7 @@ export function LibraryColorPickerMenu({
                 onClick={() => onPick(token.id)}
                 className={cn(
                   "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui transition-colors hover:bg-app-hover",
-                  active && "bg-accent/10 text-accent",
+                  active && "bg-app-inset text-app-fg",
                 )}
               >
                 <span
@@ -97,7 +98,7 @@ export function LibraryColorPickerMenu({
                   aria-hidden
                 />
                 <span className="min-w-0 flex-1 truncate font-medium">{token.name}</span>
-                <span className="shrink-0 font-mono text-ui text-[#737373]">{v.hex}</span>
+                <span className="shrink-0 font-mono text-ui text-app-subtle">{v.hex}</span>
               </button>
             </li>
           );

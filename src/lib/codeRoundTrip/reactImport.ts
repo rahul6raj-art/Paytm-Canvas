@@ -2,7 +2,10 @@ import { DEFAULT_CANVAS_BACKGROUND } from "@/lib/canvasVisual";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import type { EditorPersistSlice } from "@/lib/documentPersistence";
 import { wrapPersistSliceWithPages } from "@/lib/documentPersistence";
+import type { EditorNode } from "@/stores/useEditorStore";
+import { placeScreenFrameOnCanvas } from "@/lib/codeExport/frameRelativeExport";
 import { importReactFromJsx } from "./reactJsxToGraph";
+import type { CodeRoundTripLink } from "@/lib/craftBridge/types";
 import {
   CODE_PAYLOAD_END,
   CODE_PAYLOAD_START,
@@ -16,6 +19,7 @@ export type ReactImportResult =
       componentName: string;
       message: string;
       sourceHeader?: string;
+      codeRoundTripLink?: CodeRoundTripLink | null;
     }
   | { ok: false; error: string };
 
@@ -43,8 +47,21 @@ function payloadToSlice(payload: CodeRoundTripPayloadV1): EditorPersistSlice {
   const childOrder = { ...payload.childOrder };
   childOrder[EDITOR_ROOT_KEY] = rootIds;
 
+  const nodes: Record<string, EditorNode> = { ...payload.nodes };
+  for (const rootId of rootIds) {
+    const root = nodes[rootId];
+    if (root) {
+      nodes[rootId] = {
+        ...root,
+        parentId: null,
+        clipChildren: false,
+      };
+    }
+  }
+  const placed = placeScreenFrameOnCanvas(nodes, rootIds);
+
   return wrapPersistSliceWithPages({
-    nodes: payload.nodes,
+    nodes: placed,
     childOrder,
     assets: payload.assets ?? {},
     designTokens: payload.designTokens ?? {},
@@ -52,10 +69,11 @@ function payloadToSlice(payload: CodeRoundTripPayloadV1): EditorPersistSlice {
     selectedIds: rootIds,
     zoom: 1,
     pan: { x: 0, y: 0 },
-    showGrid: true,
+    showGrid: false,
     showRulers: false,
     canvasBackgroundColor: DEFAULT_CANVAS_BACKGROUND,
     comments: [],
+    codeRoundTripLink: payload.codeRoundTripLink ?? null,
   });
 }
 
@@ -107,6 +125,41 @@ export function diagnoseImportFailure(source: string): string {
   ].join("\n");
 }
 
+function stripCodeRoundTripPayload(source: string): string {
+  const start = source.indexOf(CODE_PAYLOAD_START);
+  const end = source.indexOf(CODE_PAYLOAD_END);
+  if (start < 0 || end < 0 || end <= start) return source;
+  return `${source.slice(0, start)}${source.slice(end + CODE_PAYLOAD_END.length)}`.trim();
+}
+
+function isUsablePayload(payload: CodeRoundTripPayloadV1): boolean {
+  const rootIds = payload.exportRootIds.filter((id) => payload.nodes[id]);
+  return rootIds.length > 0 && Object.keys(payload.nodes).length > 0;
+}
+
+/** Shared payload → canvas slice (React + HTML round-trip). */
+export function sliceFromCodeRoundTripPayload(
+  payload: CodeRoundTripPayloadV1,
+  opts?: { fileName?: string },
+): EditorPersistSlice {
+  const slice = payloadToSlice(payload);
+  if (opts?.fileName) slice.fileName = opts.fileName;
+  return slice;
+}
+
+export function isUsableCodeRoundTripPayload(payload: CodeRoundTripPayloadV1 | null): boolean {
+  return !!payload && isUsablePayload(payload);
+}
+
+/** Detect pasted app source (.tsx) vs HTML fragment. */
+export function looksLikeReactSource(source: string): boolean {
+  const t = source.trim();
+  if (!t) return false;
+  if (/from\s+["']react["']/i.test(t)) return true;
+  if (/import\s+.+from\s+["'][^"']+["']/.test(t) && /export\s+(default\s+)?/.test(t)) return true;
+  return /export\s+(default\s+)?(function|const)\s+\w+/.test(t) && /<\w+/.test(t);
+}
+
 export function importReactSource(
   source: string,
   opts?: { fileName?: string },
@@ -117,11 +170,8 @@ export function importReactSource(
   }
 
   const payload = parseCodeRoundTripPayload(trimmed);
-  if (payload) {
+  if (payload && isUsablePayload(payload)) {
     const rootIds = payload.exportRootIds.filter((id) => payload.nodes[id]);
-    if (rootIds.length === 0) {
-      return { ok: false, error: "Payload has no export roots." };
-    }
 
     const slice = payloadToSlice(payload);
     if (opts?.fileName) slice.fileName = opts.fileName;
@@ -131,17 +181,20 @@ export function importReactSource(
       slice,
       componentName: payload.componentName,
       sourceHeader: payload.sourceHeader,
+      codeRoundTripLink: payload.codeRoundTripLink ?? null,
       message: `Imported ${Object.keys(payload.nodes).length} layers from React (${payload.componentName}).`,
     };
   }
 
-  const jsxResult = importReactFromJsx(trimmed, { fileName: opts?.fileName });
+  const jsxSource = payload ? stripCodeRoundTripPayload(trimmed) : trimmed;
+  const jsxResult = importReactFromJsx(jsxSource, { fileName: opts?.fileName });
   if (jsxResult.ok) {
     return {
       ok: true,
       slice: jsxResult.slice,
       componentName: jsxResult.payload.componentName,
       sourceHeader: jsxResult.payload.sourceHeader,
+      codeRoundTripLink: jsxResult.slice.codeRoundTripLink ?? null,
       message: jsxResult.message,
     };
   }

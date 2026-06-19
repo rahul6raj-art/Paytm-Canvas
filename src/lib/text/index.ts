@@ -15,6 +15,8 @@ export {
 export { renderTextToCanvas } from "./textCanvasRender";
 export {
   toTextNodeModel,
+  nodeForTextLayout,
+  availableWrapWidthForNode,
   type TextNodeModel,
   type TextAlign,
   type TextResizeMode,
@@ -27,7 +29,40 @@ export { textResizeModeToAutoResize, autoResizeToTextResizeMode } from "./autoRe
 export { createTextNode, createPointTextAt, createTextBoxFromDrag } from "./textCreation";
 export { hitTestTextLocal, hitTestTextWorld } from "./textHitTest";
 export { enterTextEditMode, exitTextEditMode } from "./textEditMode";
-export { layoutTextCanonical, textLayoutForEditorNode, clearCanonicalTextLayoutCache } from "./canonicalTextLayout";
+export {
+  ensureTextModeForExplicitWidth,
+  webImportTextResizeMode,
+  type TextWidthConstraintReason,
+} from "./ensureTextModeForExplicitWidth";
+export {
+  ensureTextModeForExplicitHeight,
+  type TextHeightConstraintReason,
+} from "./ensureTextModeForExplicitHeight";
+export {
+  buildTextResizeGeometryPatch,
+  isTextResizeHandleAllowed,
+  textResizeHandlesForMode,
+} from "./textResizeFromDrag";
+export { setTextResizeMode } from "./setTextResizeMode";
+export {
+  computeTextResizeModePatch,
+  logTextResizeModeClick,
+  resolveTextNodeFromStore,
+  setTextResizeModeForNode,
+  textResizeLayoutSnapshot,
+  textResizeModeSnapshot,
+  textResizeModeStylePatch,
+} from "./setTextResizeModeForNode";
+export {
+  layoutTextForNode,
+  measureTextRun,
+  wrapTextIntoLines,
+  computeTextBounds,
+  updateTextAutoResize,
+  type LayoutTextResult,
+  type LayoutTextLine,
+  type LayoutTextGlyph,
+} from "./layoutTextForNode";
 export { getMissingFontWarnings, getFontWarnings, preserveImportFontFamily } from "./textFontManager";
 export {
   textAdvancedStyleFromNode,

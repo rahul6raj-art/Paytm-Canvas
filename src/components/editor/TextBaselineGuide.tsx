@@ -7,7 +7,7 @@ import { textBaselineWorldSegment } from "@/lib/text/textBaseline";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { useCanvasOverlaySpace } from "./useCanvasOverlaySpace";
 
-/** Figma-style baseline guide for a selected or editing text layer. */
+/** Figma-style baseline guide for a selected text layer (hidden while editing). */
 export function TextBaselineGuide() {
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const editingTextId = useEditorStore((s) => s.editingTextId);
@@ -17,7 +17,7 @@ export function TextBaselineGuide() {
   const overlay = useCanvasOverlaySpace();
 
   const textId = useMemo(() => {
-    if (editingTextId && nodes[editingTextId]?.type === "text") return editingTextId;
+    if (editingTextId) return null;
     if (selectedIds.length !== 1) return null;
     const id = selectedIds[0]!;
     return nodes[id]?.type === "text" ? id : null;
@@ -27,13 +27,12 @@ export function TextBaselineGuide() {
     if (!textId) return null;
     const node = nodes[textId];
     if (!node || node.type !== "text") return null;
-    if (editingTextId === textId && !(node.content?.length)) return null;
     const segment = textBaselineWorldSegment(textId, node, nodes, childOrder);
     if (!segment) return null;
     const p1 = worldPointToOverlay(segment.x1, segment.y1, overlay);
     const p2 = worldPointToOverlay(segment.x2, segment.y2, overlay);
     return { x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y };
-  }, [textId, editingTextId, nodes, childOrder, overlay]);
+  }, [textId, nodes, childOrder, overlay]);
 
   if (editorMode !== "design" || !line) return null;
 

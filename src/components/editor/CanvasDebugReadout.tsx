@@ -8,6 +8,7 @@ import { readCraftEngineDiagnostics, type CraftEngineDiagnostics } from "@/engin
 import { worldRect } from "@/lib/tree";
 import { CANVAS_VIEWPORT_SELECTOR } from "@/lib/viewportZoom";
 import { clientToWorldFromDocument } from "@/lib/canvasCoordinates";
+import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
 
 function fmt(n: number, digits = 1): string {
   return Number.isFinite(n) ? n.toFixed(digits) : "—";
@@ -76,10 +77,8 @@ export function CanvasDebugReadout() {
   const hasViewport = typeof document !== "undefined" && document.querySelector(CANVAS_VIEWPORT_SELECTOR);
 
   return (
-    <div
-      className="hidden min-w-0 flex-1 items-center justify-center gap-3 truncate font-mono text-ui text-app-subtle md:flex"
-      title="Canvas debug (NEXT_PUBLIC_PAYTM_CRAFT_DEBUG_CANVAS=true)"
-    >
+    <EditorHintWrap title="Canvas debug (NEXT_PUBLIC_PAYTM_CRAFT_DEBUG_CANVAS=true)">
+      <div className="hidden min-w-0 flex-1 items-center justify-center gap-3 truncate font-mono text-ui text-app-subtle md:flex">
       <span>zoom {fmt(zoom * 100, 0)}%</span>
       <span>pan {fmt(pan.x)},{fmt(pan.y)}</span>
       <span>cursor {fmt(cursor.x)},{fmt(cursor.y)}</span>
@@ -95,6 +94,7 @@ export function CanvasDebugReadout() {
       ) : isNativeRendererEnabled() ? (
         <span className="text-amber-600">wasm pending</span>
       ) : null}
-    </div>
+      </div>
+    </EditorHintWrap>
   );
 }

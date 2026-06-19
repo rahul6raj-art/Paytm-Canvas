@@ -6,8 +6,9 @@ import { PropertiesSection } from "../PropertiesSection";
 import { CornerRadiusControls } from "../CornerRadiusControls";
 import { ArcControls } from "./ArcControls";
 import { BlendModePicker } from "./BlendModePicker";
+import { InspectorHintIconButton } from "./InspectorPrimitives";
 import { OpacityIcon } from "./InspectorSettingIcons";
-import { appFieldRadius, inspectorControlHeightClass } from "@/lib/appFieldStyles";
+import { appFieldInnerClass, appFieldShellClass } from "@/lib/appFieldStyles";
 import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
 import { useInspectorValueScrub } from "@/lib/useInspectorValueScrub";
 import type { LayerBlendMode } from "@/lib/layerBlendMode";
@@ -64,15 +65,7 @@ function AppearanceOpacityField({
   return (
     <div className="min-w-0 flex-1">
       <div className="inspector-field-label mb-0.5">Opacity</div>
-      <div
-        className={cn(
-          "flex items-center overflow-hidden border border-app-border bg-app-field",
-          inspectorControlHeightClass,
-          appFieldRadius,
-          "shadow-[inset_0_1px_0_0_hsl(var(--app-inset-highlight)/var(--app-inset-highlight-opacity))]",
-          disabled && "opacity-45",
-        )}
-      >
+      <div className={cn(appFieldShellClass, disabled && "opacity-45")}>
         <span className={cn(inspectorFieldIconSlotClass, "text-app-fg/75")}>
           <OpacityIcon />
         </span>
@@ -82,7 +75,7 @@ function AppearanceOpacityField({
           disabled={disabled}
           aria-label="Opacity percent"
           {...bindScrubInput(
-            "min-w-0 flex-1 border-0 bg-transparent px-1.5 py-0 text-ui tabular-nums text-app-field-fg focus-visible:outline-none disabled:cursor-not-allowed",
+            cn(appFieldInnerClass, "tabular-nums"),
             focused,
           )}
           value={focused ? text : `${text}%`}
@@ -158,15 +151,14 @@ export function AppearanceSection({
       defaultOpen
       headerActions={
         <>
-          <button
-            type="button"
-            disabled={locked}
+          <InspectorHintIconButton
             title={visible ? "Hide layer" : "Show layer"}
+            disabled={locked}
             onClick={onToggleVisible}
             className={cn(inspectorHeaderActionBtnClass, "inspector-icon-btn")}
           >
             {visible ? <Eye {...inspectorLucideProps()} /> : <EyeOff {...inspectorLucideProps()} />}
-          </button>
+          </InspectorHintIconButton>
           <BlendModePicker
             node={node}
             disabled={locked}

@@ -11,6 +11,8 @@ describe("aiRichMobileBuilder", () => {
   it("supports rich fallback for checkout and related intents", () => {
     assert.equal(supportsRichScreen("checkout"), true);
     assert.equal(supportsRichScreen("send_money"), true);
+    assert.equal(supportsRichScreen("auth"), true);
+    assert.equal(supportsRichScreen("generic_mobile"), true);
     assert.equal(supportsRichScreen("dashboard"), false);
   });
 

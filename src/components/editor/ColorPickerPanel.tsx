@@ -12,6 +12,7 @@ import {
   type HsvColor,
 } from "@/lib/color";
 import { cn } from "@/lib/utils";
+import { InspectorHintIconButton } from "./design-panel/InspectorPrimitives";
 import { ColorFormatFields } from "./ColorFormatFields";
 
 const CHECKERBOARD =
@@ -20,7 +21,7 @@ const CHECKERBOARD =
 const SLIDER_TRACK = "relative h-5 min-h-5 w-full cursor-pointer rounded-full border border-app-border";
 const SLIDER_TRACK_FILL = "pointer-events-none absolute inset-0 overflow-hidden rounded-full";
 const SLIDER_THUMB =
-  "pointer-events-none absolute top-1/2 z-10 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-md ring-1 ring-black/10";
+  "pointer-events-none absolute top-1/2 z-10 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-sm border-2 border-white shadow-md ring-1 ring-black/10";
 
 type ColorPickerPanelProps = {
   hex: string;
@@ -159,40 +160,42 @@ export function ColorPickerPanel({
 
   return (
     <div className={cn("space-y-3", disabled && "pointer-events-none opacity-50")}>
-      <div
-        ref={svRef}
-        role="slider"
-        aria-label="Saturation and brightness"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(hsv.s * 100)}
-        tabIndex={disabled ? -1 : 0}
-        className="relative h-40 w-full cursor-crosshair overflow-hidden rounded-lg border border-app-border touch-none"
-        style={{
-          background: `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, ${hueColor})`,
-        }}
-        onPointerDown={onSvPointerDown}
-      >
-        <span
-          className="pointer-events-none absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-md"
+      <div className="overflow-hidden rounded-lg border border-app-border">
+        <div
+          ref={svRef}
+          role="slider"
+          aria-label="Saturation and brightness"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(hsv.s * 100)}
+          tabIndex={disabled ? -1 : 0}
+          className="relative h-40 w-full cursor-crosshair touch-none"
           style={{
-            left: `${hsv.s * 100}%`,
-            top: `${(1 - hsv.v) * 100}%`,
+            backgroundColor: hueColor,
+            backgroundImage:
+              "linear-gradient(to top, rgb(0, 0, 0), rgba(0, 0, 0, 0)), linear-gradient(to right, rgb(255, 255, 255), rgba(255, 255, 255, 0))",
           }}
-        />
+          onPointerDown={onSvPointerDown}
+        >
+          <span
+            className="pointer-events-none absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-sm border-2 border-white shadow-md"
+            style={{
+              left: `${hsv.s * 100}%`,
+              top: `${(1 - hsv.v) * 100}%`,
+            }}
+          />
+        </div>
       </div>
 
       <div className="flex items-center gap-2.5">
-        <button
-          type="button"
+        <InspectorHintIconButton
           title="Eyedropper"
-          aria-label="Pick color from screen"
           disabled={disabled || typeof window === "undefined" || !("EyeDropper" in window)}
           onClick={() => void pickEyedropper()}
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-app-border text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg disabled:opacity-35"
         >
           <Pipette className="h-4 w-4" strokeWidth={1.75} />
-        </button>
+        </InspectorHintIconButton>
         <div className="min-w-0 flex-1 space-y-2.5">
           <div
             ref={hueRef}

@@ -26,11 +26,14 @@ export function isPointerOverRulerStrip(
   clientX: number,
   clientY: number,
   viewportEl: HTMLElement,
+  leftInset = 0,
 ): boolean {
   const rect = viewportEl.getBoundingClientRect();
   const v = clientToViewport(clientX, clientY, rect);
-  if (axis === "h") return v.y < CANVAS_RULER_SIZE;
-  return v.x < CANVAS_RULER_SIZE;
+  if (axis === "h") {
+    return v.y < CANVAS_RULER_SIZE && v.x >= leftInset + CANVAS_RULER_SIZE;
+  }
+  return v.x >= leftInset && v.x < leftInset + CANVAS_RULER_SIZE && v.y >= CANVAS_RULER_SIZE;
 }
 
 /** Drag from a ruler to place a layout guide (Figma-style). */
@@ -43,8 +46,9 @@ export function startRulerGuideDragSession(opts: {
   viewportEl: HTMLElement;
   pan: { x: number; y: number };
   zoom: number;
+  leftInset?: number;
 }): void {
-  const { axis, pointerId, captureTarget, viewportEl } = opts;
+  const { axis, pointerId, captureTarget, viewportEl, leftInset = 0 } = opts;
 
   const updatePos = (clientX: number, clientY: number) => {
     const st = useEditorStore.getState();
@@ -93,7 +97,7 @@ export function startRulerGuideDragSession(opts: {
     cleanup();
     const st = useEditorStore.getState();
     if (!st.layoutGuideDraft) return;
-    if (isPointerOverRulerStrip(axis, e.clientX, e.clientY, viewportEl)) {
+    if (isPointerOverRulerStrip(axis, e.clientX, e.clientY, viewportEl, leftInset)) {
       st.cancelLayoutGuideDraft();
       return;
     }

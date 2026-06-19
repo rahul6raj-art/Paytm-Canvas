@@ -65,22 +65,20 @@ export function FrameToolDropdown() {
       <div
         ref={menuRef}
         role="menu"
-        className="fixed z-[100] max-h-[min(420px,70vh)] min-w-[220px] overflow-y-auto rounded-md border border-app-border bg-app-panel py-0.5 shadow-lg thin-scroll"
+        data-editor-shell
+        className="editor-floating-menu fixed z-[100] max-h-[min(420px,70vh)] min-w-[220px] overflow-y-auto border border-app-border bg-app-panel shadow-lg thin-scroll"
         style={anchoredMenuStyle(position)}
       >
         {FRAME_PRESET_CATEGORIES.map((cat) => (
           <div key={cat.id}>
-            <div className="px-2.5 py-1.5 section-heading">
-              {cat.label}
-            </div>
+            <div className="section-heading">{cat.label}</div>
             {FRAME_PRESETS.filter((p) => p.category === cat.id).map((p) => (
               <button
                 key={p.id}
                 type="button"
                 role="menuitem"
                 className={cn(
-                  "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-ui font-medium transition-colors",
-                  framePresetId === p.id ? "bg-accent/20 text-white" : "text-app-fg hover:bg-app-hover",
+                  framePresetId === p.id ? "bg-accent/20 text-white" : undefined,
                 )}
                 onClick={() => pickPreset(p.id)}
               >
@@ -97,17 +95,14 @@ export function FrameToolDropdown() {
         <button
           type="button"
           role="menuitem"
-          className={cn(
-            "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-ui font-medium transition-colors",
-            isCustom ? "bg-accent/20 text-white" : "text-app-fg hover:bg-app-hover",
-          )}
+          className={cn(isCustom ? "bg-accent/20 text-white" : undefined)}
           onClick={() => pickPreset(FRAME_CUSTOM_PRESET_ID)}
         >
           <PenLine className="h-3.5 w-3.5 shrink-0 text-[#a3a3a3]" strokeWidth={1.75} />
           <span className="flex-1">Draw custom</span>
           <span className="shrink-0 text-ui text-app-subtle">drag</span>
         </button>
-        <p className="px-2.5 pb-1.5 pt-0.5 text-ui leading-snug text-app-subtle">
+        <p className="px-3.5 pb-2 pt-1 text-ui leading-snug text-app-subtle">
           Click canvas to place preset · drag to draw any size
         </p>
       </div>

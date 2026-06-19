@@ -188,7 +188,9 @@ function svgDragRootGroups(movingIds: readonly string[]): SVGGElement[] {
   const tops = topLevelSelectedIds([...movingIds], nodes);
   const out: SVGGElement[] = [];
   for (const id of tops) {
-    const el = scene.querySelector<SVGGElement>(`:scope > [data-node-id="${CSS.escape(id)}"]`);
+    const el = scene.querySelector<SVGGElement>(
+      `:scope > [data-node-id="${CSS.escape(id)}"]:not([data-drag-preview])`,
+    );
     if (el) out.push(el);
   }
   return out;
@@ -250,10 +252,6 @@ export function applyDragPreview(movingIds: readonly string[], dx: number, dy: n
     } else {
       el.style.transform = `${prefix}translate(${dx}px, ${dy}px)`;
     }
-  }
-
-  for (const el of svgDragRootGroups(movingIds)) {
-    applySvgTranslate(el, dx, dy);
   }
 
   notifyDragListeners();

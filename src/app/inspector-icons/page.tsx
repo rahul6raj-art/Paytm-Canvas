@@ -1,9 +1,12 @@
 import {
   BooleanExcludeIcon,
+  BooleanFlattenIcon,
   BooleanIntersectIcon,
   BooleanMenuIcon,
   BooleanSubtractIcon,
   BooleanUnionIcon,
+  EditObjectIcon,
+  UseAsMaskIcon,
 } from "@/components/editor/design-panel/BooleanOperationIcons";
 import {
   AutoLayoutHorizontalIcon,
@@ -58,6 +61,9 @@ const BOOLEAN_ICONS = [
   { name: "BooleanSubtractIcon", node: <BooleanSubtractIcon /> },
   { name: "BooleanIntersectIcon", node: <BooleanIntersectIcon /> },
   { name: "BooleanExcludeIcon", node: <BooleanExcludeIcon /> },
+  { name: "BooleanFlattenIcon", node: <BooleanFlattenIcon /> },
+  { name: "EditObjectIcon", node: <EditObjectIcon /> },
+  { name: "UseAsMaskIcon", node: <UseAsMaskIcon /> },
   { name: "BooleanMenuIcon", node: <BooleanMenuIcon /> },
 ] as const;
 

@@ -134,7 +134,7 @@ describe("applyAutoLayoutToContainer — existing frame", () => {
 });
 
 describe("applyAutoLayoutToSelection — children inside frame", () => {
-  it("enables auto layout on the parent frame instead of nesting", () => {
+  it("wraps selected children in a nested auto layout frame (Figma ⇧A)", () => {
     const nodes: Record<string, EditorNode> = {
       f: frame("f"),
       a: rect("a", 10, 10, 40, 20, { parentId: "f" }),
@@ -144,13 +144,18 @@ describe("applyAutoLayoutToSelection — children inside frame", () => {
 
     const result = applyAutoLayoutToSelection(nodes, childOrder, ["a", "b"]);
     assert.ok(result);
-    assert.deepEqual(result!.selectedIds, ["f"]);
-    assert.equal(result!.nodes.f.layoutMode, "horizontal");
-    assert.equal(result!.nodes.f.layoutGapAuto, false);
-    assert.equal(Object.keys(result!.nodes).filter((id) => id.startsWith("frame-al-")).length, 0);
+    const alFrameId = result!.selectedIds[0]!;
+    assert.ok(alFrameId.startsWith("frame-al-"));
+    assert.equal(result!.nodes.f.layoutMode, "none");
+    assert.equal(result!.nodes[alFrameId].parentId, "f");
+    assert.equal(result!.nodes[alFrameId].layoutMode, "horizontal");
+    assert.equal(result!.nodes.a.parentId, alFrameId);
+    assert.equal(result!.nodes.b.parentId, alFrameId);
+    assert.deepEqual(result!.childOrder.f, [alFrameId]);
+    assert.deepEqual(result!.childOrder[alFrameId], ["a", "b"]);
   });
 
-  it("wraps root-level siblings when childOrder lists operands only via parentId", () => {
+  it("wraps siblings when childOrder lists operands only via parentId", () => {
     const nodes: Record<string, EditorNode> = {
       f: frame("f"),
       a: rect("a", 10, 10, 40, 20, { parentId: "f" }),
@@ -160,8 +165,11 @@ describe("applyAutoLayoutToSelection — children inside frame", () => {
 
     const result = applyAutoLayoutToSelection(nodes, childOrder, ["a", "b"]);
     assert.ok(result);
-    assert.deepEqual(result!.selectedIds, ["f"]);
-    assert.equal(result!.nodes.f.layoutMode, "horizontal");
-    assert.deepEqual(result!.childOrder.f, ["a", "b"]);
+    const alFrameId = result!.selectedIds[0]!;
+    assert.ok(alFrameId.startsWith("frame-al-"));
+    assert.equal(result!.nodes.f.layoutMode, "none");
+    assert.equal(result!.nodes[alFrameId].parentId, "f");
+    assert.deepEqual(result!.childOrder.f, [alFrameId]);
+    assert.deepEqual(result!.childOrder[alFrameId], ["a", "b"]);
   });
 });

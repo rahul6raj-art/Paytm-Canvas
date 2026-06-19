@@ -4,9 +4,12 @@ import { startTransition, useEffect, useRef } from "react";
 import {
   clearLocalDocument,
   documentToEditorPatch,
+  hasInMemoryWorkspaceContent,
   isBrokenOrphanedLocalDocument,
   readLocalDocument,
   serializePersistStable,
+  shouldPreserveInMemoryPages,
+  shouldRestoreLocalDocument,
 } from "@/lib/documentPersistence";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import {
@@ -15,6 +18,7 @@ import {
   repairNodeHierarchyIfNeeded,
 } from "@/lib/editorGraph";
 import { editorPatchFromPage } from "@/lib/editorPages";
+import { preferLayoutGridOffWhenEmpty } from "@/lib/editorBootstrap";
 import { getRouteApiFileId, hydrateEditorFromApiFile } from "@/lib/apiFileHydration";
 import { isPaytmCraftHttpApiMode } from "@/lib/env";
 import { FIG_IMPORT_POST_LAYOUT_NODE_CAP } from "@/lib/figImport/figImportConstants";
@@ -27,7 +31,8 @@ function persistFingerprint(state: ReturnType<typeof useEditorStore.getState>): 
   const slice = toPersistSlice(state);
   const nodeCount = Object.keys(slice.nodes).length;
   if (nodeCount > CHEAP_FINGERPRINT_NODE_THRESHOLD) {
-    return `${slice.fileName}|n:${nodeCount}|p:${slice.activePageId}|r:${state.documentHydrationRevision}`;
+    const pageNames = slice.pageOrder.map((id) => slice.pages[id]?.name ?? "").join("\0");
+    return `${slice.fileName}|n:${nodeCount}|p:${slice.activePageId}|pn:${pageNames}|r:${state.documentHydrationRevision}`;
   }
   return serializePersistStable(slice);
 }
@@ -49,14 +54,24 @@ function hasCanvasRootDesign(state: ReturnType<typeof useEditorStore.getState>):
   return (state.childOrder[EDITOR_ROOT_KEY] ?? []).length > 0;
 }
 
+function isPendingBridgeImportRoute(): boolean {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("bridgeImport") === "1";
+}
+
 function applyLocalDocumentToStore(localDoc: ReturnType<typeof readLocalDocument>): void {
   if (!localDoc) return;
-  const st = useEditorStore.getState();
+  const hydrationRevision = useEditorStore.getState().documentHydrationRevision;
   startTransition(() => {
+    const live = useEditorStore.getState();
+    // Deferred hydration must not clobber edits made while the transition was pending.
+    if (live.documentHydrationRevision !== hydrationRevision) return;
+    if (live.documentSaveStatus === "unsaved") return;
+    if (hasInMemoryWorkspaceContent(live)) return;
     useEditorStore.setState({
-      ...documentToEditorPatch(localDoc),
+      ...preferLayoutGridOffWhenEmpty(documentToEditorPatch(localDoc)),
       documentHydrating: false,
-      documentHydrationRevision: st.documentHydrationRevision + 1,
+      documentHydrationRevision: hydrationRevision + 1,
       documentSaveStatus: "saved",
       historyPast: [],
       historyFuture: [],
@@ -66,9 +81,7 @@ function applyLocalDocumentToStore(localDoc: ReturnType<typeof readLocalDocument
 
 function restoreFromLocalStorage(): void {
   const st = useEditorStore.getState();
-  if (st.figImportInProgress) return;
-
-  const hasInMemoryDesign = hasCanvasRootDesign(st);
+  if (st.figImportInProgress || st.craftBridgeInboundActive || isPendingBridgeImportRoute()) return;
 
   let localDoc = readLocalDocument();
   if (localDoc && isBrokenOrphanedLocalDocument(localDoc)) {
@@ -79,12 +92,17 @@ function restoreFromLocalStorage(): void {
     localDoc = null;
   }
 
-  if (localDoc && !hasInMemoryDesign) {
+  if (shouldPreserveInMemoryPages(st, localDoc)) {
+    st.saveToLocal();
+    return;
+  }
+
+  if (localDoc && shouldRestoreLocalDocument(st, localDoc)) {
     applyLocalDocumentToStore(localDoc);
     return;
   }
 
-  if (!localDoc && !hasInMemoryDesign) {
+  if (!localDoc && !hasInMemoryWorkspaceContent(st)) {
     useEditorStore.getState().applySampleDocumentIfEmpty();
   }
 }
@@ -256,7 +274,11 @@ export function EditorDocumentPersistence() {
     };
 
     unsubImportHydration = useEditorStore.subscribe((state, prev) => {
-      if (!prev?.figImportInProgress || state.figImportInProgress) return;
+      if (!prev) return;
+
+      const figImportFinished = prev.figImportInProgress && !state.figImportInProgress;
+      const bridgeImportFinished = prev.craftBridgeInboundActive && !state.craftBridgeInboundActive;
+      if (!figImportFinished && !bridgeImportFinished) return;
       if (!skippedHydrationDuringImportRef.current) return;
       skippedHydrationDuringImportRef.current = false;
 
@@ -312,6 +334,12 @@ export function EditorDocumentPersistence() {
         return;
       }
 
+      if (isPendingBridgeImportRoute() || useEditorStore.getState().craftBridgeInboundActive) {
+        skippedHydrationDuringImportRef.current = true;
+        completeHydration();
+        return;
+      }
+
       const routeFileId = getRouteApiFileId();
       const st = useEditorStore.getState();
       const shouldHydrateRoute =
@@ -354,6 +382,7 @@ export function EditorDocumentPersistence() {
       const live = useEditorStore.getState();
       if (hasCanvasRootDesign(live)) return;
       if (live.figImportInProgress) return;
+      if (live.craftBridgeInboundActive || isPendingBridgeImportRoute()) return;
       live.applySampleDocumentIfEmpty();
     }, 5_000);
     cancelTimers.push(() => window.clearTimeout(emptyRecovery));

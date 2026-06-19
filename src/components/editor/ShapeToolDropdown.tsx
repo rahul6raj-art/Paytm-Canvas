@@ -105,7 +105,8 @@ export function ShapeToolDropdown() {
       <div
         ref={menuRef}
         role="menu"
-        className="fixed z-[100] min-w-[200px] rounded-md border border-app-border bg-app-panel py-0.5 shadow-lg"
+        data-editor-shell
+        className="editor-floating-menu fixed z-[100] min-w-[200px] border border-app-border bg-app-panel shadow-lg"
         style={anchoredMenuStyle(position)}
       >
         {shapeItems.map(({ id, label, icon: Icon, shortcut }) => (
@@ -113,10 +114,7 @@ export function ShapeToolDropdown() {
             key={id}
             type="button"
             role="menuitem"
-            className={cn(
-              "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-ui font-medium transition-colors",
-              tool === id ? "bg-accent/20 text-white" : "text-app-fg hover:bg-app-hover",
-            )}
+            className={cn(tool === id ? "bg-accent/20 text-white" : undefined)}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => pick(id)}
           >

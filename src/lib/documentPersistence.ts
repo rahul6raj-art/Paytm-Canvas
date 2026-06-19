@@ -1,5 +1,6 @@
 import type { EditorComment } from "@/lib/comments";
 import { parseCommentsArray } from "@/lib/comments";
+import type { CodeRoundTripLink } from "@/lib/craftBridge/types";
 import type { DesignToken } from "@/lib/designTokens";
 import {
   captureActivePage,
@@ -128,6 +129,8 @@ export interface PaytmCraftDocument {
     showRulers?: boolean;
     backgroundColor?: string;
   };
+  /** Linked source file for design ↔ code round-trip bridge. */
+  codeRoundTripLink?: CodeRoundTripLink | null;
 }
 
 export interface EditorPersistSlice {
@@ -148,12 +151,16 @@ export interface EditorPersistSlice {
   pages: Record<string, EditorPage>;
   pageOrder: string[];
   activePageId: string;
+  /** Active sub-page within the active master page. */
+  activeSubPageId: string;
   /** Active page layout guides (mirrored from `pages[activePageId]`). */
   layoutGuides?: LayoutGuide[];
+  /** Linked source file for design ↔ code round-trip bridge. */
+  codeRoundTripLink?: CodeRoundTripLink | null;
 }
 
 export function wrapPersistSliceWithPages(
-  slice: Omit<EditorPersistSlice, "pages" | "pageOrder" | "activePageId">,
+  slice: Omit<EditorPersistSlice, "pages" | "pageOrder" | "activePageId" | "activeSubPageId">,
 ): EditorPersistSlice {
   const pageMeta = initialPagesFromCanvas(slice.nodes, slice.childOrder, {
     zoom: slice.zoom,
@@ -171,12 +178,14 @@ export function wrapPersistSliceWithPages(
     pages: { ...pageMeta.pages, [pageMeta.activePageId]: page },
     pageOrder: pageMeta.pageOrder,
     activePageId: pageMeta.activePageId,
+    activeSubPageId: pageMeta.activeSubPageId ?? page.activeSubPageId ?? `${pageMeta.activePageId}-sp-1`,
   };
 }
 
 function sliceWithCapturedActivePage(slice: EditorPersistSlice): EditorPersistSlice {
   const active = captureActivePage({
     activePageId: slice.activePageId,
+    activeSubPageId: slice.activeSubPageId,
     pages: slice.pages,
     pageOrder: slice.pageOrder,
     nodes: slice.nodes,
@@ -213,6 +222,7 @@ export function serializePersistStable(slice: EditorPersistSlice): string {
     showRulers: synced.showRulers,
     canvasBackgroundColor: synced.canvasBackgroundColor,
     comments: synced.comments,
+    codeRoundTripLink: synced.codeRoundTripLink ?? null,
   });
 }
 
@@ -240,6 +250,44 @@ export function editorStateToDocument(slice: EditorPersistSlice): PaytmCraftDocu
       showRulers: active.showRulers,
       backgroundColor: active.canvasBackgroundColor,
     },
+    codeRoundTripLink: synced.codeRoundTripLink ?? null,
+  };
+}
+
+/** Standalone `.paytmcraft` document for one page (dashboard file when a tab is closed). */
+export function paytmCraftDocumentFromPage(
+  page: EditorPage,
+  shared: {
+    assets?: Record<string, EditorAsset>;
+    fontAssets?: Record<string, EditorFontAsset>;
+    designTokens?: Record<string, DesignToken>;
+    comments?: EditorComment[];
+    codeRoundTripLink?: CodeRoundTripLink | null;
+  } = {},
+): PaytmCraftDocument {
+  const snap = pageToSnapshot(page);
+  return {
+    version: 1,
+    name: page.name,
+    savedAt: new Date().toISOString(),
+    nodes: page.nodes,
+    childOrder: page.childOrder,
+    pages: [snap],
+    activePageId: page.id,
+    assets: shared.assets ?? {},
+    fontAssets: shared.fontAssets ?? {},
+    designTokens: shared.designTokens ?? {},
+    selectedIds: [],
+    comments: shared.comments ?? [],
+    canvas: {
+      zoom: page.zoom,
+      panX: page.pan.x,
+      panY: page.pan.y,
+      showGrid: page.showGrid,
+      showRulers: page.showRulers,
+      backgroundColor: page.canvasBackgroundColor,
+    },
+    codeRoundTripLink: shared.codeRoundTripLink ?? null,
   };
 }
 
@@ -258,10 +306,11 @@ export function documentToEditorPatch(
     designTokens: doc.designTokens ?? {},
     fileName: doc.name,
     comments: parseCommentsArray(doc.comments),
+    codeRoundTripLink: doc.codeRoundTripLink ?? null,
   };
 
   if (doc.pages && doc.pages.length > 0) {
-    const { pages, pageOrder, activePageId, activePage } = pagesFromDocumentSnapshots(
+    const { pages, pageOrder, activePageId, activeSubPageId, activePage } = pagesFromDocumentSnapshots(
       doc.pages,
       doc.activePageId,
       opts?.skipHierarchyRepair ? { skipHierarchyRepair: true } : undefined,
@@ -271,6 +320,7 @@ export function documentToEditorPatch(
       pages,
       pageOrder,
       activePageId,
+      activeSubPageId,
       nodes: activePage.nodes,
       childOrder: activePage.childOrder,
       selectedIds: activePage.selectedIds,
@@ -302,6 +352,7 @@ export function documentToEditorPatch(
     pages: { ...pageMeta.pages, [pageMeta.activePageId]: legacyPage },
     pageOrder: pageMeta.pageOrder,
     activePageId: pageMeta.activePageId,
+    activeSubPageId: pageMeta.activeSubPageId ?? legacyPage.activeSubPageId ?? `${pageMeta.activePageId}-sp-1`,
     nodes: repaired.nodes,
     childOrder: repaired.childOrder,
     selectedIds: doc.selectedIds ?? [],
@@ -446,6 +497,54 @@ export function clearLocalDocument(): void {
   } catch {
     /* ignore quota / private mode */
   }
+}
+
+export function pageOrderFromDocument(doc: PaytmCraftDocument | null): string[] {
+  if (!doc) return [];
+  if (doc.pages?.length) return doc.pages.map((page) => page.id);
+  if (doc.activePageId) return [doc.activePageId];
+  return [];
+}
+
+/** True when any page (including non-active) has canvas content. */
+export function hasInMemoryWorkspaceContent(state: {
+  childOrder: Record<string, string[]>;
+  pages: Record<string, EditorPage>;
+  pageOrder: string[];
+}): boolean {
+  if ((state.childOrder[EDITOR_ROOT_KEY] ?? []).length > 0) return true;
+  if (state.pageOrder.length > 1) return true;
+  for (const pageId of state.pageOrder) {
+    const page = state.pages[pageId];
+    if (page && (page.childOrder[EDITOR_ROOT_KEY] ?? []).length > 0) return true;
+  }
+  return false;
+}
+
+/** Dashboard/editor share one store — memory wins when pages were added before localStorage caught up. */
+export function shouldPreserveInMemoryPages(
+  state: { pageOrder: string[] },
+  localDoc: PaytmCraftDocument | null,
+): boolean {
+  const localOrder = pageOrderFromDocument(localDoc);
+  if (state.pageOrder.length > localOrder.length) return true;
+  return state.pageOrder.some((id, index) => id !== localOrder[index]);
+}
+
+export function shouldRestoreLocalDocument(
+  state: {
+    childOrder: Record<string, string[]>;
+    pages: Record<string, EditorPage>;
+    pageOrder: string[];
+  },
+  localDoc: PaytmCraftDocument | null,
+): boolean {
+  if (!localDoc) return false;
+  if (shouldPreserveInMemoryPages(state, localDoc)) return false;
+  if (hasInMemoryWorkspaceContent(state)) return false;
+  const localOrder = pageOrderFromDocument(localDoc);
+  if (localOrder.length > state.pageOrder.length) return true;
+  return (state.childOrder[EDITOR_ROOT_KEY] ?? []).length === 0;
 }
 
 /** Fig/import glitches can leave nodes with no canvas root — loading that freezes the editor. */

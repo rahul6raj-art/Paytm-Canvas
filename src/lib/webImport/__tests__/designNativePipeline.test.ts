@@ -47,6 +47,30 @@ describe("layoutAnalyzer", () => {
     assert.equal(layout.counterAxisAlign, "stretch");
   });
 
+  it("maps block padding on non-flex containers", () => {
+    const card = node({
+      id: "card",
+      tagName: "div",
+      className: "card pml-more-theme-card",
+      rect: { x: 0, y: 0, width: 344, height: 76 },
+      styles: {
+        display: "block",
+        paddingTop: "24px",
+        paddingRight: "16px",
+        paddingBottom: "24px",
+        paddingLeft: "16px",
+      },
+      children: [
+        node({ id: "row", tagName: "div", rect: { x: 16, y: 24, width: 312, height: 28 } }),
+      ],
+    });
+    const layout = analyzeLayout(card);
+    assert.equal(layout.paddingTop, 24);
+    assert.equal(layout.paddingRight, 16);
+    assert.equal(layout.paddingBottom, 24);
+    assert.equal(layout.paddingLeft, 16);
+  });
+
   it("infers fill sizing from flex-grow", () => {
     const child = node({
       id: "child",

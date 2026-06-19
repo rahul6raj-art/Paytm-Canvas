@@ -11,6 +11,7 @@ import {
   pathOutlineD,
   pathPointCornerIndex,
   pathSupportsCornerRadius,
+  resolvePathOutlineD,
   shapeToPathPoints,
   vectorShapeHitOutlineD,
 } from "@/lib/shapes/shapeToPath";
@@ -181,5 +182,22 @@ describe("shapeToPath", () => {
     const unlinked = cornerRadiiStylePatch(node, [4, 8, 12, 0]);
     assert.equal(unlinked.cornerRadius, undefined);
     assert.deepEqual(unlinked.cornerRadii, [4, 8, 12, 0]);
+  });
+
+  it("prefers flattenedPathData over editable path points for imported paths", () => {
+    const node = baseNode({
+      type: "path",
+      pathClosed: true,
+      flattenedPathData: "M 0 0 L 10 0 L 10 10 L 0 10 Z M 3 3 L 7 3 L 7 7 L 3 7 Z",
+      pathPoints: [
+        { id: newPathPointId(), x: 0, y: 0 },
+        { id: newPathPointId(), x: 10, y: 0 },
+        { id: newPathPointId(), x: 10, y: 10 },
+        { id: newPathPointId(), x: 0, y: 10 },
+      ],
+    });
+    const d = resolvePathOutlineD(node);
+    assert.match(d, /M 3 3/);
+    assert.equal((d.match(/ Z/g) ?? []).length, 2);
   });
 });

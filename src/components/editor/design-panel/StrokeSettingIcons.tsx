@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import type { StrokeLinecap, StrokeLinejoin } from "@/lib/stroke";
+import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
 
 function IconBtn({
   active,
@@ -18,20 +19,21 @@ function IconBtn({
   children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      title={title}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        "flex h-6 flex-1 items-center justify-center rounded border transition-colors disabled:opacity-40",
-        active
-          ? "border-accent/45 bg-accent/15 text-app-fg"
-          : "border-app-border text-app-muted hover:bg-app-hover hover:text-app-fg",
-      )}
-    >
-      {children}
-    </button>
+    <EditorHintWrap title={title} disabled={disabled}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onClick}
+        className={cn(
+          "flex h-6 flex-1 items-center justify-center rounded border transition-colors disabled:opacity-40",
+          active
+            ? "border-accent/45 bg-accent/15 text-app-fg"
+            : "border-app-border text-app-muted hover:bg-app-hover hover:text-app-fg",
+        )}
+      >
+        {children}
+      </button>
+    </EditorHintWrap>
   );
 }
 

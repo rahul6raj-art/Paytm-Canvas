@@ -22,6 +22,7 @@ export function extractDomTreeInBrowser(): DomSnapshotNode {
 
   let seq = 0;
   const nextId = () => `dom-${++seq}`;
+  const PAINT_SELECTOR = "path,rect,circle,ellipse,line,polyline,polygon,text";
 
   type Raw = DomSnapshotNode;
 
@@ -66,6 +67,7 @@ export function extractDomTreeInBrowser(): DomSnapshotNode {
       opacity: cs.opacity,
       mixBlendMode: cs.mixBlendMode,
       filter: cs.filter,
+      backdropFilter: cs.backdropFilter,
       transform: cs.transform,
       objectFit: cs.objectFit,
       overflow: cs.overflow,
@@ -138,9 +140,22 @@ export function extractDomTreeInBrowser(): DomSnapshotNode {
     return out.length ? out : undefined;
   }
 
+  function isVisuallyHiddenFormControl(el: Element): boolean {
+    const tag = el.tagName.toLowerCase();
+    if (tag !== "input" && tag !== "textarea") return false;
+    const input = el as HTMLInputElement;
+    if (input.type === "hidden") return true;
+    const cs = window.getComputedStyle(el);
+    const w = el.getBoundingClientRect().width;
+    const h = el.getBoundingClientRect().height;
+    if (w <= 1 && h <= 1) return true;
+    const clip = cs.clip ?? "";
+    if (/rect\(0(?:px)?,\s*0(?:px)?,\s*0(?:px)?,\s*0(?:px)?\)/i.test(clip)) return true;
+    return false;
+  }
+
   function isHiddenElement(el: Element): boolean {
     if (el.hasAttribute("hidden")) return true;
-    if (el.getAttribute("aria-hidden") === "true") return true;
     const cls = ((el as HTMLElement).className ?? "").toString().toLowerCase();
     if (
       cls.includes("sr-only") ||
@@ -155,6 +170,12 @@ export function extractDomTreeInBrowser(): DomSnapshotNode {
     const opacity = parseFloat(cs.opacity);
     if (Number.isFinite(opacity) && opacity < 0.05) return true;
     if (parseFloat(cs.fontSize) < 1) return true;
+    // aria-hidden decorative chrome (home indicator, gradient overlays) can still be visible.
+    if (el.getAttribute("aria-hidden") === "true") {
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 2 || rect.height < 2) return true;
+      return false;
+    }
     return false;
   }
 
@@ -206,10 +227,54 @@ export function extractDomTreeInBrowser(): DomSnapshotNode {
   }
 
   function inlineSvgMarkup(el: Element): string | undefined {
-    if (el.tagName.toLowerCase() === "svg") {
-      return (el as SVGElement).outerHTML.slice(0, 8000);
-    }
-    return undefined;
+    if (el.tagName.toLowerCase() !== "svg") return undefined;
+    const svg = el as SVGSVGElement;
+    const liveTargets = svg.querySelectorAll<SVGElement>(PAINT_SELECTOR);
+    const clone = svg.cloneNode(true) as SVGSVGElement;
+    const cloneTargets = clone.querySelectorAll<SVGElement>(PAINT_SELECTOR);
+    const svgColor = window.getComputedStyle(svg).color;
+    cloneTargets.forEach((node, i) => {
+      const source = liveTargets[i] ?? node;
+      const cs = window.getComputedStyle(source);
+      const fillAttr = source.getAttribute("fill");
+      if (cs.fill && cs.fill !== "none") {
+        node.setAttribute("fill", cs.fill);
+      } else if (fillAttr === "currentColor" && svgColor) {
+        node.setAttribute("fill", svgColor);
+      } else if (fillAttr === "none" || cs.fill === "none") {
+        node.setAttribute("fill", "none");
+      }
+      const strokeAttr = source.getAttribute("stroke");
+      if (cs.stroke && cs.stroke !== "none") {
+        node.setAttribute("stroke", cs.stroke);
+        if (cs.strokeWidth) node.setAttribute("stroke-width", cs.strokeWidth);
+        if (cs.strokeLinecap && cs.strokeLinecap !== "butt") {
+          node.setAttribute("stroke-linecap", cs.strokeLinecap);
+        }
+        if (cs.strokeLinejoin && cs.strokeLinejoin !== "miter") {
+          node.setAttribute("stroke-linejoin", cs.strokeLinejoin);
+        }
+      } else if (strokeAttr === "currentColor" && svgColor) {
+        node.setAttribute("stroke", svgColor);
+      } else {
+        node.setAttribute("stroke", "none");
+        node.removeAttribute("stroke-width");
+      }
+      const fillRule =
+        source.getAttribute("fill-rule") ??
+        source.getAttribute("fillRule") ??
+        cs.getPropertyValue("fill-rule");
+      if (fillRule) node.setAttribute("fill-rule", fillRule);
+      const clipRule =
+        source.getAttribute("clip-rule") ??
+        source.getAttribute("clipRule") ??
+        cs.getPropertyValue("clip-rule");
+      if (clipRule) node.setAttribute("clip-rule", clipRule);
+      if (cs.opacity && cs.opacity !== "1") {
+        node.setAttribute("opacity", cs.opacity);
+      }
+    });
+    return clone.outerHTML.slice(0, 128_000);
   }
 
   function aggregateNestedText(el: Element): string | undefined {
@@ -240,10 +305,27 @@ export function extractDomTreeInBrowser(): DomSnapshotNode {
     return undefined;
   }
 
+  function hasMixedInlineContent(el: Element): boolean {
+    let hasText = false;
+    let hasElement = false;
+    for (const child of el.childNodes) {
+      if (child.nodeType === Node.TEXT_NODE && (child.textContent ?? "").trim()) hasText = true;
+      if (child.nodeType === Node.ELEMENT_NODE) hasElement = true;
+    }
+    return hasText && hasElement;
+  }
+
   function walkChildNodes(el: Element, depth: number): Raw[] {
+    const tag = el.tagName.toLowerCase();
+    // Inner SVG shapes are captured via svgMarkup on the <svg> node.
+    if (tag === "svg") return [];
+    const splitInlineText =
+      hasMixedInlineContent(el) &&
+      (tag === "p" || tag === "span" || tag === "div" || tag === "label");
     const children: Raw[] = [];
     for (const child of Array.from(el.childNodes)) {
       if (child.nodeType === Node.TEXT_NODE) {
+        if (!splitInlineText) continue;
         const raw = (child.textContent ?? "").replace(/\s+/g, " ");
         const trimmed = raw.trim();
         if (!trimmed) continue;
@@ -276,6 +358,7 @@ export function extractDomTreeInBrowser(): DomSnapshotNode {
   function walk(el: Element, depth: number): Raw | null {
     const tag = el.tagName.toLowerCase();
     if (SKIP.has(tag)) return null;
+    if (isVisuallyHiddenFormControl(el)) return null;
     if (isHiddenElement(el)) return null;
 
     const rect = rectOf(el);

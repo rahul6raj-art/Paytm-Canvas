@@ -6,9 +6,10 @@ import {
   sweepDegToPercent,
   sweepPercentToDeg,
 } from "@/lib/shapes/ellipseArc";
-import { appFieldClass, appFieldRadius } from "@/lib/appFieldStyles";
+import { appFieldShellClassCompact } from "@/lib/appFieldStyles";
 import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
+import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
 import { inspectorInlineSvgClass } from "@/lib/inspectorIconStyles";
 import type { EditorNode, NodeStylePatch } from "@/stores/useEditorStore";
 
@@ -62,30 +63,31 @@ function ArcSegmentInput({
 }: ArcSegmentInputProps) {
   return (
     <div className={cn("flex min-w-0 flex-1 items-center", className)}>
-      <input
-        type="text"
-        inputMode="decimal"
-        disabled={disabled}
-        title={title}
-        className={cn(
-          appFieldClass,
-          "h-full min-h-0 flex-1 border-0 bg-transparent px-1.5 shadow-none ring-0 focus-visible:ring-0",
-          "text-ui tabular-nums",
-          inputClassName,
-        )}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onBlur={onCommit}
-        onKeyDown={(e) => {
-          handlePanelFieldKeyDown(e, {
-            onEnter: () => {
-              onCommit();
-              e.currentTarget.blur();
-            },
-            onArrowNudge: onNudge,
-          });
-        }}
-      />
+      <EditorHintWrap title={title} disabled={disabled} anchorClassName="contents min-w-0 flex-1">
+        <input
+          type="text"
+          inputMode="decimal"
+          disabled={disabled}
+          className={cn(
+            appFieldClass,
+            "h-full min-h-0 flex-1 border-0 bg-transparent px-1.5 shadow-none ring-0 focus-visible:ring-0",
+            "text-ui tabular-nums",
+            inputClassName,
+          )}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onCommit}
+          onKeyDown={(e) => {
+            handlePanelFieldKeyDown(e, {
+              onEnter: () => {
+                onCommit();
+                e.currentTarget.blur();
+              },
+              onArrowNudge: onNudge,
+            });
+          }}
+        />
+      </EditorHintWrap>
     </div>
   );
 }
@@ -188,8 +190,8 @@ export function ArcControls({
       <div className="inspector-field-label">Arc</div>
       <div
         className={cn(
-          "flex h-6 divide-x divide-app-border overflow-hidden border border-app-border bg-app-field",
-          appFieldRadius,
+          appFieldShellClassCompact,
+          "divide-x divide-app-border",
           locked && "opacity-45",
         )}
       >

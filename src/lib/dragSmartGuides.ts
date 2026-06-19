@@ -1,4 +1,5 @@
 import type { EditorNode, GuideLine } from "@/stores/useEditorStore";
+import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import { screenPxToWorld } from "@/lib/canvasVisual";
 import { getNodeTransformedWorldBounds } from "@/lib/transformMath";
 
@@ -33,6 +34,26 @@ function isDescendantOf(
   return false;
 }
 
+/** Top-level canvas artboard root for a node (direct child of `EDITOR_ROOT_KEY`). */
+function canvasRootId(nodes: Record<string, EditorNode>, nodeId: string): string | null {
+  let cur: string | null = nodeId;
+  while (cur) {
+    const parentId = nodes[cur]?.parentId ?? null;
+    if (parentId == null || parentId === EDITOR_ROOT_KEY) return cur;
+    cur = parentId;
+  }
+  return null;
+}
+
+function movingCanvasRoots(movingIds: string[], nodes: Record<string, EditorNode>): Set<string> {
+  const roots = new Set<string>();
+  for (const id of movingIds) {
+    const root = canvasRootId(nodes, id);
+    if (root) roots.add(root);
+  }
+  return roots;
+}
+
 function shouldExcludeStatic(
   id: string,
   movingSet: Set<string>,
@@ -47,14 +68,33 @@ function shouldExcludeStatic(
   return !n?.visible;
 }
 
+/** Snap targets: same-artboard detail; other artboards use outer frame bounds only. */
+function shouldIncludeStaticRef(
+  id: string,
+  movingSet: Set<string>,
+  movingRoots: Set<string>,
+  nodes: Record<string, EditorNode>,
+): boolean {
+  if (shouldExcludeStatic(id, movingSet, nodes)) return false;
+
+  const nodeRoot = canvasRootId(nodes, id);
+  if (!nodeRoot) return true;
+
+  if (movingRoots.has(nodeRoot)) return true;
+
+  // Other artboard: measure to its root bounds, not nested content.
+  return id === nodeRoot;
+}
+
 function collectStaticRects(
   movingIds: string[],
   nodes: Record<string, EditorNode>,
 ): WorldRect[] {
   const movingSet = new Set(movingIds);
+  const movingRoots = movingCanvasRoots(movingIds, nodes);
   const out: WorldRect[] = [];
   for (const id of Object.keys(nodes)) {
-    if (shouldExcludeStatic(id, movingSet, nodes)) continue;
+    if (!shouldIncludeStaticRef(id, movingSet, movingRoots, nodes)) continue;
     out.push(getNodeTransformedWorldBounds(id, nodes));
   }
   return out;
@@ -97,6 +137,34 @@ function midX(a: WorldRect, b: WorldRect): number {
   const left = Math.max(a.x, b.x);
   const right = Math.min(a.x + a.width, b.x + b.width);
   return (left + right) / 2;
+}
+
+type GapDirection = "left" | "right" | "top" | "bottom";
+
+function gapDirection(m: DragMeasurementLine, bounds: WorldRect): GapDirection | null {
+  if (Math.abs(m.y1 - m.y2) <= ALIGN_EPS) {
+    if (Math.abs(m.x2 - bounds.x) <= ALIGN_EPS && m.x1 < m.x2) return "left";
+    if (Math.abs(m.x1 - (bounds.x + bounds.width)) <= ALIGN_EPS && m.x2 > m.x1) return "right";
+  }
+  if (Math.abs(m.x1 - m.x2) <= ALIGN_EPS) {
+    if (Math.abs(m.y2 - bounds.y) <= ALIGN_EPS && m.y1 < m.y2) return "top";
+    if (Math.abs(m.y1 - (bounds.y + bounds.height)) <= ALIGN_EPS && m.y2 > m.y1) return "bottom";
+  }
+  return null;
+}
+
+function keepNearestGapMeasurements(
+  candidates: DragMeasurementLine[],
+  bounds: WorldRect,
+): DragMeasurementLine[] {
+  const best: Partial<Record<GapDirection, DragMeasurementLine>> = {};
+  for (const m of candidates) {
+    const dir = gapDirection(m, bounds);
+    if (!dir) continue;
+    const prev = best[dir];
+    if (!prev || m.distance < prev.distance) best[dir] = m;
+  }
+  return Object.values(best).filter((m): m is DragMeasurementLine => m != null);
 }
 
 /** Figma-style snap + alignment guides + gap measurements while dragging. */
@@ -219,14 +287,7 @@ export function computeDragSmartGuides(
   }
 
   const measurements: DragMeasurementLine[] = [];
-  const measureKeys = new Set<string>();
-
-  const addMeasure = (m: DragMeasurementLine) => {
-    const key = `${Math.round(m.x1)}:${Math.round(m.y1)}:${Math.round(m.x2)}:${Math.round(m.y2)}`;
-    if (measureKeys.has(key)) return;
-    measureKeys.add(key);
-    measurements.push(m);
-  };
+  const gapCandidates: DragMeasurementLine[] = [];
 
   for (const s of statics) {
     if (verticalOverlap(finalBounds, s)) {
@@ -234,7 +295,7 @@ export function computeDragSmartGuides(
       if (s.x + s.width <= finalBounds.x + ALIGN_EPS) {
         const gap = finalBounds.x - (s.x + s.width);
         if (gap > 0 && gap <= MEASURE_MAX_GAP) {
-          addMeasure({
+          gapCandidates.push({
             x1: s.x + s.width,
             y1: my,
             x2: finalBounds.x,
@@ -246,7 +307,7 @@ export function computeDragSmartGuides(
       if (s.x >= finalBounds.x + finalBounds.width - ALIGN_EPS) {
         const gap = s.x - (finalBounds.x + finalBounds.width);
         if (gap > 0 && gap <= MEASURE_MAX_GAP) {
-          addMeasure({
+          gapCandidates.push({
             x1: finalBounds.x + finalBounds.width,
             y1: my,
             x2: s.x,
@@ -261,7 +322,7 @@ export function computeDragSmartGuides(
       if (s.y + s.height <= finalBounds.y + ALIGN_EPS) {
         const gap = finalBounds.y - (s.y + s.height);
         if (gap > 0 && gap <= MEASURE_MAX_GAP) {
-          addMeasure({
+          gapCandidates.push({
             x1: mx,
             y1: s.y + s.height,
             x2: mx,
@@ -273,7 +334,7 @@ export function computeDragSmartGuides(
       if (s.y >= finalBounds.y + finalBounds.height - ALIGN_EPS) {
         const gap = s.y - (finalBounds.y + finalBounds.height);
         if (gap > 0 && gap <= MEASURE_MAX_GAP) {
-          addMeasure({
+          gapCandidates.push({
             x1: mx,
             y1: finalBounds.y + finalBounds.height,
             x2: mx,
@@ -284,6 +345,8 @@ export function computeDragSmartGuides(
       }
     }
   }
+
+  measurements.push(...keepNearestGapMeasurements(gapCandidates, finalBounds));
 
   return {
     dx: snapDx,

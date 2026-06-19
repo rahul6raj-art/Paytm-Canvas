@@ -139,6 +139,35 @@ describe("svgPerSideStroke", () => {
     assert.match(markup!, /fill="rgba\(0,0,255,1\)"/);
   });
 
+  it("center all-sides gradient stroke uses outline fill with gradient url", () => {
+    const defs: string[] = [];
+    const node = rectNode({
+      strokeType: "gradient",
+      strokeGradient: {
+        kind: "linear",
+        stops: [
+          { id: "s1", color: "#ff0000", position: 0 },
+          { id: "s2", color: "#0000ff", position: 100 },
+        ],
+        transform: { cx: 0.5, cy: 0.5, width: 1, height: 1, rotation: 0 },
+        handles: [
+          { x: 0, y: 0.5 },
+          { x: 1, y: 0.5 },
+          { x: 1, y: 0 },
+        ],
+      },
+      strokePosition: "center",
+    });
+    const markup = svgRectLike(node, {
+      nodeId: node.id,
+      registerGradient: (id, m) => defs.push(m),
+    });
+    assert.match(markup, /fill="url\(#pc-grad-pc-sg-r1\)"/);
+    assert.doesNotMatch(markup, /stroke="#111111"/);
+    assert.doesNotMatch(markup, /stroke-width="4"/);
+    assert.ok(defs.some((d) => d.includes('id="pc-grad-pc-sg-r1"')));
+  });
+
   it("gradient per-side stroke registers paint and uses filled bands", () => {
     const node = rectNode({
       strokeSides: "custom",

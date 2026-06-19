@@ -9,6 +9,7 @@ import type {
 import { IMPORT_WEB_LIMITS } from "@/lib/webImport/types";
 import { validateReactPreviewUrl } from "@/lib/codeRoundTrip/reactPreviewUrlValidation";
 import { validateImportWebUrl } from "@/lib/webImport/urlValidation";
+import { focusDomTreeOnReactScreenRoot } from "@/lib/webImport/reactPreviewDomRoot";
 import { filterDomSnapshotTree, countDomNodes, pruneDomTreeByLimit } from "@/lib/webImport/domFilter";
 import { normalizeDomSnapshot } from "@/lib/webImport/domNormalizer";
 import { annotateSectionHints, detectSections } from "@/lib/webImport/sectionDetector";
@@ -18,6 +19,37 @@ import { inlineDomImageSources } from "@/lib/webImport/server/inlineDomImageSour
 import { launchImportBrowser } from "@/lib/webImport/server/launchPlaywrightBrowser";
 import { loadPageForImport } from "@/lib/webImport/server/pageLoad";
 import { loadDomExtractorBundle } from "@/lib/webImport/server/bundleDomExtractor";
+import {
+  captureThemeFromUrl,
+  defaultCaptureColorTheme,
+  PML_THEME_STORAGE_KEY,
+  type CaptureColorTheme,
+} from "@/lib/webImport/captureTheme";
+import type { Page } from "playwright";
+
+async function extractDomTreeWithRetry(
+  page: Page,
+  bundleCode: string,
+): Promise<DomSnapshotNode> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+      return (await page.evaluate((code: string) => {
+        // eslint-disable-next-line no-eval
+        return eval(`${code}; __craftDomExtract.extractDomTreeInBrowser()`);
+      }, bundleCode)) as DomSnapshotNode;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const retryable =
+        msg.includes("Execution context was destroyed") ||
+        msg.includes("navigation") ||
+        msg.includes("Target closed");
+      if (!retryable || attempt === 2) throw e;
+      await page.waitForTimeout(400);
+    }
+  }
+  throw new Error("DOM extract failed after retries.");
+}
 
 export type CaptureStep =
   | "launching"
@@ -51,17 +83,36 @@ export async function runImportWebCapture(
 
   const browser = await launchImportBrowser();
 
+  const captureTheme: CaptureColorTheme =
+    body.urlPolicy === "react-preview"
+      ? captureThemeFromUrl(targetUrl ?? "") ?? defaultCaptureColorTheme()
+      : "light";
+
   try {
     const context = await browser.newContext({
       viewport,
       deviceScaleFactor: 1,
       ignoreHTTPSErrors: false,
       acceptDownloads: false,
-      colorScheme: "light",
+      colorScheme: captureTheme,
       userAgent:
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
       locale: "en-US",
     });
+
+    if (body.urlPolicy === "react-preview") {
+      await context.addInitScript(
+        ({ storageKey, theme }: { storageKey: string; theme: string }) => {
+          try {
+            localStorage.setItem(storageKey, theme);
+          } catch {
+            /* ignore */
+          }
+        },
+        { storageKey: PML_THEME_STORAGE_KEY, theme: captureTheme },
+      );
+    }
+
     const page = await context.newPage();
     page.setDefaultNavigationTimeout(IMPORT_WEB_LIMITS.navigationTimeoutMs);
     page.setDefaultTimeout(IMPORT_WEB_LIMITS.navigationTimeoutMs);
@@ -122,14 +173,14 @@ export async function runImportWebCapture(
       };
     }
 
-    const rawTree = (await page.evaluate((bundleCode: string) => {
-      // eslint-disable-next-line no-eval
-      return eval(`${bundleCode}; __craftDomExtract.extractDomTreeInBrowser()`);
-    }, loadDomExtractorBundle())) as DomSnapshotNode;
+    const rawTree = (await extractDomTreeWithRetry(page, loadDomExtractorBundle())) as DomSnapshotNode;
     let tree = filterDomSnapshotTree(rawTree) ?? rawTree;
     tree = await inlineDomImageSources(tree, context.request);
     await context.close();
     tree = normalizeDomSnapshot(tree);
+    if (body.urlPolicy === "react-preview") {
+      tree = focusDomTreeOnReactScreenRoot(tree, viewport);
+    }
     tree = annotateSectionHints(tree);
     tree = annotateComponentHints(tree);
     if (countDomNodes(tree) > IMPORT_WEB_LIMITS.maxNodes) {
@@ -139,8 +190,8 @@ export async function runImportWebCapture(
     const pageMeta: ImportWebPageMeta = {
       title: title || "Imported page",
       url: targetUrl,
-      width: viewport.width,
-      height: Math.min(scrollHeight, IMPORT_WEB_LIMITS.maxPageHeight),
+      width: Math.round(tree.rect.width),
+      height: Math.min(Math.round(tree.rect.height), IMPORT_WEB_LIMITS.maxPageHeight),
     };
 
     const sections = detectSections(tree);

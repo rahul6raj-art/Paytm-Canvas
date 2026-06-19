@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { useEditorStore } from "@/stores/useEditorStore";
+import { enterTextEditModeAtWorldPoint } from "@/lib/text/textEditMode";
 import { beginCanvasNodeDrag, type ClientToWorldFn } from "@/lib/canvasNodeDrag";
 import { prepareAltDragDuplicate } from "@/lib/canvasAltDrag";
 import {
@@ -23,21 +23,32 @@ import {
 } from "@/lib/editMode/shapeEditGate";
 import { activateCanvasForShortcuts } from "@/lib/editorKeyboardFocus";
 import { pickDeepestNodeAtWorldPoint } from "@/lib/tree";
+import { useEditorStore } from "@/stores/useEditorStore";
 
 export function useCanvasHitHandlers(clientToWorld: ClientToWorldFn) {
   const { spaceDown, panning: canvasPanning, commandDown } = useCanvasInteraction();
 
-  const onEnter = useCallback((nodeId: string) => {
-    const st = useEditorStore.getState();
-    if (st.editingTextId || st.pathEditModeNodeId) return;
-    const n = st.nodes[nodeId];
-    if (!n?.visible) return;
-    if (st.editorMode === "inspect") {
-      st.setHoveredCanvasId(nodeId);
-      return;
-    }
-    if (!n.locked) st.setHoveredCanvasId(nodeId);
-  }, []);
+  const onEnter = useCallback(
+    (nodeId: string) => {
+      const st = useEditorStore.getState();
+      if (st.editingTextId || st.pathEditModeNodeId) return;
+      const n = st.nodes[nodeId];
+      if (!n?.visible) return;
+      const hoverId = selectionTargetForClick(
+        nodeId,
+        st.nodes,
+        st.childOrder,
+        st.objectEditModeNodeId,
+        commandDown,
+      );
+      if (st.editorMode === "inspect") {
+        st.setHoveredCanvasId(hoverId);
+        return;
+      }
+      if (!st.nodes[hoverId]?.locked) st.setHoveredCanvasId(hoverId);
+    },
+    [commandDown],
+  );
 
   const onLeave = useCallback((nodeId: string) => {
     const st = useEditorStore.getState();
@@ -87,9 +98,7 @@ export function useCanvasHitHandlers(clientToWorld: ClientToWorldFn) {
         });
       }
       if (editTextId) {
-        st.pushHistory();
-        st.select(editTextId);
-        st.setEditingTextId(editTextId);
+        enterTextEditModeAtWorldPoint(editTextId, w.x, w.y);
         return;
       }
 
@@ -109,7 +118,9 @@ export function useCanvasHitHandlers(clientToWorld: ClientToWorldFn) {
   const onPointerDown = useCallback(
     (e: React.PointerEvent, nodeId: string) => {
       if (e.button === 0 || e.button === 2) {
-        activateCanvasForShortcuts();
+        if (!useEditorStore.getState().editingTextId) {
+          activateCanvasForShortcuts();
+        }
       }
 
       const st = useEditorStore.getState();
@@ -161,7 +172,7 @@ export function useCanvasHitHandlers(clientToWorld: ClientToWorldFn) {
       if (e.altKey && !prepareAltDragDuplicate(targetId)) return;
 
       beginCanvasNodeDrag({
-        nodeId,
+        nodeId: targetId,
         pointerId: e.pointerId,
         clientX: e.clientX,
         clientY: e.clientY,
@@ -170,7 +181,7 @@ export function useCanvasHitHandlers(clientToWorld: ClientToWorldFn) {
         fromAltDragDuplicate: e.altKey,
       });
     },
-    [clientToWorld, spaceDown, canvasPanning],
+    [clientToWorld, spaceDown, canvasPanning, commandDown],
   );
 
   return {

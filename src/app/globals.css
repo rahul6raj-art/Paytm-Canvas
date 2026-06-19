@@ -22,6 +22,8 @@
   --ui-leading-ui-sm: var(--ui-leading-ui);
   --ui-icon-toolbar: calc(15px * var(--ui-scale));
   --ui-icon-canvas-rail: calc(18px * var(--ui-scale));
+  --inspector-control-height: 1.75rem;
+  --inspector-control-height-compact: 1.5rem;
 
   --app-bg: 0 0% 96%;
   --app-fg: 0 0% 9%;
@@ -52,7 +54,7 @@
   --pc-canvas-selection: #18a0fb;
   --pc-canvas-selection-fill: rgba(24, 160, 251, 0.08);
   --pc-canvas-selection-muted: rgba(24, 160, 251, 0.12);
-  --pc-canvas-hover-outline: rgba(24, 160, 251, 0.38);
+  --pc-canvas-hover-outline: #18a0fb;
   --pc-canvas-inspect-hover: rgba(244, 114, 182, 0.5);
   --pc-canvas-locked-outline: rgba(214, 158, 46, 0.5);
   --pc-canvas-instance-outline: rgba(151, 71, 255, 0.45);
@@ -65,44 +67,82 @@
 }
 
 .dark {
-  --app-bg: 0 0% 10%;
-  --app-fg: 0 0% 90%;
-  --app-muted: 0 0% 58%;
-  --app-subtle: 0 0% 44%;
-  --app-panel: 0 0% 11%;
-  --app-surface: 0 0% 8%;
-  --app-raised: 0 0% 13%;
-  --app-card: 0 0% 11%;
+  --app-bg: 0 0% 4%;
+  --app-fg: 0 0% 98%;
+  --app-muted: 0 0% 64%;
+  --app-subtle: 0 0% 64%;
+  --app-panel: 0 0% 9%;
+  --app-surface: 0 0% 6%;
+  --app-raised: 0 0% 8%;
+  --app-card: 0 0% 9%;
   --app-inset: 0 0% 15%;
   --app-border: 0 0% 100%;
-  --app-border-opacity: 0.07;
-  --app-border-subtle-opacity: 0.04;
-  --app-panel-edge-opacity: 0.095;
+  --app-border-opacity: 0.08;
+  --app-border-subtle-opacity: 0.05;
+  --app-panel-edge-opacity: 0.08;
   --app-hover: 0 0% 100%;
-  --app-hover-opacity: 0.055;
+  --app-hover-opacity: 0.06;
   --app-overlay: 0 0% 100%;
-  --app-overlay-opacity: 0.036;
-  --app-toolbar-well: 0 0% 0%;
-  --app-toolbar-well-opacity: 0.34;
+  --app-overlay-opacity: 0.04;
+  --app-toolbar-well: 0 0% 15%;
+  --app-toolbar-well-opacity: 1;
   --app-inset-highlight: 0 0% 100%;
-  --app-inset-highlight-opacity: 0.05;
+  --app-inset-highlight-opacity: 0.04;
   --app-scrollbar: 0 0% 100%;
-  --app-scrollbar-opacity: 0.14;
-  --app-field-bg: 0 0% 17%;
-  --app-field-fg: 0 0% 96%;
+  --app-scrollbar-opacity: 0.12;
+  --app-field-bg: 0 0% 15%;
+  --app-field-fg: 0 0% 98%;
   --pc-canvas-selection: rgba(138, 188, 255, 0.68);
   --pc-canvas-selection-fill: rgba(138, 188, 255, 0.05);
   --pc-canvas-selection-muted: rgba(138, 188, 255, 0.1);
-  --pc-canvas-hover-outline: rgba(138, 188, 255, 0.22);
+  --pc-canvas-hover-outline: rgba(138, 188, 255, 0.95);
   --pc-canvas-inspect-hover: rgba(244, 114, 182, 0.38);
   --pc-canvas-locked-outline: rgba(214, 158, 46, 0.38);
   --pc-canvas-instance-outline: rgba(180, 140, 255, 0.38);
   --pc-canvas-group-outline: rgba(255, 255, 255, 0.09);
   --pc-canvas-boolean-outline: rgba(138, 188, 255, 0.28);
   --pc-canvas-mask-outline: rgba(196, 150, 255, 0.32);
-  /* Pasteboard — a touch lighter than chrome, without the washed-out grey of the old theme */
-  --pc-canvas-workspace: 0 0% 13%;
+  /* Pasteboard — deep grey canvas like reference UI */
+  --pc-canvas-workspace: 0 0% 4%;
   color-scheme: dark;
+}
+
+/* Editor chrome — slightly larger type, icons, and touch targets than the app default. */
+[data-editor-shell] {
+  --ui-scale: 1.125;
+  --editor-chrome-radius: 1rem;
+  --editor-sidebar-radius: var(--editor-chrome-radius);
+  --ui-font-ui: calc(13px * var(--ui-scale));
+  --ui-leading-ui: calc(19px * var(--ui-scale));
+  --ui-icon-toolbar: calc(17px * var(--ui-scale));
+  --ui-icon-canvas-rail: calc(21px * var(--ui-scale));
+  --inspector-control-height: 2rem;
+  --inspector-control-height-compact: 1.75rem;
+  font-size: var(--ui-font-ui);
+  line-height: var(--ui-leading-ui);
+}
+
+html.dark [data-editor-shell] {
+  /* Match canvas pasteboard — sections defined by border only, not a lighter fill. */
+  --editor-sidebar-card: 0 0% 4%;
+  --app-panel: 0 0% 4%;
+  --app-raised: 0 0% 6%;
+  --app-inset: 0 0% 8%;
+  --app-inset-highlight-opacity: 0;
+  --pc-canvas-workspace: 0 0% 12%;
+}
+
+html:not(.dark) [data-editor-shell] {
+  /* Light editor — bright chrome cards on a white pasteboard. */
+  --app-panel: 0 0% 100%;
+  --app-raised: 0 0% 98%;
+  --app-inset: 0 0% 94%;
+  --pc-canvas-workspace: 0 0% 100%;
+}
+
+html:not(.dark) [data-dashboard-shell] {
+  /* Dashboard — soft grey workspace so white cards read clearly. */
+  --pc-canvas-workspace: 0 0% 94%;
 }
 
 html {
@@ -128,6 +168,59 @@ body {
     @apply text-ui font-medium text-app-subtle;
   }
 
+  /* Editor side columns — transparent shell; cards float above the canvas. */
+  .editor-sidebar-shell {
+    @apply pointer-events-none bg-transparent;
+  }
+
+  .editor-sidebar-section {
+    @apply pointer-events-auto border border-app-border-subtle bg-chrome-panel shadow-none;
+    border-radius: var(--editor-chrome-radius, 1rem);
+  }
+
+  .editor-floating-menu {
+    --ui-scale: 1.125;
+    --ui-font-ui: calc(13px * var(--ui-scale));
+    --ui-leading-ui: calc(19px * var(--ui-scale));
+    border-radius: var(--editor-chrome-radius, 1rem);
+    font-size: var(--ui-font-ui);
+    line-height: var(--ui-leading-ui);
+    @apply border border-app-border-subtle bg-app-panel py-1.5 shadow-xl;
+  }
+
+  .editor-floating-menu [role="menuitem"] {
+    @apply flex w-full min-h-9 items-center gap-2 px-3.5 py-2 text-left text-ui font-medium text-app-fg transition-colors hover:bg-app-hover;
+  }
+
+  .editor-floating-menu .section-heading {
+    @apply px-3.5 py-2;
+  }
+
+  .editor-floating-menu [role="option"] {
+    @apply text-app-fg hover:bg-app-hover;
+  }
+
+  /** Inspector floating panels (gradient, color, typography, stroke, etc.) */
+  .editor-inspector-dialog {
+    @apply flex flex-col overflow-hidden border border-app-border-subtle bg-app-panel shadow-xl;
+    border-radius: var(--editor-chrome-radius, 1rem);
+    font-size: var(--ui-font-ui);
+    line-height: var(--ui-leading-ui);
+  }
+
+  .editor-inspector-dialog-header {
+    @apply flex shrink-0 cursor-grab select-none touch-none items-center justify-between gap-2 border-b border-app-panel-edge px-3 py-2 active:cursor-grabbing;
+  }
+
+  .editor-inspector-dialog-body {
+    @apply thin-scroll min-h-0 flex-1 overflow-y-auto px-3 py-2.5;
+  }
+
+  [data-editor-shell] .chrome-segmented-tab-active {
+    @apply bg-app-panel text-app-fg shadow-none;
+    border: 1px solid hsl(var(--app-border) / 0.16);
+  }
+
   .chrome-tab {
     @apply relative flex h-full w-full min-w-0 items-center justify-center overflow-hidden px-1 text-center text-ui font-medium transition-colors;
   }
@@ -137,7 +230,15 @@ body {
   }
 
   .chrome-tab-active {
-    @apply text-app-fg after:absolute after:bottom-0 after:inset-x-2 after:h-px after:rounded-full after:bg-accent;
+    @apply text-app-fg after:absolute after:bottom-0 after:inset-x-2 after:h-px after:rounded-full after:bg-app-fg;
+  }
+
+  .chrome-segmented-tab {
+    @apply rounded-md px-2.5 py-2 text-ui font-medium transition-colors;
+  }
+
+  .chrome-segmented-tab-active {
+    @apply bg-app-fg text-app-bg shadow-sm;
   }
 
   .chrome-menu-item {
@@ -148,8 +249,42 @@ body {
     @apply text-ui text-app-fg hover:bg-app-hover;
   }
 
+  .editor-menu-dropdown {
+    @apply min-w-[260px] py-1.5 text-ui;
+    border-radius: var(--editor-chrome-radius, 1rem);
+  }
+
+  .editor-menu-dropdown-item {
+    @apply flex w-full min-h-9 items-center justify-between gap-3 px-3.5 py-2 text-left text-ui;
+  }
+
+  .editor-menu-dropdown-item > button.min-w-0 {
+    @apply bg-transparent p-0;
+  }
+
+  .editor-menu-dropdown-shortcut {
+    @apply shrink-0 font-mono text-ui tabular-nums text-app-subtle;
+  }
+
   .panel-list-row {
     @apply flex min-h-7 items-center gap-2 rounded px-2 text-ui transition-colors;
+  }
+
+  [data-editor-shell] .panel-list-row {
+    @apply min-h-8 gap-2.5 px-2.5;
+  }
+
+  [data-editor-shell] .chrome-tab {
+    @apply px-1.5;
+  }
+
+  [data-editor-shell] .section-heading {
+    @apply text-ui font-medium text-app-subtle;
+  }
+
+  [data-editor-shell] .inspector-field-label,
+  [data-editor-shell] .inspector-helper-text {
+    @apply text-ui;
   }
 
   .inspector-field-label {
@@ -310,4 +445,31 @@ body {
     opacity: 1;
     transform: translateX(0);
   }
+}
+
+/* Seamless loop: inner column is duplicated; -50% scrolls exactly one copy. */
+@keyframes aiGenPlusBlink {
+  0%,
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.85);
+  }
+  12%,
+  28% {
+    opacity: var(--plus-peak-opacity, 0.55);
+    transform: translate(-50%, -50%) scale(1);
+  }
+  40% {
+    opacity: calc(var(--plus-peak-opacity, 0.55) * 0.15);
+    transform: translate(-50%, -50%) scale(0.92);
+  }
+  58% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.85);
+  }
+}
+
+.ai-gen-plus-blink {
+  animation: aiGenPlusBlink ease-in-out infinite;
+  will-change: opacity, transform;
 }

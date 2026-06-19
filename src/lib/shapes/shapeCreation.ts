@@ -1,9 +1,9 @@
 import type { EditorNode } from "@/stores/useEditorStore";
+import { defaultCanvasForegroundColor } from "@/lib/canvasForeground";
 import { normalizePathNode } from "@/lib/pathGeometry";
 import { RESIZE_MIN_DIMENSION } from "@/lib/resize";
 import {
   DEFAULT_SHAPE_FILL,
-  DEFAULT_SHAPE_STROKE,
   editorNodeKindForShapeType,
   shapeTypeLabel,
   type ShapeType,
@@ -185,7 +185,7 @@ export function createShapeNode(
     fill: style?.fill ?? DEFAULT_SHAPE_FILL,
     fillEnabled: true,
     fillOpacity: 1,
-    strokeColor: style?.strokeColor ?? DEFAULT_SHAPE_STROKE,
+    strokeColor: style?.strokeColor ?? defaultCanvasForegroundColor(),
     strokeWidth: style?.strokeWidth ?? 0,
     strokeStyle: "solid" as const,
     strokePosition: "center" as const,
@@ -209,7 +209,7 @@ export function createShapeNode(
         fillEnabled: false,
         fill: "transparent",
         fillOpacity: 0,
-        strokeColor: style?.strokeColor ?? DEFAULT_SHAPE_STROKE,
+        strokeColor: style?.strokeColor ?? defaultCanvasForegroundColor(),
         strokeWidth: sw,
         strokeLinecap: "butt",
       };
@@ -222,7 +222,7 @@ export function createShapeNode(
       fillEnabled: false,
       fill: "transparent",
       fillOpacity: 0,
-      strokeColor: style?.strokeColor ?? DEFAULT_SHAPE_STROKE,
+      strokeColor: style?.strokeColor ?? defaultCanvasForegroundColor(),
       strokeWidth: sw,
       strokeLinecap: "round",
     };

@@ -28,7 +28,7 @@ export function InspectorExportSection({
   onExportPdf: () => void;
 }) {
   const btnClass = variant === "inspect" ? INSPECT_BTN : PANEL_BTN;
-  const rowClass = variant === "inspect" ? "grid grid-cols-3 gap-2" : "flex gap-1.5";
+  const rowClass = "grid grid-cols-3 gap-2";
 
   return (
     <div className="space-y-2">

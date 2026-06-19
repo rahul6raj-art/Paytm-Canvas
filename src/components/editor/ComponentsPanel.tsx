@@ -100,7 +100,7 @@ function ComponentCard({
   );
 }
 
-export function ComponentsPanel() {
+export function ComponentsPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const leftTab = useEditorStore((s) => s.leftTab);
   const nodes = useEditorStore((s) => s.nodes);
   const selectedIds = useEditorStore((s) => s.selectedIds);
@@ -181,6 +181,7 @@ export function ComponentsPanel() {
   };
 
   const onSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    e.stopPropagation();
     if (trySelectAllPanelField(e)) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -209,7 +210,7 @@ export function ComponentsPanel() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 border-b border-app-panel-edge p-2">
+      <div className={cn("shrink-0 p-2", !embedded && "border-b border-app-panel-edge")}>
         <div className="relative">
           <Search
             className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-app-subtle"
@@ -218,13 +219,15 @@ export function ComponentsPanel() {
           />
           <input
             ref={searchRef}
-            type="search"
+            type="text"
+            role="searchbox"
+            data-sidebar-typing-field
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onSearchKeyDown}
             placeholder="Search components"
             aria-label="Search components"
-            className="h-8 w-full rounded-md border border-app-border bg-app-field py-0 pl-7 pr-7 text-ui text-app-field-fg placeholder:text-app-subtle focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            className="h-8 w-full rounded-md border border-app-border bg-app-field py-0 pl-7 pr-7 text-ui text-app-field-fg placeholder:text-app-subtle focus-visible:border-[hsl(var(--app-fg)/0.5)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[hsl(var(--app-fg)/0.25)]"
           />
           {query ? (
             <button
@@ -266,15 +269,11 @@ export function ComponentsPanel() {
           <Plus className="h-3.5 w-3.5" strokeWidth={2} />
           Create component
         </button>
-        <p className="mt-1.5 px-0.5 text-ui leading-relaxed text-app-subtle">
-          Select layers, then create. Use{" "}
-          <span className="font-medium text-app-subtle">⌘⌥K</span> · ↑↓ to browse · Enter to place.
-        </p>
       </div>
 
       <div className="thin-scroll min-h-0 flex-1 overflow-y-auto p-2">
         {totalCount === 0 ? (
-          <div className="mx-1 rounded-lg border border-dashed border-app-border bg-white/[0.02] px-3 py-8 text-center">
+          <div className="mx-1 px-3 py-8 text-center">
             <Package className="mx-auto mb-2 h-8 w-8 text-[#4a4a4a]" strokeWidth={1.25} />
             <p className="text-ui font-medium text-app-muted">No components yet</p>
             <p className="mt-1 text-ui leading-relaxed text-app-subtle">

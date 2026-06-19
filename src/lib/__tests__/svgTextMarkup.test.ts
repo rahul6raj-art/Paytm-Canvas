@@ -1,9 +1,11 @@
 import { before, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { defaultFillGradient } from "@/lib/fillGradient";
 import { svgTextMarkup } from "@/lib/svgMarkupCore";
 import { textLayoutForEditorNode } from "@/lib/text/canonicalTextLayout";
 import { TEXT_BOX_PAD_X, TEXT_BOX_PAD_Y } from "@/lib/text/textNodeModel";
 import { lineOffsetX, lineTopY } from "@/lib/text/textMeasure";
+import { strikethroughDecorationY } from "@/lib/text/textAdvancedStyle";
 import type { EditorNode } from "@/stores/useEditorStore";
 
 function installTextMeasureDomStub(): void {
@@ -73,10 +75,40 @@ describe("svgTextMarkup", () => {
     assert.doesNotMatch(svg, /y="14"/);
   });
 
-  it("applies strikethrough on each tspan", () => {
-    const svg = svgTextMarkup(textNode({ textDecoration: "strikethrough" }));
-    assert.match(svg, /text-decoration="strikethrough"/);
-    assert.doesNotMatch(svg, /<text[^>]*text-decoration=/);
+  it("draws explicit strikethrough lines for each layout line", () => {
+    const node = textNode({ textDecoration: "strikethrough" });
+    const prepared = textLayoutForEditorNode(node);
+    assert.ok(prepared);
+
+    const svg = svgTextMarkup(node);
+    assert.match(svg, /<line[^>]+stroke-width="/);
+    assert.doesNotMatch(svg, /text-decoration="strikethrough"/);
+
+    const sy = strikethroughDecorationY(
+      lineTopY(prepared!.layout, 0) + TEXT_BOX_PAD_Y + prepared!.blockOffsetY,
+      prepared!.typo.fontSize,
+      prepared!.typo.lineHeight,
+    );
+    assert.match(svg, new RegExp(`<line[^>]+y1="${sy}"`));
+  });
+
+  it("renders linear gradient fills via defs", () => {
+    const gradient = defaultFillGradient("#ff0000");
+    const defs: string[] = [];
+    const svg = svgTextMarkup(
+      textNode({
+        fill: "#ff0000",
+        fillType: "gradient",
+        fillGradient: gradient,
+        fillOpacity: 1,
+      }),
+      {
+        nodeId: "t-grad",
+        registerGradient: (id, markup) => defs.push(markup),
+      },
+    );
+    assert.match(svg, /fill="url\(#pc-grad-pc-text-t-grad\)"/);
+    assert.ok(defs.some((d) => d.includes("linearGradient")));
   });
 
   it("wraps multiline text with the same line offsets as canvas layout", () => {

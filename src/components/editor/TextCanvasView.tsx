@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { EditorNode } from "@/stores/useEditorStore";
 import {
   toTextNodeModel,
@@ -11,6 +11,7 @@ import { ensureFontFamilyLoaded } from "@/lib/fonts";
 import { textLayoutPatchForNode } from "@/lib/text/textLayout";
 import { textAdvancedStyleFromNode } from "@/lib/text/textAdvancedStyle";
 import { textLayoutForEditorNode } from "@/lib/text/canonicalTextLayout";
+import { loadTextMediaFill } from "@/lib/text/textFillPaint";
 import { renderTextToCanvas } from "@/lib/text/textCanvasRender";
 import { getCursorPositionFromPoint } from "@/lib/text/textCursor";
 import {
@@ -18,7 +19,9 @@ import {
   dispatchTextEditPointerDrag,
 } from "./TextEditPortal";
 import { cn } from "@/lib/utils";
+import { getTextLayoutEpoch, subscribeTextLayoutEpoch } from "@/lib/text/textLayoutEpoch";
 import { useEditorStore } from "@/stores/useEditorStore";
+import { isRotateGeometryLockActive, rotateGeomSnapshotForNode } from "@/lib/rotation/rotateGeometryLock";
 
 type TextCanvasViewProps = {
   node: EditorNode;
@@ -39,6 +42,8 @@ export function TextCanvasView({
   const [caretVisible, setCaretVisible] = useState(true);
 
   const zoom = useEditorStore((s) => s.zoom);
+  const assets = useEditorStore((s) => s.assets);
+  const textLayoutEpoch = useSyncExternalStore(subscribeTextLayoutEpoch, getTextLayoutEpoch, () => 0);
   const model = toTextNodeModel(node, isEditing);
   const caretIndex = selection?.focus ?? 0;
 
@@ -55,7 +60,10 @@ export function TextCanvasView({
     const typo = textTypoFromModel(model);
     const wrapWidth = wrapWidthForResizeMode(model.width, model.textResizeMode);
 
-    void ensureFontFamilyLoaded(typo.fontFamily).then(() => {
+    void Promise.all([
+      ensureFontFamilyLoaded(typo.fontFamily),
+      loadTextMediaFill(node, assets),
+    ]).then(([, mediaFill]) => {
       if (!alive || !canvasRef.current) return;
       const prepared = textLayoutForEditorNode(node);
       renderTextToCanvas(canvasRef.current, {
@@ -73,10 +81,15 @@ export function TextCanvasView({
         caretVisible: isEditing && caretVisible,
         style: textAdvancedStyleFromNode(node),
         gradientNode: node,
+        mediaFill,
         prepared,
       });
       const fresh = useEditorStore.getState().nodes[node.id];
-      if (fresh?.type === "text") {
+      const rotateSt = useEditorStore.getState();
+      const rotateLocked =
+        isRotateGeometryLockActive(rotateSt) &&
+        rotateGeomSnapshotForNode(rotateSt, node.id) != null;
+      if (fresh?.type === "text" && !rotateLocked) {
         const layoutPatch = textLayoutPatchForNode(fresh, fresh.content ?? "");
         if (
           layoutPatch &&
@@ -90,7 +103,7 @@ export function TextCanvasView({
     return () => {
       alive = false;
     };
-  }, [model, isEditing, selection, caretIndex, caretVisible, zoom]);
+  }, [model, isEditing, selection, caretIndex, caretVisible, zoom, node, assets, textLayoutEpoch]);
 
   const localFromEvent = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {

@@ -9,6 +9,7 @@ import {
   getActiveCraftEngine,
   getCraftEngineSyncState,
 } from "@/engine/craftEngineRegistry";
+import { runCraftEngineAccess } from "@/engine/craftEngineMutation";
 import type { CraftEngineDocument } from "@/engine/craftEngineTypes";
 import { isNativeRendererEnabled } from "@/lib/craftPublicConfig";
 import { ROOT, useEditorStore } from "@/stores/useEditorStore";
@@ -41,11 +42,13 @@ export function mirrorDocumentDeltaToWasm(
   if (plan === "noop") return false;
 
   try {
-    if (plan === "full") {
-      engine.syncDocument(JSON.stringify(next));
-    } else {
-      applyWasmOps(engine, plan);
-    }
+    runCraftEngineAccess(() => {
+      if (plan === "full") {
+        engine.syncDocument(JSON.stringify(next));
+      } else {
+        applyWasmOps(engine, plan);
+      }
+    });
     state.lastDocument = next;
     reconcileStoreFromWasmWhenIdle();
     return true;

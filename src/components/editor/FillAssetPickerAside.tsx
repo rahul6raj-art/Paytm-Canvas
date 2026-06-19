@@ -75,22 +75,19 @@ export function FillAssetPickerAside({
         role="dialog"
         aria-label={title}
         aria-modal="false"
-        className="fixed z-[121] flex flex-col overflow-hidden rounded-md border border-app-border bg-app-panel shadow-xl"
+        data-editor-shell
+        className="editor-inspector-dialog fixed z-[121]"
         style={adjacentPanelDialogStyle(dragPosition)}
       >
         <div
-          className={cn(
-            "flex items-center justify-between border-b border-app-border px-2.5 py-1.5",
-            "cursor-grab select-none touch-none active:cursor-grabbing",
-            isDragging && "cursor-grabbing",
-          )}
+          className={cn("editor-inspector-dialog-header !px-2.5 !py-1.5", isDragging && "cursor-grabbing")}
           onPointerDown={onHeaderPointerDown}
         >
           <span className="pointer-events-none text-ui font-medium text-app-fg">{title}</span>
           <button
             type="button"
             onClick={onClose}
-            className="flex h-6 w-6 items-center justify-center rounded text-app-muted hover:bg-app-hover hover:text-app-fg"
+            className="flex h-6 w-6 items-center justify-center rounded-lg text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
             aria-label="Close"
           >
             <X className="h-3.5 w-3.5" strokeWidth={2} />

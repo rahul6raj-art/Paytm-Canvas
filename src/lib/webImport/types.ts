@@ -73,6 +73,7 @@ export interface DomSnapshotStyles {
   opacity?: string;
   mixBlendMode?: string;
   filter?: string;
+  backdropFilter?: string;
   transform?: string;
   objectFit?: string;
   overflow?: string;
@@ -237,6 +238,14 @@ export interface DesignNode {
   style: ExtractedVisualStyle;
   typography?: ExtractedTypography;
   text?: string;
+  /** Raw CSS hints for text resize mode on web import. */
+  cssLayoutHints?: {
+    width?: string;
+    maxWidth?: string;
+    whiteSpace?: string;
+    overflowWrap?: string;
+    wordBreak?: string;
+  };
   href?: string;
   /** `<img>` src only — not CSS background-image. */
   imageSrc?: string;
@@ -323,6 +332,11 @@ export interface ImportWebSceneNode {
   assetId?: string;
   pathPoints?: import("@/lib/pathGeometry").PathPoint[];
   pathClosed?: boolean;
+  pathFillRule?: "nonzero" | "evenodd";
+  flattenedPathData?: string;
+  strokeLinecap?: import("@/stores/useEditorStore").EditorNode["strokeLinecap"];
+  strokeLinejoin?: import("@/stores/useEditorStore").EditorNode["strokeLinejoin"];
+  strokeOpacity?: number;
   layoutMode?: LayoutMode;
   layoutGap?: number;
   layoutWrap?: boolean;

@@ -5,6 +5,7 @@ import {
   type CraftEngineSyncState,
 } from "@/engine/craftEngineIncrementalSync";
 import { getActiveCraftEngine, getCraftEngineSyncState } from "@/engine/craftEngineRegistry";
+import { readCraftEngine } from "@/engine/craftEngineMutation";
 import type { CraftEngineDocument } from "@/engine/craftEngineTypes";
 import {
   mergeWasmSnapshotWithStore,
@@ -13,6 +14,7 @@ import {
 } from "@/engine/craftEngineSnapshotApply";
 import { isNativeRendererEnabled, isWasmUiMirrorModeEnabled } from "@/lib/craftPublicConfig";
 import { isAutoLayoutHandleDragActive } from "@/lib/autoLayout/autoLayoutDragSession";
+import { isRotateGeometryLockActive } from "@/lib/rotation/rotateGeometryLock";
 import { EMPTY_CHILD_IDS } from "@/lib/editorConstants";
 import { ROOT, useEditorStore } from "@/stores/useEditorStore";
 
@@ -65,6 +67,7 @@ export function isWasmDocumentMutationIdle(): boolean {
   const st = useEditorStore.getState();
   return (
     st.transformInteractionMode === "none" &&
+    !isRotateGeometryLockActive(st) &&
     !st.isMovingSelection &&
     !st.isApplyingWasmMirror &&
     !st.isApplyingHistory &&
@@ -76,6 +79,11 @@ export function isWasmDocumentMutationIdle(): boolean {
 export function requestDeferredWasmReconcile(): void {
   if (!isWasmUiMirrorMode()) return;
   deferredWasmReconcile = true;
+}
+
+/** Drop a queued reconcile without applying WASM snapshot to the store. */
+export function clearDeferredWasmReconcile(): void {
+  deferredWasmReconcile = false;
 }
 
 /** Run a queued reconcile after pointer-up / transform end. */
@@ -108,7 +116,7 @@ export function reconcileStoreFromWasmSnapshot(): boolean {
   if (!engine) return false;
 
   try {
-    const json = engine.snapshotDocument();
+    const json = readCraftEngine(() => engine.snapshotDocument(), null);
     if (!json) return false;
     const patch = wasmSnapshotToStorePatch(json);
     if (!patch) return false;

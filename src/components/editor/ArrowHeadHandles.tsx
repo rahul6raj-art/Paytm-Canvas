@@ -23,6 +23,7 @@ import { useCanvasToWorld } from "./CanvasToWorldContext";
 import { clientToWorldFromDocument } from "@/lib/canvasCoordinates";
 import { useShapeEditHandlesGate } from "./useShapeEditHandles";
 import { beginArrowCapCycle, beginArrowHeadSizeDrag } from "@/lib/shapes/arrowHeadDrag";
+import { EditorHintWrap } from "./EditorHoverHint";
 
 function localToWorld(
   nodeId: string,
@@ -75,43 +76,46 @@ export function ArrowHeadHandles() {
   return (
     <>
       {handles.map(({ kind, world }) => (
-        <button
+        <EditorHintWrap
           key={kind}
-          type="button"
-          data-arrow-edit-handle={kind}
-          aria-label={
-            kind === "size"
-              ? "Arrowhead size"
-              : kind === "start-cap"
-                ? "Start arrowhead"
-                : "End arrowhead"
-          }
           title={
             kind === "size"
               ? "Drag to adjust arrowhead size"
               : "Click to cycle arrowhead style"
           }
-          className="pointer-events-auto absolute z-[34] touch-none rounded-sm border-2 border-[#18a0fb] bg-white will-change-transform"
-          style={{
-            left: world.x - dotSize / 2,
-            top: world.y - dotSize / 2,
-            width: dotSize,
-            height: dotSize,
-            borderRadius: kind === "size" ? dotSize / 2 : 2,
-            boxShadow: `0 0 0 ${borderWorld}px ${CANVAS_VISUAL.selection}`,
-          }}
-          onPointerDown={(e) => {
-            if (!id || e.button !== 0) return;
-            e.stopPropagation();
-            e.preventDefault();
-            if (kind === "size") {
-              beginArrowHeadSizeDrag({
-                nodeId: id,
-                pointerId: e.pointerId,
-                clientToWorld,
-                captureTarget: e.currentTarget,
-              });
-            } else {
+          anchorClassName="contents"
+        >
+          <button
+            type="button"
+            data-arrow-edit-handle={kind}
+            aria-label={
+              kind === "size"
+                ? "Arrowhead size"
+                : kind === "start-cap"
+                  ? "Start arrowhead"
+                  : "End arrowhead"
+            }
+            className="pointer-events-auto absolute z-[34] touch-none rounded-sm border-2 border-[#18a0fb] bg-white will-change-transform"
+            style={{
+              left: world.x - dotSize / 2,
+              top: world.y - dotSize / 2,
+              width: dotSize,
+              height: dotSize,
+              borderRadius: kind === "size" ? dotSize / 2 : 2,
+              boxShadow: `0 0 0 ${borderWorld}px ${CANVAS_VISUAL.selection}`,
+            }}
+            onPointerDown={(e) => {
+              if (!id || e.button !== 0) return;
+              e.stopPropagation();
+              e.preventDefault();
+              if (kind === "size") {
+                beginArrowHeadSizeDrag({
+                  nodeId: id,
+                  pointerId: e.pointerId,
+                  clientToWorld,
+                  captureTarget: e.currentTarget,
+                });
+              } else {
               beginArrowCapCycle({
                 nodeId: id,
                 end: kind === "start-cap" ? "start" : "end",
@@ -119,6 +123,7 @@ export function ArrowHeadHandles() {
             }
           }}
         />
+        </EditorHintWrap>
       ))}
     </>
   );

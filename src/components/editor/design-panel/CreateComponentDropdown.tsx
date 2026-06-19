@@ -7,6 +7,7 @@ import { canCreateComponentFromSelection } from "@/lib/componentModel";
 import { formatShortcutLabel } from "@/lib/commands";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { cn } from "@/lib/utils";
+import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
 import {
   inspectorHeaderActionBtnClass,
   inspectorIconClass,
@@ -45,7 +46,7 @@ export function CreateComponentDropdown({ disabled }: { disabled?: boolean }) {
       <div
         ref={menuRef}
         role="menu"
-        className="fixed z-[120] overflow-hidden rounded-md border border-app-border bg-app-panel py-1 shadow-xl"
+        className="fixed z-[120] overflow-hidden editor-floating-menu"
         style={{ left: position.left, top: position.top }}
       >
         <div className="section-heading px-2.5 py-1">Component</div>
@@ -71,27 +72,28 @@ export function CreateComponentDropdown({ disabled }: { disabled?: boolean }) {
   return (
     <>
       <div ref={anchorRef} className="inline-flex -m-1.5 p-1.5">
-        <button
-          type="button"
-          title="Create component"
-          aria-label="Create component"
-          aria-expanded={open}
-          aria-haspopup="menu"
-          disabled={!canCreate}
-          onClick={() => setOpen((v) => !v)}
-          className={cn(
-            inspectorHeaderActionBtnClass,
-            "h-8 min-h-8 w-auto min-w-9 shrink-0 gap-0.5 px-1.5",
-            "text-violet-200 hover:bg-violet-500/15 hover:text-violet-100",
-            open && "bg-violet-500/15 text-violet-100",
-          )}
-        >
-          <Component {...inspectorLucideProps()} />
-          <ChevronDown
-            className={cn(inspectorIconClass, "h-3 w-3 opacity-70")}
-            strokeWidth={inspectorIconStroke}
-          />
-        </button>
+        <EditorHintWrap title="Create component" disabled={!canCreate}>
+          <button
+            type="button"
+            aria-label="Create component"
+            aria-expanded={open}
+            aria-haspopup="menu"
+            disabled={!canCreate}
+            onClick={() => setOpen((v) => !v)}
+            className={cn(
+              inspectorHeaderActionBtnClass,
+              "h-8 min-h-8 w-auto min-w-9 shrink-0 gap-0.5 px-1.5",
+              "text-violet-200 hover:bg-violet-500/15 hover:text-violet-100",
+              open && "bg-violet-500/15 text-violet-100",
+            )}
+          >
+            <Component {...inspectorLucideProps()} />
+            <ChevronDown
+              className={cn(inspectorIconClass, "h-3 w-3 opacity-70")}
+              strokeWidth={inspectorIconStroke}
+            />
+          </button>
+        </EditorHintWrap>
       </div>
       {menu ? createPortal(menu, document.body) : null}
     </>

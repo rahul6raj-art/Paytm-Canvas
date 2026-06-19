@@ -54,7 +54,7 @@ export function CanvasToolRail({ className }: { className?: string }) {
     <div
       ref={railRef}
       className={cn(
-        "pointer-events-auto absolute z-50 flex w-fit flex-row items-center gap-1 overflow-visible rounded-2xl border border-app-border-subtle bg-app-panel p-1.5",
+        "pointer-events-auto absolute z-50 flex w-fit flex-row items-center gap-1 overflow-visible editor-floating-menu border border-app-border-subtle bg-app-panel/95 p-1.5 shadow-float backdrop-blur-sm",
         position == null && `inset-x-0 ${CANVAS_TOOL_RAIL_OFFSET_CLASS} mx-auto`,
         isDragging ? "cursor-grabbing select-none" : "cursor-grab",
         className,

@@ -1,6 +1,7 @@
 import {
   clampCornerRadii,
   getNodeCornerRadii,
+  outlineRoundedRectRingPathD,
   roundedRectPolygonPoints,
 } from "@/lib/cornerRadius";
 import { buildCompositePathDForGroup } from "@/lib/booleanGeometry";
@@ -73,8 +74,13 @@ export type OutlineStrokeContext = {
 const MITER_LIMIT = 4;
 const CAP_SEGMENTS = 12;
 const BEZIER_SEGMENTS = 8;
-const ARC_SEGMENTS = 8;
 const ELLIPSE_SEGMENTS = 64;
+
+function arcSegmentsForRadius(radius: number): number {
+  const r = Math.max(0, radius);
+  if (r <= 0) return 8;
+  return Math.max(8, Math.ceil(((r * Math.PI) / 2) / 0.75));
+}
 
 function dist(x: number, y: number): number {
   return Math.hypot(x, y);
@@ -275,7 +281,7 @@ function sampleSvgArc(
   let delta = a1 - a0;
   if (sweep && delta < 0) delta += Math.PI * 2;
   if (!sweep && delta > 0) delta -= Math.PI * 2;
-  const steps = Math.max(2, ARC_SEGMENTS);
+  const steps = Math.max(2, arcSegmentsForRadius(r));
   const pts: Point2[] = [];
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
@@ -391,16 +397,99 @@ function offsetSideAtVertex(
   return createJoinGeometry(prev, curr, next, delta, join);
 }
 
+function polylineBounds(points: Point2[]): { width: number; height: number } {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of points) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  return {
+    width: Math.max(1, maxX - minX),
+    height: Math.max(1, maxY - minY),
+  };
+}
+
+function pickInwardNormalForOpenStroke(
+  nx: number,
+  ny: number,
+  px: number,
+  py: number,
+  bounds: { width: number; height: number },
+): Point2 {
+  const cx = bounds.width / 2;
+  const cy = bounds.height / 2;
+  const toCenterX = cx - px;
+  const toCenterY = cy - py;
+  if (nx * toCenterX + ny * toCenterY < 0) return { x: -nx, y: -ny };
+  return { x: nx, y: ny };
+}
+
 /** Expand an open polyline into a closed stroke outline polygon. */
 export function expandOpenPolylineStroke(
   points: Point2[],
   params: StrokeGeometryParams,
+  bounds?: { width: number; height: number },
 ): Point2[] {
   if (points.length < 2 || params.width < 1e-9) return [];
-  const half = params.width / 2;
   const join = params.join;
   const cap = params.cap;
   const n = points.length;
+  const align = params.align;
+
+  if (align === "inside" || align === "outside") {
+    const b = bounds ?? polylineBounds(points);
+    const centerline: Point2[] = [];
+    const offset: Point2[] = [];
+    for (let i = 0; i < n; i++) {
+      const curr = points[i]!;
+      const prev = points[Math.max(0, i - 1)]!;
+      const next = points[Math.min(n - 1, i + 1)]!;
+      const dir = normalize({ x: next.x - prev.x, y: next.y - prev.y });
+      const perp = leftNormal(dir);
+      const inward = pickInwardNormalForOpenStroke(perp.x, perp.y, curr.x, curr.y, b);
+      const normal =
+        align === "inside" ? inward : { x: -inward.x, y: -inward.y };
+      centerline.push(copyPoint(curr));
+      offset.push({
+        x: curr.x + normal.x * params.width,
+        y: curr.y + normal.y * params.width,
+      });
+    }
+    const startDir = normalize({
+      x: points[1]!.x - points[0]!.x,
+      y: points[1]!.y - points[0]!.y,
+    });
+    const endDir = normalize({
+      x: points[n - 1]!.x - points[n - 2]!.x,
+      y: points[n - 1]!.y - points[n - 2]!.y,
+    });
+    const startCap = createCapGeometry(
+      points[0]!,
+      startDir,
+      params.width,
+      cap,
+      centerline[0]!,
+      offset[0]!,
+      true,
+    );
+    const endCap = createCapGeometry(
+      points[n - 1]!,
+      endDir,
+      params.width,
+      cap,
+      centerline[n - 1]!,
+      offset[n - 1]!,
+      false,
+    );
+    return mergeStrokePolygons([centerline, startCap, offset.slice().reverse(), endCap]);
+  }
+
+  const half = params.width / 2;
   const left: Point2[] = [];
   const right: Point2[] = [];
 
@@ -742,8 +831,29 @@ export function generateStrokeGeometry(
   points: Point2[],
   closed: boolean,
   params: StrokeGeometryParams,
+  shape?: Pick<EditorNode, "type" | "width" | "height" | "cornerRadius" | "cornerRadii">,
 ): OutlineStrokeResult | null {
   if (points.length < 2 || params.width < 1e-9) return null;
+
+  if (closed && shape && (shape.type === "rectangle" || shape.type === "frame")) {
+    const w = Math.max(1, shape.width);
+    const h = Math.max(1, shape.height);
+    const radii = clampCornerRadii(getNodeCornerRadii(shape), w, h);
+    if (radii.some((r) => r > 0)) {
+      const ring = outlineRoundedRectRingPathD(w, h, radii, params.width, params.align);
+      if (ring?.pathD) {
+        const outlinePts = tessellateSvgPathD(ring.pathD);
+        return {
+          pathD: ring.pathD,
+          fillRule: ring.fillRule,
+          pathPoints: pointsToPathPoints(outlinePts),
+          pathClosed: true,
+          fill: "#000000",
+          fillOpacity: 1,
+        };
+      }
+    }
+  }
 
   if (closed) {
     const band = expandClosedContourStroke(points, params);
@@ -763,7 +873,10 @@ export function generateStrokeGeometry(
     };
   }
 
-  const outline = expandOpenPolylineStroke(points, params);
+  const bounds = shape
+    ? { width: Math.max(1, shape.width), height: Math.max(1, shape.height) }
+    : polylineBounds(points);
+  const outline = expandOpenPolylineStroke(points, params, bounds);
   if (outline.length < 3) return null;
   return {
     pathD: polylineToPathD(outline),
@@ -818,7 +931,7 @@ export function centerlineContourForNode(
 
   if (node.type === "rectangle" || node.type === "frame") {
     const radii = clampCornerRadii(getNodeCornerRadii(node), w, h);
-    return { points: roundedRectPolygonPoints(w, h, radii, 10), closed: true };
+    return { points: roundedRectPolygonPoints(w, h, radii), closed: true };
   }
 
   if (node.type === "ellipse") {
@@ -945,7 +1058,7 @@ export function outlineStroke(
     if (dashed) return dashed;
   }
 
-  const base = generateStrokeGeometry(points, closed, params);
+  const base = generateStrokeGeometry(points, closed, params, node);
   if (!base) return null;
 
   return {

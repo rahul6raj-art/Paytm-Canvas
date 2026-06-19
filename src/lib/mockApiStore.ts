@@ -125,7 +125,7 @@ function emptyDocument(name: string): unknown {
 
 function seedStore(): MockApiStoreState {
   const users: MockApiUserRow[] = [
-    { id: "user-you", email: "rahul.verma@paytm.com", displayName: "Rahul Verma" },
+    { id: "user-you", email: "rahul6.raj@paytm.com", displayName: "Rahul Raj" },
     { id: "u2", email: "aisha.khan@paytm.com", displayName: "Aisha Khan" },
     { id: "u3", email: "dev.sharma@paytm.com", displayName: "Dev Sharma" },
     { id: "u4", email: "meera@paytm.com", displayName: "Meera N." },

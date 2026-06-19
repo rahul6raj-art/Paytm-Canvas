@@ -1,0 +1,191 @@
+{
+  "name": "craft-bridge",
+  "displayName": "Craft Bridge",
+  "description": "Push React/HTML page folders (.tsx or .html + .css) to Paytm Craft canvas; Send to code round-trip",
+  "version": "0.1.7",
+  "publisher": "paytm-craft",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rahul6raj-art/Craft.git",
+    "directory": "packages/craft-bridge-vscode"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "keywords": ["craft", "cursor", "design", "figma", "react", "html", "css", "canvas"],
+  "activationEvents": ["onStartupFinished"],
+  "extensionKind": ["ui", "workspace"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "craft-bridge.push",
+        "title": "Push to Craft Canvas",
+        "category": "Craft",
+        "icon": "$(export)"
+      },
+      {
+        "command": "craft-bridge.pushFolder",
+        "title": "Push Page Folder to Craft (.tsx/.html + .css)",
+        "category": "Craft",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "craft-bridge.pushActive",
+        "title": "Push Active File to Craft",
+        "category": "Craft",
+        "icon": "$(export)"
+      },
+      {
+        "command": "craft-bridge.init",
+        "title": "Init Project (craft.link.json + hooks)",
+        "category": "Craft",
+        "icon": "$(add)"
+      },
+      {
+        "command": "craft-bridge.link",
+        "title": "Link Page (file or folder)",
+        "category": "Craft",
+        "icon": "$(link)"
+      },
+      {
+        "command": "craft-bridge.openCraft",
+        "title": "Open Craft Editor",
+        "category": "Craft",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "craft-bridge.status",
+        "title": "Check Bridge Status",
+        "category": "Craft",
+        "icon": "$(info)"
+      },
+      {
+        "command": "craft-bridge.setup",
+        "title": "Setup & Push Screen (manual sync)",
+        "category": "Craft",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "craft-bridge.pullActive",
+        "title": "Reload Source from Craft",
+        "category": "Craft",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "craft-bridge.installHooks",
+        "title": "Install Cursor Hooks",
+        "category": "Craft",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "craft-bridge.installPreviewMenu",
+        "title": "Install Live Preview Right-Click Menu",
+        "category": "Craft",
+        "icon": "$(browser)"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "craft-bridge.pushFolder",
+          "when": "explorerResourceIsFolder",
+          "group": "craft@1"
+        },
+        {
+          "command": "craft-bridge.push",
+          "when": "resourceExtname =~ /\\.(tsx|ts|jsx|js|html|htm|css)$/",
+          "group": "craft@1"
+        },
+        {
+          "command": "craft-bridge.link",
+          "when": "explorerResourceIsFolder || resourceExtname =~ /\\.(tsx|ts|jsx|js|html|htm|css)$/",
+          "group": "craft@2"
+        },
+        {
+          "command": "craft-bridge.setup",
+          "when": "explorerResourceIsFolder || resourceExtname =~ /\\.(tsx|ts|jsx|js|html|htm|css)$/",
+          "group": "craft@3"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "craft-bridge.setup",
+          "when": "resourceExtname =~ /\\.(tsx|ts|jsx|js|html|htm|css)$/",
+          "group": "craft@1"
+        },
+        {
+          "command": "craft-bridge.push",
+          "when": "resourceExtname =~ /\\.(tsx|ts|jsx|js|html|htm|css)$/",
+          "group": "craft@2"
+        },
+        {
+          "command": "craft-bridge.pullActive",
+          "when": "resourceExtname =~ /\\.(tsx|ts|jsx|js|html|htm|css)$/",
+          "group": "craft@3"
+        },
+        {
+          "command": "craft-bridge.pushActive",
+          "when": "resourceExtname =~ /\\.(tsx|ts|jsx|js|html|htm|css)$/",
+          "group": "craft@4"
+        }
+      ],
+      "commandPalette": [
+        { "command": "craft-bridge.push", "when": "false" },
+        { "command": "craft-bridge.pushFolder", "when": "false" }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "craft-bridge.pushActive",
+        "key": "shift+alt+c p",
+        "mac": "shift+alt+c p",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "craft-bridge.setup",
+        "key": "shift+alt+c s",
+        "mac": "shift+alt+c s",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "craft-bridge.pullActive",
+        "key": "shift+alt+c u",
+        "mac": "shift+alt+c u",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "craft-bridge.openCraft",
+        "key": "shift+alt+c o",
+        "mac": "shift+alt+c o"
+      }
+    ],
+    "configuration": {
+      "title": "Craft Bridge",
+      "properties": {
+        "craftBridge.craftUrl": {
+          "type": "string",
+          "default": "http://localhost:3000",
+          "description": "Paytm Craft server URL (must have CRAFT_BRIDGE_ENABLED=1)"
+        },
+        "craftBridge.cliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Override path to craft-bridge CLI. Leave empty to use the bundled CLI."
+        },
+        "craftBridge.openBrowserOnPush": {
+          "type": "boolean",
+          "default": false,
+          "description": "Open Craft editor in browser after push (keep one /editor tab open; imports appear on that canvas)"
+        },
+        "craftBridge.bridgeToken": {
+          "type": "string",
+          "default": "",
+          "description": "Bearer token when Craft requires CRAFT_BRIDGE_TOKEN"
+        }
+      }
+    }
+  }
+}

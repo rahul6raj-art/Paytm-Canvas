@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Check, ChevronDown } from "lucide-react";
 import {
   clamp01,
@@ -19,7 +20,11 @@ import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyb
 import { useInspectorValueScrub } from "@/lib/useInspectorValueScrub";
 import { appFieldClass } from "@/lib/appFieldStyles";
 import { cn } from "@/lib/utils";
-import { useDismissAnchoredDropdown } from "./useAnchoredDropdown";
+import {
+  anchoredMenuStyle,
+  useAnchoredDropdownPosition,
+  useDismissAnchoredDropdown,
+} from "./useAnchoredDropdown";
 
 export type ColorFormat = "hex" | "rgb" | "css" | "hsl" | "hsb";
 
@@ -59,9 +64,17 @@ export function ColorFormatFields({
   const safeHex = normalizeHex(hex) ?? "#888888";
   const [format, setFormat] = useState<ColorFormat>("hex");
   const [formatMenuOpen, setFormatMenuOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const formatBtnRef = useRef<HTMLButtonElement>(null);
   const formatMenuRef = useRef<HTMLDivElement>(null);
+  const formatMenuPosition = useAnchoredDropdownPosition(formatBtnRef, formatMenuOpen, 4, {
+    viewportClamp: true,
+    width: 112,
+    maxHeight: 240,
+  });
   useDismissAnchoredDropdown(formatMenuOpen, () => setFormatMenuOpen(false), formatBtnRef, formatMenuRef);
+
+  useEffect(() => setMounted(true), []);
 
   const [hexText, setHexText] = useState(() => hexToDisplay(safeHex));
   const [rgbText, setRgbText] = useState(() => {
@@ -210,6 +223,42 @@ export function ColorFormatFields({
   const hslParts = hslText.split(/[\s,]+/).filter(Boolean);
   const hsbParts = hsbText.split(/[\s,]+/).filter(Boolean);
 
+  const formatMenu =
+    formatMenuOpen && mounted ? (
+      <div
+        ref={formatMenuRef}
+        role="listbox"
+        aria-label="Color format"
+        className="fixed z-[125] min-w-[7rem] overflow-hidden editor-floating-menu py-1"
+        style={anchoredMenuStyle(formatMenuPosition)}
+      >
+        {FORMAT_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            role="option"
+            aria-selected={format === opt.value}
+            className={cn(
+              "flex w-full items-center gap-2 px-3.5 py-1.5 text-left text-ui text-app-fg hover:bg-app-hover",
+              format === opt.value && "bg-app-inset",
+            )}
+            onClick={() => {
+              setFormat(opt.value);
+              setFormatMenuOpen(false);
+              syncFromColor(safeHex, opacity);
+            }}
+          >
+            <Check
+              className={cn("h-3.5 w-3.5 shrink-0", format === opt.value ? "opacity-100" : "opacity-0")}
+              strokeWidth={2}
+              aria-hidden
+            />
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    ) : null;
+
   return (
     <div className="space-y-2">
       <div className="flex items-end gap-2">
@@ -230,39 +279,6 @@ export function ColorFormatFields({
             {FORMAT_OPTIONS.find((o) => o.value === format)?.label ?? "Hex"}
             <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
           </button>
-          {formatMenuOpen ? (
-            <div
-              ref={formatMenuRef}
-              role="listbox"
-              aria-label="Color format"
-              className="absolute left-0 top-full z-20 mt-1 min-w-full overflow-hidden rounded-md border border-app-border bg-app-panel py-1 shadow-lg"
-            >
-              {FORMAT_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  role="option"
-                  aria-selected={format === opt.value}
-                  className={cn(
-                    "flex w-full items-center gap-2 px-3 py-2 text-left text-ui text-app-fg hover:bg-app-hover",
-                    format === opt.value && "bg-accent/10",
-                  )}
-                  onClick={() => {
-                    setFormat(opt.value);
-                    setFormatMenuOpen(false);
-                    syncFromColor(safeHex, opacity);
-                  }}
-                >
-                  <Check
-                    className={cn("h-3.5 w-3.5 shrink-0", format === opt.value ? "opacity-100" : "opacity-0")}
-                    strokeWidth={2}
-                    aria-hidden
-                  />
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
         </div>
 
         <div className="flex min-w-0 flex-1 items-end gap-1.5">
@@ -446,6 +462,7 @@ export function ColorFormatFields({
           />
         </div>
       </div>
+      {mounted && formatMenu ? createPortal(formatMenu, document.body) : null}
     </div>
   );
 }

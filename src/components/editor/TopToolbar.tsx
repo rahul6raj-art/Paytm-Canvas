@@ -25,6 +25,7 @@ import { DEFAULT_MOCK_WORKSPACE, getActiveMockWorkspace, subscribeMockAuth } fro
 import { PaytmCraftApiModeBanner } from "@/components/PaytmCraftApiModeBanner";
 import { isPaytmCraftHttpApiMode } from "@/lib/env";
 import { EditorMenuBar } from "./EditorMenuBar";
+import { EditorHintWrap } from "./EditorHoverHint";
 import { editorCanRedoHistory, editorCanUndoHistory } from "@/engine/editorHistoryState";
 
 function saveStatusLabel(status: DocumentSaveStatus): string {
@@ -93,32 +94,34 @@ export function TopToolbar() {
       <div className="flex h-11 min-w-0 items-center gap-2 px-2">
       <div className="flex min-w-0 shrink items-center gap-2">
       <div className="flex shrink-0 items-center gap-0.5 border-r border-app-border pr-2">
-        <button
-          type="button"
-          disabled={!canUndo}
-          title="Undo (⌘Z or Ctrl+Z)"
-          aria-label="Undo"
-          onClick={() => undo()}
-          className={cn(
-            "flex h-8 w-8 items-center justify-center rounded-md text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg",
-            !canUndo && "cursor-not-allowed opacity-30 hover:bg-transparent hover:text-app-muted",
-          )}
-        >
-          <Undo2 className="h-4 w-4" strokeWidth={1.75} />
-        </button>
-        <button
-          type="button"
-          disabled={!canRedo}
-          title="Redo (⌘⇧Z / Ctrl+Y or Ctrl+Shift+Z)"
-          aria-label="Redo"
-          onClick={() => redo()}
-          className={cn(
-            "flex h-8 w-8 items-center justify-center rounded-md text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg",
-            !canRedo && "cursor-not-allowed opacity-30 hover:bg-transparent hover:text-app-muted",
-          )}
-        >
-          <Redo2 className="h-4 w-4" strokeWidth={1.75} />
-        </button>
+        <EditorHintWrap hintLabel="Undo" hintShortcut="⌘Z" hintSide="bottom" disabled={!canUndo}>
+          <button
+            type="button"
+            disabled={!canUndo}
+            aria-label="Undo"
+            onClick={() => undo()}
+            className={cn(
+              "flex h-8 w-8 items-center justify-center rounded-md text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg",
+              !canUndo && "cursor-not-allowed opacity-30 hover:bg-transparent hover:text-app-muted",
+            )}
+          >
+            <Undo2 className="h-4 w-4" strokeWidth={1.75} />
+          </button>
+        </EditorHintWrap>
+        <EditorHintWrap hintLabel="Redo" hintShortcut="⇧⌘Z" hintSide="bottom" disabled={!canRedo}>
+          <button
+            type="button"
+            disabled={!canRedo}
+            aria-label="Redo"
+            onClick={() => redo()}
+            className={cn(
+              "flex h-8 w-8 items-center justify-center rounded-md text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg",
+              !canRedo && "cursor-not-allowed opacity-30 hover:bg-transparent hover:text-app-muted",
+            )}
+          >
+            <Redo2 className="h-4 w-4" strokeWidth={1.75} />
+          </button>
+        </EditorHintWrap>
       </div>
 
       <div className="relative flex min-w-0 max-w-[min(36vw,320px)] items-center gap-1.5">
@@ -129,9 +132,11 @@ export function TopToolbar() {
           Paytm Craft
         </Link>
         <ChevronRight className="h-3 w-3 shrink-0 text-app-subtle" strokeWidth={2} />
-        <span className="max-w-[120px] shrink-0 truncate text-ui font-medium text-app-subtle" title={workspace.name}>
-          {workspace.name}
-        </span>
+        <EditorHintWrap title={workspace.name}>
+          <span className="max-w-[120px] shrink-0 truncate text-ui font-medium text-app-subtle">
+            {workspace.name}
+          </span>
+        </EditorHintWrap>
         <ChevronRight className="h-3 w-3 shrink-0 text-app-subtle" strokeWidth={2} />
 
         <div className="relative shrink-0" ref={fileMenuRef}>
@@ -147,7 +152,7 @@ export function TopToolbar() {
           {fileMenuOpen ? (
             <div
               role="menu"
-              className="absolute left-0 top-full z-50 mt-1 min-w-[200px] rounded-md border border-app-border bg-app-surface py-1 shadow-lg"
+              className="absolute left-0 top-full z-50 mt-1 min-w-[200px] editor-floating-menu border border-app-border bg-app-surface py-1 shadow-lg"
             >
               <button
                 type="button"
@@ -247,26 +252,33 @@ export function TopToolbar() {
                 <Code2 className="h-3.5 w-3.5 shrink-0 opacity-80" strokeWidth={2} />
                 Import React (Design ↔ Code)
               </button>
-              <button
-                type="button"
-                role="menuitem"
-                disabled={!isApiMode || !isApiBackedFile}
-                title={!isApiMode || !isApiBackedFile ? "API file required" : "Browse and restore saved versions"}
-                className={cn(
-                  "flex w-full items-center gap-2 px-3 py-1.5 text-left text-ui",
+              <EditorHintWrap
+                title={
                   !isApiMode || !isApiBackedFile
-                    ? "cursor-not-allowed text-app-subtle"
-                    : "text-app-fg hover:bg-app-hover",
-                )}
-                onClick={() => {
-                  if (!isApiMode || !isApiBackedFile) return;
-                  setFileMenuOpen(false);
-                  openVersionHistory();
-                }}
+                    ? "API file required"
+                    : "Browse and restore saved versions"
+                }
               >
-                <History className="h-3.5 w-3.5 shrink-0 opacity-80" strokeWidth={2} />
-                Version history
-              </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!isApiMode || !isApiBackedFile}
+                  className={cn(
+                    "flex w-full items-center gap-2 px-3 py-1.5 text-left text-ui",
+                    !isApiMode || !isApiBackedFile
+                      ? "cursor-not-allowed text-app-subtle"
+                      : "text-app-fg hover:bg-app-hover",
+                  )}
+                  onClick={() => {
+                    if (!isApiMode || !isApiBackedFile) return;
+                    setFileMenuOpen(false);
+                    openVersionHistory();
+                  }}
+                >
+                  <History className="h-3.5 w-3.5 shrink-0 opacity-80" strokeWidth={2} />
+                  Version history
+                </button>
+              </EditorHintWrap>
               <button
                 type="button"
                 role="menuitem"
@@ -300,51 +312,58 @@ export function TopToolbar() {
 
         <DocumentTitleField />
 
-        <span
-          className={cn(
-            "shrink-0 whitespace-nowrap text-ui font-medium tabular-nums",
-            documentSaveStatus === "saving" && "text-amber-300/90",
-            documentSaveStatus === "unsaved" && "text-amber-200/85",
-            documentSaveStatus === "saved" && "text-app-subtle",
-            documentSaveStatus === "saved-api" && "text-emerald-400/85",
-            documentSaveStatus === "api-save-failed" && "text-red-400/90",
-            documentSaveStatus === "api-conflict" && "text-orange-300/95",
-          )}
-          title={saveStatusLabel(documentSaveStatus)}
-        >
-          {documentSaveStatus === "api-conflict" ? (
-            <button
-              type="button"
-              className="underline decoration-orange-300/50 underline-offset-2 hover:text-orange-200"
-              onClick={() => void reloadApiFileFromServer()}
-            >
-              {saveStatusLabel(documentSaveStatus)}
-            </button>
-          ) : (
-            saveStatusLabel(documentSaveStatus)
-          )}
-        </span>
-        <PaytmCraftApiModeBanner variant="dark" className="ml-1 hidden shrink-0 sm:flex" />
-        {isApiMode ? (
+        <EditorHintWrap title={saveStatusLabel(documentSaveStatus)}>
           <span
             className={cn(
-              "hidden shrink-0 rounded border px-1.5 py-0.5 text-ui font-medium sm:inline",
-              isApiBackedFile
-                ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-200/95"
-                : "border-amber-500/35 bg-amber-500/12 text-amber-100/90",
+              "shrink-0 whitespace-nowrap text-ui font-medium tabular-nums",
+              documentSaveStatus === "saving" && "text-amber-300/90",
+              documentSaveStatus === "unsaved" && "text-amber-200/85",
+              documentSaveStatus === "saved" && "text-app-subtle",
+              documentSaveStatus === "saved-api" && "text-emerald-400/85",
+              documentSaveStatus === "api-save-failed" && "text-red-400/90",
+              documentSaveStatus === "api-conflict" && "text-orange-300/95",
             )}
-            title={isApiBackedFile ? "Edits save to the mock API file" : "Edits are kept in browser storage until you save as an API file"}
           >
-            {isApiBackedFile ? "API file" : "Local draft"}
+            {documentSaveStatus === "api-conflict" ? (
+              <button
+                type="button"
+                className="underline decoration-orange-300/50 underline-offset-2 hover:text-orange-200"
+                onClick={() => void reloadApiFileFromServer()}
+              >
+                {saveStatusLabel(documentSaveStatus)}
+              </button>
+            ) : (
+              saveStatusLabel(documentSaveStatus)
+            )}
           </span>
+        </EditorHintWrap>
+        <PaytmCraftApiModeBanner variant="dark" className="ml-1 hidden shrink-0 sm:flex" />
+        {isApiMode ? (
+          <EditorHintWrap
+            title={
+              isApiBackedFile
+                ? "Edits save to the mock API file"
+                : "Edits are kept in browser storage until you save as an API file"
+            }
+          >
+            <span
+              className={cn(
+                "hidden shrink-0 rounded border px-1.5 py-0.5 text-ui font-medium sm:inline",
+                isApiBackedFile
+                  ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-200/95"
+                  : "border-amber-500/35 bg-amber-500/12 text-amber-100/90",
+              )}
+            >
+              {isApiBackedFile ? "API file" : "Local draft"}
+            </span>
+          </EditorHintWrap>
         ) : null}
         {isApiMode && realtimeSyncStatus === "connected" ? (
-          <span
-            className="hidden shrink-0 rounded border border-violet-500/35 bg-violet-500/12 px-1.5 py-0.5 text-ui font-medium text-violet-200/95 sm:inline"
-            title="Yjs WebSocket sync is active for this file"
-          >
-            Live sync
-          </span>
+          <EditorHintWrap title="Yjs WebSocket sync is active for this file">
+            <span className="hidden shrink-0 rounded border border-violet-500/35 bg-violet-500/12 px-1.5 py-0.5 text-ui font-medium text-violet-200/95 sm:inline">
+              Live sync
+            </span>
+          </EditorHintWrap>
         ) : null}
       </div>
       </div>

@@ -10,6 +10,7 @@ import {
   getActiveCraftEngine,
   getCraftEngineSyncState,
 } from "@/engine/craftEngineRegistry";
+import { runCraftEngineAccess } from "@/engine/craftEngineMutation";
 import type { CraftEngineDocument } from "@/engine/craftEngineTypes";
 import type { EditorNode } from "@/stores/useEditorStore";
 import { useEditorStore } from "@/stores/useEditorStore";
@@ -109,11 +110,13 @@ export function mirrorGeometryPatchesToWasm(entries: GeometryMirrorEntry[]): boo
   if (ops.length === 0) return false;
 
   try {
-    if (ops.length === 1) {
-      engine.applyDocumentOp(JSON.stringify(ops[0]));
-    } else {
-      engine.applyDocumentOps(JSON.stringify(ops));
-    }
+    runCraftEngineAccess(() => {
+      if (ops.length === 1) {
+        engine.applyDocumentOp(JSON.stringify(ops[0]));
+      } else {
+        engine.applyDocumentOps(JSON.stringify(ops));
+      }
+    });
     advanceSyncBaseline(state, baselineUpdates);
     if (isWasmFirstMutationsMode() && !isWasmDocumentMutationIdle()) {
       requestDeferredWasmReconcile();

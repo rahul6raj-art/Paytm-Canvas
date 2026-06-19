@@ -1,12 +1,4 @@
-import {
-  getOpenAIModelById,
-  isValidOpenAIModelId,
-  OPENAI_MODEL_OPTIONS,
-  openAIModelsByCategory,
-  type OpenAIModelOption,
-} from "@/lib/openaiModels";
-
-export type AIProvider = "ollama" | "openai";
+export type AIProvider = "ollama" | "openai" | "cursor";
 
 export type AIModelOption = {
   id: string;
@@ -19,8 +11,8 @@ export type AIModelOption = {
   ollamaTag?: string;
 };
 
-/** Default for new sessions — local open-source via Ollama. */
-export const DEFAULT_AI_MODEL_ID = "ollama:llama3.2";
+/** Default when no API keys — overridden by resolveDefaultAIModelId() when OpenAI is configured. */
+export const DEFAULT_AI_MODEL_ID = "cursor:composer-2.5";
 
 const STORAGE_KEY = "paytm-craft-ai-model";
 
@@ -120,33 +112,57 @@ export const OLLAMA_MODEL_OPTIONS: AIModelOption[] = [
   },
 ];
 
-function openAIToAIModel(m: OpenAIModelOption): AIModelOption {
-  return {
-    id: m.id,
-    label: m.label,
-    description: m.description,
+export const OPENAI_FAST_MODEL_OPTIONS: AIModelOption[] = [
+  {
+    id: "openai:gpt-4o-mini",
+    label: "GPT-4o Mini",
+    description: "Fastest — direct chat API, great with text and reference images.",
     provider: "openai",
-    recommended: m.recommended,
-    deprecated: m.deprecated,
-  };
-}
+    recommended: true,
+  },
+  {
+    id: "openai:gpt-5.4-nano",
+    label: "GPT-5.4 Nano",
+    description: "Very fast drafts and simple screens.",
+    provider: "openai",
+  },
+];
 
-const OPENAI_AS_AI: AIModelOption[] = OPENAI_MODEL_OPTIONS.map(openAIToAIModel);
+export const CURSOR_MODEL_OPTIONS: AIModelOption[] = [
+  {
+    id: "cursor:composer-2.5",
+    label: "Composer 2.5",
+    description: "Cursor cloud agent — higher quality, slower (30–90s).",
+    provider: "cursor",
+    recommended: true,
+  },
+  {
+    id: "cursor:default",
+    label: "Auto",
+    description: "Let Cursor pick the best model for your account.",
+    provider: "cursor",
+  },
+];
 
-export const AI_MODEL_OPTIONS: AIModelOption[] = [...OLLAMA_MODEL_OPTIONS, ...OPENAI_AS_AI];
+export const AI_MODEL_OPTIONS: AIModelOption[] = [...OPENAI_FAST_MODEL_OPTIONS, ...CURSOR_MODEL_OPTIONS];
 
 const MODEL_BY_ID = new Map(AI_MODEL_OPTIONS.map((m) => [m.id, m]));
 
 export function getAIModelById(id: string | undefined): AIModelOption | undefined {
   if (!id) return undefined;
-  const hit = MODEL_BY_ID.get(id);
-  if (hit) return hit;
-  const legacy = getOpenAIModelById(id);
-  return legacy ? openAIToAIModel(legacy) : undefined;
+  return MODEL_BY_ID.get(id);
 }
 
 export function isValidAIModelId(id: string): boolean {
-  return MODEL_BY_ID.has(id) || isValidOpenAIModelId(id);
+  return isOpenAIModelId(id) || isCursorModelId(id);
+}
+
+export function isOpenAIModelId(id: string): boolean {
+  return id.startsWith("openai:");
+}
+
+export function openaiChatModelId(modelId: string): string {
+  return isOpenAIModelId(modelId) ? modelId.slice("openai:".length) : modelId;
 }
 
 export function normalizeAIModelId(id: string | undefined): string {
@@ -156,6 +172,16 @@ export function normalizeAIModelId(id: string | undefined): string {
 
 export function isOllamaModelId(id: string): boolean {
   return id.startsWith("ollama:");
+}
+
+export function isCursorModelId(id: string): boolean {
+  return id.startsWith("cursor:");
+}
+
+export function cursorAgentModelId(modelId: string): string {
+  const id = isCursorModelId(modelId) ? modelId.slice("cursor:".length) : modelId;
+  if (id === "auto") return "default";
+  return id;
 }
 
 export function ollamaTagFromModelId(id: string): string | null {
@@ -190,23 +216,20 @@ export type AIModelSelectGroup = {
   models: AIModelOption[];
 };
 
-/** Optgroups for the model `<select>` — local/open-source first, then OpenAI. */
-export function aiModelSelectGroups(): AIModelSelectGroup[] {
-  const groups: AIModelSelectGroup[] = [
+/** Fast OpenAI chat first, then Cursor cloud agents. */
+export function aiModelSelectGroups(cursorModels: AIModelOption[] = CURSOR_MODEL_OPTIONS): AIModelSelectGroup[] {
+  return [
     {
-      key: "ollama",
-      label: "Local & open source (Ollama)",
-      models: OLLAMA_MODEL_OPTIONS,
+      key: "openai-fast",
+      label: "Fast (recommended)",
+      models: OPENAI_FAST_MODEL_OPTIONS,
+    },
+    {
+      key: "cursor",
+      label: "Cursor (slower)",
+      models: cursorModels.length ? cursorModels : CURSOR_MODEL_OPTIONS,
     },
   ];
-  for (const g of openAIModelsByCategory()) {
-    groups.push({
-      key: `openai-${g.category}`,
-      label: `OpenAI GPT (cloud) — ${g.label}`,
-      models: g.models.map(openAIToAIModel),
-    });
-  }
-  return groups;
 }
 
 export function ollamaBaseUrl(): string {

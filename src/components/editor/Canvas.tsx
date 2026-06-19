@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useEffect, useState } from "react";
-import { Grid3X3, Ruler } from "lucide-react";
 import { CanvasRulers } from "./CanvasRulers";
 import { SelectionBox } from "./SelectionBox";
 import { TextBaselineGuide } from "./TextBaselineGuide";
@@ -26,6 +25,7 @@ import { AutoLayoutHandlesOverlay } from "./AutoLayoutHandlesOverlay";
 import { AutoLayoutHoverOverlay } from "./AutoLayoutHoverOverlay";
 import { pickLayoutGuideAt } from "@/lib/layoutGuidePick";
 import { LayoutGuidesOverlay } from "./LayoutGuidesOverlay";
+import { AIGenerateCanvasOverlay } from "@/components/ai/AIGenerateCanvasOverlay";
 import { InspectMeasurementsLayer } from "./InspectMeasurementsLayer";
 import { PresenceLayer } from "./PresenceLayer";
 import { CommentPinLayer } from "./CommentPinLayer";
@@ -82,6 +82,7 @@ import {
   isEditableFieldElement,
   releaseFieldFocusForCanvas,
 } from "@/lib/editorKeyboardFocus";
+import { enterTextEditModeAtWorldPoint } from "@/lib/text/textEditMode";
 import { hasEditorClipboardContent } from "@/lib/editorClipboardAvailability";
 import {
   clearPostCreationPointerSuppress,
@@ -266,8 +267,6 @@ export function Canvas() {
   );
   const gridLineColor =
     themeResolved === "dark" ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.045)";
-  const toggleGrid = useEditorStore((s) => s.toggleGrid);
-  const toggleRulers = useEditorStore((s) => s.toggleRulers);
   const clearSelection = useEditorStore((s) => s.clearSelection);
   const tool = useEditorStore((s) => s.tool);
   const addRectangleAt = useEditorStore((s) => s.addRectangleAt);
@@ -934,10 +933,8 @@ export function Canvas() {
         creationBranch = "text";
         const existingText = pickDeepestNodeAtWorldPoint(w.x, w.y, st.nodes, st.childOrder, { types: ["text"] });
         if (existingText) {
-          st.pushHistory();
-          st.select(existingText);
           st.setTool("move");
-          st.setEditingTextId(existingText);
+          enterTextEditModeAtWorldPoint(existingText, w.x, w.y);
           return;
         }
 
@@ -1118,8 +1115,11 @@ export function Canvas() {
       }
     }
     if (e.button === 0 || e.button === 2) {
-      releaseFieldFocusForCanvas();
-      focusCanvasViewport(viewportRef.current);
+      const editingTextId = useEditorStore.getState().editingTextId;
+      if (!editingTextId) {
+        releaseFieldFocusForCanvas();
+        focusCanvasViewport(viewportRef.current);
+      }
     }
     const st = useEditorStore.getState();
     const placing = st.editorMode === "design" && st.tool === "comment" && st.isPlacingComment;
@@ -1283,7 +1283,11 @@ export function Canvas() {
       onDragOverCapture={onCanvasDragOverCapture}
       onDropCapture={onCanvasDropCapture}
       onPaste={onCanvasPaste}
-      onFocus={() => activateCanvasForShortcuts()}
+      onFocus={() => {
+        if (!useEditorStore.getState().editingTextId) {
+          activateCanvasForShortcuts();
+        }
+      }}
       onPointerMove={(e) => {
         setLastCanvasWorldPoint(toWorld(e.clientX, e.clientY));
         if (tool !== "pen" || !useEditorStore.getState().penDrawingNodeId) {
@@ -1439,45 +1443,7 @@ export function Canvas() {
       </div>
 
       <LayoutGuidesOverlay zoom={zoom} pan={pan} viewportRef={viewportRef} />
-
-      <div className="absolute bottom-3 left-3 z-50 flex items-center gap-1">
-        <button
-          type="button"
-          data-rulers-toggle
-          onClick={(e) => {
-            e.stopPropagation();
-            toggleRulers();
-          }}
-          title={showRulers ? "Hide rulers" : "Show rulers"}
-          className={cn(
-            "flex h-6 items-center gap-1 rounded border px-1.5 text-ui font-medium transition-colors",
-            showRulers
-              ? "border-accent/40 bg-app-panel text-app-fg shadow-sm"
-              : "border-app-border bg-app-panel/95 text-app-muted hover:border-app-border hover:bg-app-hover hover:text-app-fg",
-          )}
-        >
-          <Ruler className="h-3.5 w-3.5" strokeWidth={1.75} />
-          Rulers
-        </button>
-        <button
-          type="button"
-          data-grid-toggle
-          onClick={(e) => {
-            e.stopPropagation();
-            toggleGrid();
-          }}
-          title={showGrid ? "Hide layout grid" : "Show layout grid"}
-          className={cn(
-            "flex h-6 items-center gap-1 rounded border px-1.5 text-ui font-medium transition-colors",
-            showGrid
-              ? "border-accent/40 bg-app-panel text-app-fg shadow-sm"
-              : "border-app-border bg-app-panel/95 text-app-muted hover:border-app-border hover:bg-app-hover hover:text-app-fg",
-          )}
-        >
-          <Grid3X3 className="h-3.5 w-3.5" strokeWidth={1.75} />
-          Grid
-        </button>
-      </div>
+      <AIGenerateCanvasOverlay />
       </CanvasViewportProvider>
       </CanvasToWorldContext.Provider>
       </CanvasInteractionContext.Provider>

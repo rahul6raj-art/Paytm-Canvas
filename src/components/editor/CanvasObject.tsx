@@ -57,6 +57,7 @@ import {
   isCanvasSelectTool,
 } from "@/lib/canvasInteractionGuards";
 import { TextCanvasView } from "./TextCanvasView";
+import { enterTextEditModeAtWorldPoint } from "@/lib/text/textEditMode";
 import { PathEditPathOutline } from "./PathEditPathOutline";
 import { ShapeVectorView } from "./ShapeVectorView";
 import { BooleanGroupView, MaskGroupView } from "./BooleanGroupView";
@@ -187,7 +188,6 @@ export function CanvasObject({
   const openContextMenu = useEditorStore((s) => s.openContextMenu);
   const editingTextId = useEditorStore((s) => s.editingTextId);
   const textEditSelection = useEditorStore((s) => s.textEditSelection);
-  const setEditingTextId = useEditorStore((s) => s.setEditingTextId);
   const editorMode = useEditorStore((s) => s.editorMode);
   const startPrototypeConnection = useEditorStore((s) => s.startPrototypeConnection);
   const finishPrototypeConnection = useEditorStore((s) => s.finishPrototypeConnection);
@@ -440,7 +440,7 @@ export function CanvasObject({
       if (e.altKey && !prepareAltDragDuplicate(targetId)) return;
 
       beginCanvasNodeDrag({
-        nodeId: node.id,
+        nodeId: targetId,
         pointerId: e.pointerId,
         clientX: e.clientX,
         clientY: e.clientY,
@@ -478,6 +478,12 @@ export function CanvasObject({
       ? cornerRadiiToCss(clampCornerRadii(getNodeCornerRadii(node), node.width, node.height))
       : undefined;
   const isRootFrame = node.type === "frame" && renderParentId === null;
+  const frameBodyHits = frameBodyReceivesPointerHits(
+    id,
+    nodesSnapshot,
+    childOrder,
+    commandDown,
+  );
   const collapseChildHits = shouldCollapseContainerHits(
     id,
     nodesSnapshot,
@@ -485,7 +491,6 @@ export function CanvasObject({
     objectEditModeNodeId,
     commandDown,
   );
-  const frameBodyHits = frameBodyReceivesPointerHits(id, nodesSnapshot, childOrder);
   const layerPointerEvents =
     node.type === "frame" && !frameBodyHits ? "none" : objectPointerEvents;
 
@@ -774,7 +779,8 @@ export function CanvasObject({
 
         if (node.type === "text") {
           e.stopPropagation();
-          setEditingTextId(node.id);
+          const w = clientToWorld(e.clientX, e.clientY);
+          enterTextEditModeAtWorldPoint(node.id, w.x, w.y);
           return;
         }
 

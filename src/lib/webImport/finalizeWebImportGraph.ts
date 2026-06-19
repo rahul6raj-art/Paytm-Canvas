@@ -7,10 +7,19 @@ import {
   fixOverlappingStackedSiblings,
   normalizeFooterLegalText,
   normalizeEmailToButtonGap,
+  normalizeWebImportTextNodes,
+  normalizeWebImportSvgPaths,
   normalizeWebImportColors,
+  preserveWebImportOverflowEffects,
   stripWebImportAutoLayout,
   trimFramesToChildBounds,
 } from "@/lib/webImport/normalizeWebImportLayers";
+import { pinPhoneShellBottomChromeNodes } from "@/lib/webImport/phoneShellBottomChrome";
+import {
+  applyPhoneShellFullPageLayout,
+  isPhoneShellClassName,
+  shouldPreserveViewportFrameBounds,
+} from "@/lib/webImport/phoneShellViewport";
 
 function expandFramesToFitChildren(
   nodes: Record<string, EditorNode>,
@@ -20,6 +29,7 @@ function expandFramesToFitChildren(
     if (parentId === EDITOR_ROOT_KEY) continue;
     const parent = nodes[parentId];
     if (!parent || (parent.type !== "frame" && parent.type !== "group")) continue;
+    if (shouldPreserveViewportFrameBounds(parent)) continue;
     if (kids.length === 0) continue;
 
     const padR = parent.paddingRight ?? 0;
@@ -60,21 +70,18 @@ export function finalizeWebImportGraph(
   normalizeFooterLegalText(nodes, childOrder);
   normalizeEmailToButtonGap(nodes, childOrder);
   disableAutoLayoutForAbsoluteChildren(nodes, childOrder);
+  normalizeWebImportTextNodes(nodes);
+  normalizeWebImportSvgPaths(nodes);
   normalizeWebImportColors(nodes);
 
   for (let pass = 0; pass < 3; pass++) {
     expandFramesToFitChildren(nodes, childOrder);
   }
-
-  for (const rootId of childOrder[EDITOR_ROOT_KEY] ?? []) {
-    const root = nodes[rootId];
-    if (!root) continue;
-    nodes[rootId] = {
-      ...root,
-      width: Math.max(root.width, pageWidth),
-      height: Math.max(root.height, pageHeight),
-    };
-  }
+  preserveWebImportOverflowEffects(nodes, childOrder);
+  applyPhoneShellFullPageLayout(nodes, childOrder, pageWidth, pageHeight);
+  const shellHeight =
+    Object.values(nodes).find((n) => isPhoneShellClassName(n.codeClassName))?.height ?? pageHeight;
+  pinPhoneShellBottomChromeNodes(nodes, childOrder, shellHeight);
 
   return nodes;
 }

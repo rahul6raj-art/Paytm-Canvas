@@ -8,14 +8,19 @@ export function pointerAngleRad(
   return Math.atan2(pointerWorld.y - centerWorld.y, pointerWorld.x - centerWorld.x);
 }
 
-/** Delta in degrees between current pointer angle and drag-start angle. */
+/** Shortest signed delta in degrees between two pointer angles (handles atan2 branch cut). */
+export function shortestAngleDeltaDegrees(fromRad: number, toRad: number): number {
+  return (Math.atan2(Math.sin(toRad - fromRad), Math.cos(toRad - fromRad)) * 180) / Math.PI;
+}
+
+/** Delta in degrees between current pointer angle and drag-start angle (shortest path). */
 export function rotationDeltaDegrees(
   pointerWorld: { x: number; y: number },
   centerWorld: { x: number; y: number },
   startAngleRad: number,
 ): number {
   const angle = pointerAngleRad(pointerWorld, centerWorld);
-  return ((angle - startAngleRad) * 180) / Math.PI;
+  return shortestAngleDeltaDegrees(startAngleRad, angle);
 }
 
 /** Snap absolute rotation to 15° when Shift is held. */

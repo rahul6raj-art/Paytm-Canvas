@@ -24,7 +24,9 @@ import { normalizeHex } from "@/lib/color";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { ColorPickerPanel } from "../ColorPickerPanel";
 import { InspectorColorPickerAside } from "../InspectorColorPickerAside";
+import { InspectorHintIconButton } from "../design-panel/InspectorPrimitives";
 import { GradientRampBar, GradientStopRow } from "./GradientRampBar";
+import { appFieldInnerClass, appFieldShellClass, inspectorRowGapClass } from "@/lib/appFieldStyles";
 import { cn } from "@/lib/utils";
 
 const KIND_OPTIONS: { value: GradientKind; label: string }[] = [
@@ -85,15 +87,13 @@ function GradientAngleInput({
   };
 
   return (
-    <input
-      type="text"
-      inputMode="decimal"
-      disabled={disabled}
-      aria-label={ariaLabel}
-      {...bindScrubInput(
-        "h-7 min-w-0 flex-1 rounded border border-app-border bg-app-field px-2 font-mono tabular-nums text-ui text-app-fg disabled:opacity-40",
-        focused,
-      )}
+    <div className={cn(appFieldShellClass, "min-w-0 flex-1", disabled && "opacity-40")}>
+      <input
+        type="text"
+        inputMode="decimal"
+        disabled={disabled}
+        aria-label={ariaLabel}
+        {...bindScrubInput(cn(appFieldInnerClass, "font-mono tabular-nums"), focused)}
       value={text}
       onFocus={() => setFocused(true)}
       onChange={(e) => setText(e.target.value.replace(/[^\d.-]/g, ""))}
@@ -116,7 +116,8 @@ function GradientAngleInput({
           },
         })
       }
-    />
+      />
+    </div>
   );
 }
 
@@ -339,7 +340,7 @@ export function GradientFillEditor({
     <div
       className={cn(
         "space-y-3",
-        embedded && "rounded-lg border border-app-border bg-[#2a2a2a] p-2.5",
+        embedded && "rounded-lg border border-app-border-subtle bg-app-inset p-2.5",
       )}
     >
       {embedded ? (
@@ -355,20 +356,20 @@ export function GradientFillEditor({
             type="button"
             disabled={disabled}
             onClick={() => setKindOpen((o) => !o)}
-            className="flex h-7 w-full items-center justify-between rounded-md border border-app-border bg-app-field px-2 text-ui text-app-fg disabled:opacity-40"
+            className={cn(appFieldShellClass, "w-full items-center justify-between px-2 text-ui text-app-fg disabled:opacity-40")}
           >
             <span>{KIND_OPTIONS.find((k) => k.value === gradient.kind)?.label ?? "Linear"}</span>
             <span className="text-app-muted text-[10px]">▼</span>
           </button>
           {kindOpen ? (
-            <ul className="absolute left-0 right-0 top-full z-50 mt-0.5 rounded-md border border-app-border bg-app-panel py-0.5 shadow-lg">
+            <ul className="absolute left-0 right-0 top-full z-50 mt-0.5 editor-floating-menu py-0.5">
               {KIND_OPTIONS.map((opt) => (
                 <li key={opt.value}>
                   <button
                     type="button"
                     className={cn(
-                      "w-full px-2 py-1.5 text-left text-ui hover:bg-app-hover",
-                      gradient.kind === opt.value ? "text-accent" : "text-app-fg",
+                      "w-full px-2 py-1.5 text-left text-ui transition-colors hover:bg-app-hover",
+                      gradient.kind === opt.value ? "bg-app-inset text-app-fg" : "text-app-fg",
                     )}
                     onClick={() => {
                       setKindOpen(false);
@@ -387,16 +388,18 @@ export function GradientFillEditor({
       {gradient.kind === "linear" || gradient.kind === "angular" ? (
         <div>
           <FieldLabel>{gradient.kind === "angular" ? "Rotation" : "Angle"}</FieldLabel>
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              disabled={disabled}
+          <div className={cn("flex items-center", inspectorRowGapClass)}>
+            <InspectorHintIconButton
               title="Reverse gradient"
+              disabled={disabled}
               onClick={() => commit((prev) => reverseGradientStops(prev))}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-app-border bg-app-field text-app-muted hover:bg-app-hover hover:text-app-fg disabled:opacity-40"
+              className={cn(
+                appFieldShellClass,
+                "h-7 w-7 shrink-0 justify-center text-app-muted hover:bg-app-hover hover:text-app-fg disabled:opacity-40",
+              )}
             >
               <FlipHorizontal2 className="h-3.5 w-3.5" strokeWidth={1.75} />
-            </button>
+            </InspectorHintIconButton>
             <GradientAngleInput
               value={gradientAngleDeg(gradient)}
               disabled={disabled}
@@ -452,7 +455,7 @@ export function GradientFillEditor({
             Add
           </button>
         </div>
-        <div className="space-y-1">
+        <div className="space-y-3">
           {sortedStops.map((stop) => (
             <GradientStopRow
               key={stop.id}

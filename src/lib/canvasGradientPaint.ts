@@ -3,6 +3,8 @@ export {
   createGradientFillPattern,
   paintFillOnCanvas,
   paintGradientFillInBox,
+  paintNodeFillInBox,
+  paintMediaFillInBox,
   resolveCanvasStrokeStyle,
   type GradientPaintContext,
 } from "@/lib/gradient/canvasPaint";

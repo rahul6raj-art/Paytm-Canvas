@@ -3,6 +3,7 @@ import type { FillGradient, FillPaintNode, GradientStop } from "./types";
 import { gradientTAtLocal } from "./handles";
 import { effectiveFillType, gradientStopEffectiveOpacity, normalizeFillGradient, sortStops } from "./model";
 import { resolveSolidFillCss } from "./cssPaint";
+import type { ImageFitMode } from "@/stores/useEditorStore";
 
 export type GradientPaintContext = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
@@ -196,6 +197,77 @@ export function paintGradientFillInBox(
   if (!paintFillOnCanvas(ctx, node, width, height)) return false;
   ctx.fillRect(0, 0, Math.max(1, width), Math.max(1, height));
   return true;
+}
+
+export function canvasObjectFitRect(
+  mode: ImageFitMode | undefined,
+  iw: number,
+  ih: number,
+  bw: number,
+  bh: number,
+): { sx: number; sy: number; sw: number; sh: number; dx: number; dy: number; dw: number; dh: number } {
+  if (iw <= 0 || ih <= 0) {
+    return { sx: 0, sy: 0, sw: 1, sh: 1, dx: 0, dy: 0, dw: bw, dh: bh };
+  }
+  const fit = mode ?? "fill";
+  if (fit === "fill") {
+    return { sx: 0, sy: 0, sw: iw, sh: ih, dx: 0, dy: 0, dw: bw, dh: bh };
+  }
+  const s = fit === "fit" ? Math.min(bw / iw, bh / ih) : Math.max(bw / iw, bh / ih);
+  const dw = iw * s;
+  const dh = ih * s;
+  return { sx: 0, sy: 0, sw: iw, sh: ih, dx: (bw - dw) / 2, dy: (bh - dh) / 2, dw, dh };
+}
+
+/** Paint image/video/pattern fills into a box (caller clips/masks to glyphs if needed). */
+export function paintMediaFillInBox(
+  ctx: GradientPaintContext,
+  node: FillPaintNode,
+  width: number,
+  height: number,
+  source: CanvasImageSource,
+  sourceW: number,
+  sourceH: number,
+): boolean {
+  if (node.fillEnabled === false) return false;
+  const kind = effectiveFillType(node);
+  if (kind !== "image" && kind !== "video" && kind !== "pattern") return false;
+  const w = Math.max(1, width);
+  const h = Math.max(1, height);
+  const tiled = kind === "pattern";
+  const opacity = clamp01(node.fillOpacity ?? 1);
+  const prevAlpha = ctx.globalAlpha;
+  ctx.globalAlpha = prevAlpha * opacity;
+  if (tiled) {
+    const pw = Math.max(8, sourceW);
+    const ph = Math.max(8, sourceH);
+    const pattern = ctx.createPattern(source, "repeat");
+    if (pattern) {
+      ctx.fillStyle = pattern;
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalAlpha = prevAlpha;
+      return true;
+    }
+  }
+  const r = canvasObjectFitRect(node.imageFitMode, sourceW, sourceH, w, h);
+  ctx.drawImage(source, r.sx, r.sy, r.sw, r.sh, r.dx, r.dy, r.dw, r.dh);
+  ctx.globalAlpha = prevAlpha;
+  return true;
+}
+
+/** Paint any enabled fill (solid, gradient, or preloaded media) into a box. */
+export function paintNodeFillInBox(
+  ctx: GradientPaintContext,
+  node: FillPaintNode,
+  width: number,
+  height: number,
+  media?: { source: CanvasImageSource; width: number; height: number } | null,
+): boolean {
+  const kind = effectiveFillType(node);
+  if ((kind === "image" || kind === "video" || kind === "pattern") && media) {
+    return paintMediaFillInBox(ctx, node, width, height, media.source, media.width, media.height);
+  }
+  return paintGradientFillInBox(ctx, node, width, height);
 }
 
 export function createGradientPaintStyle(

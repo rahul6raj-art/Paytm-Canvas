@@ -2,6 +2,7 @@
 
 import { useCallback, useRef } from "react";
 import { cn } from "@/lib/utils";
+import { EditorHintWrap } from "./EditorHoverHint";
 import { forEachCoalescedPointerEvent } from "@/lib/smoothPointer";
 
 type PanelEdge = "left" | "right";
@@ -70,18 +71,19 @@ export function ResizablePanelEdge({
   );
 
   return (
-    <div
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="Resize panel"
-      title="Drag to resize panel"
-      className={cn(
-        "absolute top-0 z-10 h-full w-1.5 shrink-0 touch-none",
-        edge === "right" ? "right-0 translate-x-1/2" : "left-0 -translate-x-1/2",
-        "cursor-col-resize",
-        className,
-      )}
-      onPointerDown={onPointerDown}
-    />
+    <EditorHintWrap title="Drag to resize panel" anchorClassName="contents">
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize panel"
+        className={cn(
+          "absolute top-0 z-10 h-full w-1.5 shrink-0 touch-none",
+          edge === "right" ? "right-0 translate-x-1/2" : "left-0 -translate-x-1/2",
+          "cursor-col-resize",
+          className,
+        )}
+        onPointerDown={onPointerDown}
+      />
+    </EditorHintWrap>
   );
 }

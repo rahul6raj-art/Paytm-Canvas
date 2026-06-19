@@ -6,6 +6,7 @@ import {
 } from "@/lib/aiDesignSpec";
 import type { AIStyleId } from "@/lib/aiMockGenerator";
 import type { ScreenIntent } from "@/lib/aiScreenIntent";
+import { openaiChatModelId } from "@/lib/aiModels";
 
 export type OpenAIGenerateInput = {
   modelId: string;
@@ -32,8 +33,9 @@ export function isOpenAIConfigured(): boolean {
 }
 
 function resolveModelId(modelId: string, hasImages: boolean): string {
-  if (!hasImages) return modelId;
-  if (/^gpt-4o/i.test(modelId)) return modelId;
+  const bare = openaiChatModelId(modelId);
+  if (!hasImages) return bare;
+  if (/^gpt-4o/i.test(bare)) return bare;
   return VISION_MODEL_ID;
 }
 
@@ -88,7 +90,7 @@ export async function generateWithOpenAI(input: OpenAIGenerateInput): Promise<Op
         ...images.map(
           (img): ChatContentPart => ({
             type: "image_url",
-            image_url: { url: img.dataUrl, detail: "high" },
+            image_url: { url: img.dataUrl, detail: "low" },
           }),
         ),
       ]
@@ -106,6 +108,7 @@ export async function generateWithOpenAI(input: OpenAIGenerateInput): Promise<Op
       body: JSON.stringify({
         model,
         temperature: 0.35,
+        max_tokens: 8192,
         response_format: { type: "json_object" },
         messages: [
           {

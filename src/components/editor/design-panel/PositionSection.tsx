@@ -2,8 +2,11 @@
 
 import { PropertiesSection } from "../PropertiesSection";
 import { PropertyNumberInput } from "../PropertyInput";
+import { DimensionFieldsRow } from "./DimensionFieldsRow";
 import { useEditorStore, type EditorNode } from "@/stores/useEditorStore";
+import { rotateGeomSnapshotForNode } from "@/lib/rotation/rotateGeometryLock";
 import { RotationTransformRow } from "./TransformSettingIcons";
+import { inspectorTwoColGridClass } from "@/lib/appFieldStyles";
 
 export function PositionSection({
   node,
@@ -11,6 +14,7 @@ export function PositionSection({
   locked,
   parentAutoLayout,
   isContainer,
+  hideDimensions,
   onPatch,
   onResizeFrame,
 }: {
@@ -19,24 +23,25 @@ export function PositionSection({
   locked: boolean;
   parentAutoLayout: boolean;
   isContainer: boolean;
+  hideDimensions?: boolean;
   onPatch: (p: Partial<EditorNode>) => void;
   onResizeFrame: (width: number, height: number) => void;
 }) {
   const transformMode = useEditorStore((s) => s.transformInteractionMode);
-  const rotateGeomSnapshot = useEditorStore((s) => s.rotateGeomSnapshot);
+  const rotateSnap = useEditorStore((s) => rotateGeomSnapshotForNode(s, node.id));
+  const freezePosition = useEditorStore(
+    (s) => transformMode === "rotate" && s.rotateGeomSnapshot?.nodeId === node.id,
+  );
 
-  const freezeGeom =
-    transformMode === "rotate" &&
-    rotateGeomSnapshot != null &&
-    rotateGeomSnapshot.nodeId === node.id;
-  const displayX = freezeGeom ? rotateGeomSnapshot.x : node.x;
-  const displayY = freezeGeom ? rotateGeomSnapshot.y : node.y;
-  const displayW = freezeGeom ? rotateGeomSnapshot.width : node.width;
-  const displayH = freezeGeom ? rotateGeomSnapshot.height : node.height;
+  const freezeGeom = transformMode === "rotate" && rotateSnap != null;
+  const displayX = freezePosition && rotateSnap ? rotateSnap.x : node.x;
+  const displayY = freezePosition && rotateSnap ? rotateSnap.y : node.y;
+  const displayW = freezeGeom && rotateSnap ? rotateSnap.width : node.width;
+  const displayH = freezeGeom && rotateSnap ? rotateSnap.height : node.height;
 
   return (
     <PropertiesSection title="Position" defaultOpen>
-      <div className="grid grid-cols-2 gap-2">
+      <div className={inspectorTwoColGridClass}>
         <PropertyNumberInput
           commitOnInput={false}
           label="X"
@@ -56,30 +61,19 @@ export function PositionSection({
           onCommit={(v) => onPatch({ y: v })}
         />
       </div>
-      <div className="mt-1.5 grid grid-cols-2 gap-1">
-        <PropertyNumberInput
-          commitOnInput={false}
-          label="W"
-          value={displayW}
-          instanceKey={`${instanceKey}-w`}
-          disabled={locked}
-          min={1}
-          onCommit={(v) =>
-            isContainer ? onResizeFrame(v, displayH) : onPatch({ width: v })
-          }
-        />
-        <PropertyNumberInput
-          commitOnInput={false}
-          label="H"
-          value={displayH}
-          instanceKey={`${instanceKey}-h`}
-          disabled={locked}
-          min={1}
-          onCommit={(v) =>
-            isContainer ? onResizeFrame(displayW, v) : onPatch({ height: v })
-          }
-        />
-      </div>
+      {!hideDimensions ? (
+        <div className="mt-1.5">
+          <DimensionFieldsRow
+            width={displayW}
+            height={displayH}
+            instanceKey={instanceKey}
+            locked={locked}
+            onCommitDimensions={({ width, height }) =>
+              isContainer ? onResizeFrame(width, height) : onPatch({ width, height })
+            }
+          />
+        </div>
+      ) : null}
       <div className="mt-1.5">
         <RotationTransformRow
           rotation={node.rotation}

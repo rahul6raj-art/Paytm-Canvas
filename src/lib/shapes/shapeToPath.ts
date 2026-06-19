@@ -365,10 +365,14 @@ export function resolvePathOutlineD(
   >,
   nodeId?: string,
 ): string {
+  const baked = node.flattenedPathData?.trim();
+  if (node.type === "path" && baked) {
+    return baked;
+  }
   if (node.type === "path" && (node.pathPoints?.length ?? 0) > 0) {
     return vectorShapeOutlineD(node, nodeId);
   }
-  return node.flattenedPathData ?? vectorShapeOutlineD(node, nodeId);
+  return baked ?? vectorShapeOutlineD(node, nodeId);
 }
 
 /** SVG path `d` for vector shapes (polygon, star, path). */

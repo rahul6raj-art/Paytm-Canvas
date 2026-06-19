@@ -1,8 +1,11 @@
 import { convertSvgTree } from "@/lib/svgImport";
+import { scaleSvgPathD } from "@/lib/svgImport/parseSvgPath";
 import { sanitizeImportText } from "@/lib/webImport/urlValidation";
 import { mapBackgroundSizeToFit } from "@/lib/webImport/backgroundImageFit";
 import { ensureReadableTextColor } from "@/lib/webImport/colorContrast";
 import { isLayoutContainer } from "@/lib/webImport/layoutAnalyzer";
+import { webImportTextResizeMode } from "@/lib/text/ensureTextModeForExplicitWidth";
+import { textResizePatch } from "@/lib/text/textNodeModel";
 import { isImportableTextContent, isSemanticTextTag } from "@/lib/webImport/textContentHeuristics";
 import type {
   DesignNode,
@@ -20,6 +23,24 @@ const INPUT_TAGS = new Set(["input", "textarea", "select"]);
 
 type AssetMap = Record<string, { id: string; dataUrl: string; name: string; mimeType: string }>;
 type MasterMap = Map<string, ImportWebSceneNode>;
+
+const SCREEN_SHELL_CLASS_TOKENS = new Set([
+  "pml-home",
+  "pml-signup",
+  "pml-onboarding",
+  "pml-more",
+  "pml-stocks",
+]);
+
+/** Full-page capture: do not clip scroll shells — below-the-fold content stays on canvas. */
+function importClipChildren(node: DesignNode): boolean {
+  const cls = node.codeClassName ?? "";
+  if (/__(?:scroll|main)\b/.test(cls)) return false;
+  if (SCREEN_SHELL_CLASS_TOKENS.has(cls.split(/\s+/).find((t) => SCREEN_SHELL_CLASS_TOKENS.has(t)) ?? "")) {
+    return false;
+  }
+  return node.overflowHidden ?? false;
+}
 
 function buildFromDesign(
   node: DesignNode,
@@ -88,7 +109,7 @@ function buildSceneNode(
     layoutSizingHorizontal: layout.layoutSizingHorizontal,
     layoutSizingVertical: layout.layoutSizingVertical,
     layoutGrow: layout.layoutGrow,
-    clipChildren: node.overflowHidden ?? false,
+    clipChildren: importClipChildren(node),
     isComponent: node.isComponentMaster || undefined,
     componentId: node.componentId,
     sourceComponentId: node.sourceComponentId,
@@ -104,7 +125,8 @@ function buildSceneNode(
     base.textDecoration = node.typography?.textDecoration;
     base.textAlign = node.typography?.textAlign ?? "left";
     base.verticalAlign = node.typography?.verticalAlign;
-    base.textResizeMode = "auto-height";
+    const resizeMode = webImportTextResizeMode(node.cssLayoutHints ?? {});
+    Object.assign(base, textResizePatch(resizeMode));
     base.fill = style.fill ?? "#111111";
     base.fillEnabled = true;
     return base;
@@ -145,6 +167,10 @@ function buildSceneNode(
     if (isLayoutContainer(layout) && !base.layoutMode) {
       base.layoutMode = layout.layoutMode ?? "vertical";
     }
+  }
+
+  if (node.role === "badge" && (node.text || children.length > 0)) {
+    return preserveStyledBadgeFrame(node, base, children);
   }
 
   if (node.role === "button" && node.tagName.toLowerCase() === "a") {
@@ -226,6 +252,58 @@ function buildRecoveredLabel(
     layoutSizingHorizontal: "hug",
     layoutSizingVertical: "hug",
     layoutPositioning: "auto",
+  };
+}
+
+function preserveStyledBadgeFrame(
+  node: DesignNode,
+  base: ImportWebSceneNode,
+  children: ImportWebSceneNode[],
+): ImportWebSceneNode {
+  const label = sanitizeImportText(node.text || "", 200);
+  const chipBg = base.fillEnabled ? base.fill : undefined;
+  const rawLabelColor = node.typography?.color ?? "#ffffff";
+  const labelColor = ensureReadableTextColor(rawLabelColor, chipBg) ?? rawLabelColor;
+
+  let kids = [...children];
+  const hasText = kids.some((c) => c.type === "text" && c.content?.trim());
+  if (label && !hasText) {
+    kids.push({
+      id: nextId("web"),
+      type: "text",
+      name: "Label",
+      x: Math.max(8, Math.round((base.width - label.length * 6) / 2)),
+      y: Math.max(0, Math.round((base.height - 16) / 2)),
+      width: Math.max(40, base.width - 16),
+      height: 16,
+      content: label,
+      fontFamily: node.typography?.fontFamily ?? "Inter",
+      fontSize: node.typography?.fontSize ?? 12,
+      fontWeight: node.typography?.fontWeight ?? 500,
+      textAlign: "center",
+      fill: labelColor,
+      fillEnabled: true,
+      layoutPositioning: "absolute",
+    });
+  } else {
+    kids = kids.map((c) =>
+      c.type === "text"
+        ? { ...c, fill: ensureReadableTextColor(c.fill ?? rawLabelColor, chipBg) ?? c.fill }
+        : c,
+    );
+  }
+
+  return {
+    ...base,
+    type: "frame",
+    name: node.name || "Badge",
+    fillEnabled: base.fillEnabled || Boolean(chipBg),
+    layoutMode: "horizontal",
+    layoutGap: base.layoutGap ?? 2,
+    primaryAxisAlign: "center",
+    counterAxisAlign: "center",
+    layoutPositioning: "absolute",
+    children: kids,
   };
 }
 
@@ -390,6 +468,7 @@ function nodeKind(node: DesignNode): ImportWebSceneNode["type"] {
     return "frame";
   }
   if (node.role === "button") return "frame";
+  if (node.role === "badge") return "frame";
   if ((tag === "img" || node.role === "image" || node.role === "avatar") && node.imageSrc) {
     return "image";
   }
@@ -456,15 +535,15 @@ function buildSvgSceneNode(
   const vbParts = vbMatch?.[1]?.trim().split(/\s+/).map(Number) ?? [];
   const vbW = vbParts[2] && vbParts[2] > 0 ? vbParts[2] : root.width;
   const vbH = vbParts[3] && vbParts[3] > 0 ? vbParts[3] : root.height;
-  const scaleX = base.width > 0 && vbW > 0 ? base.width / vbW : 1;
-  const scaleY = base.height > 0 && vbH > 0 ? base.height / vbH : 1;
+  const scale =
+    vbW > 0 && vbH > 0 ? Math.min(base.width / vbW, base.height / vbH) : 1;
 
   const children: ImportWebSceneNode[] = [];
   for (const cid of result.childOrder[result.rootId] ?? []) {
     const n = result.nodes[cid];
     if (!n) continue;
     const scene = editorNodeToScene(n, result.nodes, result.childOrder, assets);
-    children.push(scaleSceneNode(scene, scaleX, scaleY));
+    children.push(scaleSceneNode(scene, scale));
   }
 
   return sanitizeSvgGroupFills({
@@ -472,7 +551,7 @@ function buildSvgSceneNode(
     type: "frame",
     name: node.name || "SVG",
     children,
-    clipChildren: true,
+    clipChildren: false,
     layoutMode: "none",
     primaryAxisAlign: "center",
     counterAxisAlign: "center",
@@ -495,25 +574,34 @@ function sanitizeSvgGroupFills(node: ImportWebSceneNode): ImportWebSceneNode {
 
 function scaleSceneNode(
   node: ImportWebSceneNode,
-  scaleX: number,
-  scaleY: number,
+  scale: number,
 ): ImportWebSceneNode {
   const scaled: ImportWebSceneNode = {
     ...node,
-    x: node.x * scaleX,
-    y: node.y * scaleY,
-    width: node.width * scaleX,
-    height: node.height * scaleY,
-    children: node.children?.map((c) => scaleSceneNode(c, scaleX, scaleY)),
+    x: node.x * scale,
+    y: node.y * scale,
+    width: node.width * scale,
+    height: node.height * scale,
+    children: node.children?.map((c) => scaleSceneNode(c, scale)),
   };
   if (node.pathPoints?.length) {
     scaled.pathPoints = node.pathPoints.map((p) => ({
       ...p,
-      x: p.x * scaleX,
-      y: p.y * scaleY,
+      x: p.x * scale,
+      y: p.y * scale,
+      handleIn: p.handleIn
+        ? { x: p.handleIn.x * scale, y: p.handleIn.y * scale }
+        : undefined,
+      handleOut: p.handleOut
+        ? { x: p.handleOut.x * scale, y: p.handleOut.y * scale }
+        : undefined,
     }));
   }
-  if (node.fontSize) scaled.fontSize = node.fontSize * Math.min(scaleX, scaleY);
+  if (node.flattenedPathData && scale !== 1) {
+    scaled.flattenedPathData = scaleSvgPathD(node.flattenedPathData, scale);
+  }
+  if (node.fontSize) scaled.fontSize = node.fontSize * scale;
+  if (node.strokeWidth) scaled.strokeWidth = node.strokeWidth * scale;
   return scaled;
 }
 
@@ -551,6 +639,11 @@ function editorNodeToScene(
     fontWeight: node.fontWeight,
     pathPoints: node.pathPoints,
     pathClosed: node.pathClosed,
+    pathFillRule: node.pathFillRule,
+    flattenedPathData: node.flattenedPathData,
+    strokeLinecap: node.strokeLinecap,
+    strokeLinejoin: node.strokeLinejoin,
+    strokeOpacity: node.strokeOpacity,
     assetId: node.assetId,
     imageSrc: node.imageSrc,
   };
@@ -605,48 +698,34 @@ export function designTreeToScene(
   const assets: AssetMap = {};
   const masters: MasterMap = new Map();
 
-  const builtChildren: ImportWebSceneNode[] = [];
-  for (const child of root.children) {
-    const scene = buildFromDesign(child, assets, masters);
-    if (scene) builtChildren.push(scene);
+  const shell = buildFromDesign(root, assets, masters);
+  if (!shell) {
+    const scene: ImportWebSceneNode = {
+      id: nextId("web-root"),
+      type: "frame",
+      name: page.title || "Imported page",
+      x: 0,
+      y: 0,
+      width: page.width,
+      height: page.height,
+      fillEnabled: false,
+      clipChildren: true,
+      children: [],
+    };
+    return { scene, assets };
   }
 
-  const rootLayout = inferSceneRootLayout(builtChildren);
+  const phoneColumn = page.width > 0 && page.width <= 420;
   const scene: ImportWebSceneNode = {
+    ...shell,
     id: nextId("web-root"),
-    type: "frame",
-    name: page.title || "Imported page",
+    name: page.title || shell.name,
     x: 0,
     y: 0,
-    width: page.width,
-    height: page.height,
-    fillEnabled: false,
-    clipChildren: true,
-    layoutMode: rootLayout.mode,
-    layoutGap: rootLayout.gap,
-    children: builtChildren,
+    width: phoneColumn ? page.width : Math.max(shell.width, root.bounds.width, page.width),
+    height: phoneColumn ? page.height : Math.max(shell.height, root.bounds.height, page.height),
+    clipChildren: false,
   };
 
   return { scene, assets };
-}
-
-function inferSceneRootLayout(
-  children: ImportWebSceneNode[],
-): { mode: ImportWebSceneNode["layoutMode"]; gap: number } {
-  if (children.length < 2) return { mode: "vertical", gap: 0 };
-  const xs = children.map((c) => c.x);
-  const ys = children.map((c) => c.y);
-  const xSpread = Math.max(...xs) - Math.min(...xs);
-  const ySpread = Math.max(...ys) - Math.min(...ys);
-  if (xSpread > ySpread && xSpread > 40) {
-    let gap = 0;
-    const sorted = [...children].sort((a, b) => a.x - b.x);
-    for (let i = 1; i < sorted.length; i++) {
-      const prev = sorted[i - 1]!;
-      const cur = sorted[i]!;
-      gap = Math.max(gap, cur.x - (prev.x + prev.width));
-    }
-    return { mode: "horizontal", gap: Math.max(0, Math.round(gap)) };
-  }
-  return { mode: "vertical", gap: 0 };
 }

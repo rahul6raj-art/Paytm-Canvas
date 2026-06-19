@@ -10,8 +10,10 @@ export interface MockUser {
   name: string;
   email: string;
   initials: string;
-  /** CSS hue for avatar ring */
+  /** CSS hue for avatar ring when no photo is available */
   avatarHue: number;
+  /** Optional profile photo (local path or absolute URL) */
+  avatarUrl?: string | null;
 }
 
 export interface MockTeamMember {
@@ -44,10 +46,11 @@ export interface MockPendingInvite {
 
 const MOCK_USER: MockUser = {
   id: "user-you",
-  name: "Rahul Verma",
-  email: "rahul.verma@paytm.com",
-  initials: "RV",
+  name: "Rahul Raj",
+  email: "rahul6.raj@paytm.com",
+  initials: "RR",
   avatarHue: 210,
+  avatarUrl: "/avatars/rahul-raj.webp",
 };
 
 export const DEFAULT_MOCK_WORKSPACE: MockWorkspace = {
@@ -56,7 +59,7 @@ export const DEFAULT_MOCK_WORKSPACE: MockWorkspace = {
   slug: "personal",
   section: "personal",
   members: [
-    { userId: "user-you", name: "Rahul Verma", email: "rahul.verma@paytm.com", initials: "RV", role: "owner" },
+    { userId: "user-you", name: "Rahul Raj", email: "rahul6.raj@paytm.com", initials: "RR", role: "owner" },
   ],
 };
 
@@ -67,7 +70,7 @@ const MOCK_WORKSPACES: MockWorkspace[] = [
     slug: "personal",
     section: "personal",
     members: [
-      { userId: "user-you", name: "Rahul Verma", email: "rahul.verma@paytm.com", initials: "RV", role: "owner" },
+      { userId: "user-you", name: "Rahul Raj", email: "rahul6.raj@paytm.com", initials: "RR", role: "owner" },
     ],
   },
   {
@@ -76,7 +79,7 @@ const MOCK_WORKSPACES: MockWorkspace[] = [
     slug: "paytm-design",
     section: "paytm-design",
     members: [
-      { userId: "user-you", name: "Rahul Verma", email: "rahul.verma@paytm.com", initials: "RV", role: "owner" },
+      { userId: "user-you", name: "Rahul Raj", email: "rahul6.raj@paytm.com", initials: "RR", role: "owner" },
       { userId: "u2", name: "Aisha Khan", email: "aisha.khan@paytm.com", initials: "AK", role: "editor" },
       { userId: "u3", name: "Dev Sharma", email: "dev.sharma@paytm.com", initials: "DS", role: "editor" },
       { userId: "u4", name: "Meera N.", email: "meera@paytm.com", initials: "MN", role: "viewer" },
@@ -88,7 +91,7 @@ const MOCK_WORKSPACES: MockWorkspace[] = [
     slug: "product-team",
     section: "product-team",
     members: [
-      { userId: "user-you", name: "Rahul Verma", email: "rahul.verma@paytm.com", initials: "RV", role: "editor" },
+      { userId: "user-you", name: "Rahul Raj", email: "rahul6.raj@paytm.com", initials: "RR", role: "editor" },
       { userId: "u5", name: "Priya Rao", email: "priya.rao@paytm.com", initials: "PR", role: "owner" },
       { userId: "u6", name: "Karan Mehta", email: "karan@paytm.com", initials: "KM", role: "viewer" },
     ],
@@ -99,7 +102,7 @@ const MOCK_WORKSPACES: MockWorkspace[] = [
     slug: "experiments",
     section: "experiments",
     members: [
-      { userId: "user-you", name: "Rahul Verma", email: "rahul.verma@paytm.com", initials: "RV", role: "owner" },
+      { userId: "user-you", name: "Rahul Raj", email: "rahul6.raj@paytm.com", initials: "RR", role: "owner" },
       { userId: "u7", name: "Sana Ali", email: "sana@paytm.com", initials: "SA", role: "editor" },
     ],
   },

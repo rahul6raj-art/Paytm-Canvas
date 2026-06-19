@@ -2,8 +2,6 @@ import { before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 function installTextMeasureDomStub(): void {
-  if (typeof globalThis.document !== "undefined") return;
-
   const ctx = {
     font: "",
     measureText(text: string) {
@@ -31,6 +29,7 @@ import {
   textLayoutPatchForNode,
   withTextLayoutPatch,
 } from "@/lib/text/textLayout";
+import { layoutText } from "@/lib/text/textMeasure";
 import { TEXT_BOX_PAD_X, TEXT_BOX_PAD_Y } from "@/lib/text/textNodeModel";
 
 function textNode(): EditorNode {
@@ -76,7 +75,7 @@ describe("text layout patch helpers", () => {
     const next = withTextLayoutPatch(node, { textTruncate: "end" });
     assert.equal(next.textTruncate, "end");
     assert.equal(next.textResizeMode, "fixed");
-    assert.equal(next.autoResize, "fixed");
+    assert.equal(next.autoResize, "none");
   });
 
   it("auto-width grows height when content has line breaks", () => {
@@ -175,6 +174,35 @@ describe("text layout patch helpers", () => {
       content: "Line one\nLine two\nLine three",
     };
     const patch = textLayoutPatchForNode(node, node.content ?? "");
-    assert.equal(patch?.height, undefined);
+    assert.equal(patch, null);
+  });
+
+  it("fixed mode keeps height when width changes", () => {
+    const node = {
+      ...textNode(),
+      textResizeMode: "fixed" as const,
+      autoResize: "none" as const,
+      content: "hello world wrap test",
+      width: 120,
+      height: 48,
+    };
+    const patch = withTextLayoutPatch(node, { width: 48 });
+    assert.equal(patch.width, 48);
+    assert.equal(patch.height, undefined);
+    assert.notEqual(patch.textResizeMode, "auto-height");
+  });
+
+  it("auto-height unwraps and shrinks height when width widens", () => {
+    const typo = resolveTextTypo({ fontSize: 14, lineHeight: 1.25 });
+    const narrow = computeTextBoxSize("hello world test", typo, "auto-height", 40, 40);
+    const wide = computeTextBoxSize("hello world test", typo, "auto-height", 200, narrow.height);
+    assert.ok(wide.height <= narrow.height);
+    assert.equal(wide.width, 200);
+  });
+
+  it("wraps long words at character boundaries", () => {
+    const typo = resolveTextTypo({ fontSize: 14, lineHeight: 1.25 });
+    const layout = layoutText("superlongword", 22, typo);
+    assert.ok(layout.lines.length > 1);
   });
 });

@@ -1,4 +1,5 @@
 import { getActiveCraftEngine, isCraftEngineReady } from "@/engine/craftEngineRegistry";
+import { readCraftEngine } from "@/engine/craftEngineMutation";
 import { getCraftEngineWasm } from "@/engine/craftEngineLoader";
 import { isNativeRendererEnabled } from "@/lib/craftPublicConfig";
 
@@ -51,13 +52,24 @@ export async function readCraftEngineDiagnostics(): Promise<CraftEngineDiagnosti
     };
   }
 
+  const snapshot = readCraftEngine(
+    () => ({
+      backend: engine.backendLabel(),
+      tileCacheLen: engine.tileCacheLen(),
+      atlasImageCount: engine.atlasImageCount(),
+      canUndo: engine.canUndo(),
+      canRedo: engine.canRedo(),
+    }),
+    null,
+  );
+
   return {
     ready: true,
-    backend: engine.backendLabel(),
+    backend: snapshot?.backend ?? null,
     version: await engineVersion(),
-    tileCacheLen: engine.tileCacheLen(),
-    atlasImageCount: engine.atlasImageCount(),
-    canUndo: engine.canUndo(),
-    canRedo: engine.canRedo(),
+    tileCacheLen: snapshot?.tileCacheLen ?? null,
+    atlasImageCount: snapshot?.atlasImageCount ?? null,
+    canUndo: snapshot?.canUndo ?? null,
+    canRedo: snapshot?.canRedo ?? null,
   };
 }

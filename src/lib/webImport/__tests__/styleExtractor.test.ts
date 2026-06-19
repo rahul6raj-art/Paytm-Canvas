@@ -23,4 +23,29 @@ describe("styleExtractor stroke fidelity", () => {
     assert.equal(style.strokeWidth, 2);
     assert.equal(style.strokeEnabled, true);
   });
+
+  it("maps css filter and backdrop-filter to node effects", () => {
+    const style = extractVisualStyle({
+      filter: "blur(8px)",
+      backdropFilter: "blur(12px) saturate(180%)",
+    });
+    assert.ok(style.effects?.some((e) => e.type === "layer-blur" && e.blur === 8));
+    const backdrop = style.effects?.find((e) => e.type === "background-blur");
+    assert.ok(backdrop);
+    assert.equal(backdrop?.blur, 12);
+    assert.equal(backdrop?.saturation, 180);
+  });
+
+  it("parses radial-gradient circle shape without treating circle as a color stop", () => {
+    const style = extractVisualStyle({
+      backgroundImage:
+        "radial-gradient(circle, rgba(0, 200, 83, 0.35) 0%, rgba(0, 200, 83, 0.15) 40%, rgba(0, 200, 83, 0) 70%)",
+    });
+    assert.equal(style.fillType, "gradient");
+    assert.ok(style.fillGradient);
+    assert.equal(style.fillGradient?.stops.length, 3);
+    assert.notEqual(style.fillGradient?.stops[0]?.color, "circle");
+    assert.ok((style.fillGradient?.stops[0]?.opacity ?? 1) < 1);
+    assert.equal(style.fillGradient?.stops[2]?.opacity, 0);
+  });
 });

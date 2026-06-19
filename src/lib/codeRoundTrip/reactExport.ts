@@ -11,12 +11,12 @@ import {
   maskGroupClipDefsMarkup,
 } from "@/lib/codeExport/compositeShapeExport";
 import { isBooleanGroup, isMaskGroup } from "@/lib/booleanGeometry";
-import { nodeToReactStyle, sanitizeComponentName, styleToLiteral } from "./reactStyle";
+import { nodeToReactStyle, sanitizeComponentName, styleToLiteral, type ReactStyleRecord } from "./reactStyle";
 import {
-  CODE_PAYLOAD_END,
-  CODE_PAYLOAD_START,
+  formatCodeRoundTripPayloadBlock,
   type CodeRoundTripPayloadV1,
 } from "./types";
+import type { CodeRoundTripLink } from "@/lib/craftBridge/types";
 
 export type ReactExportInput = {
   nodes: Record<string, EditorNode>;
@@ -27,6 +27,7 @@ export type ReactExportInput = {
   fileName?: string;
   /** Preserved import block from initial React upload */
   sourceHeader?: string | null;
+  codeRoundTripLink?: CodeRoundTripLink | null;
 };
 
 export type ReactExportResult = {
@@ -79,6 +80,8 @@ export type JsxExportOptions = {
   /** Marks the exported screen frame element */
   isPcRoot?: boolean;
   pcRootId?: string;
+  /** When true, nodes with className export appearance via page CSS (no inline style). */
+  preferPageCss?: boolean;
 };
 
 function jsxTagForNode(node: EditorNode, opts?: JsxExportOptions): string {
@@ -115,13 +118,15 @@ export function nodeToJsx(
 ): string {
   const pad = "  ".repeat(depth);
   const kids = codeExportChildIds(node, childOrder);
-  const style = styleToLiteral(
-    nodeToReactStyle(node, designTokens, {
-      isFrameRoot: opts?.isFrameRoot,
-      nodes,
-      childOrder,
-    }),
-  );
+  const fullStyle = nodeToReactStyle(node, designTokens, {
+    isFrameRoot: opts?.isFrameRoot,
+    nodes,
+    childOrder,
+  });
+  const exportStyle =
+    opts?.preferPageCss && node.codeClassName?.trim() ? ({} as ReactStyleRecord) : fullStyle;
+  const styleAttr =
+    Object.keys(exportStyle).length > 0 ? ` style={${styleToLiteral(exportStyle)}}` : "";
   const rootAttr =
     opts?.isPcRoot && opts.pcRootId ? ` data-pc-root=${JSON.stringify(opts.pcRootId)}` : "";
   const nameAttr = ` data-pc-name=${JSON.stringify(node.name || node.type)}`;
@@ -142,12 +147,12 @@ export function nodeToJsx(
 
   if (node.type === "text" && tag === "p") {
     const text = escapeJsxText(node.content ?? "");
-    return `${pad}<p${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr} style={${style}}>${text || "\u00a0"}</p>\n`;
+    return `${pad}<p${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr}${styleAttr}>${text || "\u00a0"}</p>\n`;
   }
 
   if (node.type === "image" && tag === "img") {
     const src = node.imageSrc ? ` src=${JSON.stringify(node.imageSrc)}` : "";
-    return `${pad}<img${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr}${src} style={${style}} alt="" />\n`;
+    return `${pad}<img${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr}${src}${styleAttr} alt="" />\n`;
   }
 
   if (
@@ -157,7 +162,7 @@ export function nodeToJsx(
     node.type === "arrow" ||
     node.type === "path"
   ) {
-    return `${pad}<div${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr}${compositeAttrs}${ellipseArcJsxAttrs(node)} data-pc-shape=${JSON.stringify(node.type)} style={${style}} />\n`;
+    return `${pad}<div${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr}${compositeAttrs}${ellipseArcJsxAttrs(node)} data-pc-shape=${JSON.stringify(node.type)}${styleAttr} />\n`;
   }
 
   if (isBooleanGroup(node)) {
@@ -166,7 +171,7 @@ export function nodeToJsx(
       .replace(/<\/svg>\s*$/, "");
     const w = Math.max(1, node.width);
     const h = Math.max(1, node.height);
-    return `${pad}<div${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr}${compositeAttrs} style={${style}}>
+    return `${pad}<div${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr}${compositeAttrs}${styleAttr}>
 ${pad}  <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style={{ display: 'block', position: 'absolute', inset: 0 }} aria-hidden>
 ${pad}    ${svgInner}
 ${pad}  </svg>
@@ -194,7 +199,7 @@ ${pad}      </clipPath>
 ${pad}    </defs>
 ${pad}  </svg>\n`
       : "";
-    return `${pad}<div${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr}${compositeAttrs} style={${style}}>
+    return `${pad}<div${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr}${compositeAttrs}${styleAttr}>
 ${defsJsx}${pad}  <div style={${clipStyle}}>
 ${inner}${pad}  </div>
 ${pad}</div>\n`;
@@ -206,7 +211,7 @@ ${pad}</div>\n`;
       : "";
 
   if (kids.length === 0) {
-    return `${pad}<${tag}${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr}${shapeAttr} style={${style}} />\n`;
+    return `${pad}<${tag}${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr}${shapeAttr}${styleAttr} />\n`;
   }
   const inner = kids
     .map((cid) => {
@@ -215,7 +220,7 @@ ${pad}</div>\n`;
       return c ? nodeToJsx(c, nodes, childOrder, designTokens, depth + 1, childOpts) : "";
     })
     .join("");
-  return `${pad}<${tag}${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr}${compositeAttrs}${shapeAttr} style={${style}}>\n${inner}${pad}</${tag}>\n`;
+  return `${pad}<${tag}${rootAttr}${typeAttr}${idAttr}${nameAttr}${classAttr}${componentAttr}${compositeAttrs}${shapeAttr}${styleAttr}>\n${inner}${pad}</${tag}>\n`;
 }
 
 export function buildCodeRoundTripPayload(input: ReactExportInput): CodeRoundTripPayloadV1 {
@@ -238,15 +243,19 @@ export function buildCodeRoundTripPayload(input: ReactExportInput): CodeRoundTri
     designTokens: input.designTokens,
     assets: input.assets,
     sourceHeader: input.sourceHeader ?? undefined,
+    codeRoundTripLink: input.codeRoundTripLink ?? undefined,
   };
 }
 
 export function exportReactSource(input: ReactExportInput): ReactExportResult {
   const payload = buildCodeRoundTripPayload(input);
+  const jsxOpts = input.codeRoundTripLink?.cssPaths?.length
+    ? { preferPageCss: true as const }
+    : undefined;
   const body = payload.exportRootIds
     .map((rid) => {
       const n = payload.nodes[rid];
-      return n ? nodeToJsx(n, payload.nodes, payload.childOrder, payload.designTokens, 2) : "";
+      return n ? nodeToJsx(n, payload.nodes, payload.childOrder, payload.designTokens, 2, jsxOpts) : "";
     })
     .join("");
 
@@ -263,9 +272,7 @@ export function exportReactSource(input: ReactExportInput): ReactExportResult {
  * • Keep the @paytm-craft-payload block intact for lossless re-import.
  */
 
-${CODE_PAYLOAD_START}
-${payloadJson}
-${CODE_PAYLOAD_END}
+${formatCodeRoundTripPayloadBlock(payloadJson)}
 
 ${headerBlock}${useClientBlock}export function ${payload.componentName}() {
   return (

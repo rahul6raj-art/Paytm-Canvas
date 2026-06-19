@@ -1,12 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { ChevronDown, Eye, EyeOff, Minus } from "lucide-react";
 import { normalizeHex, parseHexInputLive, fillCss } from "@/lib/color";
 import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
 import { useInspectorValueScrub } from "@/lib/useInspectorValueScrub";
-import { appFieldRadius, inspectorControlHeightClass } from "@/lib/appFieldStyles";
+import { appFieldInnerClass, appFieldInnerClassCompact, appFieldShellClass, appFieldShellClassCompact, inspectorRowGapClass } from "@/lib/appFieldStyles";
 import { cn } from "@/lib/utils";
 import {
   inspectorIconClass,
@@ -15,13 +14,9 @@ import {
   inspectorRowActionBtnClass,
 } from "@/lib/inspectorIconStyles";
 import { useEditorStore } from "@/stores/useEditorStore";
-import {
-  anchoredMenuStyle,
-  useAnchoredDropdownPosition,
-  useDismissAnchoredDropdown,
-} from "./useAnchoredDropdown";
 import { InspectorColorPickerAside } from "./InspectorColorPickerAside";
-import { LibraryColorPickerMenu } from "./LibraryColorPickerMenu";
+import { ColorLibraryDialog } from "./ColorLibraryDialog";
+import { EditorHintWrap } from "./EditorHoverHint";
 
 export type ColorCommitOptions = { skipHistory?: boolean };
 
@@ -77,31 +72,13 @@ export function ColorInput({
   );
   const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
   const lastAppliedRef = useRef(safe);
   const dirtyLiveRef = useRef(false);
   const libraryAnchorRef = useRef<HTMLButtonElement>(null);
   const swatchRef = useRef<HTMLButtonElement>(null);
-  const libraryMenuRef = useRef<HTMLDivElement>(null);
   const applyTokenToSelection = useEditorStore((s) => s.applyTokenToSelection);
 
   const canPickLibrary = Boolean(libraryName && libraryTokenId && !disabled);
-
-  const libraryPosition = useAnchoredDropdownPosition(libraryAnchorRef, libraryPickerOpen, 4, {
-    viewportClamp: true,
-    maxHeight: 360,
-    width: 240,
-  });
-  useDismissAnchoredDropdown(
-    libraryPickerOpen,
-    () => setLibraryPickerOpen(false),
-    libraryAnchorRef,
-    libraryMenuRef,
-  );
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   useEffect(() => {
     if (focused) return;
@@ -198,21 +175,7 @@ export function ColorInput({
 
   const pickerTitleText = pickerTitle ?? (label ? `${label} color` : "Color");
 
-  const libraryMenu =
-    libraryPickerOpen && mounted && canPickLibrary ? (
-      <div
-        ref={libraryMenuRef}
-        role="dialog"
-        aria-label="Choose library color"
-        className="fixed z-[120] w-[min(240px,calc(100vw-16px))] overflow-hidden rounded-md border border-app-border bg-app-panel shadow-xl"
-        style={anchoredMenuStyle(libraryPosition)}
-      >
-        <LibraryColorPickerMenu
-          activeTokenId={libraryTokenId}
-          onPick={pickLibraryColor}
-        />
-      </div>
-    ) : null;
+  const libraryDialogTitle = libraryName ?? "Color library";
 
   if (variant === "inspectorRow") {
     const rowDisabled = disabled || !visible;
@@ -220,17 +183,16 @@ export function ColorInput({
     return (
       <div>
         {label ? (
-          <div className="mb-0.5 text-ui font-medium leading-4 text-app-subtle">{label}</div>
+          <div className="mb-1.5 text-ui font-medium leading-4 text-app-subtle">{label}</div>
         ) : null}
-        <div className="flex items-center gap-1">
+        <div className={cn("flex items-center", inspectorRowGapClass)}>
           <div
             className={cn(
-              "flex min-w-0 flex-1 items-center overflow-hidden border border-app-border bg-app-field",
-              inspectorControlHeightClass,
-              appFieldRadius,
+              appFieldShellClass,
+              "min-w-0 flex-1",
               rowDisabled && "opacity-45",
               (focused || opacityFocused || colorPickerOpen) &&
-                "border-accent ring-1 ring-accent",
+                "border-app-panel-edge ring-1 ring-app-panel-edge",
             )}
           >
             <button
@@ -239,73 +201,80 @@ export function ColorInput({
               disabled={rowDisabled}
               onClick={() => setColorPickerOpen((o) => !o)}
               className={cn(
-                "h-7 w-7 shrink-0 border-r border-app-border p-1 disabled:cursor-not-allowed",
+                "flex h-7 w-7 shrink-0 items-center justify-center border-r border-app-border p-1 disabled:cursor-not-allowed",
                 colorPickerOpen && "bg-accent/10",
               )}
-              style={{ background: fillCss(previewHex, opacity) }}
               aria-label={pickerTitleText}
               aria-expanded={colorPickerOpen}
               aria-haspopup="dialog"
-            />
+            >
+              <span
+                className="block h-full w-full rounded-[2px] border border-app-border"
+                style={{ background: fillCss(previewHex, opacity) }}
+              />
+            </button>
             {libraryName ? (
               canPickLibrary ? (
-                <button
-                  ref={libraryAnchorRef}
-                  type="button"
-                  disabled={rowDisabled}
-                  onClick={() => setLibraryPickerOpen((o) => !o)}
-                  className={cn(
-                    "max-w-[40%] shrink-0 truncate border-r border-app-border bg-app-surface px-1.5 text-left text-ui font-medium text-accent hover:bg-app-hover",
-                    libraryPickerOpen && "bg-accent/10",
-                  )}
-                  title={`${libraryName} — change library color`}
-                >
-                  {libraryName}
-                </button>
+                <EditorHintWrap title={`${libraryName} — change library color`}>
+                  <button
+                    ref={libraryAnchorRef}
+                    type="button"
+                    disabled={rowDisabled}
+                    onClick={() => setLibraryPickerOpen((o) => !o)}
+                    className={cn(
+                      "max-w-[40%] shrink-0 truncate border-r border-app-border bg-app-surface px-1.5 text-left text-ui font-medium text-accent hover:bg-app-hover",
+                      libraryPickerOpen && "bg-accent/10",
+                    )}
+                  >
+                    {libraryName}
+                  </button>
+                </EditorHintWrap>
               ) : (
                 <span className="max-w-[40%] shrink-0 truncate border-r border-app-border bg-app-surface px-1.5 text-ui font-medium text-accent">
                   {libraryName}
                 </span>
               )
             ) : null}
-            <input
-              type="text"
-              disabled={rowDisabled}
-              spellCheck={false}
-              autoComplete="off"
-              maxLength={showMixedHex ? undefined : 6}
-              aria-label={label ? `${label} hex` : "Color hex"}
-              title={showMixedHex ? "Mixed colors" : "6-digit hex"}
-              className={cn(
-                "h-full min-w-0 flex-1 border-0 bg-transparent px-2 py-0 font-mono text-ui uppercase text-app-field-fg focus-visible:outline-none disabled:cursor-not-allowed",
-                showMixedHex && "text-app-muted",
-              )}
-              value={showMixedHex ? "Mixed" : text}
-              onFocus={() => {
-                if (hexMixed) setText(safe.replace("#", "").toUpperCase());
-                setFocused(true);
-              }}
-              onChange={(e) => {
-                if (showMixedHex) return;
-                handleTextChange(e.target.value);
-              }}
-              onBlur={finishEditing}
-              onKeyDown={(e) => {
-                handlePanelFieldKeyDown(e, {
-                  onEnter: () => {
-                    finishEditing();
-                    e.currentTarget.blur();
-                  },
-                  onEscape: () => {
-                    dirtyLiveRef.current = false;
-                    setText(safe.replace("#", "").toUpperCase());
-                    lastAppliedRef.current = safe;
-                    setFocused(false);
-                    e.currentTarget.blur();
-                  },
-                });
-              }}
-            />
+            <EditorHintWrap title={showMixedHex ? "Mixed colors" : "6-digit hex"}>
+              <input
+                type="text"
+                disabled={rowDisabled}
+                spellCheck={false}
+                autoComplete="off"
+                maxLength={showMixedHex ? undefined : 6}
+                aria-label={label ? `${label} hex` : "Color hex"}
+                className={cn(
+                  appFieldInnerClass,
+                  "font-mono uppercase",
+                  showMixedHex && "text-app-muted",
+                )}
+                value={showMixedHex ? "Mixed" : text}
+                onFocus={() => {
+                  if (hexMixed) setText(safe.replace("#", "").toUpperCase());
+                  setFocused(true);
+                }}
+                onChange={(e) => {
+                  if (showMixedHex) return;
+                  handleTextChange(e.target.value);
+                }}
+                onBlur={finishEditing}
+                onKeyDown={(e) => {
+                  handlePanelFieldKeyDown(e, {
+                    onEnter: () => {
+                      finishEditing();
+                      e.currentTarget.blur();
+                    },
+                    onEscape: () => {
+                      dirtyLiveRef.current = false;
+                      setText(safe.replace("#", "").toUpperCase());
+                      lastAppliedRef.current = safe;
+                      setFocused(false);
+                      e.currentTarget.blur();
+                    },
+                  });
+                }}
+              />
+            </EditorHintWrap>
             <div className="h-5 w-px shrink-0 bg-app-border" aria-hidden />
             <input
               type="text"
@@ -313,7 +282,7 @@ export function ColorInput({
               disabled={rowDisabled || !onCommitOpacity}
               aria-label="Opacity percent"
               {...bindOpacityScrub(
-                "h-full w-9 shrink-0 border-0 bg-transparent px-1 py-0 text-right font-mono text-ui tabular-nums text-app-field-fg focus-visible:outline-none disabled:cursor-not-allowed",
+                cn(appFieldInnerClass, "w-9 shrink-0 text-right tabular-nums"),
                 opacityFocused,
               )}
               value={opacityText}
@@ -355,29 +324,41 @@ export function ColorInput({
             <span className="shrink-0 pr-2 text-ui text-app-subtle">%</span>
           </div>
           {onToggleVisible ? (
-            <button
-              type="button"
-              disabled={disabled}
-              title={visible ? "Hide fill" : "Show fill"}
-              onClick={onToggleVisible}
-              className={cn(inspectorRowActionBtnClass, "inspector-icon-btn")}
-            >
-              {visible ? <Eye {...inspectorLucideProps()} /> : <EyeOff {...inspectorLucideProps()} />}
-            </button>
+            <EditorHintWrap title={visible ? "Hide fill" : "Show fill"}>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={onToggleVisible}
+                className={cn(inspectorRowActionBtnClass, "inspector-icon-btn")}
+              >
+                {visible ? <Eye {...inspectorLucideProps()} /> : <EyeOff {...inspectorLucideProps()} />}
+              </button>
+            </EditorHintWrap>
           ) : null}
           {onRemove ? (
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={onRemove}
-              className={cn(inspectorRowActionBtnClass, "inspector-icon-btn hover:text-rose-300")}
-              aria-label={removeLabel}
-            >
-              <Minus className={inspectorIconClass} strokeWidth={inspectorIconStroke} />
-            </button>
+            <EditorHintWrap title={removeLabel}>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={onRemove}
+                className={cn(inspectorRowActionBtnClass, "inspector-icon-btn hover:text-rose-300")}
+                aria-label={removeLabel}
+              >
+                <Minus className={inspectorIconClass} strokeWidth={inspectorIconStroke} />
+              </button>
+            </EditorHintWrap>
           ) : null}
         </div>
-        {mounted && libraryMenu ? createPortal(libraryMenu, document.body) : null}
+        {canPickLibrary ? (
+          <ColorLibraryDialog
+            open={libraryPickerOpen}
+            onClose={() => setLibraryPickerOpen(false)}
+            anchorRef={libraryAnchorRef}
+            title={libraryDialogTitle}
+            activeTokenId={libraryTokenId}
+            onPick={pickLibraryColor}
+          />
+        ) : null}
         <InspectorColorPickerAside
           open={colorPickerOpen}
           onClose={() => setColorPickerOpen(false)}
@@ -399,43 +380,48 @@ export function ColorInput({
   return (
     <div>
       {label ? (
-        <div className="mb-0.5 text-ui font-medium leading-4 text-app-subtle">{label}</div>
+        <div className="mb-1.5 text-ui font-medium leading-4 text-app-subtle">{label}</div>
       ) : null}
-      <div className="flex gap-1.5">
+      <div
+        className={cn(
+          appFieldShellClassCompact,
+          "min-w-0 focus-within:border-accent focus-within:ring-1 focus-within:ring-accent",
+          disabled && "opacity-45",
+          (focused || opacityFocused || colorPickerOpen) &&
+            "border-app-panel-edge ring-1 ring-app-panel-edge",
+          libraryPickerOpen && canPickLibrary && "border-app-panel-edge ring-1 ring-app-panel-edge",
+        )}
+      >
         <button
           ref={swatchRef}
           type="button"
           disabled={disabled}
           onClick={() => setColorPickerOpen((o) => !o)}
           className={cn(
-            "h-6 w-9 shrink-0 cursor-pointer rounded border border-app-border p-px disabled:opacity-45",
-            colorPickerOpen && "border-accent ring-1 ring-accent",
+            "flex h-full w-9 shrink-0 items-center justify-center border-r border-app-border p-px disabled:cursor-not-allowed",
+            colorPickerOpen && "bg-app-inset",
           )}
-          style={{ background: fillCss(previewHex, opacity) }}
           aria-label={pickerTitleText}
           aria-expanded={colorPickerOpen}
           aria-haspopup="dialog"
-        />
-        <div
-          className={cn(
-            "flex h-6 min-h-[24px] min-w-0 flex-1 overflow-hidden border border-app-border bg-app-field focus-within:border-accent focus-within:ring-1 focus-within:ring-accent",
-            appFieldRadius,
-            disabled && "opacity-45",
-            libraryPickerOpen && canPickLibrary && "border-accent ring-1 ring-accent",
-          )}
         >
-          {libraryName ? (
-            canPickLibrary ? (
+          <span
+            className="block h-full w-full rounded-[2px] border border-app-border"
+            style={{ background: fillCss(previewHex, opacity) }}
+          />
+        </button>
+        {libraryName ? (
+          canPickLibrary ? (
+            <EditorHintWrap title={`${libraryName} — click to change library color`}>
               <button
                 ref={libraryAnchorRef}
                 type="button"
                 disabled={disabled}
                 onClick={() => setLibraryPickerOpen((o) => !o)}
                 className={cn(
-                  "flex max-w-[55%] shrink-0 items-center gap-0.5 truncate border-r border-app-border bg-app-surface px-1.5 text-left text-ui font-medium leading-4 text-accent transition-colors hover:bg-app-hover",
-                  libraryPickerOpen && "bg-accent/10",
+                  "flex max-w-[55%] shrink-0 items-center gap-0.5 truncate border-r border-app-border bg-app-surface px-1.5 text-left text-ui font-medium leading-4 text-app-fg transition-colors hover:bg-app-hover",
+                  libraryPickerOpen && "bg-app-inset",
                 )}
-                title={`${libraryName} — click to change library color`}
                 aria-expanded={libraryPickerOpen}
                 aria-haspopup="dialog"
               >
@@ -448,23 +434,25 @@ export function ColorInput({
                   aria-hidden
                 />
               </button>
-            ) : (
-              <span
-                className="flex max-w-[55%] shrink-0 items-center truncate border-r border-app-border bg-app-surface px-1.5 text-ui font-medium leading-4 text-accent"
-                title={libraryName}
-              >
+            </EditorHintWrap>
+          ) : (
+            <EditorHintWrap title={libraryName}>
+              <span className="flex max-w-[55%] shrink-0 items-center truncate border-r border-app-border bg-app-surface px-1.5 text-ui font-medium leading-4 text-app-fg">
                 {libraryName}
               </span>
-            )
-          ) : null}
+            </EditorHintWrap>
+          )
+        ) : null}
+        <EditorHintWrap
+          title={disabled ? "Enable fill to edit color" : "Type 6-digit hex — shape updates when complete"}
+        >
           <input
             type="text"
             disabled={disabled}
             spellCheck={false}
             autoComplete="off"
             aria-label={label ? `${label} hex` : "Color hex"}
-            title={disabled ? "Enable fill to edit color" : "Type 6-digit hex — shape updates when complete"}
-            className="h-full min-w-0 flex-1 border-0 bg-transparent px-1.5 py-0 font-mono text-ui leading-4 text-app-field-fg focus-visible:outline-none disabled:opacity-45"
+            className={cn(appFieldInnerClassCompact, "font-mono leading-4")}
             value={text}
             onFocus={() => setFocused(true)}
             onChange={(e) => handleTextChange(e.target.value)}
@@ -485,9 +473,69 @@ export function ColorInput({
               });
             }}
           />
-        </div>
+        </EditorHintWrap>
+        {onCommitOpacity ? (
+          <>
+            <div className="h-5 w-px shrink-0 bg-app-border" aria-hidden />
+            <input
+              type="text"
+              inputMode="numeric"
+              disabled={disabled}
+              aria-label="Opacity percent"
+              {...bindOpacityScrub(
+                cn(appFieldInnerClassCompact, "w-9 shrink-0 text-right tabular-nums"),
+                opacityFocused,
+              )}
+              value={opacityText}
+              onFocus={() => setOpacityFocused(true)}
+              onChange={(e) => {
+                const digits = e.target.value.replace(/[^\d]/g, "").slice(0, 3);
+                setOpacityText(digits);
+                if (digits !== "") {
+                  const n = parseInt(digits, 10);
+                  if (Number.isFinite(n)) commitOpacityPercent(n);
+                }
+              }}
+              onBlur={() => {
+                if (opacityScrubActiveRef.current) return;
+                setOpacityFocused(false);
+                if (!applyOpacityDraft(opacityText)) {
+                  setOpacityText(String(Math.round(opacity * 100)));
+                }
+              }}
+              onKeyDown={(e) => {
+                handlePanelFieldKeyDown(e, {
+                  onEnter: () => {
+                    if (!applyOpacityDraft(opacityText)) {
+                      setOpacityText(String(Math.round(opacity * 100)));
+                    }
+                    e.currentTarget.blur();
+                  },
+                  onArrowNudge: (dir, shift, alt) => {
+                    const step = keyboardNudgeStep(1, 0, shift, alt) * dir;
+                    const current = parseInt(opacityText, 10);
+                    const base = Number.isFinite(current)
+                      ? current
+                      : Math.round(opacity * 100);
+                    commitOpacityPercent(base + step);
+                  },
+                });
+              }}
+            />
+            <span className="shrink-0 pr-2 text-ui text-app-subtle">%</span>
+          </>
+        ) : null}
       </div>
-      {mounted && libraryMenu ? createPortal(libraryMenu, document.body) : null}
+      {canPickLibrary ? (
+        <ColorLibraryDialog
+          open={libraryPickerOpen}
+          onClose={() => setLibraryPickerOpen(false)}
+          anchorRef={libraryAnchorRef}
+          title={libraryDialogTitle}
+          activeTokenId={libraryTokenId}
+          onPick={pickLibraryColor}
+        />
+      ) : null}
       <InspectorColorPickerAside
         open={colorPickerOpen}
         onClose={() => setColorPickerOpen(false)}

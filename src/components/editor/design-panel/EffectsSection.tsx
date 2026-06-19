@@ -6,7 +6,7 @@ import { Eye, EyeOff, Minus } from "lucide-react";
 import { PropertiesSection } from "../PropertiesSection";
 import { ColorInput } from "../ColorInput";
 import { PropertyNumberInput } from "../PropertyInput";
-import { InspectorLabelRow, InspectorSectionAddButton } from "./InspectorPrimitives";
+import { InspectorInsetSelect, InspectorLabelRow, InspectorSectionAddButton, InspectorHintIconButton } from "./InspectorPrimitives";
 import {
   EffectBlurIcon,
   EffectOffsetXIcon,
@@ -23,7 +23,7 @@ import {
   type NoiseEffectMode,
 } from "@/lib/nodeEffects";
 import type { DesignToken } from "@/lib/designTokens";
-import { appFieldClassCompact } from "@/lib/appFieldStyles";
+import { inspectorTwoColGridClass } from "@/lib/appFieldStyles";
 import {
   inspectorIconClass,
   inspectorIconStroke,
@@ -36,8 +36,6 @@ import {
   useAdjacentPanelDialogPosition,
 } from "../useAdjacentPanelDialogPosition";
 import { useDismissAnchoredDropdown } from "../useAnchoredDropdown";
-
-const field = appFieldClassCompact;
 
 export function EffectsSection({
   instanceKey,
@@ -82,7 +80,8 @@ export function EffectsSection({
         ref={menuRef}
         role="menu"
         aria-label="Add effect"
-        className="fixed z-[120] overflow-y-auto overscroll-contain rounded-md border border-app-border bg-app-panel py-1 shadow-xl"
+        data-editor-shell
+        className="fixed z-[120] overflow-y-auto overscroll-contain editor-floating-menu"
         style={adjacentPanelDialogStyle(position)}
       >
         {EFFECT_TYPE_OPTIONS.map((opt) => (
@@ -91,7 +90,6 @@ export function EffectsSection({
               type="button"
               role="menuitem"
               disabled={locked}
-              className="flex w-full px-3 py-1.5 text-left text-ui text-app-fg hover:bg-app-hover disabled:opacity-40"
               onClick={() => {
                 onAddEffect(opt.type);
                 setAddOpen(false);
@@ -175,30 +173,29 @@ function EffectRow({
   const disabled = locked || !e.visible;
 
   return (
-    <li className="rounded border border-app-border bg-app-field p-1.5">
-      <div className="mb-1.5 flex items-center gap-1">
-        <select
+    <li className="rounded-lg border border-app-border-subtle bg-app-inset p-2">
+      <div className="mb-2 flex items-center gap-2">
+        <InspectorInsetSelect
           disabled={locked}
-          className={cn(field, "min-w-0 flex-1 font-medium")}
           value={e.type}
-          onChange={(ev) => onChangeType(ev.target.value as NodeEffectType)}
+          shellClassName="min-w-0 flex-1 font-medium"
           aria-label="Effect type"
+          onChange={(ev) => onChangeType(ev.target.value as NodeEffectType)}
         >
           {EFFECT_TYPE_OPTIONS.map((opt) => (
             <option key={opt.type} value={opt.type}>
               {opt.label}
             </option>
           ))}
-        </select>
-        <button
-          type="button"
-          disabled={locked}
+        </InspectorInsetSelect>
+        <InspectorHintIconButton
           title={e.visible ? "Hide effect" : "Show effect"}
+          disabled={locked}
           onClick={onToggle}
           className={cn(inspectorRowActionBtnClass, "inspector-icon-btn h-6 w-6")}
         >
           {e.visible ? <Eye {...inspectorLucideProps()} /> : <EyeOff {...inspectorLucideProps()} />}
-        </button>
+        </InspectorHintIconButton>
         <button
           type="button"
           disabled={locked}
@@ -246,7 +243,7 @@ function ShadowEffectFields({
 }) {
   return (
     <div className="space-y-1.5">
-      <div className="grid grid-cols-2 gap-1">
+      <div className={inspectorTwoColGridClass}>
         <PropertyNumberInput
           commitOnInput
           label="X"
@@ -287,20 +284,14 @@ function ShadowEffectFields({
         />
       </div>
       <ColorInput
+        variant="inspectorRow"
         hex={e.color ?? "#000000"}
+        opacity={e.opacity ?? 1}
         instanceKey={`${instanceKey}-efx-${e.id}-c`}
         disabled={disabled}
+        pickerTitle="Shadow color"
         onCommitHex={(hex) => onUpdate({ color: hex })}
-      />
-      <PropertyNumberInput
-        commitOnInput
-        label="Opacity %"
-        value={Math.round((e.opacity ?? 1) * 100)}
-        instanceKey={`${instanceKey}-efx-${e.id}-op`}
-        disabled={disabled}
-        min={0}
-        max={100}
-        onCommit={(v) => onUpdate({ opacity: Math.min(1, Math.max(0, v / 100)) })}
+        onCommitOpacity={(opacity) => onUpdate({ opacity })}
       />
     </div>
   );
@@ -360,15 +351,14 @@ function NoiseEffectFields({
   return (
     <div className="space-y-1.5">
       <InspectorLabelRow label="Type">
-        <select
+        <InspectorInsetSelect
           disabled={disabled}
-          className={field}
           value={e.noiseMode ?? "monochrome"}
           onChange={(ev) => onUpdate({ noiseMode: ev.target.value as NoiseEffectMode })}
         >
           <option value="monochrome">Monochrome</option>
           <option value="color">Color</option>
-        </select>
+        </InspectorInsetSelect>
       </InspectorLabelRow>
       <PropertyNumberInput
         commitOnInput
@@ -392,9 +382,11 @@ function NoiseEffectFields({
       />
       {(e.noiseMode ?? "monochrome") === "color" ? (
         <ColorInput
+          variant="inspectorRow"
           hex={e.color ?? "#808080"}
           instanceKey={`${instanceKey}-efx-${e.id}-nc`}
           disabled={disabled}
+          pickerTitle="Noise color"
           onCommitHex={(hex) => onUpdate({ color: hex })}
         />
       ) : null}
@@ -438,9 +430,8 @@ function TextureEffectFields({
         onCommit={(v) => onUpdate({ opacity: Math.min(1, Math.max(0, v / 100)) })}
       />
       <InspectorLabelRow label="Blend">
-        <select
+        <InspectorInsetSelect
           disabled={disabled}
-          className={field}
           value={e.blendMode ?? "overlay"}
           onChange={(ev) =>
             onUpdate({
@@ -452,7 +443,7 @@ function TextureEffectFields({
           <option value="overlay">Overlay</option>
           <option value="multiply">Multiply</option>
           <option value="soft-light">Soft light</option>
-        </select>
+        </InspectorInsetSelect>
       </InspectorLabelRow>
     </div>
   );
@@ -512,20 +503,14 @@ function GlassEffectFields({
         onCommit={(v) => onUpdate({ borderWidth: v })}
       />
       <ColorInput
+        variant="inspectorRow"
         hex={e.borderColor ?? "#ffffff"}
+        opacity={e.borderOpacity ?? 0.35}
         instanceKey={`${instanceKey}-efx-${e.id}-bc`}
         disabled={disabled}
+        pickerTitle="Border color"
         onCommitHex={(hex) => onUpdate({ borderColor: hex })}
-      />
-      <PropertyNumberInput
-        commitOnInput
-        label="Border opacity %"
-        value={Math.round((e.borderOpacity ?? 0.35) * 100)}
-        instanceKey={`${instanceKey}-efx-${e.id}-bo`}
-        disabled={disabled}
-        min={0}
-        max={100}
-        onCommit={(v) => onUpdate({ borderOpacity: Math.min(1, Math.max(0, v / 100)) })}
+        onCommitOpacity={(opacity) => onUpdate({ borderOpacity: opacity })}
       />
       <PropertyNumberInput
         commitOnInput

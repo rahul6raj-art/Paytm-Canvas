@@ -12,16 +12,54 @@ export function classNameToNodePatch(className: string | undefined): Partial<Edi
     patch.height = 844;
     patch.layoutMode = "vertical" as LayoutMode;
     patch.layoutGap = 0;
+    patch.fill = "#0f1117";
+    patch.fillEnabled = true;
+  }
+
+  if (className.includes("pml-signup") && !className.includes("__")) {
+    patch.width = 390;
+    patch.height = 844;
+    patch.layoutMode = "vertical" as LayoutMode;
+    patch.layoutGap = 0;
+    patch.fill = "#0f1117";
+    patch.fillEnabled = true;
   }
 
   for (const t of tokens) {
-    if (t === "pml-home__scroll" || t === "pml-home-scroll") {
+    if (t === "pml-home__scroll" || t === "pml-home-scroll" || t === "pml-signup__scroll") {
       patch.layoutMode = "vertical" as LayoutMode;
       patch.layoutGap = patch.layoutGap ?? 0;
       patch.height = patch.height ?? 640;
       patch.width = patch.width ?? 390;
+      patch.layoutSizingVertical = "fill";
     }
-    if (t.startsWith("pml-home__") || t.startsWith("sh-section")) {
+    if (t === "pml-signup__main") {
+      patch.layoutMode = "vertical" as LayoutMode;
+      patch.layoutGap = 0;
+      patch.width = patch.width ?? 390;
+      patch.layoutSizingVertical = "fill";
+    }
+    if (t === "pml-signup__body" || t === "pml-signup__hero" || t === "pml-signup__footer-zone") {
+      patch.layoutMode = "vertical" as LayoutMode;
+      patch.width = patch.width ?? 390;
+    }
+    if (t === "pml-signup__hero") {
+      patch.layoutGap = 8;
+    }
+    if (t === "pml-signup__tc") {
+      patch.layoutMode = "horizontal";
+      patch.layoutGap = 8;
+      patch.counterAxisAlign = "start";
+    }
+    if (t === "pml-signup__tc-text") {
+      patch.layoutSizingHorizontal = "fill";
+    }
+    if (t === "pml-signup__footer" || t === "pml-signup__form") {
+      patch.layoutMode = "vertical" as LayoutMode;
+      patch.width = patch.width ?? 390;
+      patch.layoutGap = patch.layoutGap ?? 12;
+    }
+    if (t.startsWith("pml-home__") || t.startsWith("pml-signup__") || t.startsWith("sh-section")) {
       patch.width = patch.width ?? 390;
     }
     if (t === "flex" || t === "inline-flex") {

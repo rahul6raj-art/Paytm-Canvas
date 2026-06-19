@@ -11,6 +11,7 @@ import { ensureFontFamilyLoaded } from "@/lib/fonts/fontLoader";
 import { uploadedFontOptionsFromAssets } from "@/lib/fonts/uploadedFonts";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { cn } from "@/lib/utils";
+import { EditorHintWrap } from "./EditorHoverHint";
 
 function formatAssetMeta(a: { mimeType: string; width?: number; height?: number; dataUrl: string }): string {
   const dim =
@@ -211,7 +212,7 @@ export function AssetsPanel() {
 
       {contextMenu && contextAsset ? (
         <div
-          className="fixed z-[80] min-w-[168px] rounded-md border border-app-border bg-app-surface py-1 shadow-xl"
+          className="fixed z-[80] min-w-[168px] editor-floating-menu border border-app-border bg-app-surface py-1 shadow-xl"
           style={{
             left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - 176)),
             top: Math.max(8, Math.min(contextMenu.y, window.innerHeight - 88)),
@@ -258,15 +259,15 @@ export function AssetsPanel() {
           <ul className="space-y-1">
             {fontList.map((f) => (
               <li key={f.id}>
-                <button
-                  type="button"
-                  onClick={() => void applyFontByClick(f.id)}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-md border border-app-border bg-app-panel px-2 py-1.5 text-left transition-colors",
-                    "hover:border-violet-500/35 hover:bg-violet-500/10 hover:text-app-fg",
-                  )}
-                  title="Apply to selected text"
-                >
+                <EditorHintWrap title="Apply to selected text">
+                  <button
+                    type="button"
+                    onClick={() => void applyFontByClick(f.id)}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-md border border-app-border bg-app-panel px-2 py-1.5 text-left transition-colors",
+                      "hover:border-violet-500/35 hover:bg-violet-500/10 hover:text-app-fg",
+                    )}
+                  >
                   <span
                     className="flex h-9 w-9 shrink-0 items-center justify-center rounded border border-app-border-subtle bg-app-inset text-ui font-semibold text-app-fg"
                     style={{ fontFamily: `"${f.family.replace(/"/g, '\\"')}", system-ui, sans-serif` }}
@@ -280,6 +281,7 @@ export function AssetsPanel() {
                     </span>
                   </span>
                 </button>
+                </EditorHintWrap>
               </li>
             ))}
             <p className="px-1 pt-1 text-ui leading-relaxed text-app-subtle">

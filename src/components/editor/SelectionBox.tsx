@@ -6,8 +6,6 @@ import { findInstanceRoot } from "@/lib/componentModel";
 import { compositeSelectionBoundsId } from "@/lib/compositeSelection";
 import {
   CANVAS_HANDLE_SCREEN_PX,
-  CANVAS_ROTATE_HANDLE_GLYPH_SCREEN_PX,
-  CANVAS_ROTATE_HANDLE_SCREEN_PX,
   CANVAS_SELECTION_DIMENSION_BADGE_FONT_SCREEN_PX,
   CANVAS_SELECTION_DIMENSION_BADGE_GAP_SCREEN_PX,
   CANVAS_SELECTION_DIMENSION_BADGE_PAD_X_SCREEN_PX,
@@ -15,14 +13,12 @@ import {
   CANVAS_SELECTION_DIMENSION_BADGE_RADIUS_SCREEN_PX,
   CANVAS_VISUAL,
   canvasResizeHandleStyle,
-  canvasRotateHandleStyle,
   formatSelectionDimensions,
   screenPxToWorld,
 } from "@/lib/canvasVisual";
 import {
   applyMatrixToPoint,
   getMatrixRotationDegrees,
-  getNodeTransformedWorldCorners,
   getWorldHandlesFromMatrix,
   matrixIsFinite,
   matrixToCssTransform,
@@ -32,6 +28,7 @@ import {
 import {
   getNodeWorldInverseMatrixFromChildOrder,
   getNodeWorldMatrixFromChildOrder,
+  getNodeTransformedWorldCornersFromChildOrder,
   getRenderedWorldBounds,
   worldToNodeLocalFromChildOrder,
 } from "@/lib/editorGraph";
@@ -48,7 +45,7 @@ import {
   rotateZonesForAxisBounds,
   rotateZonesForCornerHandles,
   ROTATE_CORNER_HANDLES,
-  topRotateHandleWorld,
+  pointerOnCornerHandleRotateHalf,
 } from "@/lib/selectionRotateZones";
 import {
   applyMultiRotatePatches,
@@ -61,6 +58,7 @@ import {
   singleRotateLabelDegrees,
   type RotateDragSession,
 } from "@/lib/rotation";
+import { isRotateGeometryLockActive } from "@/lib/rotation/rotateGeometryLock";
 import { anchorWorldAtBoundsFromChildOrder } from "@/lib/resizeTransform";
 import { EDGE_RESIZE_HANDLES, type ResizeHandle } from "@/lib/resize";
 import { CANVAS_CLICK_SLOP_SCREEN_PX } from "@/lib/canvasInteractionGuards";
@@ -78,14 +76,19 @@ import {
   subscribeResizePreview,
 } from "@/lib/canvasEphemeralTransform";
 import {
+  crispOverlayHairlineRect,
   overlayZoomForRotateHelpers,
   screenPxToOverlay,
   worldPointToOverlay,
   worldRectToOverlay,
 } from "@/lib/canvasOverlaySpace";
 import { useCanvasOverlaySpace } from "./useCanvasOverlaySpace";
-import { RotateHandleGlyph } from "./RotateHandleGlyph";
-import { rotateCursorAngleForHandle } from "@/lib/canvasRotateCursor";
+import {
+  isTextResizeHandleAllowed,
+  textResizeHandlesForMode,
+} from "@/lib/text/textResizeFromDrag";
+import { normalizeTextResizeMode } from "@/lib/text/textNodeModel";
+import { EditorHintWrap } from "./EditorHoverHint";
 
 const CURSOR: Record<ResizeHandle, string> = {
   nw: "nwse-resize",
@@ -121,6 +124,8 @@ export function SelectionBox() {
   const overlay = useCanvasOverlaySpace();
   const rotateZoom = overlayZoomForRotateHelpers(overlay);
 
+  const selectionRootRef = useRef<HTMLDivElement>(null);
+
   const rotateHoverHandlers = useCallback(
     (handle: ResizeHandle | "top") => ({
       onPointerEnter: () => setRotateHandleHovered(true, handle),
@@ -140,9 +145,6 @@ export function SelectionBox() {
 
   const handlePx = screenPxToOverlay(CANVAS_HANDLE_SCREEN_PX, overlay);
   const handleHalf = handlePx / 2;
-  const rotateHandlePx = screenPxToOverlay(CANVAS_ROTATE_HANDLE_SCREEN_PX, overlay);
-  const rotateGlyphPx = screenPxToOverlay(CANVAS_ROTATE_HANDLE_GLYPH_SCREEN_PX, overlay);
-  const rotateHandleHalf = rotateHandlePx / 2;
   const dimensionBadgeFont = screenPxToOverlay(
     CANVAS_SELECTION_DIMENSION_BADGE_FONT_SCREEN_PX,
     overlay,
@@ -318,13 +320,27 @@ export function SelectionBox() {
   const canTransform = Boolean(union && !locked && !multi && canTransformSelection);
   const canRotate = Boolean(union && !locked && canTransformSelection);
   const showTransformHandles = !creationToolActive;
+  const suppressTransformHandlesForTextEdit =
+    Boolean(editingTextId) &&
+    visibleSelected.length === 1 &&
+    visibleSelected[0] === editingTextId;
   const showResizeHandles =
     showTransformHandles &&
     canTransform &&
     !isDraggingSelection &&
+    !suppressTransformHandlesForTextEdit &&
     node?.type !== "line" &&
     node?.type !== "arrow";
-  const showRotateHandles = showTransformHandles && canRotate && !isDraggingSelection;
+  const showRotateHandles =
+    showTransformHandles && canRotate && !isDraggingSelection && !suppressTransformHandlesForTextEdit;
+
+  const textResizeHandleSet = useMemo(() => {
+    if (!node || node.type !== "text") return null;
+    const allowed = textResizeHandlesForMode(
+      normalizeTextResizeMode(node.textResizeMode, node.autoResize),
+    );
+    return allowed ? new Set(allowed) : null;
+  }, [node]);
 
   const displayUnion = useMemo(() => {
     let base: typeof union;
@@ -372,11 +388,28 @@ export function SelectionBox() {
           height: node.height,
         });
       } else {
-        useEditorStore.getState().setTransformInteractionMode("rotate");
+        const snapshots: Record<
+          string,
+          { x: number; y: number; width: number; height: number }
+        > = {};
+        for (const sid of visibleSelected) {
+          const n = nodes[sid];
+          if (n && !n.locked) {
+            snapshots[sid] = {
+              x: n.x,
+              y: n.y,
+              width: n.width,
+              height: n.height,
+            };
+          }
+        }
+        useEditorStore.getState().beginMultiRotateInteraction(snapshots);
       }
       const st = useEditorStore.getState();
       const worldCorners =
-        !multi && id ? getNodeTransformedWorldCorners(id, st.nodes) : null;
+        !multi && id
+          ? getNodeTransformedWorldCornersFromChildOrder(id, st.nodes, st.childOrder)
+          : null;
       const rotateCursorGeom = rotateCursorGeometryForHandle(
         rotateHandle,
         union,
@@ -402,14 +435,14 @@ export function SelectionBox() {
         if (!d) return;
         const cur = useEditorStore.getState();
         if (d.session.kind === "single") {
-          const { rotation, x, y } = applySingleRotate(
+          const { rotation } = applySingleRotate(
             d.session,
             world,
             shiftKey,
             cur.nodes,
             cur.childOrder,
           );
-          updateNode(d.session.id, { rotation, x, y }, { skipHistory: true });
+          updateNode(d.session.id, { rotation }, { skipHistory: true });
           setRotateLabel({
             x: world.x,
             y: world.y - labelOffset,
@@ -438,7 +471,11 @@ export function SelectionBox() {
         const cur = useEditorStore.getState();
         const liveCorners =
           d.session.kind === "single"
-            ? getNodeTransformedWorldCorners(d.session.id, cur.nodes)
+            ? getNodeTransformedWorldCornersFromChildOrder(
+                d.session.id,
+                cur.nodes,
+                cur.childOrder,
+              )
             : null;
         return rotateCursorGeometryForHandle(
           d.rotateHandle,
@@ -511,14 +548,98 @@ export function SelectionBox() {
     ],
   );
 
+  const overlayUnion = useMemo(
+    () => (displayUnion ? worldRectToOverlay(displayUnion, overlay) : null),
+    [displayUnion, overlay],
+  );
+
+  const overlayCenter = useMemo(() => {
+    if (!overlayUnion) return null;
+    return {
+      x: overlayUnion.x + overlayUnion.width / 2,
+      y: overlayUnion.y + overlayUnion.height / 2,
+    };
+  }, [overlayUnion]);
+
+  const cornerHandleOutwardScreen = useCallback(
+    (handleEl: HTMLElement) => {
+      if (!useOrientedOverlay || !overlayCenter) return undefined;
+      const root = selectionRootRef.current;
+      if (!root) return undefined;
+      const rootRect = root.getBoundingClientRect();
+      const rect = handleEl.getBoundingClientRect();
+      const hcx = rect.left + rect.width / 2;
+      const hcy = rect.top + rect.height / 2;
+      const ccx = rootRect.left + overlayCenter.x;
+      const ccy = rootRect.top + overlayCenter.y;
+      return { x: hcx - ccx, y: hcy - ccy };
+    },
+    [useOrientedOverlay, overlayCenter],
+  );
+
+  const cornerHandleCursorAt = useCallback(
+    (handle: ResizeHandle, handleEl: HTMLElement, clientX: number, clientY: number) => {
+      const resizeCursor = oriented
+        ? resizeCursorForRotatedHandle(handle, worldRotation)
+        : CURSOR[handle];
+      if (!showRotateHandles || !ROTATE_CORNER_HANDLES.includes(handle)) {
+        return resizeCursor;
+      }
+      const outward = cornerHandleOutwardScreen(handleEl);
+      if (pointerOnCornerHandleRotateHalf(handle, clientX, clientY, handleEl, outward)) {
+        return rotateCursorCssForHandle(handle, worldRotation);
+      }
+      return resizeCursor;
+    },
+    [oriented, worldRotation, showRotateHandles, cornerHandleOutwardScreen],
+  );
+
+  const onCornerHandlePointerMove = useCallback(
+    (handle: ResizeHandle) => (e: React.PointerEvent) => {
+      if (!ROTATE_CORNER_HANDLES.includes(handle)) return;
+      const el = e.currentTarget as HTMLElement;
+      const outward = cornerHandleOutwardScreen(el);
+      const rotateHalf = pointerOnCornerHandleRotateHalf(
+        handle,
+        e.clientX,
+        e.clientY,
+        el,
+        outward,
+      );
+      el.style.cursor = cornerHandleCursorAt(handle, el, e.clientX, e.clientY);
+      setRotateHandleHovered(rotateHalf, handle);
+    },
+    [cornerHandleCursorAt, cornerHandleOutwardScreen, setRotateHandleHovered],
+  );
+
+  const onCornerHandlePointerLeave = useCallback(
+    (handle: ResizeHandle) => (e: React.PointerEvent) => {
+      const el = e.currentTarget as HTMLElement;
+      el.style.cursor = "";
+      if (ROTATE_CORNER_HANDLES.includes(handle)) {
+        setRotateHandleHovered(false, handle);
+      }
+    },
+    [setRotateHandleHovered],
+  );
+
   const onHandleDown = useCallback(
     (handle: ResizeHandle) => (e: React.PointerEvent) => {
       if (editorMode === "inspect") return;
       const stGuard = useEditorStore.getState();
-      if (stGuard.transformInteractionMode === "rotate" || stGuard.rotateGeomSnapshot) return;
+      if (stGuard.transformInteractionMode === "rotate" || isRotateGeometryLockActive(stGuard)) return;
       if (!id || !node || node.locked) return;
       if (!canTransformSelection) return;
+      if (showRotateHandles && ROTATE_CORNER_HANDLES.includes(handle)) {
+        const el = e.currentTarget as HTMLElement;
+        const outward = cornerHandleOutwardScreen(el);
+        if (pointerOnCornerHandleRotateHalf(handle, e.clientX, e.clientY, el, outward)) {
+          beginRotateDrag(e, handle);
+          return;
+        }
+      }
       rotateDragRef.current = null;
+      if (node.type === "text" && !isTextResizeHandleAllowed(node, handle)) return;
       e.stopPropagation();
       e.preventDefault();
       const cursor = oriented
@@ -568,7 +689,11 @@ export function SelectionBox() {
         const d = dragRef.current;
         if (!d || !id) return;
         const st = useEditorStore.getState();
-        if (st.transformInteractionMode !== "resize" || st.rotateGeomSnapshot) return;
+        const lockAspectRatio =
+          st.nodes[id]?.type === "text"
+            ? false
+            : st.inspectorAspectRatioLocked;
+        if (st.transformInteractionMode !== "resize" || isRotateGeometryLockActive(st)) return;
 
         const resizePoint = d.startInv
           ? applyMatrixToPoint(d.startInv, world)
@@ -586,7 +711,7 @@ export function SelectionBox() {
           d.handle,
           d.startBounds,
           resizePoint,
-          { shiftKey, altKey },
+          { shiftKey, altKey, lockAspectRatio },
           {
             skipHistory: true,
             fixedWorld,
@@ -679,21 +804,10 @@ export function SelectionBox() {
       oriented,
       worldRotation,
       beginRotateDrag,
+      showRotateHandles,
+      cornerHandleOutwardScreen,
     ],
   );
-
-  const overlayUnion = useMemo(
-    () => (displayUnion ? worldRectToOverlay(displayUnion, overlay) : null),
-    [displayUnion, overlay],
-  );
-
-  const overlayCenter = useMemo(() => {
-    if (!overlayUnion) return null;
-    return {
-      x: overlayUnion.x + overlayUnion.width / 2,
-      y: overlayUnion.y + overlayUnion.height / 2,
-    };
-  }, [overlayUnion]);
 
   const rotateCursorAtOverlay = useCallback(
     (hit: { x: number; y: number }) => {
@@ -734,7 +848,7 @@ export function SelectionBox() {
     return rotateZonesForAxisBounds(overlayUnion, rotateZoom);
   }, [showRotateHandles, overlayUnion, useOrientedOverlay, overlayOrientedHandles, rotateZoom]);
 
-  const frameOutlinePoints = useMemo(() => {
+  const frameOutline = useMemo(() => {
     if (!overlayUnion) return null;
     if (
       frameNodeId &&
@@ -742,20 +856,24 @@ export function SelectionBox() {
       node?.type !== "line" &&
       node?.type !== "arrow"
     ) {
-      const corners = getNodeTransformedWorldCorners(frameNodeId, nodesForLayout);
+      const corners = getNodeTransformedWorldCornersFromChildOrder(
+        frameNodeId,
+        nodesForLayout,
+        childOrder,
+      );
       if (corners) {
-        return corners.map((c) =>
-          worldPointToOverlay(c.x + dragOffset.dx, c.y + dragOffset.dy, overlay),
-        );
+        return {
+          kind: "polygon" as const,
+          points: corners.map((c) =>
+            worldPointToOverlay(c.x + dragOffset.dx, c.y + dragOffset.dy, overlay),
+          ),
+        };
       }
     }
-    const { x, y, width, height } = overlayUnion;
-    return [
-      { x, y },
-      { x: x + width, y },
-      { x: x + width, y: y + height },
-      { x, y: y + height },
-    ];
+    return {
+      kind: "rect" as const,
+      rect: crispOverlayHairlineRect(overlayUnion),
+    };
   }, [
     overlayUnion,
     frameNodeId,
@@ -765,22 +883,6 @@ export function SelectionBox() {
     dragOffset,
     overlay,
   ]);
-
-  const topRotatePos = useMemo(() => {
-    if (!showRotateHandles || !displayUnion) return null;
-    if (oriented && id) {
-      const corners = getNodeTransformedWorldCorners(id, nodesForLayout);
-      if (corners) {
-        const [nw, ne] = corners;
-        const topMid = {
-          x: (nw.x + ne.x) / 2 + dragOffset.dx,
-          y: (nw.y + ne.y) / 2 + dragOffset.dy,
-        };
-        return topRotateHandleWorld(displayUnion, zoom, topMid);
-      }
-    }
-    return topRotateHandleWorld(displayUnion, zoom);
-  }, [showRotateHandles, displayUnion, oriented, id, nodesForLayout, zoom, dragOffset]);
 
   if (!displayUnion || !overlayUnion || visibleSelected.length === 0) return null;
   if (editorMode !== "inspect" && !canTransformSelection) return null;
@@ -803,9 +905,6 @@ export function SelectionBox() {
   const anyInstanceInMulti = visibleSelected.some((sid) => findInstanceRoot(nodes, sid));
 
   const wr = overlayUnion;
-  const topRotateScreenPos = topRotatePos
-    ? worldPointToOverlay(topRotatePos.x, topRotatePos.y, overlay)
-    : null;
   const rotateLabelScreen = rotateLabel
     ? worldPointToOverlay(rotateLabel.x, rotateLabel.y, overlay)
     : null;
@@ -829,8 +928,6 @@ export function SelectionBox() {
         : CANVAS_VISUAL.selection;
 
   const resizeHandleStyle = canvasResizeHandleStyle(handleBorderColor, handlePx);
-  const topRotateStyle = canvasRotateHandleStyle(handleBorderColor, rotateHandlePx);
-  const topRotateGlyphAngle = rotateCursorAngleForHandle("top", worldRotation);
 
   const axisEdgeHandles: { h: ResizeHandle; style: React.CSSProperties; cursor: string }[] = [
     { h: "n", style: { left: wr.x + wr.width / 2 - handleHalf, top: wr.y - handleHalf }, cursor: CURSOR.n },
@@ -847,55 +944,84 @@ export function SelectionBox() {
   ];
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-30">
-      {frameOutlinePoints ? (
+    <div ref={selectionRootRef} className="pointer-events-none absolute inset-0 z-30">
+      {frameOutline ? (
         <svg
           className="pointer-events-none absolute left-0 top-0 overflow-visible"
           width="100%"
           height="100%"
           aria-hidden
         >
-          <polygon
-            points={frameOutlinePoints.map((p) => `${p.x},${p.y}`).join(" ")}
-            fill="none"
-            stroke={outlineColor}
-            strokeWidth={1}
-            vectorEffect="non-scaling-stroke"
-          />
+          {frameOutline.kind === "rect" ? (
+            <rect
+              x={frameOutline.rect.x}
+              y={frameOutline.rect.y}
+              width={frameOutline.rect.width}
+              height={frameOutline.rect.height}
+              fill="none"
+              stroke={outlineColor}
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+              shapeRendering="crispEdges"
+            />
+          ) : (
+            <polygon
+              points={frameOutline.points.map((p) => `${p.x},${p.y}`).join(" ")}
+              fill="none"
+              stroke={outlineColor}
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+              shapeRendering="crispEdges"
+            />
+          )}
         </svg>
       ) : null}
       {showResizeHandles && useOrientedOverlay && overlayOrientedHandles
         ? overlayOrientedHandles
             .filter(
               ({ handle }) =>
-                EDGE_RESIZE_HANDLES.includes(handle) || ROTATE_CORNER_HANDLES.includes(handle),
+                (EDGE_RESIZE_HANDLES.includes(handle) || ROTATE_CORNER_HANDLES.includes(handle)) &&
+                (!textResizeHandleSet ||
+                  ROTATE_CORNER_HANDLES.includes(handle) ||
+                  textResizeHandleSet.has(handle)),
             )
             .map(({ handle, x, y }) => (
-              <button
-                key={handle}
-                type="button"
-                data-resize-handle
-                title="Drag to resize"
-                className={`pointer-events-auto touch-none absolute select-none ${
-                  ROTATE_CORNER_HANDLES.includes(handle) ? "z-[35]" : "z-[32]"
-                }`}
-                style={{
-                  ...resizeHandleStyle,
-                  left: x - handleHalf,
-                  top: y - handleHalf,
-                  cursor: resizeCursorForRotatedHandle(handle, worldRotation),
-                }}
-                onPointerDown={onHandleDown(handle)}
-              />
+              <EditorHintWrap key={handle} title="Drag to resize" anchorClassName="contents">
+                <button
+                  type="button"
+                  data-resize-handle
+                  className={`pointer-events-auto touch-none absolute select-none ${
+                    ROTATE_CORNER_HANDLES.includes(handle) ? "z-[35]" : "z-[32]"
+                  }`}
+                  style={{
+                    ...resizeHandleStyle,
+                    left: x - handleHalf,
+                    top: y - handleHalf,
+                    cursor: resizeCursorForRotatedHandle(handle, worldRotation),
+                  }}
+                  onPointerDown={onHandleDown(handle)}
+                  onPointerMove={
+                    ROTATE_CORNER_HANDLES.includes(handle)
+                      ? onCornerHandlePointerMove(handle)
+                      : undefined
+                  }
+                  onPointerLeave={
+                    ROTATE_CORNER_HANDLES.includes(handle)
+                      ? onCornerHandlePointerLeave(handle)
+                      : undefined
+                  }
+                />
+              </EditorHintWrap>
             ))
         : null}
       {showResizeHandles && !useOrientedOverlay
-        ? axisEdgeHandles.map(({ h, style, cursor }) => (
+        ? axisEdgeHandles
+            .filter(({ h }) => !textResizeHandleSet || textResizeHandleSet.has(h))
+            .map(({ h, style, cursor }) => (
+            <EditorHintWrap key={h} title="Drag to resize" anchorClassName="contents">
             <button
-              key={h}
               type="button"
               data-resize-handle
-              title="Drag to resize"
               className="pointer-events-auto z-[32] touch-none absolute select-none"
               style={{
                 ...resizeHandleStyle,
@@ -904,15 +1030,15 @@ export function SelectionBox() {
               }}
               onPointerDown={onHandleDown(h)}
             />
+            </EditorHintWrap>
           ))
         : null}
       {showResizeHandles && !useOrientedOverlay
         ? axisCornerResize.map(({ h, style, cursor }) => (
+            <EditorHintWrap key={h} title="Drag to resize" anchorClassName="contents">
             <button
-              key={h}
               type="button"
               data-resize-handle
-              title="Drag to resize"
               className="pointer-events-auto z-[35] touch-none absolute select-none"
               style={{
                 ...resizeHandleStyle,
@@ -920,17 +1046,19 @@ export function SelectionBox() {
                 cursor,
               }}
               onPointerDown={onHandleDown(h)}
+              onPointerMove={showRotateHandles ? onCornerHandlePointerMove(h) : undefined}
+              onPointerLeave={showRotateHandles ? onCornerHandlePointerLeave(h) : undefined}
             />
+            </EditorHintWrap>
           ))
         : null}
       {showRotateHandles
         ? rotateEdgeBands.map((band) => (
+            <EditorHintWrap key={band.id} title="Drag to rotate" anchorClassName="contents">
             <button
-              key={band.id}
               type="button"
               data-rotate-edge
               aria-label={`Rotate from ${band.handle} corner`}
-              title="Drag to rotate"
               className="pointer-events-auto absolute z-[33] touch-none bg-transparent"
               style={{
                 left: band.x,
@@ -944,18 +1072,18 @@ export function SelectionBox() {
               onPointerDown={(e) => beginRotateDrag(e, band.handle)}
               {...rotateHoverHandlers(band.handle)}
             />
+            </EditorHintWrap>
           ))
         : null}
       {showRotateHandles
         ? cornerRotateZones.map((zone) => {
             const half = zone.size / 2;
             return (
+              <EditorHintWrap key={`rotate-zone-${zone.handle}`} title="Drag to rotate" anchorClassName="contents">
               <button
-                key={`rotate-zone-${zone.handle}`}
                 type="button"
                 data-rotate-zone
                 aria-label={`Rotate from ${zone.handle} corner`}
-                title="Drag to rotate"
                 className="pointer-events-auto absolute z-[34] touch-none bg-transparent"
                 style={{
                   left: zone.x - half,
@@ -967,28 +1095,10 @@ export function SelectionBox() {
                 onPointerDown={(e) => beginRotateDrag(e, zone.handle)}
                 {...rotateHoverHandlers(zone.handle)}
               />
+              </EditorHintWrap>
             );
           })
         : null}
-      {showRotateHandles && topRotateScreenPos ? (
-        <button
-          type="button"
-          data-rotate-handle
-          aria-label="Rotate"
-          title="Drag to rotate"
-          className="pointer-events-auto absolute z-[36] touch-none select-none"
-          style={{
-            ...topRotateStyle,
-            left: topRotateScreenPos.x - rotateHandleHalf,
-            top: topRotateScreenPos.y - rotateHandleHalf,
-            cursor: rotateCursorAtOverlay(topRotateScreenPos),
-          }}
-          onPointerDown={(e) => beginRotateDrag(e, "top")}
-          {...rotateHoverHandlers("top")}
-        >
-          <RotateHandleGlyph size={rotateGlyphPx} angleDeg={topRotateGlyphAngle} />
-        </button>
-      ) : null}
       {rotateLabelScreen ? (
         <div
           className="pointer-events-none absolute z-[32] whitespace-nowrap rounded px-1.5 py-0.5 text-ui font-semibold tabular-nums text-white"

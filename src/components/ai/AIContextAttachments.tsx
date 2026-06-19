@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import {
   ChevronDown,
@@ -32,6 +32,7 @@ import {
   type AIContextKind,
 } from "@/lib/aiGenerateContext";
 import { cn } from "@/lib/utils";
+import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
 
 const KIND_ICONS: Record<AIContextKind, typeof FolderOpen> = {
   project: FolderOpen,
@@ -54,6 +55,14 @@ type Props = {
   minimalPart?: "all" | "button" | "chips";
   /** z-index class for portaled attach menu (e.g. above modals). */
   floatingMenuZClass?: string;
+  /** External anchor for attach menu positioning (e.g. Mitra + button). */
+  attachAnchorRef?: RefObject<HTMLButtonElement | null>;
+  controlledMenuOpen?: boolean;
+  onControlledMenuOpenChange?: (open: boolean) => void;
+  hideAttachButton?: boolean;
+  /** Hidden from the attach menu but still pickable via `pickKindRef` (e.g. Mitra + menu). */
+  excludeAttachKinds?: AIContextKind[];
+  pickKindRef?: RefObject<((kind: AIContextKind) => void) | null>;
 };
 
 export function AIContextAttachments({
@@ -64,12 +73,21 @@ export function AIContextAttachments({
   variant = "full",
   minimalPart = "all",
   floatingMenuZClass = "z-[250]",
+  attachAnchorRef,
+  controlledMenuOpen,
+  onControlledMenuOpenChange,
+  hideAttachButton = false,
+  excludeAttachKinds = [],
+  pickKindRef,
 }: Props) {
   const fileRefs = useRef<Partial<Record<AIContextKind, HTMLInputElement | null>>>({});
-  const anchorRef = useRef<HTMLButtonElement>(null);
+  const internalAnchorRef = useRef<HTMLButtonElement>(null);
+  const anchorRef = attachAnchorRef ?? internalAnchorRef;
   const menuRef = useRef<HTMLDivElement>(null);
   const [reading, setReading] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [internalMenuOpen, setInternalMenuOpen] = useState(false);
+  const menuOpen = controlledMenuOpen ?? internalMenuOpen;
+  const setMenuOpen = onControlledMenuOpenChange ?? setInternalMenuOpen;
   const [mounted, setMounted] = useState(false);
   const [lightboxAttachment, setLightboxAttachment] = useState<AIContextAttachment | null>(null);
 
@@ -137,17 +155,38 @@ export function AIContextAttachments({
   const atLimit = attachments.length >= MAX_CONTEXT_ATTACHMENTS;
   const busy = disabled || reading;
 
-  const pickKind = (kind: AIContextKind) => {
-    setMenuOpen(false);
-    requestAnimationFrame(() => {
-      fileRefs.current[kind]?.click();
-    });
-  };
+  const attachKinds = useMemo(
+    () => AI_ATTACH_CONTEXT_KINDS.filter((meta) => !excludeAttachKinds.includes(meta.kind)),
+    [excludeAttachKinds],
+  );
 
-  const menuSurface = "border-app-border bg-app-panel text-app-fg shadow-2xl";
-  const menuItemHover = "hover:bg-app-hover";
-  const menuTitleClass = "text-app-fg";
-  const menuHintClass = "text-app-subtle";
+  const inputKinds = useMemo(() => {
+    const kinds = new Set<AIContextKind>(attachKinds.map((meta) => meta.kind));
+    for (const kind of excludeAttachKinds) kinds.add(kind);
+    return AI_CONTEXT_KINDS.filter((meta) => kinds.has(meta.kind));
+  }, [attachKinds, excludeAttachKinds]);
+
+  const pickKind = useCallback(
+    (kind: AIContextKind) => {
+      setMenuOpen(false);
+      requestAnimationFrame(() => {
+        fileRefs.current[kind]?.click();
+      });
+    },
+    [setMenuOpen],
+  );
+
+  useEffect(() => {
+    if (!pickKindRef) return;
+    pickKindRef.current = pickKind;
+    return () => {
+      pickKindRef.current = null;
+    };
+  }, [pickKind, pickKindRef]);
+
+  const pickKindFromMenu = (kind: AIContextKind) => {
+    pickKind(kind);
+  };
 
   const attachMenu =
     menuOpen && mounted ? (
@@ -155,14 +194,14 @@ export function AIContextAttachments({
         ref={menuRef}
         role="menu"
         aria-label="Attach context"
+        data-editor-shell
         className={cn(
-          "fixed w-[240px] overflow-y-auto overscroll-contain rounded-xl border py-1",
+          "editor-floating-menu editor-menu-dropdown fixed w-[240px] overflow-y-auto overscroll-contain border border-app-border bg-app-surface shadow-xl thin-scroll",
           floatingMenuZClass,
-          menuSurface,
         )}
-        style={{ ...anchoredMenuStyle(position), zIndex: 500 }}
+        style={anchoredMenuStyle(position)}
       >
-        {AI_ATTACH_CONTEXT_KINDS.map((meta) => {
+        {attachKinds.map((meta) => {
           const Icon = KIND_ICONS[meta.kind];
           return (
             <button
@@ -171,16 +210,15 @@ export function AIContextAttachments({
               role="menuitem"
               disabled={busy || atLimit}
               className={cn(
-                "flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors",
-                menuItemHover,
+                "editor-menu-dropdown-item !items-start !justify-start",
                 "disabled:cursor-not-allowed disabled:opacity-40",
               )}
-              onClick={() => pickKind(meta.kind)}
+              onClick={() => pickKindFromMenu(meta.kind)}
             >
               <Icon className="mt-0.5 h-4 w-4 shrink-0 text-app-muted" strokeWidth={1.75} />
-              <span className="min-w-0">
-                <span className={cn("block text-ui font-medium", menuTitleClass)}>{meta.label}</span>
-                <span className={cn("block text-ui leading-snug", menuHintClass)}>{meta.hint}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-medium">{meta.label}</span>
+                <span className="block text-ui font-normal leading-snug text-app-subtle">{meta.hint}</span>
               </span>
             </button>
           );
@@ -190,27 +228,28 @@ export function AIContextAttachments({
 
   const attachButton =
     variant === "minimal" ? (
-      <button
-        ref={anchorRef}
-        type="button"
-        disabled={busy || atLimit}
-        aria-haspopup="menu"
-        aria-expanded={menuOpen}
-        aria-label="Attach context"
-        title="Attach context"
-        onClick={() => setMenuOpen((v) => !v)}
-        className={cn(
-          "flex h-8 w-8 items-center justify-center rounded-full border border-app-border bg-app-panel text-app-muted transition-colors",
-          "hover:bg-app-hover hover:text-app-fg disabled:cursor-not-allowed disabled:opacity-40",
-          menuOpen && "border-accent/40 bg-app-hover text-app-fg",
-        )}
-      >
-        {reading ? (
-          <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
-        ) : (
-          <Plus className="h-4 w-4" strokeWidth={2} />
-        )}
-      </button>
+      <EditorHintWrap title="Attach context">
+        <button
+          ref={anchorRef}
+          type="button"
+          disabled={busy || atLimit}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          aria-label="Attach context"
+          onClick={() => setMenuOpen((v) => !v)}
+          className={cn(
+            "flex h-8 w-8 items-center justify-center rounded-full border border-app-border bg-app-panel text-app-muted transition-colors",
+            "hover:bg-app-hover hover:text-app-fg disabled:cursor-not-allowed disabled:opacity-40",
+            menuOpen && "border-accent/40 bg-app-hover text-app-fg",
+          )}
+        >
+          {reading ? (
+            <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
+          ) : (
+            <Plus className="h-4 w-4" strokeWidth={2} />
+          )}
+        </button>
+      </EditorHintWrap>
     ) : (
       <button
         ref={anchorRef}
@@ -252,19 +291,19 @@ export function AIContextAttachments({
 
           return (
             <div key={a.id} className="group relative flex w-[72px] flex-col gap-1">
-              <button
-                type="button"
-                disabled={!canPreview}
-                title={canPreview ? `Preview ${a.name}` : a.error ?? a.name}
-                aria-label={canPreview ? `Preview ${a.name}` : a.name}
-                onClick={() => canPreview && setLightboxAttachment(a)}
-                className={cn(
-                  "relative h-[72px] w-[72px] overflow-hidden rounded-xl border border-app-border bg-app-inset transition-colors",
-                  canPreview && "cursor-zoom-in hover:border-accent/40 hover:ring-2 hover:ring-accent/20",
-                  !canPreview && "cursor-default opacity-70",
-                  a.status === "error" && "border-rose-500/40",
-                )}
-              >
+              <EditorHintWrap title={canPreview ? `Preview ${a.name}` : a.error ?? a.name}>
+                <button
+                  type="button"
+                  disabled={!canPreview}
+                  aria-label={canPreview ? `Preview ${a.name}` : a.name}
+                  onClick={() => canPreview && setLightboxAttachment(a)}
+                  className={cn(
+                    "relative h-[72px] w-[72px] overflow-hidden rounded-xl border border-app-border bg-app-inset transition-colors",
+                    canPreview && "cursor-zoom-in hover:border-accent/40 hover:ring-2 hover:ring-accent/20",
+                    !canPreview && "cursor-default opacity-70",
+                    a.status === "error" && "border-rose-500/40",
+                  )}
+                >
                 {a.status === "loading" ? (
                   <span className="flex h-full w-full items-center justify-center text-app-muted">
                     <Loader2 className="h-5 w-5 animate-spin" strokeWidth={2} />
@@ -295,10 +334,13 @@ export function AIContextAttachments({
                   </span>
                 )}
               </button>
+              </EditorHintWrap>
 
-              <p className="truncate text-center text-ui text-app-muted" title={a.name}>
-                {a.name}
-              </p>
+              <EditorHintWrap title={a.name}>
+                <p className="truncate text-center text-ui text-app-muted">
+                  {a.name}
+                </p>
+              </EditorHintWrap>
 
               <button
                 type="button"
@@ -324,14 +366,15 @@ export function AIContextAttachments({
   );
 
   if (variant === "minimal") {
-    const showButton = minimalPart === "all" || minimalPart === "button";
+    const showButton = !hideAttachButton && (minimalPart === "all" || minimalPart === "button");
+    const showAttachUi = showButton || hideAttachButton;
     const showChips = minimalPart === "all" || minimalPart === "chips";
     return (
       <>
         {showButton ? attachButton : null}
-        {showButton && mounted && attachMenu ? createPortal(attachMenu, document.body) : null}
-        {showButton
-          ? AI_ATTACH_CONTEXT_KINDS.map((meta) => (
+        {showAttachUi && mounted && attachMenu ? createPortal(attachMenu, document.body) : null}
+        {showAttachUi
+          ? inputKinds.map((meta) => (
               <input
                 key={meta.kind}
                 ref={(el) => {
@@ -369,7 +412,7 @@ export function AIContextAttachments({
       </div>
       {attachButton}
       {mounted && attachMenu ? createPortal(attachMenu, document.body) : null}
-      {AI_ATTACH_CONTEXT_KINDS.map((meta) => (
+      {inputKinds.map((meta) => (
         <input
           key={meta.kind}
           ref={(el) => {

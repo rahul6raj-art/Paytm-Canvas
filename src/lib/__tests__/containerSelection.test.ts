@@ -81,14 +81,29 @@ describe("containerSelection", () => {
     assert.equal(shouldCollapseContainerHits("g", nodes, childOrder, null), true);
   });
 
-  it("exposes auto-layout children for direct hit testing", () => {
+  it("selects auto-layout parent on child click; cmd drills to child", () => {
     const nodes = {
       f: frame("f", { layoutMode: "horizontal" }),
       r: rect("r", "f"),
     };
     const childOrder = { f: ["r"] };
-    assert.equal(shouldCollapseContainerHits("f", nodes, childOrder, null), false);
-    assert.equal(selectionTargetForClick("r", nodes, childOrder, null), "r");
+    assert.equal(shouldCollapseContainerHits("f", nodes, childOrder, null), true);
+    assert.equal(shouldCollapseContainerHits("f", nodes, childOrder, null, true), false);
+    assert.equal(selectionTargetForClick("r", nodes, childOrder, null), "f");
+    assert.equal(selectionTargetForClick("r", nodes, childOrder, null, true), "r");
+    assert.equal(frameBodyReceivesPointerHits("f", nodes, childOrder), true);
+    assert.equal(frameBodyReceivesPointerHits("f", nodes, childOrder, true), false);
+  });
+
+  it("nested auto-layout: child maps to immediate auto-layout frame only", () => {
+    const nodes = {
+      outer: frame("outer"),
+      al: frame("al", { parentId: "outer", layoutMode: "vertical" }),
+      r: rect("r", "al"),
+    };
+    const childOrder = { outer: ["al"], al: ["r"] };
+    assert.equal(selectionTargetForClick("r", nodes, childOrder, null), "al");
+    assert.equal(selectionTargetForClick("r", nodes, childOrder, null, true), "r");
   });
 
   it("double-click drills into editable frame from its child", () => {

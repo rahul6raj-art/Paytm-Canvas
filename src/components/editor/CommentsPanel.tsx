@@ -5,6 +5,7 @@ import { Inbox, MessageSquare } from "lucide-react";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { cn } from "@/lib/utils";
 import { isPaytmCraftHttpApiMode } from "@/lib/env";
+import { EditorHintWrap } from "./EditorHoverHint";
 function previewBody(body: string): string {
   const t = body.trim();
   if (!t) return "(empty)";
@@ -50,23 +51,24 @@ export function CommentsPanel() {
         <MessageSquare className="h-3.5 w-3.5 text-[#a3a3a3]" strokeWidth={2} />
         <span className="text-ui font-semibold tracking-wide text-app-muted">Comments</span>
         {apiSyncHint ? (
-          <span
-            className={cn(
-              "min-w-0 max-w-[120px] truncate text-ui font-medium",
-              apiCommentsStatus === "failed" && "text-red-400/90",
-              apiCommentsStatus === "loading" && "text-amber-200/90",
-              apiCommentsStatus === "synced" && "text-emerald-400/85",
-            )}
-            title={apiSyncHint}
-          >
-            {apiSyncHint}
-          </span>
+          <EditorHintWrap title={apiSyncHint}>
+            <span
+              className={cn(
+                "min-w-0 max-w-[120px] truncate text-ui font-medium",
+                apiCommentsStatus === "failed" && "text-red-400/90",
+                apiCommentsStatus === "loading" && "text-amber-200/90",
+                apiCommentsStatus === "synced" && "text-emerald-400/85",
+              )}
+            >
+              {apiSyncHint}
+            </span>
+          </EditorHintWrap>
         ) : null}
         <span className="ml-auto shrink-0 tabular-nums text-ui font-medium text-app-subtle">{open.length}</span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {open.length === 0 && resolved.length === 0 ? (
-          <div className="mx-1 mt-2 rounded-lg border border-dashed border-app-border bg-white/[0.02] px-3 py-8 text-center">
+          <div className="mx-1 mt-2 rounded-lg border border-dashed border-app-border px-3 py-8 text-center">
             <Inbox className="mx-auto mb-2 h-8 w-8 text-[#4a4a4a]" strokeWidth={1.25} />
             <p className="text-ui font-medium text-app-muted">No comments on this file</p>
             <p className="mt-1 text-ui leading-relaxed text-app-subtle">

@@ -53,6 +53,7 @@ var __craftDomExtract = (() => {
     ]);
     let seq = 0;
     const nextId = () => `dom-${++seq}`;
+    const PAINT_SELECTOR = "path,rect,circle,ellipse,line,polyline,polygon,text";
     function stylesOf(el, pseudo) {
       const cs = window.getComputedStyle(el, pseudo);
       return {
@@ -94,6 +95,7 @@ var __craftDomExtract = (() => {
         opacity: cs.opacity,
         mixBlendMode: cs.mixBlendMode,
         filter: cs.filter,
+        backdropFilter: cs.backdropFilter,
         transform: cs.transform,
         objectFit: cs.objectFit,
         overflow: cs.overflow,
@@ -160,9 +162,21 @@ var __craftDomExtract = (() => {
       }
       return out.length ? out : void 0;
     }
+    function isVisuallyHiddenFormControl(el) {
+      const tag = el.tagName.toLowerCase();
+      if (tag !== "input" && tag !== "textarea") return false;
+      const input = el;
+      if (input.type === "hidden") return true;
+      const cs = window.getComputedStyle(el);
+      const w = el.getBoundingClientRect().width;
+      const h = el.getBoundingClientRect().height;
+      if (w <= 1 && h <= 1) return true;
+      const clip = cs.clip ?? "";
+      if (/rect\(0(?:px)?,\s*0(?:px)?,\s*0(?:px)?,\s*0(?:px)?\)/i.test(clip)) return true;
+      return false;
+    }
     function isHiddenElement(el) {
       if (el.hasAttribute("hidden")) return true;
-      if (el.getAttribute("aria-hidden") === "true") return true;
       const cls = (el.className ?? "").toString().toLowerCase();
       if (cls.includes("sr-only") || cls.includes("visually-hidden")) {
         return true;
@@ -174,6 +188,11 @@ var __craftDomExtract = (() => {
       const opacity = parseFloat(cs.opacity);
       if (Number.isFinite(opacity) && opacity < 0.05) return true;
       if (parseFloat(cs.fontSize) < 1) return true;
+      if (el.getAttribute("aria-hidden") === "true") {
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 2 || rect.height < 2) return true;
+        return false;
+      }
       return false;
     }
     function tryCanvasImgDataUrl(el) {
@@ -221,10 +240,48 @@ var __craftDomExtract = (() => {
       return joined ? joined.slice(0, 4e3) : void 0;
     }
     function inlineSvgMarkup(el) {
-      if (el.tagName.toLowerCase() === "svg") {
-        return el.outerHTML.slice(0, 8e3);
-      }
-      return void 0;
+      if (el.tagName.toLowerCase() !== "svg") return void 0;
+      const svg = el;
+      const liveTargets = svg.querySelectorAll(PAINT_SELECTOR);
+      const clone = svg.cloneNode(true);
+      const cloneTargets = clone.querySelectorAll(PAINT_SELECTOR);
+      const svgColor = window.getComputedStyle(svg).color;
+      cloneTargets.forEach((node, i) => {
+        const source = liveTargets[i] ?? node;
+        const cs = window.getComputedStyle(source);
+        const fillAttr = source.getAttribute("fill");
+        if (cs.fill && cs.fill !== "none") {
+          node.setAttribute("fill", cs.fill);
+        } else if (fillAttr === "currentColor" && svgColor) {
+          node.setAttribute("fill", svgColor);
+        } else if (fillAttr === "none" || cs.fill === "none") {
+          node.setAttribute("fill", "none");
+        }
+        const strokeAttr = source.getAttribute("stroke");
+        if (cs.stroke && cs.stroke !== "none") {
+          node.setAttribute("stroke", cs.stroke);
+          if (cs.strokeWidth) node.setAttribute("stroke-width", cs.strokeWidth);
+          if (cs.strokeLinecap && cs.strokeLinecap !== "butt") {
+            node.setAttribute("stroke-linecap", cs.strokeLinecap);
+          }
+          if (cs.strokeLinejoin && cs.strokeLinejoin !== "miter") {
+            node.setAttribute("stroke-linejoin", cs.strokeLinejoin);
+          }
+        } else if (strokeAttr === "currentColor" && svgColor) {
+          node.setAttribute("stroke", svgColor);
+        } else {
+          node.setAttribute("stroke", "none");
+          node.removeAttribute("stroke-width");
+        }
+        const fillRule = source.getAttribute("fill-rule") ?? source.getAttribute("fillRule") ?? cs.getPropertyValue("fill-rule");
+        if (fillRule) node.setAttribute("fill-rule", fillRule);
+        const clipRule = source.getAttribute("clip-rule") ?? source.getAttribute("clipRule") ?? cs.getPropertyValue("clip-rule");
+        if (clipRule) node.setAttribute("clip-rule", clipRule);
+        if (cs.opacity && cs.opacity !== "1") {
+          node.setAttribute("opacity", cs.opacity);
+        }
+      });
+      return clone.outerHTML.slice(0, 128e3);
     }
     function aggregateNestedText(el) {
       const tag = el.tagName.toLowerCase();
@@ -247,10 +304,23 @@ var __craftDomExtract = (() => {
       }
       return void 0;
     }
+    function hasMixedInlineContent(el) {
+      let hasText = false;
+      let hasElement = false;
+      for (const child of el.childNodes) {
+        if (child.nodeType === Node.TEXT_NODE && (child.textContent ?? "").trim()) hasText = true;
+        if (child.nodeType === Node.ELEMENT_NODE) hasElement = true;
+      }
+      return hasText && hasElement;
+    }
     function walkChildNodes(el, depth) {
+      const tag = el.tagName.toLowerCase();
+      if (tag === "svg") return [];
+      const splitInlineText = hasMixedInlineContent(el) && (tag === "p" || tag === "span" || tag === "div" || tag === "label");
       const children = [];
       for (const child of Array.from(el.childNodes)) {
         if (child.nodeType === Node.TEXT_NODE) {
+          if (!splitInlineText) continue;
           const raw = (child.textContent ?? "").replace(/\s+/g, " ");
           const trimmed = raw.trim();
           if (!trimmed) continue;
@@ -282,6 +352,7 @@ var __craftDomExtract = (() => {
     function walk(el, depth) {
       const tag = el.tagName.toLowerCase();
       if (SKIP.has(tag)) return null;
+      if (isVisuallyHiddenFormControl(el)) return null;
       if (isHiddenElement(el)) return null;
       const rect = rectOf(el);
       if (rect.width < 1 || rect.height < 1) {

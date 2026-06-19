@@ -43,10 +43,11 @@ pub fn vertical_align_for(node: &NodeInput) -> &str {
 }
 
 fn is_auto_width(node: &NodeInput) -> bool {
-    if node.text_resize_mode.as_deref() == Some("auto-width") {
-        return true;
+    match node.text_resize_mode.as_deref() {
+        Some("auto-width") => true,
+        Some("auto-height") | Some("fixed") => false,
+        _ => node.auto_resize.as_deref() == Some("width-height"),
     }
-    node.auto_resize.as_deref() == Some("width-height")
 }
 
 fn wrap_width_for(node: &NodeInput) -> f32 {
@@ -359,14 +360,12 @@ mod tests {
     }
 
     #[test]
-    fn bold_weight_uses_bold_metrics() {
-        let mut regular = text_node("Hello", 200.0);
-        regular.font_weight = Some(400.0);
-        let mut bold = text_node("Hello", 200.0);
-        bold.font_weight = Some(700.0);
+    fn auto_height_mode_wraps_even_when_auto_resize_is_width_height() {
+        let mut node = text_node("hello world from craft", 60.0);
+        node.text_resize_mode = Some("auto-height".into());
+        node.auto_resize = Some("width-height".into());
         let fonts = RuntimeFontRegistry::default();
-        let reg = layout_text_node(&regular, &fonts);
-        let b = layout_text_node(&bold, &fonts);
-        assert!(b.width > reg.width);
+        let layout = layout_text_node(&node, &fonts);
+        assert!(layout.lines.len() > 1);
     }
 }

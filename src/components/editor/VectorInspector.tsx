@@ -33,6 +33,8 @@ import { AlignControls } from "./AlignControls";
 import { CornerRadiusControls } from "./CornerRadiusControls";
 import { PropertyNumberInput } from "./PropertyInput";
 import { PropertiesSection } from "./PropertiesSection";
+import { EditorHintWrap } from "./EditorHoverHint";
+import { InspectorHintIconButton } from "./design-panel/InspectorPrimitives";
 
 function MirroringButton({
   mode,
@@ -50,23 +52,24 @@ function MirroringButton({
   children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      title={title}
-      aria-label={title}
-      aria-pressed={active}
-      disabled={disabled}
-      data-mirroring={mode}
-      onClick={onClick}
-      className={cn(
-        "flex h-7 flex-1 items-center justify-center rounded border transition-colors disabled:opacity-40",
-        active
-          ? "border-app-border bg-app-toolbar-well text-app-fg"
-          : "border-transparent text-app-muted hover:bg-app-hover hover:text-app-fg",
-      )}
-    >
-      {children}
-    </button>
+    <EditorHintWrap title={title} disabled={disabled}>
+      <button
+        type="button"
+        aria-label={title}
+        aria-pressed={active}
+        disabled={disabled}
+        data-mirroring={mode}
+        onClick={onClick}
+        className={cn(
+          "flex h-7 flex-1 items-center justify-center rounded border transition-colors disabled:opacity-40",
+          active
+            ? "border-app-border bg-app-toolbar-well text-app-fg"
+            : "border-transparent text-app-muted hover:bg-app-hover hover:text-app-fg",
+        )}
+      >
+        {children}
+      </button>
+    </EditorHintWrap>
   );
 }
 
@@ -300,22 +303,20 @@ export function VectorInspector({ node }: { node: EditorNode }) {
         <div className="mb-1.5 flex items-center justify-between">
           <span className="text-ui font-semibold text-app-fg">Fill</span>
           <div className="flex items-center gap-0.5">
-            <button
-              type="button"
+            <InspectorHintIconButton
               title="Color styles"
               className={cn(inspectorHeaderActionBtnClass, "inspector-icon-btn")}
             >
               <Grid2x2 {...inspectorLucideProps()} />
-            </button>
-            <button
-              type="button"
+            </InspectorHintIconButton>
+            <InspectorHintIconButton
               title="Add fill"
               disabled={locked}
               className={cn(inspectorHeaderActionBtnClass, "inspector-icon-btn")}
               onClick={() => style({ fillEnabled: true, fill: fillHex, fillType: "solid" })}
             >
               <Plus {...inspectorLucideProps()} />
-            </button>
+            </InspectorHintIconButton>
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -381,17 +382,15 @@ export function VectorInspector({ node }: { node: EditorNode }) {
               });
             }}
           />
-          <button
-            type="button"
+          <InspectorHintIconButton
             title={fillEnabled ? "Hide fill" : "Show fill"}
             disabled={locked}
             className={cn(inspectorRowActionBtnClass, "inspector-icon-btn")}
             onClick={() => style({ fillEnabled: !fillEnabled })}
           >
             {fillEnabled ? <Eye {...inspectorLucideProps()} /> : <EyeOff {...inspectorLucideProps()} />}
-          </button>
-          <button
-            type="button"
+          </InspectorHintIconButton>
+          <InspectorHintIconButton
             title="Remove fill"
             disabled={locked}
             className={cn(inspectorRowActionBtnClass, "inspector-icon-btn")}
@@ -401,7 +400,7 @@ export function VectorInspector({ node }: { node: EditorNode }) {
             }}
           >
             <Minus className={inspectorIconClass} strokeWidth={inspectorIconStroke} />
-          </button>
+          </InspectorHintIconButton>
         </div>
       </section>
 
@@ -409,8 +408,7 @@ export function VectorInspector({ node }: { node: EditorNode }) {
         <div className="mb-1.5 flex items-center justify-between">
           <span className="text-ui font-semibold text-app-fg">Stroke</span>
           {!hasStroke ? (
-            <button
-              type="button"
+            <InspectorHintIconButton
               title="Add stroke"
               disabled={locked}
               className={cn(inspectorHeaderActionBtnClass, "inspector-icon-btn")}
@@ -423,7 +421,7 @@ export function VectorInspector({ node }: { node: EditorNode }) {
               }
             >
               <Plus {...inspectorLucideProps()} />
-            </button>
+            </InspectorHintIconButton>
           ) : null}
         </div>
         {hasStroke ? (
@@ -486,15 +484,14 @@ export function VectorInspector({ node }: { node: EditorNode }) {
                   });
                 }}
               />
-              <button
-                type="button"
+              <InspectorHintIconButton
                 title="Remove stroke"
                 disabled={locked}
                 className={cn(inspectorRowActionBtnClass, "inspector-icon-btn")}
                 onClick={() => style({ strokeWidth: 0 })}
               >
                 <Minus className={inspectorIconClass} strokeWidth={inspectorIconStroke} />
-              </button>
+              </InspectorHintIconButton>
             </div>
           </div>
         ) : null}

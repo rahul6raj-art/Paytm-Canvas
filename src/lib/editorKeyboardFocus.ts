@@ -1,6 +1,7 @@
 /** Focus helpers so canvas tool shortcuts work after clicking the canvas. */
 
 import { useEditorStore, type EditorState, type Tool } from "@/stores/useEditorStore";
+import { isRotateGeometryLockActive } from "@/lib/rotation/rotateGeometryLock";
 
 const TOOL_SHORTCUT_MAP: Record<string, Tool> = {
   v: "move",
@@ -32,6 +33,69 @@ export function isEditableFieldElement(el: EventTarget | null): boolean {
     return true;
   }
   return false;
+}
+
+/** Hidden textarea used for canvas inline text editing (must keep focus while typing). */
+export function isCanvasTextEditFieldElement(el: EventTarget | null): boolean {
+  if (typeof HTMLElement === "undefined" || !(el instanceof HTMLElement)) return false;
+  return el.hasAttribute("data-text-editor") || Boolean(el.closest("[data-text-editor]"));
+}
+
+/** Floating canvas page name rename field — must keep focus while typing. */
+export function isPageNameEditFieldElement(el: EventTarget | null): boolean {
+  if (typeof HTMLElement === "undefined" || !(el instanceof HTMLElement)) return false;
+  return (
+    el.hasAttribute("data-page-name-editor") ||
+    Boolean(el.closest("[data-page-name-editor]"))
+  );
+}
+
+export function isPageNameEditActive(): boolean {
+  if (typeof document === "undefined") return false;
+  if (isPageNameEditFieldElement(document.activeElement)) return true;
+  return Boolean(document.querySelector("[data-page-name-editor]"));
+}
+
+/** True when canvas tool shortcuts must not fire — user is typing in a prompt or rename field. */
+export function shouldBlockToolShortcutsForTyping(target: EventTarget | null): boolean {
+  if (isPageNameEditFieldElement(target) || isPageNameEditActive()) return true;
+  const field = resolveKeyboardFieldTarget(target);
+  if (!field) return false;
+  if (isMultilineEditableElement(field)) return true;
+  if (isLeftSidebarTypingFieldElement(field)) return true;
+  return false;
+}
+
+/** Left sidebar inputs/textareas — search, Mitra prompt, layer rename, etc. */
+export function isLeftSidebarTypingFieldElement(el: EventTarget | null): boolean {
+  if (typeof HTMLElement === "undefined" || !(el instanceof HTMLElement)) return false;
+  if (!isEditableFieldElement(el)) return false;
+  if (el.hasAttribute("data-sidebar-typing-field")) return true;
+  return Boolean(el.closest("[data-left-sidebar]"));
+}
+
+function focusPageNameEditField(): void {
+  if (typeof document === "undefined") return;
+  const input = document.querySelector<HTMLInputElement>("[data-page-name-editor]");
+  if (!input) return;
+  try {
+    input.focus({ preventScroll: true });
+  } catch {
+    input.focus();
+  }
+}
+
+export function focusActiveTextEditField(nodeId?: string | null): void {
+  if (typeof document === "undefined") return;
+  const id = nodeId ?? useEditorStore.getState().editingTextId;
+  if (!id) return;
+  const el = document.querySelector<HTMLTextAreaElement>(`[data-text-editor="${id}"]`);
+  if (!el) return;
+  try {
+    el.focus({ preventScroll: true });
+  } catch {
+    el.focus();
+  }
 }
 
 /** Event target or focused field — keydown target can differ from activeElement in some trees. */
@@ -101,8 +165,12 @@ export function shouldBlockDeleteSelectionShortcut(
   target: EventTarget | null,
 ): boolean {
   if (!isDeleteShortcutEvent(e)) return false;
-  const el = resolveKeyboardFieldTarget(target);
-  return Boolean(el) && !isMultilineEditableElement(el);
+  const st = useEditorStore.getState();
+  if (st.editingTextId || st.layerRenameId) return true;
+  if (isPageNameEditFieldElement(resolveKeyboardFieldTarget(target)) || isPageNameEditActive()) {
+    return true;
+  }
+  return Boolean(resolveKeyboardFieldTarget(target));
 }
 
 /** Let inputs/textareas handle clipboard & undo/redo (code panel import, inspector fields). */
@@ -133,10 +201,14 @@ export function shouldYieldShortcutsToTyping(e: KeyboardEvent, target: EventTarg
     if (e.key === "Escape") return false;
     return true;
   }
-  // Figma-style: V/R/P/F… switch tools even when an inspector field still has DOM focus.
+  if (shouldBlockToolShortcutsForTyping(target)) {
+    if (e.metaKey || e.ctrlKey) return shouldAllowNativeFieldClipboard(e, target);
+    if (e.key === "Escape") return false;
+    return true;
+  }
+  // Figma-style: V/R/P/F… switch tools even when a single-line inspector field retains focus.
   if (isToolShortcutEvent(e)) return false;
   const field = resolveKeyboardFieldTarget(target);
-  if (!field) return false;
   if (shouldAllowNativeFieldClipboard(e, target)) return true;
   if (e.metaKey || e.ctrlKey) return false;
   if (e.key === "Escape") return false;
@@ -160,6 +232,9 @@ export function shouldYieldShortcutsToTyping(e: KeyboardEvent, target: EventTarg
 export function releaseFieldFocusForCanvas(): void {
   const ae = document.activeElement;
   if (ae instanceof HTMLElement && isEditableFieldElement(ae)) {
+    if (isCanvasTextEditFieldElement(ae)) return;
+    if (isPageNameEditFieldElement(ae) || isPageNameEditActive()) return;
+    if (isLeftSidebarTypingFieldElement(ae)) return;
     ae.blur();
   }
 }
@@ -209,6 +284,19 @@ export function recoverCanvasInteractionState(): void {
 /** Blur property fields and move focus to the canvas for global shortcuts. */
 export function activateCanvasForShortcuts(): void {
   recoverCanvasInteractionState();
+  const st = useEditorStore.getState();
+  if (st.editingTextId) {
+    focusActiveTextEditField(st.editingTextId);
+    return;
+  }
+  if (isPageNameEditActive()) {
+    focusPageNameEditField();
+    return;
+  }
+  if (typeof document !== "undefined") {
+    const ae = document.activeElement;
+    if (isLeftSidebarTypingFieldElement(ae)) return;
+  }
   releaseFieldFocusForCanvas();
   releaseChromeControlFocus();
   if (typeof document !== "undefined") {
@@ -219,10 +307,11 @@ export function activateCanvasForShortcuts(): void {
 /** Figma-style Escape: return the canvas pointer to the move (V) tool. */
 export function escapeToMovePointer(): void {
   const st = useEditorStore.getState();
-  if (st.transformInteractionMode !== "none" || st.rotateGeomSnapshot) {
+  if (st.transformInteractionMode !== "none" || isRotateGeometryLockActive(st)) {
     useEditorStore.setState({
       transformInteractionMode: "none",
       rotateGeomSnapshot: null,
+      rotateGeomSnapshots: null,
     });
   }
   if (st.tool !== "move") {

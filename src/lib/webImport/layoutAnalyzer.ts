@@ -9,15 +9,26 @@ import {
   parsePx,
 } from "@/lib/webImport/cssParseUtils";
 
+function readPadding(styles: DomSnapshotNode["styles"]) {
+  return {
+    paddingTop: parsePx(styles.paddingTop, 0),
+    paddingRight: parsePx(styles.paddingRight, 0),
+    paddingBottom: parsePx(styles.paddingBottom, 0),
+    paddingLeft: parsePx(styles.paddingLeft, 0),
+  };
+}
+
 export function analyzeLayout(node: DomSnapshotNode, parent?: DomSnapshotNode): DesignLayout {
   const styles = inferDisplayFromClassName(node);
   const display = (styles.display ?? "").toLowerCase();
   const position = (node.styles.position ?? "static").toLowerCase();
+  const padding = readPadding(node.styles);
 
   if (position === "absolute" || position === "fixed" || position === "sticky") {
     return {
       kind: "absolute",
       layoutPositioning: "absolute",
+      ...padding,
       ...inferSizing(node, parent),
     };
   }
@@ -34,6 +45,7 @@ export function analyzeLayout(node: DomSnapshotNode, parent?: DomSnapshotNode): 
     return {
       kind: "inline",
       layoutPositioning: "auto",
+      ...padding,
       ...inferSizing(node, parent),
     };
   }
@@ -44,6 +56,7 @@ export function analyzeLayout(node: DomSnapshotNode, parent?: DomSnapshotNode): 
       layoutMode: inferStackDirection(node, parent),
       layoutGap: inferStackGap(node),
       layoutPositioning: "auto",
+      ...padding,
       ...inferSizing(node, parent),
     };
   }
@@ -51,6 +64,7 @@ export function analyzeLayout(node: DomSnapshotNode, parent?: DomSnapshotNode): 
   return {
     kind: "none",
     layoutPositioning: "auto",
+    ...padding,
     ...inferSizing(node, parent),
   };
 }
@@ -111,10 +125,7 @@ function analyzeFlexLayout(node: DomSnapshotNode, parent?: DomSnapshotNode): Des
     layoutMode,
     layoutGap: gap,
     layoutWrap: (node.styles.flexWrap ?? "").includes("wrap"),
-    paddingTop: parsePx(node.styles.paddingTop, 0),
-    paddingRight: parsePx(node.styles.paddingRight, 0),
-    paddingBottom: parsePx(node.styles.paddingBottom, 0),
-    paddingLeft: parsePx(node.styles.paddingLeft, 0),
+    ...readPadding(node.styles),
     primaryAxisAlign: mapPrimaryAxisAlign(node.styles.justifyContent),
     counterAxisAlign: mapCounterAxisAlign(node.styles.alignItems),
     layoutPositioning: "auto",
@@ -141,10 +152,7 @@ function analyzeGridLayout(node: DomSnapshotNode, parent?: DomSnapshotNode): Des
     gridTemplateColumns: node.styles.gridTemplateColumns,
     gridTemplateRows: node.styles.gridTemplateRows,
     gridGap: gap,
-    paddingTop: parsePx(node.styles.paddingTop, 0),
-    paddingRight: parsePx(node.styles.paddingRight, 0),
-    paddingBottom: parsePx(node.styles.paddingBottom, 0),
-    paddingLeft: parsePx(node.styles.paddingLeft, 0),
+    ...readPadding(node.styles),
     primaryAxisAlign: "start",
     counterAxisAlign: "stretch",
     layoutPositioning: "auto",

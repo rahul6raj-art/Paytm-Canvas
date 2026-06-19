@@ -58,8 +58,9 @@ export function findInstanceRoot(
 ): string | null {
   let cur: string | null = nodeId;
   while (cur) {
-    const n: EditorNode | undefined = nodes[cur];
-    if (n?.sourceComponentId) return cur;
+    const n = nodes[cur];
+    if (!n) return null;
+    if (n.sourceComponentId) return cur;
     cur = n.parentId ?? null;
   }
   return null;

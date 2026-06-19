@@ -16,17 +16,20 @@ import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import { clampCanvasZoom, DEFAULT_CANVAS_ZOOM, viewportForRootNodes } from "@/lib/canvasZoom";
 import { deferFigImportSave } from "@/lib/figImport/figImportRuntime";
 import { fitCanvasToImportedDocument } from "@/lib/viewportZoom";
+import { prepareImportedSliceForCanvas } from "@/lib/prepareImportedSliceForCanvas";
+import { buildAIGenerateSkeletonSlice } from "@/lib/aiGenerateSkeleton";
 import { normalizeHex } from "@/lib/color";
 import type { StrokeSpec } from "@/lib/strokeSpec";
 import { mergeStrokeIntoNode } from "@/lib/strokeSpec";
-import { canvasChromeForeground } from "@/lib/canvasForeground";
+import { defaultCanvasForegroundColor } from "@/lib/canvasForeground";
 import { isShapeTool, type ShapeTool } from "@/lib/canvasToolRail";
 import {
   createEmptyDocumentFields,
   isWorkspaceEmpty,
-  mergeSampleDocumentFields,
+  preferLayoutGridOffWhenEmpty,
   readInitialDocumentFields,
 } from "@/lib/editorBootstrap";
+import { focusActiveTextEditField } from "@/lib/editorKeyboardFocus";
 import {
   applyLayoutPatchWithAutoLayout,
   computeAutoLayout,
@@ -114,6 +117,7 @@ import {
   dedupeChildOrderLists,
   getRenderedWorldTopLeft,
   insertNodeInChildOrder,
+  insertDuplicatedSiblingInChildOrder,
   buildParentMapFromChildOrder,
   syncParentIdsFromChildOrder,
   worldPointToParentLocalFromChildOrder,
@@ -153,6 +157,8 @@ import type {
   EditorPersistSlice,
   PaytmCraftDocument,
 } from "@/lib/documentPersistence";
+import type { CodeRoundTripLink } from "@/lib/craftBridge/types";
+import { normalizeCodeRoundTripLink } from "@/lib/craftBridge/normalizeLink";
 import type { DesignToken, DetachableTokenKind, EffectTokenValue } from "@/lib/designTokens";
 import {
   newDesignTokenId,
@@ -194,6 +200,18 @@ import {
   textLayoutPatchForNode,
   withTextLayoutPatch,
 } from "@/lib/text/textLayout";
+import { clearCanonicalTextLayoutCache } from "@/lib/text/canonicalTextLayout";
+import { buildTextResizeGeometryPatch } from "@/lib/text/textResizeFromDrag";
+import { ensureTextModeForExplicitWidth } from "@/lib/text/ensureTextModeForExplicitWidth";
+import { bumpTextLayoutEpoch } from "@/lib/text/textLayoutEpoch";
+import {
+  logTextResizeModeClick,
+  resolveTextNodeFromStore,
+  textResizeLayoutSnapshot,
+  textResizeModeSnapshot,
+  textResizeModeStylePatch,
+} from "@/lib/text/setTextResizeModeForNode";
+import { applyAspectLockedDimensions } from "@/lib/dimensionAspectLock";
 import {
   createPointTextAt,
   createTextBoxFromDrag,
@@ -203,7 +221,6 @@ import {
 import { createFrameNodeFromDrag, frameGeometryPatchFromDrag } from "@/lib/frameDrawing";
 import { MIN_TEXT_BOX, textResizePatch } from "@/lib/text/textNodeModel";
 import {
-  DEFAULT_TEXT_COLOR,
   DEFAULT_TEXT_FONT_FAMILY,
   DEFAULT_TEXT_FONT_SIZE,
   resolveTextTypo,
@@ -229,7 +246,6 @@ import { polygonGeometryPatch } from "@/lib/shapes/polygonGeometry";
 import {
   DEFAULT_FRAME_FILL,
   DEFAULT_SHAPE_FILL,
-  DEFAULT_SHAPE_STROKE,
   type ShapeType,
 } from "@/lib/shapes/shapeModel";
 import {
@@ -273,6 +289,7 @@ import {
   editorStateToDocument,
   isBrokenOrphanedLocalDocument,
   parsePaytmCraftDocumentJson,
+  paytmCraftDocumentFromPage,
   prepareDocumentForEditorImport,
   readLocalDocument,
   sanitizeDocumentFilename,
@@ -285,12 +302,13 @@ import {
   setActiveApiFileId,
   setActiveApiRevision,
 } from "@/lib/apiSyncProvider";
-import { persistSliceFromApiFileDetail } from "@/lib/apiFileHydration";
 import { getSyncProvider } from "@/lib/syncProviderSingleton";
+import { persistSliceFromApiFileDetail } from "@/lib/apiFileHydration";
+import { addDashboardSavedFile } from "@/lib/dashboardSavedFiles";
+import { getActiveMockWorkspace } from "@/lib/mockAuth";
 import { isPaytmCraftHttpApiMode } from "@/lib/env";
 import type { RealtimeSyncStatus } from "@/lib/realtimeSyncProtocol";
 import { apiClient, type CraftFileVersionSummary } from "@/lib/apiClient";
-import { getActiveMockWorkspace } from "@/lib/mockAuth";
 
 import {
   clonePersistedEditorSnapshot,
@@ -303,12 +321,11 @@ import { bumpResizePreview } from "@/lib/canvasEphemeralTransform";
 import {
   craftEngineAuthorityCanRedo,
   craftEngineAuthorityCanUndo,
-  craftEngineAuthorityPushSnapshot,
   craftEngineAuthorityRedo,
   craftEngineAuthorityUndo,
 } from "@/engine/craftEngineAuthorityBridge";
 import { mirrorGeometryPatchesToWasm, mirrorNodeGeometryToWasm } from "@/engine/craftEngineAuthorityGeometry";
-import { flushDeferredWasmReconcile } from "@/engine/craftEngineAuthorityMirror";
+import { flushDeferredWasmReconcile, clearDeferredWasmReconcile } from "@/engine/craftEngineAuthorityMirror";
 import type { WasmSnapshotStorePatch } from "@/engine/craftEngineSnapshotApply";
 import { mergeWasmSnapshotWithStore } from "@/engine/craftEngineSnapshotApply";
 import {
@@ -316,9 +333,16 @@ import {
   syncWasmDocumentAfterStoreUpdate,
 } from "@/engine/craftEngineWasmFirstMutation";
 import {
+  applyRotateGeometryLock,
+  isRotateGeometryLockActive,
+  rotateGeomSnapshotForNode,
+} from "@/lib/rotation/rotateGeometryLock";
+import {
   getActiveCraftEngine,
+  requestCraftEngineForceFullSync,
   requestCraftEngineWasmBootstrap,
 } from "@/engine/craftEngineRegistry";
+import { runCraftEngineAccess } from "@/engine/craftEngineMutation";
 
 export type { PersistedEditorSnapshot };
 
@@ -331,7 +355,7 @@ import {
   type EditorComment,
   type EditorCommentReply,
 } from "@/lib/comments";
-import { shouldSampleFreehandPoint, simplifyPolyline } from "@/lib/freehandPath";
+import { shouldSampleFreehandPoint, simplifyPolyline, smoothPolylineToPathPoints } from "@/lib/freehandPath";
 import {
   newPathPointId,
   normalizePathNode,
@@ -356,11 +380,17 @@ import {
 import {
   captureActivePage,
   createEmptyPage,
+  createEmptySubPage,
   editorPatchFromPage,
+  editorPatchFromSubPage,
+  ensurePageHasSubPages,
   initialPagesFromCanvas,
   nextPageName,
+  nextSubPageName,
   pagesWithActiveCaptured,
+  resolveActiveSubPage,
   type EditorPage,
+  type EditorSubPage,
 } from "@/lib/editorPages";
 
 export type { EditorComment, EditorCommentReply };
@@ -682,6 +712,17 @@ export interface EditorNode {
   codeJsxIntrinsic?: boolean;
   /** Design ↔ Code: original className for export */
   codeClassName?: string;
+  /** Craft bridge: linked repo source path for this screen artboard root. */
+  bridgeSourcePath?: string;
+  /** Project CSS spacing token ids matched on bridge import. */
+  projectSpacingTokenIds?: {
+    paddingTop?: string;
+    paddingRight?: string;
+    paddingBottom?: string;
+    paddingLeft?: string;
+    layoutGap?: string;
+    cornerRadius?: string;
+  };
 }
 
 export type NodeStylePatch = Partial<
@@ -822,6 +863,8 @@ export interface EditorState {
   pages: Record<string, EditorPage>;
   pageOrder: string[];
   activePageId: string;
+  /** Active canvas screen within the active master page. */
+  activeSubPageId: string;
   showGrid: boolean;
   showRulers: boolean;
   canvasBackgroundColor: string;
@@ -866,6 +909,11 @@ export interface EditorState {
     width: number;
     height: number;
   } | null;
+  /** Per-node frozen geometry during multi-select rotate. */
+  rotateGeomSnapshots: Record<
+    string,
+    { x: number; y: number; width: number; height: number }
+  > | null;
   /** True while dragging selected object(s) on canvas. */
   isMovingSelection: boolean;
   /** Pointer over a rotate-from-corner hit target. */
@@ -934,7 +982,7 @@ export interface EditorState {
   redo: () => void;
   clearHistory: () => void;
 
-  setEditingTextId: (id: string | null) => void;
+  setEditingTextId: (id: string | null, selection?: { anchor: number; focus: number }) => void;
   setTextEditSelection: (anchor: number, focus: number) => void;
   setTool: (t: Tool) => void;
   setFramePresetId: (id: string) => void;
@@ -968,6 +1016,12 @@ export interface EditorState {
   ) => void;
   updateNodes: (patches: Record<string, Partial<EditorNode>>, opts?: { skipHistory?: boolean }) => void;
   updateNodeStyle: (id: string, patch: NodeStylePatch, opts?: { skipHistory?: boolean }) => void;
+  /** Figma-style text resize mode — updates mode, autoResize, layout, and dimensions. */
+  setTextResizeMode: (
+    id: string,
+    mode: import("@/lib/text/textNodeModel").TextResizeMode,
+    opts?: { skipHistory?: boolean },
+  ) => void;
   /** Apply a solid fill hex on one layer (clears linked fill color token, handles instances/booleans). */
   setNodeFillHex: (nodeId: string, hex: string, opts?: { skipHistory?: boolean }) => void;
   /** Apply text color hex (clears linked color token when used for text). */
@@ -1205,6 +1259,10 @@ export interface EditorState {
     nodeId: string,
     snapshot: { x: number; y: number; width: number; height: number },
   ) => void;
+  /** Freeze geometry for every node in a multi-select rotate drag. */
+  beginMultiRotateInteraction: (
+    snapshots: Record<string, { x: number; y: number; width: number; height: number }>,
+  ) => void;
   /** Restore frozen geometry + final rotation, then end rotate mode. */
   endRotateInteraction: (nodeId: string, rotation: number) => void;
   setIsMovingSelection: (active: boolean) => void;
@@ -1309,10 +1367,17 @@ export interface EditorState {
   resetDocument: () => void;
   setDocumentName: (name: string) => void;
   setActivePage: (pageId: string) => void;
+  setActiveSubPage: (subPageId: string) => void;
   addPage: () => void;
+  addSubPage: () => void;
   duplicatePage: (pageId?: string) => void;
-  deletePage: (pageId: string) => void;
+  duplicateSubPage: (subPageId: string) => void;
+  deletePage: (pageId: string, opts?: { skipConfirm?: boolean }) => void;
+  deleteSubPage: (subPageId: string, opts?: { skipConfirm?: boolean }) => void;
+  /** Close a page tab: save to dashboard and remove from the open document. */
+  closePage: (pageId: string) => { emptied: boolean };
   renamePage: (pageId: string, name: string) => void;
+  renameSubPage: (subPageId: string, name: string) => void;
   cycleActivePage: (delta: -1 | 1) => void;
   /** Replace editor document from a persist slice (dashboard templates, imports, blank). Writes localStorage. */
   loadWorkspaceFromPersist: (
@@ -1349,15 +1414,33 @@ export interface EditorState {
   shortcutOverlayOpen: boolean;
   /** Left/right panels, top toolbar, and footer (Figma-style hide UI). */
   uiChromeVisible: boolean;
+  /** Constrain W/H proportions in the inspector and on canvas resize handles. */
+  inspectorAspectRatioLocked: boolean;
   setCommandMenuOpen: (open: boolean) => void;
   setShortcutOverlayOpen: (open: boolean) => void;
   toggleUiChrome: () => void;
   setUiChromeVisible: (visible: boolean) => void;
+  setInspectorAspectRatioLocked: (locked: boolean) => void;
+  toggleInspectorAspectRatioLocked: () => void;
 
   aiModalOpen: boolean;
   aiModalSource: "dashboard" | "editor" | null;
   openAIModal: (source: "dashboard" | "editor") => void;
   closeAIModal: () => void;
+  aiGenerateActive: boolean;
+  aiGenerateStep: string | null;
+  aiGenerateJobSeq: number;
+  aiGenerateJob: import("@/lib/aiGenerateJob").AIGenerateJob | null;
+  aiGenerateError: string | null;
+  aiGenerateFailedJob: import("@/lib/aiGenerateJob").AIGenerateFailedJob | null;
+  queueAIGenerate: (
+    job: Omit<import("@/lib/aiGenerateJob").AIGenerateJob, "id" | "queuedAt">,
+  ) => number;
+  setAIGenerateStep: (step: string) => void;
+  finishAIGenerate: () => void;
+  failAIGenerate: (error: string, job: import("@/lib/aiGenerateJob").AIGenerateJob) => void;
+  cancelAIGenerate: () => void;
+  clearAIGenerateError: () => void;
 
   importHubOpen: boolean;
   importWebModalOpen: boolean;
@@ -1384,6 +1467,34 @@ export interface EditorState {
   /** Import lines preserved from uploaded React for 1:1 export */
   codeRoundTripSourceHeader: string | null;
   setCodeRoundTripSourceHeader: (header: string | null) => void;
+  /** Linked source file for bridge round-trip (persisted in document). */
+  codeRoundTripLink: CodeRoundTripLink | null;
+  setCodeRoundTripLink: (link: CodeRoundTripLink | null) => void;
+  updateCodeRoundTripLink: (patch: Partial<CodeRoundTripLink>) => void;
+  /** Transient bridge sync UI state (not persisted). */
+  craftBridgeSyncStatus: "idle" | "syncing" | "synced" | "error";
+  craftBridgeSyncError: string | null;
+  setCraftBridgeSyncStatus: (
+    status: "idle" | "syncing" | "synced" | "error",
+    error?: string | null,
+  ) => void;
+  /** True while applying source→canvas import (pauses outbound auto-sync). */
+  craftBridgeInboundActive: boolean;
+  setCraftBridgeInboundActive: (active: boolean) => void;
+  /** Set when source and canvas diverge under conflictPolicy=ask. */
+  craftBridgeConflict: {
+    sourceHash: string;
+    canvasHash: string;
+    sourceContent: string;
+    canvasContent: string;
+  } | null;
+  setCraftBridgeConflict: (conflict: {
+    sourceHash: string;
+    canvasHash: string;
+    sourceContent: string;
+    canvasContent: string;
+  }) => void;
+  clearCraftBridgeConflict: () => void;
   openImportHub: () => void;
   closeImportHub: () => void;
   openImportWebModal: () => void;
@@ -1462,23 +1573,49 @@ function remapPersistSliceIds(slice: EditorPersistSlice): EditorPersistSlice {
   const activeRemapped = remapNodeTreeIds(slice.nodes, slice.childOrder, slice.selectedIds);
   const pages: Record<string, EditorPage> = {};
   for (const pageId of slice.pageOrder) {
-    const page = slice.pages[pageId]!;
+    const page = ensurePageHasSubPages(slice.pages[pageId]!);
     if (pageId === slice.activePageId) {
-      pages[pageId] = {
-        ...page,
+      const subId = slice.activeSubPageId ?? page.activeSubPageId!;
+      const updatedSub: EditorSubPage = {
+        ...(page.subPages?.[subId] ?? createEmptySubPage(subId, "Page 1")),
         nodes: activeRemapped.nodes,
         childOrder: activeRemapped.childOrder,
         selectedIds: activeRemapped.selectedIds,
       };
+      const subPages = { ...page.subPages, [subId]: updatedSub };
+      pages[pageId] = {
+        ...page,
+        subPages,
+        ...activeRemapped,
+      };
       continue;
     }
-    const remapped = remapNodeTreeIds(page.nodes, page.childOrder, page.selectedIds);
-    pages[pageId] = {
-      ...page,
-      nodes: remapped.nodes,
-      childOrder: remapped.childOrder,
-      selectedIds: remapped.selectedIds,
-    };
+    const subPages: Record<string, EditorSubPage> = {};
+    for (const subId of page.subPageOrder ?? []) {
+      const sub = page.subPages?.[subId];
+      if (!sub) continue;
+      const remapped = remapNodeTreeIds(sub.nodes, sub.childOrder, sub.selectedIds);
+      subPages[subId] = {
+        ...sub,
+        nodes: remapped.nodes,
+        childOrder: remapped.childOrder,
+        selectedIds: remapped.selectedIds,
+      };
+    }
+    const activeSubId = page.activeSubPageId ?? page.subPageOrder?.[0];
+    const activeSub = activeSubId ? subPages[activeSubId] : undefined;
+    pages[pageId] = activeSub
+      ? {
+          ...page,
+          subPages,
+          nodes: activeSub.nodes,
+          childOrder: activeSub.childOrder,
+          selectedIds: activeSub.selectedIds,
+        }
+      : {
+          ...page,
+          ...remapNodeTreeIds(page.nodes, page.childOrder, page.selectedIds),
+        };
   }
   return {
     ...slice,
@@ -1493,6 +1630,7 @@ function syncActivePageRecord(
     | "pages"
     | "pageOrder"
     | "activePageId"
+    | "activeSubPageId"
     | "nodes"
     | "childOrder"
     | "zoom"
@@ -1506,6 +1644,10 @@ function syncActivePageRecord(
 ): Pick<EditorState, "pages"> {
   const active = captureActivePage(state);
   return { pages: { ...state.pages, [state.activePageId]: active } };
+}
+
+function cloneSubPageCanvas(sub: EditorSubPage): Pick<EditorSubPage, "nodes" | "childOrder" | "selectedIds"> {
+  return remapNodeTreeIds(sub.nodes, sub.childOrder, sub.selectedIds);
 }
 
 function clonePageCanvas(page: EditorPage): Pick<EditorPage, "nodes" | "childOrder" | "selectedIds"> {
@@ -1580,366 +1722,6 @@ function applyMoveNodeToParent(
   nodes[id] = next;
   const repaired = repairNodeHierarchy(nodes, co);
   return { nodes: repaired.nodes, childOrder: repaired.childOrder };
-}
-
-function buildMock(): Pick<EditorState, "nodes" | "childOrder"> {
-  const nodes: Record<string, EditorNode> = {};
-  const childOrder: Record<string, string[]> = { [ROOT]: ["ab-mobile", "ab-web", "ab-dash"] };
-
-  const mk = (n: EditorNode) => {
-    nodes[n.id] = n;
-  };
-
-  mk({
-    id: "ab-mobile",
-    parentId: null,
-    type: "frame",
-    name: "Mobile — Paytm",
-    x: 80,
-    y: 80,
-    width: 390,
-    height: 844,
-    rotation: 0,
-    visible: true,
-    locked: false,
-    expanded: true,
-    fill: "#ffffff",
-    strokeColor: "#e5e5e5",
-    strokeWidth: 1,
-    cornerRadius: 32,
-  });
-  childOrder["ab-mobile"] = ["m-status", "m-header", "m-hero", "m-card1", "m-nav"];
-
-  mk({
-    id: "m-status",
-    parentId: "ab-mobile",
-    type: "rectangle",
-    name: "Status bar",
-    x: 0,
-    y: 0,
-    width: 390,
-    height: 44,
-    rotation: 0,
-    visible: true,
-    locked: false,
-    expanded: true,
-    fill: "#0f172a",
-    cornerRadius: 32,
-  });
-  mk({
-    id: "m-header",
-    parentId: "ab-mobile",
-    type: "group",
-    name: "Header",
-    x: 20,
-    y: 60,
-    width: 350,
-    height: 48,
-    rotation: 0,
-    visible: true,
-    locked: false,
-    expanded: true,
-  });
-  childOrder["m-header"] = ["m-logo", "m-title"];
-  mk({
-    id: "m-logo",
-    parentId: "m-header",
-    type: "rectangle",
-    name: "Logo mark",
-    x: 0,
-    y: 6,
-    width: 36,
-    height: 36,
-    rotation: 0,
-    visible: true,
-    locked: false,
-    expanded: true,
-    fill: "#0d99ff",
-    cornerRadius: 8,
-  });
-  mk({
-    id: "m-title",
-    parentId: "m-header",
-    type: "text",
-    name: "Title",
-    x: 48,
-    y: 10,
-    width: 200,
-    height: 28,
-    rotation: 0,
-    visible: true,
-    locked: false,
-    expanded: true,
-    content: "Paytm Craft",
-    fill: "#0f172a",
-  });
-
-  mk({
-    id: "m-hero",
-    parentId: "ab-mobile",
-    type: "rectangle",
-    name: "Hero",
-    x: 20,
-    y: 130,
-    width: 350,
-    height: 180,
-    rotation: 0,
-    visible: true,
-    locked: false,
-    expanded: true,
-    fill: "#e0f2fe",
-    cornerRadius: 16,
-  });
-  mk({
-    id: "m-card1",
-    parentId: "ab-mobile",
-    type: "rectangle",
-    name: "Primary card",
-    x: 20,
-    y: 330,
-    width: 350,
-    height: 120,
-    rotation: 0,
-    visible: true,
-    locked: false,
-    expanded: true,
-    fill: "#ffffff",
-    strokeColor: "#e2e8f0",
-    strokeWidth: 1,
-    cornerRadius: 12,
-  });
-  mk({
-    id: "m-nav",
-    parentId: "ab-mobile",
-    type: "rectangle",
-    name: "Tab bar",
-    x: 0,
-    y: 760,
-    width: 390,
-    height: 84,
-    rotation: 0,
-    visible: true,
-    locked: false,
-    expanded: true,
-    fill: "#fafafa",
-    strokeColor: "#e5e5e5",
-    strokeWidth: 1,
-    cornerRadius: 0,
-  });
-
-  mk({
-    id: "ab-web",
-    parentId: null,
-    type: "frame",
-    name: "Marketing site",
-    x: 520,
-    y: 80,
-    width: 1280,
-    height: 720,
-    rotation: 0,
-    visible: true,
-    locked: false,
-    expanded: true,
-    fill: "#ffffff",
-    strokeColor: "#e5e5e5",
-    strokeWidth: 1,
-    cornerRadius: 0,
-  });
-  childOrder["ab-web"] = ["w-nav", "w-hero", "w-grid"];
-
-  mk({
-    id: "w-nav",
-    parentId: "ab-web",
-    type: "rectangle",
-    name: "Nav bar",
-    x: 0,
-    y: 0,
-    width: 1280,
-    height: 72,
-    rotation: 0,
-    visible: true,
-    locked: false,
-    expanded: true,
-    fill: "#ffffff",
-    strokeColor: "#e5e5e5",
-    strokeWidth: 1,
-    cornerRadius: 0,
-  });
-  mk({
-    id: "w-hero",
-    parentId: "ab-web",
-    type: "group",
-    name: "Hero section",
-    x: 80,
-    y: 120,
-    width: 1120,
-    height: 280,
-    rotation: 0,
-    visible: true,
-    locked: false,
-    expanded: true,
-  });
-  childOrder["w-hero"] = ["w-hero-copy", "w-hero-visual"];
-  mk({
-    id: "w-hero-copy",
-    parentId: "w-hero",
-    type: "text",
-    name: "Headline",
-    x: 0,
-    y: 40,
-    width: 520,
-    height: 120,
-    rotation: 0,
-    visible: true,
-    locked: false,
-    expanded: true,
-    content: "Design systems, shipped.",
-    fill: "#0f172a",
-  });
-  mk({
-    id: "w-hero-visual",
-    parentId: "w-hero",
-    type: "rectangle",
-    name: "Hero visual",
-    x: 560,
-    y: 0,
-    width: 560,
-    height: 280,
-    rotation: 0,
-    visible: true,
-    locked: false,
-    expanded: true,
-    fill: "#f1f5f9",
-    cornerRadius: 12,
-  });
-
-  mk({
-    id: "w-grid",
-    parentId: "ab-web",
-    type: "group",
-    name: "Feature cards",
-    x: 80,
-    y: 440,
-    width: 1120,
-    height: 220,
-    rotation: 0,
-    visible: true,
-    locked: false,
-    expanded: true,
-  });
-  childOrder["w-grid"] = ["w-c1", "w-c2", "w-c3"];
-  for (let i = 0; i < 3; i++) {
-    const id = `w-c${i + 1}`;
-    mk({
-      id,
-      parentId: "w-grid",
-      type: "rectangle",
-      name: `Card ${i + 1}`,
-      x: i * 380,
-      y: 0,
-      width: 360,
-      height: 200,
-      rotation: 0,
-      visible: true,
-      locked: false,
-      expanded: true,
-      fill: "#fafafa",
-      strokeColor: "#e2e8f0",
-      strokeWidth: 1,
-      cornerRadius: 8,
-    });
-  }
-
-  mk({
-    id: "ab-dash",
-    parentId: null,
-    type: "frame",
-    name: "Dashboard card",
-    x: 1900,
-    y: 120,
-    width: 480,
-    height: 600,
-    rotation: 0,
-    visible: true,
-    locked: false,
-    expanded: true,
-    fill: "#f8fafc",
-    strokeColor: "#e2e8f0",
-    strokeWidth: 1,
-    cornerRadius: 12,
-  });
-  childOrder["ab-dash"] = ["d-title", "d-chart", "d-rows"];
-  mk({
-    id: "d-title",
-    parentId: "ab-dash",
-    type: "text",
-    name: "Card title",
-    x: 24,
-    y: 24,
-    width: 300,
-    height: 28,
-    rotation: 0,
-    visible: true,
-    locked: false,
-    expanded: true,
-    content: "Weekly revenue",
-    fill: "#0f172a",
-  });
-  mk({
-    id: "d-chart",
-    parentId: "ab-dash",
-    type: "rectangle",
-    name: "Chart area",
-    x: 24,
-    y: 72,
-    width: 432,
-    height: 200,
-    rotation: 0,
-    visible: true,
-    locked: false,
-    expanded: true,
-    fill: "#ffffff",
-    strokeColor: "#e2e8f0",
-    strokeWidth: 1,
-    cornerRadius: 8,
-  });
-  mk({
-    id: "d-rows",
-    parentId: "ab-dash",
-    type: "group",
-    name: "Metric rows",
-    x: 24,
-    y: 300,
-    width: 432,
-    height: 260,
-    rotation: 0,
-    visible: true,
-    locked: false,
-    expanded: true,
-  });
-  childOrder["d-rows"] = ["d-r1", "d-r2", "d-r3"];
-  [0, 1, 2].forEach((i) => {
-    mk({
-      id: `d-r${i + 1}`,
-      parentId: "d-rows",
-      type: "rectangle",
-      name: `Row ${i + 1}`,
-      x: 0,
-      y: i * 84,
-      width: 432,
-      height: 72,
-      rotation: 0,
-      visible: true,
-      locked: false,
-      expanded: true,
-      fill: i % 2 === 0 ? "#ffffff" : "#f1f5f9",
-      strokeColor: "#e2e8f0",
-      strokeWidth: 1,
-      cornerRadius: 6,
-    });
-  });
-
-  return { nodes, childOrder };
 }
 
 function resolveFrameParentForPlugin(state: Pick<EditorState, "nodes" | "childOrder" | "selectedIds">): string | null {
@@ -2327,6 +2109,7 @@ function buildCreateTextBoxFromDragResult(
 
 function commitStructuralResult(result: StructuralDocumentResult | null): void {
   if (!result) return;
+  const stBefore = useEditorStore.getState();
   commitDocumentMutation(result, (built) => {
     const st = useEditorStore.getState();
     const pageFields: Partial<EditorState> = {};
@@ -2352,7 +2135,26 @@ function commitStructuralResult(result: StructuralDocumentResult | null): void {
       ...built.ui,
       ...pageSync,
     });
-    syncWasmDocumentAfterStoreUpdate();
+    let textLayoutDirty = false;
+    for (const id of Object.keys(built.nodes)) {
+      const next = built.nodes[id];
+      const prev = stBefore.nodes[id];
+      if (!next || next.type !== "text" || !prev || prev.type !== "text") continue;
+      if (
+        next.width !== prev.width ||
+        next.height !== prev.height ||
+        next.textResizeMode !== prev.textResizeMode ||
+        next.autoResize !== prev.autoResize ||
+        next.content !== prev.content
+      ) {
+        clearCanonicalTextLayoutCache(id);
+        textLayoutDirty = true;
+      }
+    }
+    if (textLayoutDirty) bumpTextLayoutEpoch();
+    if (stBefore.transformInteractionMode !== "rotate" && !isRotateGeometryLockActive(stBefore)) {
+      syncWasmDocumentAfterStoreUpdate();
+    }
   });
 }
 
@@ -2365,20 +2167,40 @@ function flushResizePreviewToStore(): void {
   pendingResizePreview = null;
   if (!result) return;
   const st = useEditorStore.getState();
+  let textLayoutDirty = false;
+  for (const id of Object.keys(result.nodes)) {
+    const next = result.nodes[id];
+    const prev = st.nodes[id];
+    if (!next || next.type !== "text" || !prev || prev.type !== "text") continue;
+    if (
+      next.width !== prev.width ||
+      next.height !== prev.height ||
+      next.textResizeMode !== prev.textResizeMode ||
+      next.autoResize !== prev.autoResize ||
+      next.content !== prev.content
+    ) {
+      clearCanonicalTextLayoutCache(id);
+      textLayoutDirty = true;
+    }
+  }
   const merged = { ...st, nodes: result.nodes, childOrder: result.childOrder };
   useEditorStore.setState({
     nodes: result.nodes,
     childOrder: result.childOrder,
     ...syncActivePageRecord(merged),
   });
+  if (textLayoutDirty) bumpTextLayoutEpoch();
   bumpResizePreview();
 }
 
-/** Live resize preview — store only, no WASM round-trip per pointer frame. */
+/** Live resize preview — apply to store immediately so text layout matches frame width. */
 function applyResizePreviewToStore(result: StructuralDocumentResult): void {
   pendingResizePreview = result;
-  if (resizePreviewRaf) return;
-  resizePreviewRaf = requestAnimationFrame(flushResizePreviewToStore);
+  if (resizePreviewRaf) {
+    cancelAnimationFrame(resizePreviewRaf);
+    resizePreviewRaf = 0;
+  }
+  flushResizePreviewToStore();
 }
 
 export function finalizeResizeWasmSync(): void {
@@ -2456,7 +2278,7 @@ function buildAddLineResult(
     fill: "transparent",
     fillEnabled: false,
     fillOpacity: 0,
-    strokeColor: DEFAULT_SHAPE_STROKE,
+    strokeColor: defaultCanvasForegroundColor(),
     strokeWidth: 3,
     strokePosition: "center",
   };
@@ -2506,7 +2328,7 @@ function buildAddTriangleResult(
     fill: DEFAULT_SHAPE_FILL,
     fillEnabled: true,
     fillOpacity: 1,
-    strokeColor: DEFAULT_SHAPE_STROKE,
+    strokeColor: defaultCanvasForegroundColor(),
     strokeWidth: 0,
     strokePosition: "center",
   };
@@ -2707,7 +2529,7 @@ function buildStartTextFromDragResult(
     id,
     parentId: null,
     name: layerNameFromTextContent(draft.content),
-    ...textResizePatch(draft.textResizeMode ?? "auto-height"),
+    ...textResizePatch(draft.textResizeMode ?? "auto-width"),
   };
   const inserted = insertNodeWithFrameParenting(
     node,
@@ -3192,7 +3014,7 @@ function buildStartPathAtResult(
     fillEnabled: false,
     fillOpacity: 1,
     fill: "transparent",
-    strokeColor: DEFAULT_SHAPE_STROKE,
+    strokeColor: defaultCanvasForegroundColor(),
     strokeWidth: 2,
     strokePosition: "center",
   };
@@ -3425,8 +3247,8 @@ function buildFinishTextDragBoxResult(
     y: draft.y,
     width: draft.width,
     height: draft.height,
-    textResizeMode: "auto-height" as const,
-    ...textResizePatch("auto-height"),
+    textResizeMode: "fixed" as const,
+    ...textResizePatch("fixed"),
   };
   if (isZeroAreaDraftNode(next)) return null;
   return {
@@ -3525,7 +3347,10 @@ function buildSetNodeFillHexResult(
   if (!normalized) return null;
   const n = s.nodes[nodeId];
   if (!n || n.locked) return null;
-  const stylePatch: NodeStylePatch = { fill: normalized, fillType: "solid" };
+  const stylePatch: NodeStylePatch =
+    n.type === "text"
+      ? { fill: normalized, fillType: "solid", textColor: normalized, fillEnabled: true }
+      : { fill: normalized, fillType: "solid" };
   const instRoot = findInstanceRoot(s.nodes, nodeId);
   let nodes = { ...s.nodes };
 
@@ -3578,11 +3403,7 @@ function buildSetSelectionFillHexResult(
   let nodes = { ...s.nodes };
   let changed = false;
   for (const nodeId of tops) {
-    const n = nodes[nodeId]!;
-    const slice =
-      n.type === "text"
-        ? buildSetNodeTextColorHexResult({ nodes, childOrder: s.childOrder }, nodeId, normalized)
-        : buildSetNodeFillHexResult({ nodes, childOrder: s.childOrder }, nodeId, normalized);
+    const slice = buildSetNodeFillHexResult({ nodes, childOrder: s.childOrder }, nodeId, normalized);
     if (!slice) continue;
     nodes = slice.nodes;
     changed = true;
@@ -3600,7 +3421,12 @@ function buildSetNodeTextColorHexResult(
   if (!normalized) return null;
   const n = s.nodes[nodeId];
   if (!n || n.locked) return null;
-  const stylePatch: NodeStylePatch = { textColor: normalized };
+  const stylePatch: NodeStylePatch = {
+    textColor: normalized,
+    fill: normalized,
+    fillType: "solid",
+    fillEnabled: true,
+  };
   const instRoot = findInstanceRoot(s.nodes, nodeId);
   let nodes = { ...s.nodes };
 
@@ -3859,14 +3685,13 @@ function buildStartPencilStrokeResult(
 ): StructuralDocumentResult | null {
   if (s.editorMode !== "design" || s.tool !== "pencil") return null;
   const id = `path-${Date.now()}`;
-  const { defaultText } = canvasChromeForeground(s.canvasBackgroundColor);
   const strokeWidth = clampStrokeWidth(s.pencilStrokeWidth || DEFAULT_PENCIL_STROKE_WIDTH);
   const pt0: PathPoint = { id: newPathPointId(), x: 0, y: 0 };
   let node: EditorNode = {
     id,
     parentId: null,
     type: "path",
-    name: nextNumberedLayerName(s.nodes, "Freehand"),
+    name: nextNumberedLayerName(s.nodes, "Vector"),
     x: 0,
     y: 0,
     width: 1,
@@ -3880,7 +3705,7 @@ function buildStartPencilStrokeResult(
     fillEnabled: false,
     fillOpacity: 1,
     fill: "transparent",
-    strokeColor: defaultText,
+    strokeColor: defaultCanvasForegroundColor(),
     strokeEnabled: true,
     strokeWidth,
     strokeLinecap: "round",
@@ -3944,7 +3769,7 @@ function buildFinishPencilStrokeResult(
   if (!n || n.type !== "path" || !n.pathPoints) {
     return { nodes: s.nodes, childOrder: s.childOrder, ui: { pencilDrawingNodeId: null } };
   }
-  const epsilon = 1.5 / Math.max(s.zoom, 0.01);
+  const epsilon = 2.5 / Math.max(s.zoom, 0.01);
   const raw = n.pathPoints;
   let simplified = simplifyPolyline(
     raw.map((p) => ({ x: p.x, y: p.y })),
@@ -3974,12 +3799,8 @@ function buildFinishPencilStrokeResult(
       };
     }
   }
-  const pts: PathPoint[] = simplified.map((p) => ({
-    id: newPathPointId(),
-    x: p.x,
-    y: p.y,
-  }));
-  let next: EditorNode = { ...n, pathPoints: pts, pathClosed: false };
+  const pts = smoothPolylineToPathPoints(simplified, n.pathClosed ?? false, newPathPointId);
+  let next: EditorNode = { ...n, pathPoints: pts, pathClosed: n.pathClosed ?? false };
   next = normalizePathNode(next);
   let nodes = { ...s.nodes, [pathId]: next };
   nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
@@ -5052,7 +4873,7 @@ function buildApplyPluginIconResult(
     fill: DEFAULT_SHAPE_FILL,
     fillEnabled: true,
     fillOpacity: 1,
-    strokeColor: DEFAULT_SHAPE_STROKE,
+    strokeColor: defaultCanvasForegroundColor(),
     strokeWidth: 1.5,
     strokePosition: "center",
   };
@@ -5844,6 +5665,14 @@ function buildUpdateNodeStyleResult(
   }
   let finalPatch: Partial<EditorNode> =
     n.type === "text" ? withTextLayoutPatch(layoutBase, mergedPatch) : mergedPatch;
+  if (n.type === "text") {
+    finalPatch = mergeTextLayoutPatchWithAspectLock(
+      layoutBase,
+      mergedPatch,
+      finalPatch,
+      s.inspectorAspectRatioLocked,
+    );
+  }
   if (n.type === "text" && "content" in mergedPatch) {
     finalPatch = {
       ...finalPatch,
@@ -5851,6 +5680,17 @@ function buildUpdateNodeStyleResult(
         (mergedPatch as { content?: string }).content ?? n.content,
       ),
     };
+  }
+
+  const rotateInteraction = isRotateGeometryLockActive(s);
+  if (rotateInteraction) {
+    const stripped: Partial<EditorNode> = { ...finalPatch };
+    delete stripped.x;
+    delete stripped.y;
+    delete stripped.width;
+    delete stripped.height;
+    delete stripped.rotation;
+    finalPatch = stripped;
   }
 
   let nodes: Record<string, EditorNode>;
@@ -5881,6 +5721,31 @@ function buildUpdateNodeStyleResult(
     }
   }
 
+  if (rotateInteraction) {
+    const snap = rotateGeomSnapshotForNode(s, id);
+    if (snap) {
+      const cur = nodes[id];
+      if (cur) {
+        nodes[id] = applyRotateGeometryLock(
+          cur,
+          snap,
+          s.rotateGeomSnapshot?.nodeId === id,
+        );
+      }
+    } else {
+      const cur = nodes[id];
+      if (cur) {
+        nodes[id] = {
+          ...cur,
+          x: n.x,
+          y: n.y,
+          width: n.width,
+          height: n.height,
+        };
+      }
+    }
+  }
+
   const fp = finalPatch as Partial<EditorNode>;
   let childOrder = s.childOrder;
   if (
@@ -5890,7 +5755,48 @@ function buildUpdateNodeStyleResult(
   ) {
     nodes = relayoutParentsWithAutoLayout(nodes, childOrder, [n.parentId]);
   }
+  if (n.type === "text" && patchAffectsTextLayout(patch)) {
+    clearCanonicalTextLayoutCache(id);
+    bumpTextLayoutEpoch();
+  }
   return { nodes, childOrder, ui: {} };
+}
+
+/** Keep inspector/canvas aspect-locked W/H on non-text layers. Text uses resize modes instead. */
+function mergeTextLayoutPatchWithAspectLock(
+  node: EditorNode,
+  input: Partial<EditorNode>,
+  layoutPatch: Partial<EditorNode>,
+  aspectLocked: boolean,
+): Partial<EditorNode> {
+  if (node.type === "text") return layoutPatch;
+  if (!aspectLocked) return layoutPatch;
+  if (input.width != null && input.height != null) {
+    return { ...layoutPatch, width: input.width, height: input.height };
+  }
+  if (input.width != null) {
+    return {
+      ...layoutPatch,
+      ...applyAspectLockedDimensions(
+        { width: node.width, height: node.height },
+        "width",
+        input.width,
+        true,
+      ),
+    };
+  }
+  if (input.height != null) {
+    return {
+      ...layoutPatch,
+      ...applyAspectLockedDimensions(
+        { width: node.width, height: node.height },
+        "height",
+        input.height,
+        true,
+      ),
+    };
+  }
+  return layoutPatch;
 }
 
 function buildUpdateNodeResult(
@@ -5906,7 +5812,7 @@ function buildUpdateNodeResult(
   const rotationOnlyInput =
     patch.rotation != null &&
     Object.keys(patch).every((k) => k === "rotation" || k === "x" || k === "y");
-  const rotateGeomLock = s.rotateGeomSnapshot != null;
+  const rotateGeomLock = isRotateGeometryLockActive(s);
   const patchForApply =
     s.transformInteractionMode === "rotate" || rotateGeomLock || rotationOnlyInput
       ? {
@@ -5924,8 +5830,16 @@ function buildUpdateNodeResult(
     n.type === "text" && instRoot && instRoot !== id
       ? mergeInstanceOverrides(n, s.nodes)
       : n;
-  const layoutAwarePatch =
+  let layoutAwarePatch =
     n.type === "text" ? withTextLayoutPatch(layoutBase, patchForApply) : patchForApply;
+  if (n.type === "text") {
+    layoutAwarePatch = mergeTextLayoutPatchWithAspectLock(
+      layoutBase,
+      patchForApply,
+      layoutAwarePatch,
+      s.inspectorAspectRatioLocked,
+    );
+  }
 
   if (instRoot && instRoot !== id) {
     for (const k of Object.keys(layoutAwarePatch)) {
@@ -5955,15 +5869,13 @@ function buildUpdateNodeResult(
   }
 
   let merged = nodes[id]!;
-  if (s.rotateGeomSnapshot?.nodeId === id) {
-    const snap = s.rotateGeomSnapshot;
-    merged = {
-      ...merged,
-      x: snap.x,
-      y: snap.y,
-      width: snap.width,
-      height: snap.height,
-    };
+  const rotateSnap = rotateGeomSnapshotForNode(s, id);
+  if (rotateSnap) {
+    merged = applyRotateGeometryLock(
+      merged,
+      rotateSnap,
+      s.rotateGeomSnapshot?.nodeId === id,
+    );
     nodes[id] = merged;
   } else {
     merged = sanitizeNodeGeometry(merged, n, { minDimension: geomMin });
@@ -6055,21 +5967,23 @@ function buildUpdateNodeResult(
   }
   const finalNode = nodes[id];
   if (finalNode) {
-    if (s.rotateGeomSnapshot?.nodeId === id) {
-      const snap = s.rotateGeomSnapshot;
-      nodes[id] = {
-        ...finalNode,
-        x: snap.x,
-        y: snap.y,
-        width: snap.width,
-        height: snap.height,
-      };
+    const snap = rotateGeomSnapshotForNode(s, id);
+    if (snap) {
+      nodes[id] = applyRotateGeometryLock(
+        finalNode,
+        snap,
+        s.rotateGeomSnapshot?.nodeId === id,
+      );
     } else {
       nodes[id] = sanitizeNodeGeometry(finalNode, n, { minDimension: geomMin });
     }
   }
   if (geom && !allowZeroGeometry) {
     warnInvalidNodeGeometry("updateNode", id, nodes[id] ?? merged, nodes);
+  }
+  if (n.type === "text" && patchAffectsTextLayout(patchForApply)) {
+    clearCanonicalTextLayoutCache(id);
+    bumpTextLayoutEpoch();
   }
   return { nodes, childOrder: s.childOrder, ui: {} };
 }
@@ -6084,6 +5998,7 @@ function buildUpdateNodesResult(
   const refresh = new Set<string>();
   let changed = false;
   let rotationOnlyBatch = true;
+  let textLayoutEpochBump = false;
   for (const id of ids) {
     const n = nodes[id];
     const patch = patches[id];
@@ -6091,7 +6006,7 @@ function buildUpdateNodesResult(
     const rotationOnlyInput =
       patch.rotation != null &&
       Object.keys(patch).every((k) => k === "rotation" || k === "x" || k === "y");
-    const rotateGeomLock = s.rotateGeomSnapshot != null;
+    const rotateGeomLock = isRotateGeometryLockActive(s);
     const patchForApply =
       s.transformInteractionMode === "rotate" || rotateGeomLock || rotationOnlyInput
         ? {
@@ -6100,11 +6015,23 @@ function buildUpdateNodesResult(
             ...(patch.y != null ? { y: patch.y } : {}),
           }
         : patch;
-    const layoutAwarePatch = n.type === "text" ? withTextLayoutPatch(n, patchForApply) : patchForApply;
+    let layoutAwarePatch = n.type === "text" ? withTextLayoutPatch(n, patchForApply) : patchForApply;
+    if (n.type === "text") {
+      layoutAwarePatch = mergeTextLayoutPatchWithAspectLock(
+        n,
+        patchForApply,
+        layoutAwarePatch,
+        s.inspectorAspectRatioLocked,
+      );
+    }
     let merged = { ...n, ...layoutAwarePatch };
-    if (s.rotateGeomSnapshot?.nodeId === id) {
-      const snap = s.rotateGeomSnapshot;
-      merged = { ...merged, x: snap.x, y: snap.y, width: snap.width, height: snap.height };
+    const rotateSnap = rotateGeomSnapshotForNode(s, id);
+    if (rotateSnap) {
+      merged = applyRotateGeometryLock(
+        merged,
+        rotateSnap,
+        s.rotateGeomSnapshot?.nodeId === id,
+      );
     }
     nodes[id] = merged;
     changed = true;
@@ -6132,10 +6059,28 @@ function buildUpdateNodesResult(
     ) {
       refresh.add(n.parentId);
     }
+    if (n.type === "text" && patchAffectsTextLayout(patch)) {
+      clearCanonicalTextLayoutCache(id);
+      textLayoutEpochBump = true;
+    }
   }
   if (!changed) return null;
+  if (textLayoutEpochBump) bumpTextLayoutEpoch();
   if (!rotationOnlyBatch) {
     nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
+  }
+  if (isRotateGeometryLockActive(s)) {
+    for (const id of ids) {
+      const merged = nodes[id];
+      const snap = rotateGeomSnapshotForNode(s, id);
+      if (merged && snap) {
+        nodes[id] = applyRotateGeometryLock(
+          merged,
+          snap,
+          s.rotateGeomSnapshot?.nodeId === id,
+        );
+      }
+    }
   }
   for (const id of ids) {
     const merged = nodes[id];
@@ -6164,7 +6109,7 @@ function buildResizeNodeResult(
   modifiers: ResizeModifiers,
   opts?: ResizeNodeOpts,
 ): StructuralDocumentResult | null {
-  if (s.transformInteractionMode === "rotate" || s.rotateGeomSnapshot) return null;
+  if (isRotateGeometryLockActive(s)) return null;
   const n = s.nodes[id];
   if (!n || n.locked || !n.visible) return null;
   const kind: ResizeKind =
@@ -6254,12 +6199,13 @@ function buildResizeNodeResult(
   const content = buildResizeContentPatches(n, startBounds, { x, y, width, height }, handle, modifiers);
   let nodePatch: Partial<EditorNode> = { x, y, width, height, ...content };
   if (n.type === "text") {
-    const widthChanged = width !== startBounds.width;
-    if ((n.textResizeMode ?? "auto-width") === "auto-width" && widthChanged) {
-      nodePatch = { ...nodePatch, ...textResizePatch("auto-height") };
-    }
-    const layoutPatch = textLayoutPatchForNode({ ...n, ...nodePatch }, n.content ?? "");
-    if (layoutPatch) nodePatch = { ...nodePatch, ...layoutPatch };
+    const textPatch = buildTextResizeGeometryPatch(n, startBounds, {
+      x,
+      y,
+      width,
+      height,
+    });
+    nodePatch = { ...nodePatch, ...textPatch };
   }
   let nodes: Record<string, EditorNode> = {
     ...s.nodes,
@@ -6526,7 +6472,7 @@ function buildEndRotateInteractionResult(
   return {
     nodes,
     childOrder: s.childOrder,
-    ui: { transformInteractionMode: "none", rotateGeomSnapshot: null },
+    ui: { transformInteractionMode: "none", rotateGeomSnapshot: null, rotateGeomSnapshots: null },
   };
 }
 
@@ -6613,11 +6559,7 @@ function cloneTopLevelSelectionState(
       };
     }
     const P = parentListKey(renderParent);
-    const list = [...(childOrder[P] ?? [])];
-    const curIdx = list.indexOf(rootId);
-    const insertAt = curIdx >= 0 ? curIdx + 1 : list.length;
-    list.splice(insertAt, 0, newRootId);
-    childOrder[P] = list;
+    Object.assign(childOrder, insertDuplicatedSiblingInChildOrder(childOrder, P, rootId, newRootId));
     newRoots.push(newRootId);
   }
 
@@ -6706,6 +6648,8 @@ const INSTANCE_STYLE_KEYS = new Set<string>([
   "fontWeight",
   "lineHeight",
   "letterSpacing",
+  "textResizeMode",
+  "autoResize",
   "content",
   "opacity",
   "blendMode",
@@ -6837,6 +6781,27 @@ function mergeLayoutMapIntoNodes(
       layoutDirty: l.layoutDirty,
     };
   }
+  return applyTextReflowAfterAutoLayout(next, nodes);
+}
+
+/** Recompute wrapped text height when auto-layout changes a text child's width. */
+function applyTextReflowAfterAutoLayout(
+  nodes: Record<string, EditorNode>,
+  before: Record<string, EditorNode>,
+): Record<string, EditorNode> {
+  let next = { ...nodes };
+  for (const id of Object.keys(next)) {
+    const node = next[id];
+    if (!node || node.type !== "text") continue;
+    const prev = before[id];
+    if (!prev || node.width === prev.width) continue;
+    const patch = ensureTextModeForExplicitWidth(node, "auto-layout", {
+      previousWidth: prev.width,
+    });
+    if (Object.keys(patch).length > 0) {
+      next[id] = { ...node, ...patch };
+    }
+  }
   return next;
 }
 
@@ -6857,6 +6822,7 @@ function relayoutParentsWithAutoLayout(
 function textStyleFromSelection(
   s: Pick<EditorState, "nodes" | "selectedIds" | "canvasBackgroundColor">,
 ) {
+  const defaultColor = defaultCanvasForegroundColor();
   for (const id of s.selectedIds) {
     const n = s.nodes[id];
     if (n?.type === "text") {
@@ -6866,8 +6832,8 @@ function textStyleFromSelection(
         fontWeight: n.fontWeight ?? 500,
         lineHeight: n.lineHeight ?? 1.25,
         letterSpacing: n.letterSpacing ?? 0,
-        fill: n.fill ?? DEFAULT_TEXT_COLOR,
-        textColor: n.textColor ?? n.fill ?? DEFAULT_TEXT_COLOR,
+        fill: n.fill ?? defaultColor,
+        textColor: n.textColor ?? n.fill ?? defaultColor,
       };
     }
   }
@@ -6877,8 +6843,8 @@ function textStyleFromSelection(
     fontWeight: 500,
     lineHeight: 1.25,
     letterSpacing: 0,
-    fill: DEFAULT_TEXT_COLOR,
-    textColor: DEFAULT_TEXT_COLOR,
+    fill: defaultColor,
+    textColor: defaultColor,
   };
 }
 
@@ -6902,6 +6868,8 @@ export function toPersistSlice(s: EditorState): EditorPersistSlice {
     pages,
     pageOrder,
     activePageId: s.activePageId,
+    activeSubPageId: s.activeSubPageId,
+    codeRoundTripLink: s.codeRoundTripLink ?? null,
   };
 }
 
@@ -6933,6 +6901,7 @@ function editorStateAfterDocumentImport(
     shapeEditModeNodeId: null,
     transformInteractionMode: "none",
     rotateGeomSnapshot: null,
+    rotateGeomSnapshots: null,
     isMovingSelection: false,
     rotateHandleHovered: false,
     rotateHandleHoverHandle: null,
@@ -6994,6 +6963,7 @@ function editorPartialFromPaytmCraftDocument(doc: PaytmCraftDocument, s: EditorS
     shapeEditModeNodeId: null,
     transformInteractionMode: "none",
     rotateGeomSnapshot: null,
+    rotateGeomSnapshots: null,
     isMovingSelection: false,
     rotateHandleHovered: false,
     rotateHandleHoverHandle: null,
@@ -7110,6 +7080,14 @@ function pageSwitchUiReset(): Partial<EditorState> {
 }
 
 export const useEditorStore = create<EditorState>((set, get) => {
+  const scheduleWorkspacePersist = () => {
+    queueMicrotask(() => {
+      const st = get();
+      if (st.figImportInProgress || st.craftBridgeInboundActive) return;
+      st.saveToLocal();
+    });
+  };
+
   // Always seed empty on first paint so SSR and client markup match; local doc loads in EditorDocumentPersistence.
   const initialDoc = createEmptyDocumentFields();
 
@@ -7120,7 +7098,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   editorMode: "design",
   leftTab: "layers",
   rightPanelTab: "design",
-  codePanelFormat: "html",
+  codePanelFormat: "react",
   selectedIds: initialDoc.selectedIds,
   zoom: initialDoc.zoom,
   pan: initialDoc.pan,
@@ -7129,6 +7107,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
   pages: initialDoc.pages,
   pageOrder: initialDoc.pageOrder,
   activePageId: initialDoc.activePageId,
+  activeSubPageId:
+    initialDoc.activeSubPageId ??
+    initialDoc.pages[initialDoc.activePageId]?.activeSubPageId ??
+    `${initialDoc.activePageId}-sp-1`,
   assets: initialDoc.assets,
   fontAssets: initialDoc.fontAssets ?? {},
   designTokens: initialDoc.designTokens,
@@ -7157,6 +7139,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   shapeEditModeNodeId: null,
   transformInteractionMode: "none",
   rotateGeomSnapshot: null,
+  rotateGeomSnapshots: null,
   isMovingSelection: false,
   rotateHandleHovered: false,
   rotateHandleHoverHandle: null,
@@ -7245,6 +7228,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   commandMenuOpen: false,
   shortcutOverlayOpen: false,
   uiChromeVisible: true,
+  inspectorAspectRatioLocked: false,
   setCommandMenuOpen: (open) =>
     set(() => ({
       commandMenuOpen: open,
@@ -7276,13 +7260,24 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   toggleUiChrome: () => set((s) => ({ uiChromeVisible: !s.uiChromeVisible })),
   setUiChromeVisible: (visible) => set({ uiChromeVisible: visible }),
+  setInspectorAspectRatioLocked: (locked) => set({ inspectorAspectRatioLocked: locked }),
+  toggleInspectorAspectRatioLocked: () =>
+    set((s) => ({ inspectorAspectRatioLocked: !s.inspectorAspectRatioLocked })),
 
   aiModalOpen: false,
   aiModalSource: null,
+  aiGenerateActive: false,
+  aiGenerateStep: null,
+  aiGenerateJobSeq: 0,
+  aiGenerateJob: null,
+  aiGenerateError: null,
+  aiGenerateFailedJob: null,
   openAIModal: (source) =>
     set(() => ({
       aiModalOpen: true,
       aiModalSource: source,
+      aiGenerateError: null,
+      aiGenerateFailedJob: null,
       commandMenuOpen: false,
       shortcutOverlayOpen: false,
       pluginMarketplaceOpen: false,
@@ -7292,6 +7287,72 @@ export const useEditorStore = create<EditorState>((set, get) => {
       teamInviteModalOpen: false,
     })),
   closeAIModal: () => set({ aiModalOpen: false, aiModalSource: null }),
+
+  queueAIGenerate: (payload) => {
+    const id = get().aiGenerateJobSeq + 1;
+    const queuedAt = Date.now();
+    set({
+      aiGenerateJobSeq: id,
+      aiGenerateJob: { ...payload, id, queuedAt },
+      aiGenerateActive: true,
+      aiGenerateStep: payload.initialStep,
+      aiGenerateError: null,
+      aiGenerateFailedJob: null,
+      aiModalOpen: false,
+      aiModalSource: null,
+    });
+
+    const skeleton = buildAIGenerateSkeletonSlice({
+      prompt: payload.prompt,
+      preset: payload.preset,
+      style: payload.style,
+      model: payload.model,
+      contextPrompt: payload.contextPrompt,
+      contextAttachmentCount: payload.contextAttachmentCount,
+      contextImages: payload.contextImages,
+    });
+    void get().applyGeneratedDesign(skeleton.slice, "replace", {
+      recordHistory: payload.source === "editor",
+      zoomToFit: true,
+    });
+
+    return id;
+  },
+  setAIGenerateStep: (step) => set({ aiGenerateStep: step }),
+  finishAIGenerate: () =>
+    set({
+      aiGenerateActive: false,
+      aiGenerateStep: null,
+      aiGenerateJob: null,
+      aiGenerateError: null,
+      aiGenerateFailedJob: null,
+    }),
+  failAIGenerate: (error, job) =>
+    set({
+      aiGenerateActive: false,
+      aiGenerateStep: null,
+      aiGenerateJob: null,
+      aiGenerateError: error,
+      aiGenerateFailedJob: {
+        prompt: job.prompt,
+        preset: job.preset,
+        style: job.style,
+        model: job.model,
+        contextPrompt: job.contextPrompt,
+        contextAttachmentCount: job.contextAttachmentCount,
+        contextImages: job.contextImages,
+        source: job.source,
+      },
+      aiModalOpen: true,
+      aiModalSource: job.source,
+    }),
+  cancelAIGenerate: () =>
+    set({
+      aiGenerateActive: false,
+      aiGenerateStep: null,
+      aiGenerateJob: null,
+    }),
+  clearAIGenerateError: () => set({ aiGenerateError: null, aiGenerateFailedJob: null }),
 
   importHubOpen: false,
   importWebModalOpen: false,
@@ -7318,6 +7379,31 @@ export const useEditorStore = create<EditorState>((set, get) => {
   codeRoundTripTab: "export",
   codeRoundTripSourceHeader: null,
   setCodeRoundTripSourceHeader: (header) => set({ codeRoundTripSourceHeader: header }),
+  codeRoundTripLink: null,
+  setCodeRoundTripLink: (link) =>
+    set((s) => ({
+      codeRoundTripLink: normalizeCodeRoundTripLink(link),
+      documentSaveStatus: s.documentSaveStatus === "saved-api" ? "unsaved" : "unsaved",
+    })),
+  updateCodeRoundTripLink: (patch) =>
+    set((s) => {
+      const prev = s.codeRoundTripLink;
+      if (!prev) return s;
+      const { syncMode: _syncIgnored, ...rest } = patch;
+      return {
+        codeRoundTripLink: normalizeCodeRoundTripLink({ ...prev, ...rest }),
+        documentSaveStatus: "unsaved",
+      };
+    }),
+  craftBridgeSyncStatus: "idle",
+  craftBridgeSyncError: null,
+  setCraftBridgeSyncStatus: (status, error = null) =>
+    set({ craftBridgeSyncStatus: status, craftBridgeSyncError: error }),
+  craftBridgeInboundActive: false,
+  setCraftBridgeInboundActive: (active) => set({ craftBridgeInboundActive: active }),
+  craftBridgeConflict: null,
+  setCraftBridgeConflict: (conflict) => set({ craftBridgeConflict: conflict }),
+  clearCraftBridgeConflict: () => set({ craftBridgeConflict: null }),
   openImportHub: () =>
     set(() => ({
       importHubOpen: true,
@@ -7489,11 +7575,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   clearHistory: () => {
     if (isWasmDocumentAuthority()) {
-      try {
-        getActiveCraftEngine()?.clearHistory();
-      } catch {
-        /* engine not ready */
-      }
+      runCraftEngineAccess(() => {
+        try {
+          getActiveCraftEngine()?.clearHistory();
+        } catch {
+          /* engine not ready */
+        }
+      });
     }
     set({
       historyPast: [],
@@ -7507,10 +7595,18 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const s = get();
     if (s.isApplyingHistory) return;
     if (isWasmDocumentAuthority()) {
-      craftEngineAuthorityPushSnapshot();
-      set({
-        wasmHistoryCanUndo: craftEngineAuthorityCanUndo(),
-        wasmHistoryCanRedo: craftEngineAuthorityCanRedo(),
+      runCraftEngineAccess(() => {
+        const engine = getActiveCraftEngine();
+        if (!engine) return;
+        try {
+          engine.pushHistorySnapshot();
+        } catch {
+          /* engine not ready */
+        }
+        set({
+          wasmHistoryCanUndo: engine.canUndo(),
+          wasmHistoryCanRedo: engine.canRedo(),
+        });
       });
       return;
     }
@@ -7730,26 +7826,37 @@ export const useEditorStore = create<EditorState>((set, get) => {
     set({ isApplyingHistory: false });
   },
 
-  setEditingTextId: (editingTextId) => {
+  setEditingTextId: (editingTextId, selection) => {
     const prev = get().editingTextId;
     if (editingTextId && !prev) get().pushHistory();
-    if (!editingTextId && prev) {
-      const node = get().nodes[prev];
-      if (node?.type === "text" && !(node.content?.length)) {
-        get().pushHistory();
-        commitStructuralResult(buildDeleteEmptyTextOnEditEndResult(get(), prev));
-        return;
-      }
+
+    const deleteEmptyTextLayer = (textId: string): boolean => {
+      const node = get().nodes[textId];
+      if (node?.type !== "text" || node.content?.length) return false;
+      get().pushHistory();
+      commitStructuralResult(buildDeleteEmptyTextOnEditEndResult(get(), textId));
+      return true;
+    };
+
+    if (prev && prev !== editingTextId && deleteEmptyTextLayer(prev)) {
+      if (!editingTextId) return;
     }
+
+    if (!editingTextId && prev) {
+      if (deleteEmptyTextLayer(prev)) return;
+    }
+
     set((s) => {
       if (!editingTextId) {
         return { editingTextId: null, textEditSelection: null };
       }
       const node = s.nodes[editingTextId];
       const len = node?.type === "text" ? (node.content?.length ?? 0) : 0;
+      const anchor = selection?.anchor ?? len;
+      const focus = selection?.focus ?? len;
       return {
         editingTextId,
-        textEditSelection: { anchor: len, focus: len },
+        textEditSelection: { anchor, focus },
       };
     });
   },
@@ -8070,7 +8177,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       refreshDuplicateStepAfterMove(st.selectedIds, st.nodes, st.childOrder);
     }
     const after = get().nodes[id];
-    if (after) {
+    if (after && !isRotateGeometryLockActive(get())) {
       const mirrored = mirrorNodeGeometryToWasm(id, patch, after);
       if (!mirrored) syncWasmDocumentAfterStoreUpdate();
     }
@@ -8093,8 +8200,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
         return { nodeId, patch: nodePatch, node };
       })
       .filter((e): e is NonNullable<typeof e> => e != null);
-    const mirrored = mirrorGeometryPatchesToWasm(entries);
-    if (!mirrored) syncWasmDocumentAfterStoreUpdate();
+    if (!isRotateGeometryLockActive(get())) {
+      const mirrored = mirrorGeometryPatchesToWasm(entries);
+      if (!mirrored) syncWasmDocumentAfterStoreUpdate();
+    }
   },
 
   updateNodeStyle: (id, patch, opts) => {
@@ -8104,6 +8213,35 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (n0 && !n0.locked) get().pushHistory();
     }
     commitStructuralResult(buildUpdateNodeStyleResult(get(), id, patch));
+  },
+
+  setTextResizeMode: (id, mode, opts) => {
+    const pre = get();
+    const layoutBase = resolveTextNodeFromStore(pre.nodes, id);
+    if (!layoutBase || layoutBase.locked) return;
+
+    const before = textResizeModeSnapshot(layoutBase);
+    const afterPatch = textResizeModeStylePatch(layoutBase, mode);
+
+    if (!opts?.skipHistory && !pre.isApplyingHistory) {
+      const n0 = pre.nodes[id];
+      if (n0 && !n0.locked) get().pushHistory();
+    }
+
+    commitStructuralResult(buildUpdateNodeStyleResult(get(), id, afterPatch as NodeStylePatch));
+
+    const post = get();
+    const afterNode = resolveTextNodeFromStore(post.nodes, id);
+    if (!afterNode) return;
+
+    logTextResizeModeClick({
+      clickedMode: mode,
+      selectedNodeId: id,
+      before,
+      afterPatch,
+      afterStoreNode: textResizeModeSnapshot(afterNode),
+      layout: textResizeLayoutSnapshot(afterNode),
+    });
   },
 
   setNodeFillHex: (nodeId, hex, opts) => {
@@ -8783,10 +8921,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     commitStructuralResult(result);
     get().setTool("move");
     requestAnimationFrame(() => {
-      const el = document.querySelector<HTMLTextAreaElement>(
-        `[data-text-editor="${get().editingTextId}"]`,
-      );
-      el?.focus();
+      focusActiveTextEditField(get().editingTextId);
     });
   },
 
@@ -9418,7 +9553,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   resizeNode: (id, handle, startBounds, currentPoint, modifiers, opts) => {
     if (get().transformInteractionMode === "rotate") return;
-    if (get().rotateGeomSnapshot) return;
+    if (isRotateGeometryLockActive(get())) return;
     if (!opts?.skipHistory && !get().isApplyingHistory) {
       const pre = get();
       const n0 = pre.nodes[id];
@@ -9880,7 +10015,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
   },
 
   setTransformInteractionMode: (mode) => {
-    set({ transformInteractionMode: mode });
+    set({
+      transformInteractionMode: mode,
+      ...(mode === "none"
+        ? { rotateGeomSnapshot: null, rotateGeomSnapshots: null }
+        : {}),
+    });
     if (mode === "none") flushDeferredWasmReconcile();
   },
 
@@ -9890,22 +10030,39 @@ export const useEditorStore = create<EditorState>((set, get) => {
     set({
       transformInteractionMode: "rotate",
       rotateGeomSnapshot: { nodeId, ...snapshot },
+      rotateGeomSnapshots: { [nodeId]: snapshot },
+    }),
+
+  beginMultiRotateInteraction: (snapshots) =>
+    set({
+      transformInteractionMode: "rotate",
+      rotateGeomSnapshot: null,
+      rotateGeomSnapshots: snapshots,
     }),
 
   endRotateInteraction: (nodeId, rotation) => {
     const snap = get().rotateGeomSnapshot;
     if (!snap || snap.nodeId !== nodeId) {
-      set({ transformInteractionMode: "none", rotateGeomSnapshot: null });
+      set({
+        transformInteractionMode: "none",
+        rotateGeomSnapshot: null,
+        rotateGeomSnapshots: null,
+      });
       return;
     }
     const before = get().nodes[nodeId];
     const result = buildEndRotateInteractionResult(get(), nodeId, rotation);
     if (!result) {
-      set({ transformInteractionMode: "none", rotateGeomSnapshot: null });
+      set({
+        transformInteractionMode: "none",
+        rotateGeomSnapshot: null,
+        rotateGeomSnapshots: null,
+      });
       return;
     }
     commitStructuralResult(result);
     const after = get().nodes[nodeId];
+    let mirrored = false;
     if (after && before) {
       const patch: Partial<EditorNode> = {};
       if (before.rotation !== after.rotation) patch.rotation = after.rotation;
@@ -9914,11 +10071,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (before.width !== after.width) patch.width = after.width;
       if (before.height !== after.height) patch.height = after.height;
       if (Object.keys(patch).length > 0) {
-        const mirrored = mirrorNodeGeometryToWasm(nodeId, patch, after);
+        mirrored = mirrorNodeGeometryToWasm(nodeId, patch, after);
         if (!mirrored) syncWasmDocumentAfterStoreUpdate();
       }
     }
-    flushDeferredWasmReconcile();
+    if (mirrored) {
+      clearDeferredWasmReconcile();
+    } else {
+      flushDeferredWasmReconcile();
+    }
   },
 
   setIsMovingSelection: (active) => {
@@ -10364,7 +10525,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     }
     if (localDoc) {
       set({
-        ...documentToEditorPatch(localDoc),
+        ...preferLayoutGridOffWhenEmpty(documentToEditorPatch(localDoc)),
         documentHydrating: false,
         documentHydrationRevision: s.documentHydrationRevision + 1,
         documentSaveStatus: "saved",
@@ -10374,13 +10535,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return;
     }
 
-    const mock = buildMock();
-    const fields = mergeSampleDocumentFields(mock, "Paytm Craft — Product exploration");
     set({
-      ...fields,
-      selectedIds: [],
-      guides: [],
-      editingTextId: null,
       documentHydrating: false,
       documentSaveStatus: "saved",
       documentHydrationRevision: s.documentHydrationRevision + 1,
@@ -10395,6 +10550,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
       documentHydrating: false,
       figImportInProgress: false,
       figImportStatus: null,
+      aiGenerateActive: false,
+      aiGenerateStep: null,
+      aiGenerateJob: null,
     });
   },
 
@@ -10422,6 +10580,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
       pages: sliceFromDoc.pages,
       pageOrder: sliceFromDoc.pageOrder,
       activePageId: sliceFromDoc.activePageId,
+      activeSubPageId: sliceFromDoc.activeSubPageId,
+      codeRoundTripLink: normalizeCodeRoundTripLink(sliceFromDoc.codeRoundTripLink ?? null),
     };
     if (serializePersistStable(incoming) === serializePersistStable(toPersistSlice(st))) {
       return false;
@@ -10620,6 +10780,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
       pages: slice.pages,
       pageOrder: slice.pageOrder,
       activePageId: slice.activePageId,
+      activeSubPageId:
+        slice.activeSubPageId ??
+        slice.pages[slice.activePageId]?.activeSubPageId ??
+        `${slice.activePageId}-sp-1`,
+      layoutGuides: slice.layoutGuides ?? slice.pages[slice.activePageId]?.layoutGuides ?? [],
       guides: [],
       editingTextId: null,
       hoveredCanvasId: null,
@@ -10721,26 +10886,30 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const zoomToFit = opts?.zoomToFit !== false;
 
     let appliedSlice = slice;
+    if (mode === "replace") {
+      appliedSlice = prepareImportedSliceForCanvas(slice);
+    }
     if (zoomToFit) {
       const el =
         typeof document !== "undefined"
           ? document.querySelector<HTMLElement>("[data-canvas-viewport]")
           : null;
+      const roots = appliedSlice.childOrder[ROOT] ?? [];
       const vp = viewportForRootNodes(
-        slice.nodes,
-        slice.childOrder[ROOT] ?? [],
+        appliedSlice.nodes,
+        roots,
         el?.clientWidth ?? 1200,
         el?.clientHeight ?? 800,
       );
       if (vp) {
         appliedSlice = {
-          ...slice,
+          ...appliedSlice,
           zoom: vp.zoom,
           pan: vp.pan,
           pages: Object.fromEntries(
-            Object.entries(slice.pages).map(([id, page]) => [
+            Object.entries(appliedSlice.pages ?? {}).map(([id, page]) => [
               id,
-              id === slice.activePageId ? { ...page, zoom: vp.zoom, pan: vp.pan } : page,
+              id === appliedSlice.activePageId ? { ...page, zoom: vp.zoom, pan: vp.pan } : page,
             ]),
           ),
         };
@@ -10817,6 +10986,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
           pages: appliedSlice.pages,
           pageOrder: appliedSlice.pageOrder,
           activePageId: appliedSlice.activePageId,
+          activeSubPageId:
+            appliedSlice.activeSubPageId ??
+            appliedSlice.pages[appliedSlice.activePageId]?.activeSubPageId ??
+            `${appliedSlice.activePageId}-sp-1`,
+          codeRoundTripLink:
+            normalizeCodeRoundTripLink(appliedSlice.codeRoundTripLink ?? s.codeRoundTripLink),
           ...uiReset(s),
           ...(recordHistory ? {} : { historyPast: [], historyFuture: [] }),
         };
@@ -10873,6 +11048,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
       });
     }
 
+    requestCraftEngineForceFullSync();
+    syncWasmDocumentAfterStoreUpdate();
+    bumpTextLayoutEpoch();
+
     try {
       await getSyncProvider().saveDocument(editorStateToDocument(toPersistSlice(get())));
       useEditorStore.setState({ documentSaveStatus: "saved" });
@@ -10891,29 +11070,25 @@ export const useEditorStore = create<EditorState>((set, get) => {
     ) {
       if (!window.confirm("Discard unsaved changes and create a new file?")) return;
     }
-    const { nodes, childOrder } = buildMock();
-    const pageInit = initialPagesFromCanvas(nodes, childOrder, {
-      zoom: DEFAULT_CANVAS_ZOOM,
-      pan: { x: 40, y: 24 },
-      showGrid: false,
-      showRulers: false,
-    });
+    const empty = createEmptyDocumentFields();
     set({
-      nodes,
-      childOrder,
-      pages: pageInit.pages,
-      pageOrder: pageInit.pageOrder,
-      activePageId: pageInit.activePageId,
-      assets: {},
-      fontAssets: {},
-      designTokens: {},
-      fileName: "Untitled",
-      selectedIds: [],
-      zoom: DEFAULT_CANVAS_ZOOM,
-      pan: { x: 40, y: 24 },
-      showGrid: false,
-      showRulers: false,
-      comments: [],
+      nodes: empty.nodes,
+      childOrder: empty.childOrder,
+      pages: empty.pages,
+      pageOrder: empty.pageOrder,
+      activePageId: empty.activePageId,
+      activeSubPageId: empty.activeSubPageId,
+      assets: empty.assets,
+      fontAssets: empty.fontAssets ?? {},
+      designTokens: empty.designTokens,
+      fileName: empty.fileName,
+      selectedIds: empty.selectedIds,
+      zoom: empty.zoom,
+      pan: empty.pan,
+      showGrid: empty.showGrid,
+      showRulers: empty.showRulers ?? false,
+      canvasBackgroundColor: empty.canvasBackgroundColor,
+      comments: empty.comments,
       commentsPanelOpen: false,
       activeCommentId: null,
       isPlacingComment: false,
@@ -10963,11 +11138,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
       wasmHistoryCanRedo: false,
     });
     if (isWasmDocumentAuthority()) {
-      try {
-        getActiveCraftEngine()?.clearHistory();
-      } catch {
-        /* engine not ready */
-      }
+      runCraftEngineAccess(() => {
+        try {
+          getActiveCraftEngine()?.clearHistory();
+        } catch {
+          /* engine not ready */
+        }
+      });
       requestCraftEngineWasmBootstrap();
     }
     void getSyncProvider()
@@ -10989,13 +11166,36 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const s = get();
     if (pageId === s.activePageId || !s.pages[pageId]) return;
     const captured = pagesWithActiveCaptured(s);
-    const nextPage = captured.pages[pageId]!;
+    const nextMaster = ensurePageHasSubPages(captured.pages[pageId]!);
+    captured.pages[pageId] = nextMaster;
+    const nextSubId = nextMaster.activeSubPageId ?? nextMaster.subPageOrder?.[0]!;
+    const nextSub = resolveActiveSubPage(nextMaster, nextSubId);
     set({
       pages: captured.pages,
       activePageId: pageId,
-      ...editorPatchFromPage(nextPage),
+      activeSubPageId: nextSubId,
+      ...editorPatchFromSubPage(nextSub),
       ...pageSwitchUiReset(),
     });
+    scheduleWorkspacePersist();
+  },
+
+  setActiveSubPage: (subPageId) => {
+    const s = get();
+    const master = s.pages[s.activePageId];
+    if (!master) return;
+    const captured = pagesWithActiveCaptured(s);
+    const ensuredMaster = ensurePageHasSubPages(captured.pages[s.activePageId]!);
+    if (!ensuredMaster.subPages?.[subPageId] || subPageId === s.activeSubPageId) return;
+    captured.pages[s.activePageId] = ensuredMaster;
+    const nextSub = ensuredMaster.subPages[subPageId]!;
+    set({
+      pages: captured.pages,
+      activeSubPageId: subPageId,
+      ...editorPatchFromSubPage(nextSub),
+      ...pageSwitchUiReset(),
+    });
+    scheduleWorkspacePersist();
   },
 
   addPage: () => {
@@ -11004,55 +11204,136 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const id = `page-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const name = nextPageName(captured.pages, captured.pageOrder);
     const page = createEmptyPage(id, name);
+    const subId = page.activeSubPageId ?? page.subPageOrder?.[0]!;
+    const sub = resolveActiveSubPage(page, subId);
     set({
       pages: { ...captured.pages, [id]: page },
       pageOrder: [...captured.pageOrder, id],
       activePageId: id,
-      ...editorPatchFromPage(page),
+      activeSubPageId: subId,
+      ...editorPatchFromSubPage(sub),
       ...pageSwitchUiReset(),
     });
+    scheduleWorkspacePersist();
+  },
+
+  addSubPage: () => {
+    const s = get();
+    const captured = pagesWithActiveCaptured(s);
+    const masterId = s.activePageId;
+    const master = ensurePageHasSubPages(captured.pages[masterId]!);
+    const subId = `sub-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const name = nextSubPageName(master.subPages ?? {}, master.subPageOrder ?? []);
+    const sub = createEmptySubPage(subId, name);
+    const nextMaster: EditorPage = {
+      ...master,
+      subPages: { ...master.subPages, [subId]: sub },
+      subPageOrder: [...(master.subPageOrder ?? []), subId],
+      activeSubPageId: subId,
+      ...editorPatchFromSubPage(sub),
+    };
+    set({
+      pages: { ...captured.pages, [masterId]: nextMaster },
+      activeSubPageId: subId,
+      ...editorPatchFromSubPage(sub),
+      ...pageSwitchUiReset(),
+    });
+    scheduleWorkspacePersist();
   },
 
   duplicatePage: (pageId) => {
     const s = get();
     const captured = pagesWithActiveCaptured(s);
     const sourceId = pageId ?? s.activePageId;
-    const source = captured.pages[sourceId];
+    const source = ensurePageHasSubPages(captured.pages[sourceId]!);
     if (!source) return;
     const id = `page-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const cloned = clonePageCanvas(source);
+    const subPages: Record<string, EditorSubPage> = {};
+    const subPageOrder: string[] = [];
+    for (const [index, oldSubId] of (source.subPageOrder ?? []).entries()) {
+      const oldSub = source.subPages?.[oldSubId];
+      if (!oldSub) continue;
+      const newSubId = `sub-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`;
+      const cloned = cloneSubPageCanvas(oldSub);
+      subPages[newSubId] = {
+        ...oldSub,
+        id: newSubId,
+        nodes: cloned.nodes,
+        childOrder: cloned.childOrder,
+        selectedIds: cloned.selectedIds,
+        layoutGuides: (oldSub.layoutGuides ?? []).map((g) => ({
+          ...g,
+          id: `lg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        })),
+      };
+      subPageOrder.push(newSubId);
+    }
+    const activeSubId = subPageOrder[0] ?? `${id}-sp-1`;
+    const activeSub = subPages[activeSubId] ?? createEmptySubPage(activeSubId, "Page 1");
     const page: EditorPage = {
       id,
       name: `${source.name} copy`,
-      nodes: cloned.nodes,
-      childOrder: cloned.childOrder,
-      selectedIds: cloned.selectedIds,
-      zoom: source.zoom,
-      pan: { ...source.pan },
-      showGrid: source.showGrid,
-      showRulers: source.showRulers,
-      canvasBackgroundColor: source.canvasBackgroundColor,
-      layoutGuides: (source.layoutGuides ?? []).map((g) => ({
-        ...g,
-        id: `lg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      })),
+      subPages,
+      subPageOrder: subPageOrder.length > 0 ? subPageOrder : [activeSubId],
+      activeSubPageId: activeSubId,
+      ...editorPatchFromSubPage(activeSub),
     };
     set({
       pages: { ...captured.pages, [id]: page },
       pageOrder: [...captured.pageOrder, id],
       activePageId: id,
-      ...editorPatchFromPage(page),
+      activeSubPageId: activeSubId,
+      ...editorPatchFromSubPage(activeSub),
       ...pageSwitchUiReset(),
     });
+    scheduleWorkspacePersist();
   },
 
-  deletePage: (pageId) => {
+  duplicateSubPage: (subPageId) => {
+    const s = get();
+    const captured = pagesWithActiveCaptured(s);
+    const masterId = s.activePageId;
+    const master = ensurePageHasSubPages(captured.pages[masterId]!);
+    const source = master.subPages?.[subPageId];
+    if (!source) return;
+    const id = `sub-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const cloned = cloneSubPageCanvas(source);
+    const sub: EditorSubPage = {
+      ...source,
+      id,
+      name: `${source.name} copy`,
+      nodes: cloned.nodes,
+      childOrder: cloned.childOrder,
+      selectedIds: cloned.selectedIds,
+      layoutGuides: (source.layoutGuides ?? []).map((g) => ({
+        ...g,
+        id: `lg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      })),
+    };
+    const nextMaster: EditorPage = {
+      ...master,
+      subPages: { ...master.subPages, [id]: sub },
+      subPageOrder: [...(master.subPageOrder ?? []), id],
+      activeSubPageId: id,
+      ...editorPatchFromSubPage(sub),
+    };
+    set({
+      pages: { ...captured.pages, [masterId]: nextMaster },
+      activeSubPageId: id,
+      ...editorPatchFromSubPage(sub),
+      ...pageSwitchUiReset(),
+    });
+    scheduleWorkspacePersist();
+  },
+
+  deletePage: (pageId, opts) => {
     const s = get();
     if (s.pageOrder.length <= 1) return;
     const captured = pagesWithActiveCaptured(s);
     const page = captured.pages[pageId];
     if (!page) return;
     if (
+      !opts?.skipConfirm &&
       !window.confirm(`Delete "${page.name}"? This page and all of its content will be removed.`)
     ) {
       return;
@@ -11062,17 +11343,170 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const newOrder = captured.pageOrder.filter((id) => id !== pageId);
     if (pageId === s.activePageId) {
       const nextId = newOrder[newOrder.length - 1] ?? newOrder[0]!;
-      const nextPage = restPages[nextId]!;
+      const nextMaster = ensurePageHasSubPages(restPages[nextId]!);
+      restPages[nextId] = nextMaster;
+      const nextSubId = nextMaster.activeSubPageId ?? nextMaster.subPageOrder?.[0]!;
+      const nextSub = resolveActiveSubPage(nextMaster, nextSubId);
       set({
         pages: restPages,
         pageOrder: newOrder,
         activePageId: nextId,
-        ...editorPatchFromPage(nextPage),
+        activeSubPageId: nextSubId,
+        ...editorPatchFromSubPage(nextSub),
         ...pageSwitchUiReset(),
       });
+      scheduleWorkspacePersist();
       return;
     }
     set({ pages: restPages, pageOrder: newOrder });
+    scheduleWorkspacePersist();
+  },
+
+  deleteSubPage: (subPageId, opts) => {
+    const s = get();
+    const captured = pagesWithActiveCaptured(s);
+    const masterId = s.activePageId;
+    const master = ensurePageHasSubPages(captured.pages[masterId]!);
+    const sub = master.subPages?.[subPageId];
+    if (!sub || (master.subPageOrder?.length ?? 0) <= 1) return;
+    if (
+      !opts?.skipConfirm &&
+      !window.confirm(`Delete "${sub.name}"? This page and all of its content will be removed.`)
+    ) {
+      return;
+    }
+    const restSubPages = { ...master.subPages };
+    delete restSubPages[subPageId];
+    const newSubOrder = (master.subPageOrder ?? []).filter((id) => id !== subPageId);
+    if (subPageId === s.activeSubPageId) {
+      const nextSubId = newSubOrder[newSubOrder.length - 1] ?? newSubOrder[0]!;
+      const nextSub = restSubPages[nextSubId]!;
+      const nextMaster: EditorPage = {
+        ...master,
+        subPages: restSubPages,
+        subPageOrder: newSubOrder,
+        activeSubPageId: nextSubId,
+        ...editorPatchFromSubPage(nextSub),
+      };
+      set({
+        pages: { ...captured.pages, [masterId]: nextMaster },
+        activeSubPageId: nextSubId,
+        ...editorPatchFromSubPage(nextSub),
+        ...pageSwitchUiReset(),
+      });
+      scheduleWorkspacePersist();
+      return;
+    }
+    set({
+      pages: {
+        ...captured.pages,
+        [masterId]: {
+          ...master,
+          subPages: restSubPages,
+          subPageOrder: newSubOrder,
+        },
+      },
+    });
+    scheduleWorkspacePersist();
+  },
+
+  closePage: (pageId) => {
+    const s = get();
+    const captured = pagesWithActiveCaptured(s);
+    const page = ensurePageHasSubPages(captured.pages[pageId]!);
+    if (!page) return { emptied: false };
+
+    const workspaceId =
+      typeof window !== "undefined" ? getActiveMockWorkspace().id : "ws-personal";
+    addDashboardSavedFile({
+      id: `saved-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: page.name,
+      savedAt: new Date().toISOString(),
+      workspaceId,
+      document: paytmCraftDocumentFromPage(page, {
+        assets: s.assets,
+        fontAssets: s.fontAssets,
+        designTokens: s.designTokens,
+        comments: s.comments,
+        codeRoundTripLink: s.codeRoundTripLink ?? null,
+      }),
+    });
+
+    const restPages = { ...captured.pages };
+    delete restPages[pageId];
+    const newOrder = captured.pageOrder.filter((id) => id !== pageId);
+
+    const persist = () => {
+      void getSyncProvider()
+        .saveDocument(editorStateToDocument(toPersistSlice(get())))
+        .catch((err) => {
+          console.warn("[Paytm Craft] persist after close page failed", err);
+        });
+    };
+
+    if (newOrder.length === 0) {
+      const empty = createEmptyDocumentFields();
+      set({
+        nodes: empty.nodes,
+        childOrder: empty.childOrder,
+        pages: empty.pages,
+        pageOrder: empty.pageOrder,
+        activePageId: empty.activePageId,
+        activeSubPageId: empty.activeSubPageId,
+        assets: empty.assets,
+        fontAssets: empty.fontAssets ?? {},
+        designTokens: empty.designTokens,
+        fileName: empty.fileName,
+        selectedIds: empty.selectedIds,
+        zoom: empty.zoom,
+        pan: empty.pan,
+        showGrid: empty.showGrid,
+        showRulers: empty.showRulers ?? false,
+        canvasBackgroundColor: empty.canvasBackgroundColor,
+        comments: empty.comments,
+        layoutGuides: empty.pages[empty.activePageId]?.layoutGuides ?? [],
+        documentSaveStatus: "saved",
+        documentHydrationRevision: s.documentHydrationRevision + 1,
+        historyPast: [],
+        historyFuture: [],
+        ...pageSwitchUiReset(),
+      });
+      persist();
+      return { emptied: true };
+    }
+
+    if (pageId === s.activePageId) {
+      const nextId = newOrder[newOrder.length - 1] ?? newOrder[0]!;
+      const nextMaster = ensurePageHasSubPages(restPages[nextId]!);
+      restPages[nextId] = nextMaster;
+      const nextSubId = nextMaster.activeSubPageId ?? nextMaster.subPageOrder?.[0]!;
+      const nextSub = resolveActiveSubPage(nextMaster, nextSubId);
+      set({
+        pages: restPages,
+        pageOrder: newOrder,
+        activePageId: nextId,
+        activeSubPageId: nextSubId,
+        ...editorPatchFromSubPage(nextSub),
+        ...pageSwitchUiReset(),
+        documentSaveStatus:
+          s.documentSaveStatus === "saved" || s.documentSaveStatus === "saved-api"
+            ? "unsaved"
+            : s.documentSaveStatus,
+      });
+      persist();
+      return { emptied: false };
+    }
+
+    set({
+      pages: restPages,
+      pageOrder: newOrder,
+      documentSaveStatus:
+        s.documentSaveStatus === "saved" || s.documentSaveStatus === "saved-api"
+          ? "unsaved"
+          : s.documentSaveStatus,
+    });
+    persist();
+    return { emptied: false };
   },
 
   cycleActivePage: (delta) => {
@@ -11088,10 +11522,46 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const trimmed = name.trim();
     if (!trimmed) return;
     set((s) => {
-      const page = s.pages[pageId];
+      const captured = pagesWithActiveCaptured(s);
+      const page = captured.pages[pageId];
       if (!page || page.name === trimmed) return s;
-      return { pages: { ...s.pages, [pageId]: { ...page, name: trimmed } } };
+      const documentSaveStatus =
+        s.documentSaveStatus === "saved" || s.documentSaveStatus === "saved-api"
+          ? "unsaved"
+          : s.documentSaveStatus;
+      return {
+        pages: { ...captured.pages, [pageId]: { ...page, name: trimmed } },
+        documentSaveStatus,
+      };
     });
+    scheduleWorkspacePersist();
+  },
+
+  renameSubPage: (subPageId, name) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    set((s) => {
+      const captured = pagesWithActiveCaptured(s);
+      const master = ensurePageHasSubPages(captured.pages[s.activePageId]!);
+      const sub = master.subPages?.[subPageId];
+      if (!sub || sub.name === trimmed) return s;
+      const documentSaveStatus =
+        s.documentSaveStatus === "saved" || s.documentSaveStatus === "saved-api"
+          ? "unsaved"
+          : s.documentSaveStatus;
+      const nextSub = { ...sub, name: trimmed };
+      return {
+        pages: {
+          ...captured.pages,
+          [s.activePageId]: {
+            ...master,
+            subPages: { ...master.subPages, [subPageId]: nextSub },
+          },
+        },
+        documentSaveStatus,
+      };
+    });
+    scheduleWorkspacePersist();
   },
   };
 });

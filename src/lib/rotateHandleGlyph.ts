@@ -37,32 +37,17 @@ export function rotateGlyphArrowPaths(): { start: string; end: string } {
 export type RotateGlyphSvgOptions = {
   pixelSize: number;
   angleDeg?: number;
-  /** High-contrast halo for canvas cursors over any background. */
-  variant: "cursor" | "handle";
 };
 
-/** Inline SVG string for custom CSS cursors. */
+/** Inline SVG string for on-canvas rotate affordance (not the CSS cursor). */
 export function rotateGlyphSvg({
   pixelSize,
   angleDeg = 0,
-  variant,
 }: RotateGlyphSvgOptions): string {
   const arc = rotateGlyphArcPath();
   const arrows = rotateGlyphArrowPaths();
   const r = Math.round(angleDeg * 10) / 10;
   const transform = `translate(${GLYPH_CENTER},${GLYPH_CENTER}) rotate(${r}) translate(-${GLYPH_CENTER},-${GLYPH_CENTER})`;
-
-  if (variant === "cursor") {
-    return (
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${pixelSize}" height="${pixelSize}" viewBox="0 0 24 24">` +
-      `<g transform="${transform}">` +
-      `<path d="${arc}" fill="none" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round"/>` +
-      `<path d="${arc}" fill="none" stroke="#111111" stroke-width="1.5" stroke-linecap="round"/>` +
-      `<path d="${arrows.start}" fill="#111111" stroke="#ffffff" stroke-width="1" stroke-linejoin="round"/>` +
-      `<path d="${arrows.end}" fill="#111111" stroke="#ffffff" stroke-width="1" stroke-linejoin="round"/>` +
-      `</g></svg>`
-    );
-  }
 
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${pixelSize}" height="${pixelSize}" viewBox="0 0 24 24">` +

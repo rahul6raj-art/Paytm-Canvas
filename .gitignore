@@ -7,3 +7,4 @@ packages/craft-api/.env
 packages/craft-realtime/.env
 .DS_Store
 .craft-mock-api/
+.craft-bridge/

@@ -1,6 +1,8 @@
-import { roundedRectPathD, roundedRectPolygonPoints, type CornerRadii } from "@/lib/cornerRadius";
+import { offsetRoundedRectPathD, roundedRectPathD, type CornerRadii } from "@/lib/cornerRadius";
 import type { StrokeLinejoin } from "@/lib/stroke";
 import type { StrokeAlign } from "@/lib/strokeSpec";
+
+export { offsetRoundedRectPathD };
 
 export type Point2 = { x: number; y: number };
 
@@ -98,21 +100,6 @@ export function offsetSharpRectPathD(
   const y1 = h - delta;
   if (x1 - x0 < 1e-6 || y1 - y0 < 1e-6) return "";
   return `M ${x0} ${y0} H ${x1} V ${y1} H ${x0} Z`;
-}
-
-/** Inset/outset rounded rectangle via polygon offset. */
-export function offsetRoundedRectPathD(
-  width: number,
-  height: number,
-  radii: CornerRadii,
-  delta: number,
-): string {
-  const w = Math.max(0, width);
-  const h = Math.max(0, height);
-  if (w <= 0 || h <= 0) return "";
-  const pts = roundedRectPolygonPoints(w, h, radii, 10);
-  const offset = offsetPolygonPoints(pts, delta, "miter");
-  return pointsToClosedPathD(offset);
 }
 
 /** Ellipse / circle contour offset by adjusting radii. */

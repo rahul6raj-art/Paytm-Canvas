@@ -75,6 +75,24 @@ describe("outlineStroke", () => {
     const result = outlineStroke(node);
     assert.ok(result);
     assert.ok(result.pathPoints.length >= 8);
+    assert.ok(result.pathD.includes(" A "), `expected smooth arc commands, got: ${result.pathD.slice(0, 120)}`);
+    assert.equal((result.pathD.match(/ L /g) || []).length, 0);
+  });
+
+  it("outlines a rounded rectangle with inside stroke using smooth arcs", () => {
+    const node = baseNode({
+      type: "rectangle",
+      width: 200,
+      height: 150,
+      cornerRadius: 80,
+      strokeWidth: 40,
+      strokePosition: "inside",
+    });
+    const result = outlineStroke(node);
+    assert.ok(result);
+    assert.equal(result.fillRule, "evenodd");
+    assert.ok((result.pathD.match(/ A /g) || []).length >= 8, result.pathD.slice(0, 200));
+    assert.equal((result.pathD.match(/ L /g) || []).length, 0);
   });
 
   it("outlines an ellipse", () => {
@@ -177,6 +195,34 @@ describe("outlineStroke", () => {
   it("allows text layers with visible stroke", () => {
     const node = baseNode({ type: "text", content: "Hello", strokeWidth: 2 });
     assert.equal(canOutlineStroke(node), true);
+  });
+
+  it("outlines open freehand paths and respects stroke position", () => {
+    const node = baseNode({
+      type: "path",
+      width: 180,
+      height: 80,
+      pathPoints: [
+        { id: "a", x: 0, y: 40 },
+        { id: "b", x: 90, y: 10 },
+        { id: "c", x: 180, y: 60 },
+      ],
+      pathClosed: false,
+      fillEnabled: false,
+      strokeLinecap: "round",
+      strokeLinejoin: "round",
+    });
+    const center = outlineStroke(node);
+    const inside = outlineStroke({ ...node, strokePosition: "inside" });
+    const outside = outlineStroke({ ...node, strokePosition: "outside" });
+    assert.ok(center?.pathD);
+    assert.ok(inside?.pathD);
+    assert.ok(outside?.pathD);
+    assert.notEqual(inside!.pathD, outside!.pathD);
+    const converted = convertStrokeToVector(node);
+    assert.ok(converted);
+    assert.equal(converted.pathClosed, true);
+    assert.equal(converted.strokeEnabled, false);
   });
 
   it("supports miter, round, and bevel joins on closed contours", () => {

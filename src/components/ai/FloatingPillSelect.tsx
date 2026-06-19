@@ -24,7 +24,45 @@ type Props = {
   optionGroups?: PillSelectGroup[];
   menuZClass?: string;
   className?: string;
+  /** When true, ellipsize long labels in the pill (default shows full label). */
+  truncateLabel?: boolean;
 };
+
+function PillSelectOptionRow({
+  option,
+  selected,
+  onSelect,
+}: {
+  option: PillSelectOption;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={selected}
+      disabled={option.disabled}
+      className={cn(
+        "editor-menu-dropdown-item !justify-start",
+        option.hint ? "!items-start" : "!items-center",
+        selected && "bg-app-inset font-medium text-app-fg",
+        option.disabled && "cursor-not-allowed opacity-40",
+      )}
+      onClick={() => {
+        if (option.disabled) return;
+        onSelect();
+      }}
+    >
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">{option.label}</span>
+        {option.hint ? (
+          <span className="block truncate text-ui font-normal text-app-subtle">{option.hint}</span>
+        ) : null}
+      </span>
+    </button>
+  );
+}
 
 export function FloatingPillSelect({
   icon: Icon,
@@ -36,6 +74,7 @@ export function FloatingPillSelect({
   optionGroups,
   menuZClass = "z-[500]",
   className,
+  truncateLabel = false,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -61,65 +100,40 @@ export function FloatingPillSelect({
         ref={menuRef}
         role="listbox"
         aria-label={label}
+        data-editor-shell
         className={cn(
-          "fixed w-[260px] overflow-y-auto overscroll-contain rounded-xl border border-app-border bg-app-panel py-1 shadow-2xl",
+          "editor-floating-menu editor-menu-dropdown fixed min-w-[260px] overflow-y-auto overscroll-contain border border-app-border bg-app-surface shadow-xl thin-scroll",
           menuZClass,
         )}
-        style={{ ...anchoredMenuStyle(position), zIndex: 500 }}
+        style={anchoredMenuStyle(position)}
       >
         {options
           ? options.map((o) => (
-              <button
+              <PillSelectOptionRow
                 key={o.value || "__empty"}
-                type="button"
-                role="option"
-                aria-selected={value === o.value}
-                disabled={o.disabled}
-                className={cn(
-                  "block w-full px-3 py-2 text-left text-ui transition-colors",
-                  value === o.value ? "bg-app-hover font-medium text-app-fg" : "text-app-fg hover:bg-app-hover",
-                  o.disabled && "cursor-not-allowed opacity-40",
-                )}
-                onClick={() => {
-                  if (o.disabled) return;
+                option={o}
+                selected={value === o.value}
+                onSelect={() => {
                   onChange(o.value);
                   setOpen(false);
                 }}
-              >
-                <span className="block truncate">{o.label}</span>
-                {o.hint ? <span className="block truncate text-ui text-app-subtle">{o.hint}</span> : null}
-              </button>
+              />
             ))
           : null}
         {optionGroups
           ? optionGroups.map((g) => (
               <div key={g.label}>
-                <p className="px-3 pb-0.5 pt-2 section-heading">
-                  {g.label}
-                </p>
+                <p className="section-heading">{g.label}</p>
                 {g.options.map((o) => (
-                  <button
+                  <PillSelectOptionRow
                     key={o.value}
-                    type="button"
-                    role="option"
-                    aria-selected={value === o.value}
-                    disabled={o.disabled}
-                    className={cn(
-                      "block w-full px-3 py-2 text-left text-ui transition-colors",
-                      value === o.value ? "bg-app-hover font-medium text-app-fg" : "text-app-fg hover:bg-app-hover",
-                      o.disabled && "cursor-not-allowed opacity-40",
-                    )}
-                    onClick={() => {
-                      if (o.disabled) return;
+                    option={o}
+                    selected={value === o.value}
+                    onSelect={() => {
                       onChange(o.value);
                       setOpen(false);
                     }}
-                  >
-                    <span className="block truncate">{o.label}</span>
-                    {o.hint ? (
-                      <span className="block truncate text-ui text-app-subtle">{o.hint}</span>
-                    ) : null}
-                  </button>
+                  />
                 ))}
               </div>
             ))
@@ -135,17 +149,20 @@ export function FloatingPillSelect({
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={label}
+        aria-label={`${label}: ${display}`}
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          "inline-flex min-w-0 items-center gap-1.5 rounded-full border border-app-border bg-app-panel py-1 pl-2.5 pr-1.5 text-ui font-medium text-app-fg shadow-sm transition-colors",
-          "hover:bg-app-hover disabled:cursor-not-allowed disabled:opacity-50",
-          open && "border-accent/40 bg-app-hover",
+          "inline-flex items-center gap-1.5 rounded-full border border-app-border-subtle bg-app-inset py-1 pl-2 pr-1.5 text-ui font-medium text-app-fg transition-colors",
+          truncateLabel ? "min-w-0 max-w-full" : "shrink-0",
+          "hover:border-app-border hover:bg-app-hover disabled:cursor-not-allowed disabled:opacity-50",
+          open && "border-app-border bg-app-hover",
           className,
         )}
       >
         <Icon className="h-3.5 w-3.5 shrink-0 text-app-muted" strokeWidth={2} />
-        <span className="max-w-[100px] truncate">{display === label ? label : display}</span>
+        <span className={truncateLabel ? "min-w-0 max-w-[100px] truncate" : "whitespace-nowrap"}>
+          {display}
+        </span>
         <ChevronDown className="h-3 w-3 shrink-0 text-app-subtle" strokeWidth={2.5} />
       </button>
       {menu && mounted ? createPortal(menu, document.body) : null}

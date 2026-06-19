@@ -7,7 +7,7 @@ import { useEditorStore } from "@/stores/useEditorStore";
 const EMPTY_CANVAS_RECOVERY_MS = 6_000;
 
 /**
- * Ensures loading overlays cannot block the editor indefinitely and recovers an empty canvas.
+ * Ensures loading overlays cannot block the editor indefinitely and finalizes hydration on an empty canvas.
  */
 export function EditorBootGuard() {
   useEffect(() => {

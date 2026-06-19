@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterFileEdit": [
+      {
+        "command": ".cursor/hooks/craft-bridge-after-file-edit.mjs"
+      }
+    ]
+  }
+}

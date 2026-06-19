@@ -19,6 +19,7 @@ import { isBooleanGroup, isMaskGroup } from "@/lib/booleanGeometry";
 import { strokeSidesToReactStyle } from "@/lib/strokeAlign";
 import { buildLayerCssTransform } from "@/lib/transformMath";
 import type { EditorNode } from "@/stores/useEditorStore";
+import { isPhoneShellBottomChrome } from "@/lib/webImport/phoneShellBottomChrome";
 
 export type ReactStyleRecord = Record<string, string | number>;
 
@@ -160,6 +161,14 @@ export function nodeToReactStyle(
     delete style.left;
     delete style.top;
     style.position = "relative";
+  }
+
+  if (isPhoneShellBottomChrome(node.codeClassName, node.codeJsxTag)) {
+    delete style.position;
+    delete style.left;
+    delete style.top;
+    delete style.width;
+    delete style.height;
   }
 
   return style;

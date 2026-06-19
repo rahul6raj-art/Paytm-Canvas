@@ -67,6 +67,8 @@ const WASM_STYLE_PRESERVE_KEYS: (keyof EditorNode)[] = [
   "computedWidth",
   "computedHeight",
   "layoutDirty",
+  "textResizeMode",
+  "autoResize",
 ];
 
 function isAutoLayoutFlowChild(

@@ -436,17 +436,6 @@ export function applyAutoLayoutToContainer(
   };
 }
 
-function sharedManualLayoutParentId(
-  tops: string[],
-  nodes: Record<string, EditorNode>,
-): string | null {
-  if (tops.length === 0) return null;
-  const parentId = nodes[tops[0]!]!.parentId;
-  if (!parentId || !tops.every((id) => nodes[id]!.parentId === parentId)) return null;
-  if (tops.some((id) => id === parentId)) return null;
-  return isLayoutContainer(nodes[parentId]) ? parentId : null;
-}
-
 export function applyAutoLayoutToSelection(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
@@ -457,11 +446,6 @@ export function applyAutoLayoutToSelection(
     return n && n.visible && !n.locked;
   });
   if (tops.length === 0) return null;
-
-  const parentFrameId = sharedManualLayoutParentId(tops, nodes);
-  if (parentFrameId) {
-    return applyAutoLayoutToContainer(nodes, childOrder, parentFrameId);
-  }
 
   const parentId = nodes[tops[0]!]!.parentId;
   if (!tops.every((id) => nodes[id]!.parentId === parentId)) return null;

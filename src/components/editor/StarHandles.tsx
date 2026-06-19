@@ -29,6 +29,7 @@ import { useCanvasToWorld } from "./CanvasToWorldContext";
 import { clientToWorldFromDocument } from "@/lib/canvasCoordinates";
 import { useShapeEditHandlesGate } from "./useShapeEditHandles";
 import { CanvasEditValueBadge } from "./CanvasEditValueBadge";
+import { EditorHintWrap } from "./EditorHoverHint";
 
 function localToWorld(
   nodeId: string,
@@ -145,39 +146,41 @@ export function StarHandles() {
 
   return (
     <>
-      <button
-        type="button"
-        data-star-ratio-handle
-        aria-label="Adjust star ratio"
-        title="Drag to adjust inner radius (star ratio)"
-        className="pointer-events-auto absolute z-[31] touch-none rounded-full border-2 border-[#18a0fb] bg-white will-change-transform"
-        style={{
-          left: handles.ratio.x - handleWorld / 2,
-          top: handles.ratio.y - handleWorld / 2,
-          width: handleWorld,
-          height: handleWorld,
-          boxShadow: `0 0 0 ${borderWorld}px ${CANVAS_VISUAL.selection}`,
-          transition: dragging ? "none" : undefined,
-        }}
-        onPointerDown={makePointerDown("ratio")}
-      />
-      <button
-        type="button"
-        data-star-corner-handle
-        aria-label="Adjust star corner radius"
-        title="Drag along spike to round corners"
-        className="pointer-events-auto absolute z-[31] touch-none rounded-full border-2 border-[#18a0fb] bg-white/90 will-change-transform"
-        style={{
-          left: handles.corner.x - (handleWorld * 0.85) / 2,
-          top: handles.corner.y - (handleWorld * 0.85) / 2,
-          width: handleWorld * 0.85,
-          height: handleWorld * 0.85,
-          boxShadow: `0 0 0 ${borderWorld}px ${CANVAS_VISUAL.selection}`,
-          opacity: handles.cornerRadius > 0 || dragKind === "cornerRadius" ? 1 : 0.65,
-          transition: dragging ? "none" : undefined,
-        }}
-        onPointerDown={makePointerDown("cornerRadius")}
-      />
+      <EditorHintWrap title="Drag to adjust inner radius (star ratio)" anchorClassName="contents">
+        <button
+          type="button"
+          data-star-ratio-handle
+          aria-label="Adjust star ratio"
+          className="pointer-events-auto absolute z-[31] touch-none rounded-full border-2 border-[#18a0fb] bg-white will-change-transform"
+          style={{
+            left: handles.ratio.x - handleWorld / 2,
+            top: handles.ratio.y - handleWorld / 2,
+            width: handleWorld,
+            height: handleWorld,
+            boxShadow: `0 0 0 ${borderWorld}px ${CANVAS_VISUAL.selection}`,
+            transition: dragging ? "none" : undefined,
+          }}
+          onPointerDown={makePointerDown("ratio")}
+        />
+      </EditorHintWrap>
+      <EditorHintWrap title="Drag along spike to round corners" anchorClassName="contents">
+        <button
+          type="button"
+          data-star-corner-handle
+          aria-label="Adjust star corner radius"
+          className="pointer-events-auto absolute z-[31] touch-none rounded-full border-2 border-[#18a0fb] bg-white/90 will-change-transform"
+          style={{
+            left: handles.corner.x - (handleWorld * 0.85) / 2,
+            top: handles.corner.y - (handleWorld * 0.85) / 2,
+            width: handleWorld * 0.85,
+            height: handleWorld * 0.85,
+            boxShadow: `0 0 0 ${borderWorld}px ${CANVAS_VISUAL.selection}`,
+            opacity: handles.cornerRadius > 0 || dragKind === "cornerRadius" ? 1 : 0.65,
+            transition: dragging ? "none" : undefined,
+          }}
+          onPointerDown={makePointerDown("cornerRadius")}
+        />
+      </EditorHintWrap>
       {cornerRadiusBadge ? (
         <CanvasEditValueBadge
           x={cornerRadiusBadge.x}

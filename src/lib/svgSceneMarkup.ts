@@ -1,13 +1,14 @@
 import type { EditorAsset } from "@/lib/documentPersistence";
 import type { DesignToken } from "@/lib/designTokens";
 import { CANVAS_VISUAL } from "@/lib/canvasVisual";
-import { layerPanelChildIds, topLevelSelectedIds } from "@/lib/editorGraph";
-import { applyMatrixToPoint, composeSvgTransform, getNodeWorldMatrix, matrixToSvgTransform } from "@/lib/transformMath";
+import { getNodeWorldMatrixFromChildOrder, layerPanelChildIds, topLevelSelectedIds } from "@/lib/editorGraph";
+import { applyMatrixToPoint, composeSvgTransform, matrixToSvgTransform } from "@/lib/transformMath";
 import type { EllipseArcPreview } from "@/lib/shapes/ellipseArc";
 import type { EditorNode } from "@/stores/useEditorStore";
 import {
   collectNodeEffects,
   createSvgFilterRegistry,
+  escXml,
   registerClipRect,
   resolveSceneRenderNode,
   svgImageMarkup,
@@ -18,6 +19,7 @@ import {
   svgTextMarkup,
 } from "@/lib/svgMarkupCore";
 import { shouldClipChildren } from "@/lib/clipChildren";
+import { normalizeTextResizeMode } from "@/lib/text/textNodeModel";
 import {
   compositeEditModeForDrag,
   isCompositeHiddenOperand,
@@ -179,13 +181,20 @@ function renderNode(nodeId: string, ctx: BuildCtx): string {
   }
 
   if (node.type === "path" || node.type === "polygon") {
-    return wrapOpacity(svgPathMarkup(paintNode, shapeOpts));
+    return wrapOpacity(
+      svgPathMarkup(paintNode, { ...shapeOpts, fillRule: node.pathFillRule }),
+    );
   }
 
   if (node.type === "text") {
+    const markup = svgTextMarkup(paintNode, shapeOpts);
+    const resizeMode = normalizeTextResizeMode(node.textResizeMode, node.autoResize);
+    if (resizeMode === "auto-width") {
+      return wrapOpacity(markup);
+    }
     const clipId = `pc-text-clip-${svgSafeId(nodeId)}`;
     registerClipRect(ctx.defs, clipId, w, h);
-    return wrapOpacity(`<g clip-path="url(#${clipId})">${svgTextMarkup(paintNode)}</g>`);
+    return wrapOpacity(`<g clip-path="url(#${clipId})">${markup}</g>`);
   }
 
   if (node.type === "image") {
@@ -288,11 +297,11 @@ function renderNode(nodeId: string, ctx: BuildCtx): string {
 
     const stroke =
       isRoot
-        ? undefined
+        ? resolved.strokeColor
         : resolved.strokeWidth && resolved.strokeColor
           ? resolved.strokeColor
           : CANVAS_VISUAL.frameBorder;
-    const sw = isRoot ? 0 : (resolved.strokeWidth ?? 1);
+    const sw = isRoot ? (resolved.strokeWidth ?? 0) : (resolved.strokeWidth ?? 1);
 
     const shell = svgRectLike(
       {
@@ -311,7 +320,14 @@ function renderNode(nodeId: string, ctx: BuildCtx): string {
 
     const children = renderChildren(nodeId, ctx);
     const body = clip ? `<g clip-path="url(#${clipId})">${children}</g>` : children;
-    return wrapOpacity(`${shell}${body}`);
+    const componentLabel =
+      !isRoot &&
+      node.codeJsxIntrinsic === false &&
+      node.codeJsxTag &&
+      /^[A-Z]/.test(node.codeJsxTag)
+        ? `<text x="8" y="20" fill="#64748b" font-size="12" font-family="system-ui,sans-serif">${escXml(node.codeJsxTag)}</text>`
+        : "";
+    return wrapOpacity(`${shell}${componentLabel}${body}`);
   }
 
   return "";
@@ -355,7 +371,7 @@ export function buildSvgScene(input: SvgSceneBuildInput): SvgSceneBuildResult {
   for (const rid of input.rootIds) {
     const node = input.nodes[rid];
     if (!node?.visible) continue;
-    const wm = getNodeWorldMatrix(rid, input.nodes);
+    const wm = getNodeWorldMatrixFromChildOrder(rid, input.nodes, input.childOrder);
     const rootTransform = wm ? matrixToSvgTransform(wm) : undefined;
     const inner = renderNode(rid, ctx);
     if (node.type !== "frame") {
@@ -399,7 +415,7 @@ export function buildSvgScene(input: SvgSceneBuildInput): SvgSceneBuildResult {
       ) {
         continue;
       }
-      const wm = getNodeWorldMatrix(mid, input.nodes);
+      const wm = getNodeWorldMatrixFromChildOrder(mid, input.nodes, input.childOrder);
       if (!wm) continue;
       const shifted = { ...wm, e: wm.e + dx, f: wm.f + dy };
       const inner = renderNode(mid, overlayCtx);

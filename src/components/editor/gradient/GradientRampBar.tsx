@@ -8,6 +8,7 @@ import { useInspectorValueScrub } from "@/lib/useInspectorValueScrub";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { gradientBarCss, type FillGradient, type GradientStop } from "@/lib/gradient";
 import { cn } from "@/lib/utils";
+import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
 
 function formatStopPosition(position: number): string {
   const rounded = Math.round(position * 10) / 10;
@@ -105,7 +106,7 @@ function StopHandle({
     >
       <span
         className={cn(
-          "block h-3.5 w-3.5 rounded-full border-2 shadow-sm",
+          "block h-3.5 w-3.5 rounded-sm border-2 shadow-sm",
           selected || dragging
             ? "border-white shadow-[0_0_0_1px_rgba(255,255,255,0.9)]"
             : "border-white/90",
@@ -333,7 +334,7 @@ export function GradientStopRow({
     <div
       className={cn(
         "flex items-center gap-1.5 rounded-md border px-1.5 py-1",
-        selected ? "border-accent/50 bg-accent/10" : "border-app-border bg-app-field",
+        selected ? "border-app-border-subtle bg-app-inset" : "border-app-border bg-app-field",
       )}
       onClick={onSelect}
     >
@@ -379,18 +380,19 @@ export function GradientStopRow({
         onClick={(e) => e.stopPropagation()}
       />
       <span className="text-ui text-app-muted">%</span>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={(e) => {
-          e.stopPropagation();
-          onSelect();
-          onOpenColorPicker?.();
-        }}
-        className="flex h-6 min-w-0 flex-1 items-center gap-1 rounded border border-app-border bg-app-surface px-1.5"
-      >
+      <EditorHintWrap title="Stop color" disabled={disabled}>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect();
+            onOpenColorPicker?.();
+          }}
+          className="flex h-6 min-w-0 flex-1 items-center gap-1 rounded border border-app-border bg-app-surface px-1.5"
+        >
         <span
-          className="h-4 w-4 shrink-0 rounded-full border border-app-border"
+          className="h-4 w-4 shrink-0 rounded-sm border border-app-border shadow-inner"
           style={{ backgroundColor: displayHex }}
         />
         <input
@@ -454,7 +456,8 @@ export function GradientStopRow({
           className="ml-auto w-7 shrink-0 bg-transparent text-right font-mono tabular-nums text-ui leading-none text-app-fg outline-none"
         />
         <span className="text-ui text-app-muted">%</span>
-      </button>
+        </button>
+      </EditorHintWrap>
       <button
         type="button"
         disabled={disabled || !canRemove}

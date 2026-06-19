@@ -38,7 +38,6 @@ export function SelectionColorsSection() {
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const nodes = useEditorStore((s) => s.nodes);
   const setNodeFillHex = useEditorStore((s) => s.setNodeFillHex);
-  const setNodeTextColorHex = useEditorStore((s) => s.setNodeTextColorHex);
   const updateNodeStyle = useEditorStore((s) => s.updateNodeStyle);
   const pushHistory = useEditorStore((s) => s.pushHistory);
 
@@ -61,11 +60,7 @@ export function SelectionColorsSection() {
     for (const nodeId of nodeIds) {
       const n = nodes[nodeId];
       if (!n || n.locked) continue;
-      if (n.type === "text") {
-        setNodeTextColorHex(nodeId, hex, { skipHistory: true });
-      } else {
-        setNodeFillHex(nodeId, hex, { skipHistory: true });
-      }
+      setNodeFillHex(nodeId, hex, { skipHistory: true });
     }
   };
 

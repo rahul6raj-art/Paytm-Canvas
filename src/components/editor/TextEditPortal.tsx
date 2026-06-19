@@ -5,14 +5,14 @@ import { createPortal } from "react-dom";
 import { mergeInstanceOverrides } from "@/lib/componentModel";
 import { resolveNodeWithDesignTokens } from "@/lib/designTokens";
 import { getCursorPositionFromPoint, moveCaretWithArrow } from "@/lib/text/textCursor";
+import { applyTextEditDelete } from "@/lib/text/textEditDelete";
 import { textLayoutPatchForNode } from "@/lib/text/textLayout";
-import { layoutDisplayText, textAdvancedStyleFromNode } from "@/lib/text/textAdvancedStyle";
-import {
-  textInnerWidth,
-  toTextNodeModel,
-  textTypoFromModel,
-  wrapWidthForResizeMode,
-} from "@/lib/text/textNodeModel";
+import { textAdvancedStyleFromNode } from "@/lib/text/textAdvancedStyle";
+import { textLayoutForEditorNode } from "@/lib/text/canonicalTextLayout";
+import { toTextNodeModel } from "@/lib/text/textNodeModel";
+import { focusActiveTextEditField } from "@/lib/editorKeyboardFocus";
+import { clientToWorldFromDocument } from "@/lib/canvasCoordinates";
+import { pickDeepestNodeAtWorldPoint } from "@/lib/tree";
 import { useEditorStore } from "@/stores/useEditorStore";
 
 type TextEditPortalProps = {
@@ -67,7 +67,7 @@ export function TextEditPortal({ nodeId }: TextEditPortalProps) {
   useEffect(() => {
     const el = textareaRef.current;
     if (!el || !node) return;
-    el.focus();
+    focusActiveTextEditField(nodeId);
     const len = node.content?.length ?? 0;
     const anchor = selection?.anchor ?? len;
     const focus = selection?.focus ?? len;
@@ -134,11 +134,53 @@ export function TextEditPortal({ nodeId }: TextEditPortalProps) {
       if (t?.closest(`[data-text-editor="${nodeId}"]`)) return;
       if (t?.closest(`[data-text-anchor="${nodeId}"]`)) return;
       if (useEditorStore.getState().editingTextId !== nodeId) return;
+
+      const st = useEditorStore.getState();
+      const world = clientToWorldFromDocument(e.clientX, e.clientY, { pan: st.pan, zoom: st.zoom });
+      const hitId = pickDeepestNodeAtWorldPoint(world.x, world.y, st.nodes, st.childOrder, {
+        zoom: st.zoom,
+      });
+      if (hitId && hitId !== nodeId) {
+        st.select(hitId, e.shiftKey);
+      } else if (!hitId && !e.shiftKey) {
+        st.clearSelection();
+      }
+
       finishEdit();
     };
     window.addEventListener("pointerdown", onPointerDownOutside, true);
     return () => window.removeEventListener("pointerdown", onPointerDownOutside, true);
   }, [nodeId, finishEdit]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (useEditorStore.getState().editingTextId !== nodeId) return;
+      if (e.code !== "Backspace" && e.code !== "Delete") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (document.activeElement === textareaRef.current) return;
+
+      const st = useEditorStore.getState();
+      const textNode = st.nodes[nodeId];
+      if (textNode?.type !== "text") return;
+
+      const text = textNode.content ?? "";
+      const anchor = st.textEditSelection?.anchor ?? text.length;
+      const focus = st.textEditSelection?.focus ?? text.length;
+      const next = applyTextEditDelete(
+        text,
+        anchor,
+        focus,
+        e.code === "Backspace" ? "backspace" : "delete",
+      );
+      if (!next) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      applyContent(next.content, next.anchor, next.focus);
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [nodeId, applyContent]);
 
   if (!node || nodeRaw?.type !== "text") return null;
 
@@ -196,18 +238,16 @@ export function TextEditPortal({ nodeId }: TextEditPortalProps) {
             ev.preventDefault();
             const model = toTextNodeModel(node, true);
             if (!model) return;
-            const typo = textTypoFromModel(model);
-            const wrapWidth = wrapWidthForResizeMode(model.width, model.textResizeMode);
-            const innerW = textInnerWidth(model.width);
             const style = textAdvancedStyleFromNode(node);
-            const { layout } = layoutDisplayText(text, wrapWidth, node);
+            const prepared = textLayoutForEditorNode(node);
+            if (!prepared?.layout) return;
             const next = moveCaretWithArrow(
               ev.key,
               focus,
               text,
-              layout,
-              typo,
-              innerW,
+              prepared.layout,
+              prepared.typo,
+              prepared.innerW,
               model.textAlign,
               style,
             );

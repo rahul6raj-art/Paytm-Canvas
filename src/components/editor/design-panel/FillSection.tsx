@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } fro
 import { Eye, EyeOff, Minus } from "lucide-react";
 import { PropertiesSection } from "../PropertiesSection";
 import { ColorInput } from "../ColorInput";
-import { ColorLibrary } from "../ColorLibrary";
+import { InspectorHintIconButton, InspectorSegmented } from "./InspectorPrimitives";
 import {
   inspectorIconClass,
   inspectorIconStroke,
@@ -12,7 +12,7 @@ import {
   inspectorRowActionBtnClass,
 } from "@/lib/inspectorIconStyles";
 import { cn } from "@/lib/utils";
-import { appFieldRadius, inspectorControlHeightClass } from "@/lib/appFieldStyles";
+import { appFieldShellClass, inspectorRowGapClass } from "@/lib/appFieldStyles";
 import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
 import { useInspectorValueScrub } from "@/lib/useInspectorValueScrub";
 import { isColorValue, type ColorTokenValue, type DesignToken } from "@/lib/designTokens";
@@ -28,7 +28,6 @@ import {
 } from "@/lib/fillGradient";
 import type { FillType } from "@/lib/gradient/types";
 import { mediaFillPreviewCss } from "@/lib/gradient/mediaFill";
-import { InspectorSegmented } from "./InspectorPrimitives";
 import { GradientFillEditorDialog } from "../gradient/GradientFillEditorDialog";
 import { FillAssetPickerAside } from "../FillAssetPickerAside";
 import {
@@ -128,14 +127,13 @@ export function GradientFillInspectorRow({
   const rowDisabled = disabled || !visible;
 
   return (
-    <div className="flex items-center gap-1">
+    <div className={cn("flex items-center", inspectorRowGapClass)}>
       <div
         className={cn(
-          "flex min-w-0 flex-1 items-center overflow-hidden border border-app-border bg-app-field",
-          inspectorControlHeightClass,
-          appFieldRadius,
+          appFieldShellClass,
+          "min-w-0 flex-1",
           rowDisabled && "opacity-45",
-          (editorOpen || opacityFocused) && "border-accent ring-1 ring-accent",
+          (editorOpen || opacityFocused) && "border-app-panel-edge ring-1 ring-app-panel-edge",
         )}
       >
         <button
@@ -145,7 +143,7 @@ export function GradientFillInspectorRow({
           onClick={onOpenEditor}
           className={cn(
             "flex h-7 min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-1.5 text-left disabled:cursor-not-allowed",
-            editorOpen && "bg-accent/10",
+            editorOpen && "bg-app-inset",
           )}
           aria-expanded={editorOpen}
           aria-haspopup="dialog"
@@ -200,15 +198,14 @@ export function GradientFillInspectorRow({
         />
         <span className="shrink-0 pr-2 text-ui text-app-subtle">%</span>
       </div>
-      <button
-        type="button"
-        disabled={locked}
+      <InspectorHintIconButton
         title={visible ? "Hide fill" : "Show fill"}
+        disabled={locked}
         onClick={onToggleVisible}
         className={cn(inspectorRowActionBtnClass, "inspector-icon-btn")}
       >
         {visible ? <Eye {...inspectorLucideProps()} /> : <EyeOff {...inspectorLucideProps()} />}
-      </button>
+      </InspectorHintIconButton>
       <button
         type="button"
         disabled={locked}
@@ -331,14 +328,13 @@ export function MediaFillInspectorRow({
 
   return (
     <>
-      <div className="flex items-center gap-1">
+      <div className={cn("flex items-center", inspectorRowGapClass)}>
         <div
           className={cn(
-            "flex min-w-0 flex-1 items-center overflow-hidden border border-app-border bg-app-field",
-          inspectorControlHeightClass,
-            appFieldRadius,
+            appFieldShellClass,
+            "min-w-0 flex-1",
             rowDisabled && "opacity-45",
-            (pickerOpen || opacityFocused) && "border-accent ring-1 ring-accent",
+            (pickerOpen || opacityFocused) && "border-app-panel-edge ring-1 ring-app-panel-edge",
           )}
         >
           <button
@@ -348,7 +344,7 @@ export function MediaFillInspectorRow({
             onClick={onTogglePicker}
             className={cn(
               "flex h-7 min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-1.5 text-left disabled:cursor-not-allowed",
-              pickerOpen && "bg-accent/10",
+              pickerOpen && "bg-app-inset",
             )}
             aria-expanded={pickerOpen}
             aria-haspopup="dialog"
@@ -409,15 +405,14 @@ export function MediaFillInspectorRow({
           />
           <span className="shrink-0 pr-2 text-ui text-app-subtle">%</span>
         </div>
-        <button
-          type="button"
-          disabled={locked}
+        <InspectorHintIconButton
           title={visible ? "Hide fill" : "Show fill"}
+          disabled={locked}
           onClick={onToggleVisible}
           className={cn(inspectorRowActionBtnClass, "inspector-icon-btn")}
         >
           {visible ? <Eye {...inspectorLucideProps()} /> : <EyeOff {...inspectorLucideProps()} />}
-        </button>
+        </InspectorHintIconButton>
         <button
           type="button"
           disabled={locked}
@@ -474,7 +469,12 @@ export function FillSection({
     fillType === "video"
       ? display.fillVideoAssetId
       : display.fillImageAssetId ?? display.fillPatternAssetId;
-  const defaultSolid = node.type === "frame" ? DEFAULT_FRAME_FILL : DEFAULT_SHAPE_FILL;
+  const defaultSolid =
+    node.type === "text"
+      ? (display.fill ?? display.textColor ?? "#111111")
+      : node.type === "frame"
+        ? DEFAULT_FRAME_FILL
+        : DEFAULT_SHAPE_FILL;
   const gradient = resolveNodeFillGradientForEdit(node, designTokens);
   const assets = useEditorStore((s) => s.assets);
   const [gradientEditorOpen, setGradientEditorOpen] = useState(false);
@@ -532,9 +532,11 @@ export function FillSection({
   );
 
   const setSolid = () => {
+    const hex = display.fill ?? display.textColor ?? defaultSolid;
     onStyle({
       fillType: "solid",
-      fill: display.fill ?? defaultSolid,
+      fill: hex,
+      textColor: hex,
       fillGradient: undefined,
       fillEnabled: true,
     });
@@ -589,12 +591,6 @@ export function FillSection({
 
   return (
     <PropertiesSection title="Fill" defaultOpen>
-      <ColorLibrary variant="compact" className="mb-2" />
-      {fillToken ? (
-        <p className="mb-1.5 truncate text-ui text-app-muted">
-          Style: <span className="font-medium text-app-fg">{fillToken.name}</span>
-        </p>
-      ) : null}
       {node.fillTokenId ? (
         <div className="mb-2 flex flex-wrap gap-1">
           <button
@@ -620,7 +616,7 @@ export function FillSection({
         {fillType === "solid" ? (
           <ColorInput
             variant="inspectorRow"
-            hex={display.fill ?? defaultSolid}
+            hex={display.fill ?? display.textColor ?? defaultSolid}
             opacity={fillOpacity}
             visible={fillEnabled}
             pickerTitle="Fill color"

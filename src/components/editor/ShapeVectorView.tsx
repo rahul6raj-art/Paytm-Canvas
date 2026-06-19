@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { hasPathCornerRadius, resolvePathOutlineD } from "@/lib/shapes/shapeToPath";
-import { fillPaintCss } from "@/lib/fillGradient";
+import { effectiveStrokeType, fillPaintCss } from "@/lib/fillGradient";
 import {
   clampCornerRadii,
   getNodeCornerRadii,
@@ -35,8 +35,11 @@ import {
   fullEllipsePathD,
   individualBorderStrokeStyle,
   shouldUseAlignedPathStroke,
+  shouldUseOutlinedOpenPathStroke,
   strokeUsesCssIndividualBorders,
 } from "@/lib/strokeAlign";
+import { outlineStroke } from "@/lib/outlineStroke";
+import { effectColorToRgba } from "@/lib/nodeEffects";
 import { renderShapeStrokeLayers } from "./StrokedShapeLayers";
 import {
   effectiveEllipseArc,
@@ -253,6 +256,17 @@ export function ShapeVectorView({
     const markers = !closed ? strokeEndpointMarkerDefs(markerPrefix, start, end, sc, sw) : "";
     const markerRefs = !closed ? strokeMarkerRefs(start, end, markerPrefix) : {};
     const lineCap = !closed ? unifiedLineCap(start, end) : undefined;
+    const useOpenOutlineStroke = shouldUseOutlinedOpenPathStroke(node, closed) && showStroke;
+    const openStrokeOutline = useOpenOutlineStroke ? outlineStroke(node) : null;
+    const openStrokeFill =
+      openStrokeOutline && effectiveStrokeType(node) === "gradient" && node.strokeGradient
+        ? sc
+        : openStrokeOutline
+          ? effectColorToRgba(
+              openStrokeOutline.fill,
+              openStrokeOutline.fillOpacity ?? node.strokeOpacity ?? 1,
+            )
+          : sc;
     return (
       <>
         <svg
@@ -285,6 +299,27 @@ export function ShapeVectorView({
                 assets,
               },
             )
+          ) : openStrokeOutline?.pathD ? (
+            <>
+              <path
+                d={d || "M0 0"}
+                fill={closed && fillVisible ? solidFill : "none"}
+                fillRule={pathFillRule}
+                stroke="none"
+              />
+              <path
+                d={openStrokeOutline.pathD}
+                fill={openStrokeFill}
+                fillRule={
+                  openStrokeOutline.fillRule !== "nonzero"
+                    ? openStrokeOutline.fillRule
+                    : undefined
+                }
+                stroke="none"
+                markerStart={markerRefs.markerStart}
+                markerEnd={markerRefs.markerEnd}
+              />
+            </>
           ) : (
             <path
               d={d || "M0 0"}

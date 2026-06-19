@@ -2,13 +2,13 @@
 
 import { FlipHorizontal2 } from "lucide-react";
 import { PropertyNumberInput } from "../PropertyInput";
-import { InspectorLabelRow } from "./InspectorPrimitives";
+import { InspectorLabelRow, InspectorHintIconButton } from "./InspectorPrimitives";
 import {
   StrokeLinecapControl,
   StrokeLinejoinControl,
   StrokeWidthProfilePreview,
 } from "./StrokeSettingIcons";
-import { appFieldClassCompact, appFieldRadius } from "@/lib/appFieldStyles";
+import { appFieldClassCompact, appFieldShellClassCompact, inspectorRowGapClass, inspectorTwoColGridClass } from "@/lib/appFieldStyles";
 import { cn } from "@/lib/utils";
 import { inspectorIconClass, inspectorIconStroke } from "@/lib/inspectorIconStyles";
 import {
@@ -102,7 +102,7 @@ export function StrokeAdvancedPanel({
       </InspectorLabelRow>
       {dashedLike ? (
         <>
-          <div className="grid grid-cols-2 gap-1">
+          <div className={inspectorTwoColGridClass}>
             <PropertyNumberInput
               commitOnInput
               label="Dash"
@@ -138,20 +138,14 @@ export function StrokeAdvancedPanel({
       ) : null}
       <div>
         <div className="inspector-field-label">Width profile</div>
-        <div className="flex items-center gap-1">
-          <div
-            className={cn(
-              "flex h-6 min-w-0 flex-1 items-center gap-2 border border-app-border bg-app-field px-2",
-              appFieldRadius,
-            )}
-          >
+        <div className={cn("flex items-center", inspectorRowGapClass)}>
+          <div className={cn(appFieldShellClassCompact, "min-w-0 flex-1 gap-2 px-2")}>
             <StrokeWidthProfilePreview profile={widthProfile} flipped={strokeWidthProfileFlipped} />
             <span className="text-ui text-app-muted capitalize">{widthProfile}</span>
           </div>
-          <button
-            type="button"
-            disabled={locked}
+          <InspectorHintIconButton
             title="Flip width profile"
+            disabled={locked}
             onClick={() => onStyle({ strokeWidthProfileFlipped: !strokeWidthProfileFlipped })}
             className={cn(
               "flex h-6 w-6 shrink-0 items-center justify-center rounded border border-app-border bg-app-panel text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg disabled:opacity-40",
@@ -159,7 +153,7 @@ export function StrokeAdvancedPanel({
             )}
           >
             <FlipHorizontal2 className={inspectorIconClass} strokeWidth={inspectorIconStroke} />
-          </button>
+          </InspectorHintIconButton>
         </div>
       </div>
       <div>

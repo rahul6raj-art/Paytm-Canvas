@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from "react";
-import { appFieldClass, appFieldRadius, inspectorControlHeightClass } from "@/lib/appFieldStyles";
+import {
+  appFieldInnerClass,
+  appFieldShellClass,
+} from "@/lib/appFieldStyles";
 import { inspectorFieldIconSlotClass } from "@/lib/inspectorIconStyles";
 import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
 import { useInspectorValueScrub } from "@/lib/useInspectorValueScrub";
 import { cn } from "@/lib/utils";
-
-const baseField = appFieldClass;
 
 type PropertyNumberInputProps = {
   label: string;
@@ -130,35 +131,40 @@ export function PropertyNumberInput({
     },
   };
 
+  const inputClassName = cn(
+    appFieldInnerClass,
+    "font-mono tabular-nums",
+  );
+
+  const fieldShell = (
+    className?: string,
+    ariaLabel?: string,
+  ) => (
+    <div
+      className={cn(
+        appFieldShellClass,
+        disabled && "opacity-45",
+        className,
+      )}
+    >
+      {leadingIcon ? (
+        <span className={inspectorFieldIconSlotClass} aria-hidden>
+          {leadingIcon}
+        </span>
+      ) : null}
+      <input
+        {...inputProps}
+        aria-label={ariaLabel ?? (leadingIcon ? label : undefined)}
+        {...bindScrubInput(inputClassName, focused)}
+      />
+    </div>
+  );
+
   if (leadingIcon) {
     return (
       <div>
         <div className="sr-only">{label}</div>
-        <div
-          className={cn(
-            "flex min-w-0 items-center overflow-hidden border border-app-border bg-app-field",
-            inspectorControlHeightClass,
-            appFieldRadius,
-            "shadow-[inset_0_1px_0_0_hsl(var(--app-inset-highlight)/var(--app-inset-highlight-opacity))]",
-            disabled && "opacity-45",
-          )}
-        >
-          <span className={inspectorFieldIconSlotClass} aria-hidden>
-            {leadingIcon}
-          </span>
-          <input
-            {...inputProps}
-            aria-label={label}
-            {...bindScrubInput(
-              cn(
-                baseField,
-                "flex-1 rounded-none border-0 bg-transparent px-1.5 py-0 shadow-none",
-                "font-mono tabular-nums focus-visible:ring-0",
-              ),
-              focused,
-            )}
-          />
-        </div>
+        {fieldShell()}
       </div>
     );
   }
@@ -166,10 +172,7 @@ export function PropertyNumberInput({
   return (
     <div>
       <div className="inspector-field-label">{label}</div>
-      <input
-        {...inputProps}
-        {...bindScrubInput(cn(baseField, "font-mono tabular-nums"), focused)}
-      />
+      {fieldShell()}
     </div>
   );
 }
@@ -233,46 +236,47 @@ export function OpacityPercentInput({
   };
 
   return (
-    <input
-      type="text"
-      inputMode="numeric"
-      disabled={disabled}
-      {...bindScrubInput(
-        cn(
-          baseField,
-          "min-w-0 flex-1 text-right tabular-nums",
-          className,
-        ),
-        focused,
-      )}
-      value={focused ? text : `${text}%`}
-      onFocus={() => {
-        setFocused(true);
-        setText(String(percent));
-      }}
-      onChange={(e) => {
-        const digits = e.target.value.replace(/%/g, "").replace(/[^\d]/g, "");
-        setText(digits);
-        if (commitOnInput && digits !== "") {
-          const n = parseInt(digits, 10);
-          if (Number.isFinite(n)) commitPercent(n);
-        }
-      }}
-      onBlur={() => {
-        if (scrubActiveRef.current) return;
-        setFocused(false);
-        if (!applyDraft(text)) setText(String(percent));
-      }}
-      onKeyDown={(e) => {
-        handlePanelFieldKeyDown(e, {
-          onEnter: () => {
-            if (!applyDraft(text)) setText(String(percent));
-            e.currentTarget.blur();
-          },
-          onArrowNudge: nudge,
-        });
-      }}
-    />
+    <div className={cn(appFieldShellClass, disabled && "opacity-45", className)}>
+      <input
+        type="text"
+        inputMode="numeric"
+        disabled={disabled}
+        {...bindScrubInput(
+          cn(
+            appFieldInnerClass,
+            "min-w-0 flex-1 text-right tabular-nums",
+          ),
+          focused,
+        )}
+        value={focused ? text : `${text}%`}
+        onFocus={() => {
+          setFocused(true);
+          setText(String(percent));
+        }}
+        onChange={(e) => {
+          const digits = e.target.value.replace(/%/g, "").replace(/[^\d]/g, "");
+          setText(digits);
+          if (commitOnInput && digits !== "") {
+            const n = parseInt(digits, 10);
+            if (Number.isFinite(n)) commitPercent(n);
+          }
+        }}
+        onBlur={() => {
+          if (scrubActiveRef.current) return;
+          setFocused(false);
+          if (!applyDraft(text)) setText(String(percent));
+        }}
+        onKeyDown={(e) => {
+          handlePanelFieldKeyDown(e, {
+            onEnter: () => {
+              if (!applyDraft(text)) setText(String(percent));
+              e.currentTarget.blur();
+            },
+            onArrowNudge: nudge,
+          });
+        }}
+      />
+    </div>
   );
 }
 
@@ -308,23 +312,25 @@ export function PropertyTextInput({
   return (
     <div>
       <div className="inspector-field-label">{label}</div>
-      <input
-        type="text"
-        disabled={disabled}
-        placeholder={placeholder}
-        className={cn(baseField, monospace && "font-mono")}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onBlur={flush}
-        onKeyDown={(e) => {
-          handlePanelFieldKeyDown(e, {
-            onEnter: () => {
-              flush();
-              e.currentTarget.blur();
-            },
-          });
-        }}
-      />
+      <div className={cn(appFieldShellClass, disabled && "opacity-45")}>
+        <input
+          type="text"
+          disabled={disabled}
+          placeholder={placeholder}
+          className={cn(appFieldInnerClass, monospace && "font-mono")}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={flush}
+          onKeyDown={(e) => {
+            handlePanelFieldKeyDown(e, {
+              onEnter: () => {
+                flush();
+                e.currentTarget.blur();
+              },
+            });
+          }}
+        />
+      </div>
     </div>
   );
 }

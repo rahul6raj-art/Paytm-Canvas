@@ -1,18 +1,18 @@
-/** Default pasteboard / workspace background (design mode, light UI). */
-export const DEFAULT_CANVAS_BACKGROUND = "#e5e5e5";
+/** Default pasteboard / workspace background (theme-linked — resolves per UI theme). */
+export const DEFAULT_CANVAS_BACKGROUND = "#ffffff";
 
-/** Default pasteboard when app UI is in dark mode (legacy explicit pick; theme-linked uses CSS var). */
-export const CANVAS_WORKSPACE_DARK = "#212121";
+/** Legacy dark pasteboard sentinel; theme-linked like DEFAULT_CANVAS_BACKGROUND. */
+export const CANVAS_WORKSPACE_DARK = "#1e1e1e";
 
 /** Inline style for theme-linked pasteboard — tracks `:root` / `.dark` tokens. */
 export const THEME_CANVAS_WORKSPACE_CSS = "hsl(var(--pc-canvas-workspace))";
 
 const DEFAULT_LIGHT_WORKSPACE_HEXES = new Set([
   DEFAULT_CANVAS_BACKGROUND.toLowerCase(),
+  "#e5e5e5",
   "#e8eaed",
   "#ebebeb",
   "#f5f5f5",
-  "#ffffff",
 ]);
 
 function parseHexRgb(input: string): [number, number, number] | null {
@@ -52,15 +52,12 @@ export function isDefaultLightWorkspaceBackground(backgroundColor: string): bool
 /** True when the stored page background should track app light/dark theme tokens. */
 export function isThemeLinkedWorkspaceBackground(backgroundColor: string): boolean {
   const normalized = backgroundColor.trim().toLowerCase();
-  return (
-    isDefaultLightWorkspaceBackground(backgroundColor) ||
-    normalized === CANVAS_WORKSPACE_DARK.toLowerCase()
-  );
+  return isDefaultLightWorkspaceBackground(backgroundColor) || normalized === "#212121";
 }
 
 /** Resolved hex for theme-linked workspace (labels, rulers, store helpers). */
 export function themeCanvasWorkspaceHex(theme: "light" | "dark"): string {
-  return theme === "dark" ? "#212121" : "#e8e8e8";
+  return theme === "dark" ? CANVAS_WORKSPACE_DARK : DEFAULT_CANVAS_BACKGROUND;
 }
 
 /** Hex pasteboard color for chrome math when the visible bg is theme-linked. */
@@ -80,7 +77,7 @@ export function displayCanvasBackground(
   theme: "light" | "dark",
 ): string {
   if (isThemeLinkedWorkspaceBackground(stored)) {
-    return THEME_CANVAS_WORKSPACE_CSS;
+    return themeCanvasWorkspaceHex(theme);
   }
   return stored;
 }

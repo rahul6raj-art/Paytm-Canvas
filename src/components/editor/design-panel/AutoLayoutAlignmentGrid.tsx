@@ -2,6 +2,7 @@
 
 import type { CrossAxisAlign, PrimaryAxisAlign } from "@/stores/useEditorStore";
 import { cn } from "@/lib/utils";
+import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
 
 const AXIS_STOPS = ["start", "center", "end"] as const;
 
@@ -57,26 +58,30 @@ export function AutoLayoutAlignmentGrid({
         AXIS_STOPS.map((primary, col) => {
           const active = cellActive(primaryAxisAlign, counterAxisAlign, row, col);
           return (
-            <button
+            <EditorHintWrap
               key={`${row}-${col}`}
-              type="button"
-              disabled={disabled}
               title={`${primary} / ${counter}`}
-              aria-label={`Align ${primary} on primary axis, ${counter} on counter axis`}
-              onClick={() => onChange(primary, counter)}
-              className={cn(
-                "flex h-5 w-5 items-center justify-center rounded transition-colors disabled:opacity-40",
-                active
-                  ? "bg-accent/20 text-accent"
-                  : "text-app-subtle hover:bg-app-hover hover:text-app-muted",
-              )}
+              disabled={disabled}
             >
-              {active ? (
-                <ActiveAlignGlyph horizontal={layoutHorizontal} />
-              ) : (
-                <span className="h-1 w-1 rounded-full bg-current opacity-60" />
-              )}
-            </button>
+              <button
+                type="button"
+                disabled={disabled}
+                aria-label={`Align ${primary} on primary axis, ${counter} on counter axis`}
+                onClick={() => onChange(primary, counter)}
+                className={cn(
+                  "flex h-5 w-5 items-center justify-center rounded transition-colors disabled:opacity-40",
+                  active
+                    ? "bg-accent/20 text-accent"
+                    : "text-app-subtle hover:bg-app-hover hover:text-app-muted",
+                )}
+              >
+                {active ? (
+                  <ActiveAlignGlyph horizontal={layoutHorizontal} />
+                ) : (
+                  <span className="h-1 w-1 rounded-full bg-current opacity-60" />
+                )}
+              </button>
+            </EditorHintWrap>
           );
         }),
       )}

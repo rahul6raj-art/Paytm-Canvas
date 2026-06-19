@@ -1,4 +1,5 @@
 import type { EditorNode } from "@/stores/useEditorStore";
+import { parseCssColor } from "@/lib/color";
 import { parseLength } from "@/lib/svgImport/svgMatrix";
 
 export type PaintState = {
@@ -54,11 +55,13 @@ export function parseOpacity(value: string | undefined, fallback = 1): number {
 }
 
 export function normalizeColor(value: string | undefined): string | undefined {
-  if (!value) return undefined;
+  if (!value || value === "transparent" || value === "rgba(0, 0, 0, 0)") return undefined;
   const v = value.trim();
-  if (!v || v === "none" || v === "transparent") return undefined;
+  if (!v || v === "none") return undefined;
   if (/^url\(/i.test(v)) return undefined;
-  if (v === "currentColor") return "#000000";
+  const parsed = parseCssColor(v);
+  if (parsed) return parsed.hex;
+  if (v === "currentColor") return undefined;
   return v;
 }
 

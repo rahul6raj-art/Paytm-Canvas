@@ -11,6 +11,7 @@ import {
   isCanvasSelectTool,
 } from "@/lib/canvasInteractionGuards";
 import { screenPxToOverlay, worldPointToOverlay } from "@/lib/canvasOverlaySpace";
+import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
 import {
   CANVAS_FRAME_LABEL_FONT_SCREEN_PX,
   CANVAS_FRAME_LABEL_OFFSET_SCREEN_PX,
@@ -299,32 +300,35 @@ function FrameLabel({
           }}
         />
       ) : (
-        <span
-          role="button"
-          tabIndex={locked ? -1 : 0}
+        <EditorHintWrap
           title={
             locked
               ? name
               : `${name} — drag to move, double-click to rename`
           }
-          onPointerDown={onLabelPointerDown}
-          onDoubleClick={(e) => {
-            e.stopPropagation();
-            if (locked) return;
-            onStartRename();
-          }}
-          onKeyDown={(e) => {
-            if (locked) return;
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
+          anchorClassName="contents block max-w-full"
+        >
+          <span
+            role="button"
+            tabIndex={locked ? -1 : 0}
+            onPointerDown={onLabelPointerDown}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              if (locked) return;
               onStartRename();
-            }
-          }}
-          className={cn(
-            "block truncate font-medium leading-none select-none",
-            locked
-              ? "cursor-default"
-              : tool === "move" || tool === "frame"
+            }}
+            onKeyDown={(e) => {
+              if (locked) return;
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onStartRename();
+              }
+            }}
+            className={cn(
+              "block truncate font-medium leading-none select-none",
+              locked
+                ? "cursor-default"
+                : tool === "move" || tool === "frame"
                 ? "cursor-grab active:cursor-grabbing"
                 : "cursor-pointer",
           )}
@@ -335,6 +339,7 @@ function FrameLabel({
         >
           {name}
         </span>
+        </EditorHintWrap>
       )}
     </div>
   );

@@ -109,6 +109,27 @@ describe("svgImport pipeline", () => {
     assert.equal(path?.pathClosed, true);
   });
 
+  it("keeps multi-path icon subpaths aligned in node-local flattened geometry", () => {
+    const source = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+      <path d="M3.75 3H20.25V21H3.75Z" fill="#111"/>
+      <path d="M7.57715 5.5127H8.32715V16.5957H7.57715Z" fill="#111"/>
+    </svg>`;
+    const result = importSvgSourceToEditorGraph(source, "chart.svg");
+    assert.ok(result);
+    const paths = Object.values(result.nodes).filter((n) => n.type === "path");
+    assert.equal(paths.length, 2);
+    for (const path of paths) {
+      assert.ok(path.flattenedPathData);
+      const move = path.flattenedPathData!.match(/M\s+([\d.+-]+)\s+([\d.+-]+)/);
+      assert.ok(move);
+      const localX = parseFloat(move![1]!);
+      const localY = parseFloat(move![2]!);
+      assert.ok(localX >= -0.01 && localX <= 1.5, `unexpected local x ${localX}`);
+      assert.ok(localY >= -0.01 && localY <= 1.5, `unexpected local y ${localY}`);
+      assert.ok(Math.abs(path.x + localX - 3.75) < 0.01 || Math.abs(path.x + localX - 7.57715) < 0.01);
+    }
+  });
+
   it("ignores radial gradient defs and keeps solid fill", () => {
     const source = `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
       <defs>

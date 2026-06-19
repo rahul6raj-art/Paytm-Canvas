@@ -492,7 +492,7 @@ export function nodeToSvgGroupMarkup(
   } else if (node.type === "path") {
     inner = svgPathMarkup(resolved, shapeOpts);
   } else if (node.type === "text") {
-    inner = svgTextMarkup(resolved);
+    inner = svgTextMarkup(resolved, shapeOpts);
   } else if (node.type === "frame" || node.type === "group") {
     if (isBooleanGroup(node)) {
       const flowKids = kids.filter((cid) => {

@@ -173,32 +173,116 @@ export function clampCornerRadii(radii: CornerRadii, w: number, h: number): Corn
   return [tl, tr, br, bl];
 }
 
-/** SVG path for a rounded rectangle with per-corner radii (local 0,0–w,h). */
-export function roundedRectPathD(w: number, h: number, radii: CornerRadii): string {
+/** Adaptive quarter-arc segment count (~0.75px chord error on canvas). */
+export function segmentsForCornerArc(radius: number): number {
+  const r = Math.max(0, radius);
+  if (r <= 0) return 4;
+  const quarterArc = (r * Math.PI) / 2;
+  return Math.max(16, Math.ceil(quarterArc / 0.75));
+}
+
+/** SVG path for a rounded rectangle with per-corner radii (local ox,oy–ox+w,oy+h). */
+export function roundedRectPathD(
+  w: number,
+  h: number,
+  radii: CornerRadii,
+  origin: { x: number; y: number } = { x: 0, y: 0 },
+): string {
   const width = Math.max(0, w);
   const height = Math.max(0, h);
+  const ox = origin.x;
+  const oy = origin.y;
   if (width <= 0 || height <= 0) return "";
   const [tl, tr, br, bl] = clampCornerRadii(radii, width, height);
   if (tl === 0 && tr === 0 && br === 0 && bl === 0) {
-    return `M 0 0 H ${width} V ${height} H 0 Z`;
+    return `M ${ox} ${oy} H ${ox + width} V ${oy + height} H ${ox} Z`;
   }
 
   const edgeEps = 0.001;
-  const parts: string[] = [`M ${tl} 0`];
-  if (width - tl - tr > edgeEps) parts.push(`H ${width - tr}`);
+  const parts: string[] = [`M ${ox + tl} ${oy}`];
+  if (width - tl - tr > edgeEps) parts.push(`H ${ox + width - tr}`);
 
-  if (tr > 0) parts.push(`A ${tr} ${tr} 0 0 1 ${width} ${tr}`);
-  if (height - tr - br > edgeEps) parts.push(`V ${height - br}`);
+  if (tr > 0) parts.push(`A ${tr} ${tr} 0 0 1 ${ox + width} ${oy + tr}`);
+  if (height - tr - br > edgeEps) parts.push(`V ${oy + height - br}`);
 
-  if (br > 0) parts.push(`A ${br} ${br} 0 0 1 ${width - br} ${height}`);
-  if (width - br - bl > edgeEps) parts.push(`H ${bl}`);
+  if (br > 0) parts.push(`A ${br} ${br} 0 0 1 ${ox + width - br} ${oy + height}`);
+  if (width - br - bl > edgeEps) parts.push(`H ${ox + bl}`);
 
-  if (bl > 0) parts.push(`A ${bl} ${bl} 0 0 1 0 ${height - bl}`);
-  if (height - bl - tl > edgeEps) parts.push(`V ${tl}`);
+  if (bl > 0) parts.push(`A ${bl} ${bl} 0 0 1 ${ox} ${oy + height - bl}`);
+  if (height - bl - tl > edgeEps) parts.push(`V ${oy + tl}`);
 
-  if (tl > 0) parts.push(`A ${tl} ${tl} 0 0 1 ${tl} 0`);
+  if (tl > 0) parts.push(`A ${tl} ${tl} 0 0 1 ${ox + tl} ${oy}`);
   parts.push("Z");
   return parts.join(" ");
+}
+
+/**
+ * Offset a rounded-rect contour uniformly (positive delta = outward in SVG y-down space).
+ * Uses true arc geometry instead of polygon approximation.
+ */
+export function offsetRoundedRectPathD(
+  width: number,
+  height: number,
+  radii: CornerRadii,
+  delta: number,
+): string {
+  const w = Math.max(0, width);
+  const h = Math.max(0, height);
+  if (w <= 0 || h <= 0) return "";
+  const clamped = clampCornerRadii(radii, w, h);
+  if (Math.abs(delta) < 1e-9) {
+    return roundedRectPathD(w, h, clamped);
+  }
+
+  const d = -delta;
+  const ow = w - 2 * d;
+  const oh = h - 2 * d;
+  if (ow < 1e-6 || oh < 1e-6) return "";
+
+  const shifted: CornerRadii = [
+    Math.max(0, clamped[0] - d),
+    Math.max(0, clamped[1] - d),
+    Math.max(0, clamped[2] - d),
+    Math.max(0, clamped[3] - d),
+  ];
+  const outRadii = clampCornerRadii(shifted, ow, oh);
+  return roundedRectPathD(ow, oh, outRadii, { x: d, y: d });
+}
+
+export type StrokeBandAlign = "center" | "inside" | "outside";
+
+/** Smooth evenodd stroke ring for a rounded rectangle (outline / aligned stroke). */
+export function outlineRoundedRectRingPathD(
+  width: number,
+  height: number,
+  radii: CornerRadii,
+  strokeWidth: number,
+  align: StrokeBandAlign,
+): { pathD: string; fillRule: "evenodd" | "nonzero" } | null {
+  const w = Math.max(0, width);
+  const h = Math.max(0, height);
+  if (w <= 0 || h <= 0 || strokeWidth < 1e-9) return null;
+  const clamped = clampCornerRadii(radii, w, h);
+  if (clamped.every((r) => r <= 0)) return null;
+
+  const half = strokeWidth / 2;
+  let outerD: string;
+  let innerD: string | null = null;
+
+  if (align === "center") {
+    outerD = offsetRoundedRectPathD(w, h, clamped, half);
+    innerD = offsetRoundedRectPathD(w, h, clamped, -half);
+  } else if (align === "inside") {
+    outerD = roundedRectPathD(w, h, clamped);
+    innerD = offsetRoundedRectPathD(w, h, clamped, -strokeWidth);
+  } else {
+    outerD = offsetRoundedRectPathD(w, h, clamped, strokeWidth);
+    innerD = roundedRectPathD(w, h, clamped);
+  }
+
+  if (!outerD) return null;
+  if (!innerD) return { pathD: outerD, fillRule: "nonzero" };
+  return { pathD: `${outerD} ${innerD}`, fillRule: "evenodd" };
 }
 
 function arcPoints(
@@ -223,11 +307,15 @@ export function roundedRectPolygonPoints(
   w: number,
   h: number,
   radii: CornerRadii,
-  segmentsPerCorner = 8,
+  segmentsPerCorner?: number,
 ): { x: number; y: number }[] {
   const width = Math.max(0, w);
   const height = Math.max(0, h);
   const [tl, tr, br, bl] = clampCornerRadii(radii, width, height);
+  const segTl = segmentsPerCorner ?? segmentsForCornerArc(tl);
+  const segTr = segmentsPerCorner ?? segmentsForCornerArc(tr);
+  const segBr = segmentsPerCorner ?? segmentsForCornerArc(br);
+  const segBl = segmentsPerCorner ?? segmentsForCornerArc(bl);
   if (tl === 0 && tr === 0 && br === 0 && bl === 0) {
     return [
       { x: 0, y: 0 },
@@ -239,22 +327,22 @@ export function roundedRectPolygonPoints(
 
   const pts: { x: number; y: number }[] = [{ x: tl, y: 0 }];
   if (tr > 0) {
-    pts.push(...arcPoints(width - tr, tr, tr, -Math.PI / 2, 0, segmentsPerCorner).slice(1));
+    pts.push(...arcPoints(width - tr, tr, tr, -Math.PI / 2, 0, segTr).slice(1));
   } else {
     pts.push({ x: width, y: 0 });
   }
   if (br > 0) {
-    pts.push(...arcPoints(width - br, height - br, br, 0, Math.PI / 2, segmentsPerCorner).slice(1));
+    pts.push(...arcPoints(width - br, height - br, br, 0, Math.PI / 2, segBr).slice(1));
   } else {
     pts.push({ x: width, y: height });
   }
   if (bl > 0) {
-    pts.push(...arcPoints(bl, height - bl, bl, Math.PI / 2, Math.PI, segmentsPerCorner).slice(1));
+    pts.push(...arcPoints(bl, height - bl, bl, Math.PI / 2, Math.PI, segBl).slice(1));
   } else {
     pts.push({ x: 0, y: height });
   }
   if (tl > 0) {
-    pts.push(...arcPoints(tl, tl, tl, Math.PI, (3 * Math.PI) / 2, segmentsPerCorner).slice(1));
+    pts.push(...arcPoints(tl, tl, tl, Math.PI, (3 * Math.PI) / 2, segTl).slice(1));
   }
   return pts;
 }

@@ -24,7 +24,17 @@ export function craftUserToMockUser(u: CraftUser): MockUser {
     parts.length >= 2
       ? `${parts[0]![0]!}${parts[parts.length - 1]![0]!}`.toUpperCase()
       : (parts[0]?.slice(0, 2).toUpperCase() ?? "ME");
-  return { id: u.id, name: u.displayName, email: u.email, initials, avatarHue: 210 };
+  return {
+    id: u.id,
+    name: u.displayName,
+    email: u.email,
+    initials,
+    avatarHue: 210,
+    avatarUrl:
+      u.email === "rahul6.raj@paytm.com" || u.email === "rahul.verma@paytm.com"
+        ? "/avatars/rahul-raj.webp"
+        : null,
+  };
 }
 
 export function ownerMemberFromCraftUser(u: CraftUser): MockTeamMember {

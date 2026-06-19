@@ -6,7 +6,7 @@ import { Check, RotateCcw, SlidersHorizontal, X } from "lucide-react";
 import { fillCss, normalizeHex } from "@/lib/color";
 import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
 import { useInspectorValueScrub } from "@/lib/useInspectorValueScrub";
-import { appFieldRadius } from "@/lib/appFieldStyles";
+import { appFieldRadius, appFieldShellClass, inspectorControlHeightClass } from "@/lib/appFieldStyles";
 import { cn } from "@/lib/utils";
 import { inspectorIconClass, inspectorIconStroke } from "@/lib/inspectorIconStyles";
 import type {
@@ -21,6 +21,8 @@ import {
   strokeSidesCustomFromPreset,
 } from "@/lib/strokeAlign";
 import { InspectorColorPickerAside } from "../InspectorColorPickerAside";
+import { EditorHintWrap } from "../EditorHoverHint";
+import { InspectorHintIconButton } from "./InspectorPrimitives";
 import type { ColorCommitOptions } from "../ColorInput";
 import {
   adjacentPanelDialogStyle,
@@ -48,7 +50,7 @@ const CUSTOM_GRID: { side: CustomSide; mode: StrokeSidesMode }[] = [
   { side: "bottom", mode: "bottom" },
 ];
 
-const MENU_WIDTH_PRESETS = 132;
+const MENU_WIDTH_PRESETS = 148;
 const MENU_WIDTH_CUSTOM = 208;
 
 function SideColorSwatch({
@@ -82,23 +84,25 @@ function SideColorSwatch({
 
   return (
     <>
-      <button
-        ref={swatchRef}
-        type="button"
-        disabled={disabled}
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((o) => !o);
-        }}
-        className={cn(
-          "h-5 w-5 shrink-0 rounded border border-app-border p-px disabled:cursor-not-allowed",
-          open && "border-accent ring-1 ring-accent",
-        )}
-        style={{ background: fillCss(safe, opacity) }}
-        aria-label={`${side} stroke color`}
-        aria-expanded={open}
-        aria-haspopup="dialog"
-      />
+      <EditorHintWrap title={`${side} stroke color`} disabled={disabled}>
+        <button
+          ref={swatchRef}
+          type="button"
+          disabled={disabled}
+          onClick={(e) => {
+            e.stopPropagation();
+            setOpen((o) => !o);
+          }}
+          className={cn(
+            "h-5 w-5 shrink-0 rounded border border-app-border p-px disabled:cursor-not-allowed",
+            open && "border-app-panel-edge ring-1 ring-app-panel-edge",
+          )}
+          style={{ background: fillCss(safe, opacity) }}
+          aria-label={`${side} stroke color`}
+          aria-expanded={open}
+          aria-haspopup="dialog"
+        />
+      </EditorHintWrap>
       <InspectorColorPickerAside
         open={open}
         onClose={() => setOpen(false)}
@@ -232,12 +236,7 @@ function CustomSideField({
   }, [value, focused, scrubbing, scrubActiveRef]);
 
   return (
-    <div
-      className={cn(
-        "flex h-7 items-center gap-1 border border-app-border bg-app-field px-1",
-        appFieldRadius,
-      )}
-    >
+    <div className={cn(appFieldShellClass, "gap-1 px-1")}>
       <SideColorSwatch
         side={side}
         hex={color}
@@ -283,6 +282,40 @@ function CustomSideField({
         onClick={(e) => e.stopPropagation()}
       />
     </div>
+  );
+}
+
+function SideMenuItem({
+  selected,
+  mode,
+  label,
+  onClick,
+  onMouseDown,
+}: {
+  selected: boolean;
+  mode: StrokeSidesMode;
+  label: string;
+  onClick?: () => void;
+  onMouseDown?: (e: MouseEvent) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        "flex w-full items-center gap-2 px-3.5 py-1.5 text-left text-ui text-app-fg transition-colors hover:bg-app-hover",
+        selected && "bg-app-inset",
+      )}
+      onClick={onClick}
+      onMouseDown={onMouseDown}
+    >
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center text-app-muted">
+        {selected ? <Check className={inspectorIconClass} strokeWidth={inspectorIconStroke} /> : null}
+      </span>
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center text-app-muted">
+        <SideIcon mode={mode} />
+      </span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+    </button>
   );
 }
 
@@ -428,68 +461,53 @@ export function StrokeSidesPicker({
         role="dialog"
         aria-label="Stroke sides"
         aria-modal="false"
-        className="fixed z-[120] flex flex-col overflow-hidden rounded-md border border-app-border bg-app-panel shadow-xl"
+        data-editor-shell
+        className="editor-inspector-dialog fixed z-[120]"
         style={adjacentPanelDialogStyle(dragPosition)}
       >
         <div
-          className={cn(
-            "flex shrink-0 items-center justify-between gap-2 border-b border-app-border px-2.5 py-2",
-            "cursor-grab select-none touch-none active:cursor-grabbing",
-            isDragging && "cursor-grabbing",
-          )}
+          className={cn("editor-inspector-dialog-header", isDragging && "cursor-grabbing")}
           onPointerDown={onHeaderPointerDown}
         >
           <div className="inspector-field-label pointer-events-none">Stroke sides</div>
           <button
             type="button"
             onClick={() => setOpen(false)}
-            className="flex h-7 w-7 items-center justify-center rounded text-app-muted hover:bg-app-hover hover:text-app-fg"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
             aria-label="Close stroke sides"
           >
             <X className="h-3.5 w-3.5" strokeWidth={2} />
           </button>
         </div>
-        <div className="thin-scroll min-h-0 flex-1 overflow-y-auto py-1">
+        <div className="editor-inspector-dialog-body !px-0 !py-1">
         {PRESET_OPTIONS.map((opt) => (
-          <button
+          <SideMenuItem
             key={opt.id}
-            type="button"
-            className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-ui text-app-fg hover:bg-app-hover"
+            selected={strokeSides === opt.id}
+            mode={opt.id}
+            label={opt.label}
             onClick={() => {
               onChange({ strokeSides: opt.id });
               setShowCustomGrid(false);
               setOpen(false);
             }}
-          >
-            <span className="w-4 text-app-muted">
-              {strokeSides === opt.id ? <Check className={inspectorIconClass} strokeWidth={inspectorIconStroke} /> : null}
-            </span>
-            <SideIcon mode={opt.id} />
-            <span>{opt.label}</span>
-          </button>
+          />
         ))}
-        <div className="my-1 border-t border-app-border" />
-        <button
-          type="button"
-          className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-ui text-app-fg hover:bg-app-hover"
+        <div className="my-1 border-t border-app-border-subtle" />
+        <SideMenuItem
+          selected={strokeSides === "custom"}
+          mode="custom"
+          label="Custom"
           onMouseDown={enterCustom}
           onClick={enterCustom}
-        >
-          <span className="w-4 text-app-muted">
-            {strokeSides === "custom" ? <Check className={inspectorIconClass} strokeWidth={inspectorIconStroke} /> : null}
-          </span>
-          <SideIcon mode="custom" />
-          <span>Custom</span>
-        </button>
+        />
         {showGrid ? (
-          <div ref={gridRef} className="border-t border-app-border px-2 pb-2 pt-1.5">
+          <div ref={gridRef} className="border-t border-app-border-subtle px-3.5 pb-2 pt-1.5">
             <div className="mb-2 flex items-center justify-between gap-2">
               <div className="text-ui font-medium text-app-muted">Side weights (px)</div>
-              <button
-                type="button"
-                disabled={disabled}
+              <InspectorHintIconButton
                 title="Reset side weights and colors"
-                aria-label="Reset side weights and colors"
+                disabled={disabled}
                 onClick={(e) => {
                   e.stopPropagation();
                   resetCustomSides();
@@ -497,7 +515,7 @@ export function StrokeSidesPicker({
                 className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-muted hover:bg-app-hover hover:text-app-fg disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <RotateCcw className="h-3.5 w-3.5" strokeWidth={2} />
-              </button>
+              </InspectorHintIconButton>
             </div>
             <div className="grid grid-cols-2 gap-1.5">
               {CUSTOM_GRID.map(({ side, mode }) => (
@@ -525,25 +543,28 @@ export function StrokeSidesPicker({
 
   return (
     <>
-      <button
-        ref={anchorRef}
-        type="button"
-        disabled={disabled}
-        title={`Stroke sides: ${activeLabel(strokeSides)}`}
-        onClick={() => {
-          setOpen((o) => {
-            const next = !o;
-            if (next && strokeSides === "custom") setShowCustomGrid(true);
-            return next;
-          });
-        }}
-        className={cn(
-          "flex h-6 w-6 shrink-0 items-center justify-center rounded border border-app-border bg-app-panel text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg disabled:opacity-40",
-          open && "border-accent bg-accent/10 text-accent",
+      <EditorHintWrap title={`Stroke sides: ${activeLabel(strokeSides)}`} disabled={disabled}>
+        <button
+          ref={anchorRef}
+          type="button"
+          disabled={disabled}
+          onClick={() => {
+            setOpen((o) => {
+              const next = !o;
+              if (next && strokeSides === "custom") setShowCustomGrid(true);
+              return next;
+            });
+          }}
+          className={cn(
+            "flex w-7 shrink-0 items-center justify-center border border-app-border bg-app-panel text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg disabled:opacity-40",
+            inspectorControlHeightClass,
+            appFieldRadius,
+          open && "border-app-panel-edge bg-app-inset text-app-fg",
         )}
-      >
-        <SideIcon mode={strokeSides === "custom" ? "custom" : strokeSides} />
-      </button>
+        >
+          <SideIcon mode={strokeSides === "custom" ? "custom" : strokeSides} />
+        </button>
+      </EditorHintWrap>
       {mounted && menu ? createPortal(menu, document.body) : null}
     </>
   );

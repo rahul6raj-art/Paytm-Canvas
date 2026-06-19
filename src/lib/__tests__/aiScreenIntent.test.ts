@@ -35,6 +35,21 @@ describe("aiScreenIntent", () => {
     assert.equal(detectScreenIntent("Build a user profile and settings page", "Mobile app"), "profile");
   });
 
+  it("routes activity tracking before Paytm home patterns", () => {
+    assert.equal(
+      detectScreenIntent("Create the Activity Tracking mobile app", "Mobile app"),
+      "activity_tracking",
+    );
+    assert.equal(
+      detectScreenIntent("Create activity tracking home screen", "Mobile app"),
+      "activity_tracking",
+    );
+    assert.equal(
+      detectScreenIntent("Intuitive Activity Tracking", "Mobile app"),
+      "activity_tracking",
+    );
+  });
+
   it("does not treat negated home phrasing as mobile home", () => {
     assert.equal(
       detectScreenIntent("Build checkout screen — not a home screen with quick actions", "Mobile app"),

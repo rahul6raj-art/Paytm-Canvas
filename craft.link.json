@@ -1,0 +1,13 @@
+{
+  "craftUrl": "http://localhost:3000",
+  "repoRoot": "/Users/rahulraj/Downloads/Craft-main",
+  "links": [
+    {
+      "sourcePath": "src/screens/ExampleScreen.tsx",
+      "previewUrl": "http://localhost:5173",
+      "syncMode": "manual",
+      "watchSource": false,
+      "conflictPolicy": "ask"
+    }
+  ]
+}

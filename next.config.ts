@@ -11,6 +11,7 @@ const nextConfig: NextConfig = {
   output: "standalone",
   /** Hide the Next.js dev-mode corner badge (errors still surface in the overlay). */
   devIndicators: false,
+  serverExternalPackages: ["@paytm-craft/bridge", "@cursor/sdk"],
 };
 
 export default nextConfig;

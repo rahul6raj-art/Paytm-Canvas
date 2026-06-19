@@ -2,8 +2,9 @@ import type { EditorAsset } from "@/lib/documentPersistence";
 import type { DesignToken } from "@/lib/designTokens";
 import { legacyEffectShadowAppend, resolveEffectBoxShadow, resolveNodeWithDesignTokens } from "@/lib/designTokens";
 import { mergeInstanceOverrides } from "@/lib/componentModel";
-import { fillPaintCss, svgFillPaint } from "@/lib/fillGradient";
-import { resolveShapeFillAttr } from "@/lib/gradient/svgSceneFill";
+import { effectiveFillType, effectiveStrokeType, fillPaintCss, svgFillPaint } from "@/lib/fillGradient";
+import { resolveShapeFillAttr, resolveShapeStrokeAttr } from "@/lib/gradient/svgSceneFill";
+import { textFillNeedsMask, textNodeAsFillPaint } from "@/lib/text/textFillPaint";
 import { DEFAULT_SHAPE_STROKE } from "@/lib/shapes/shapeModel";
 import {
   effectiveEllipseArc,
@@ -11,7 +12,7 @@ import {
   hasEllipseArcInnerHole,
   isFullEllipseArc,
 } from "@/lib/shapes/ellipseArc";
-import { pathOutlineD } from "@/lib/shapes/shapeToPath";
+import { resolvePathOutlineD } from "@/lib/shapes/shapeToPath";
 import type { NodeEffect } from "@/lib/nodeEffects";
 import { buildNodeEffectRenderStyle, effectColorToRgba } from "@/lib/nodeEffects";
 import {
@@ -21,17 +22,18 @@ import {
   roundedRectPathD,
 } from "@/lib/cornerRadius";
 import { strokeAttrsForSvgMarkup, strokeIsVisible } from "@/lib/stroke";
-import { shouldUseAlignedPathStroke } from "@/lib/strokeAlign";
+import { shouldUseAlignedPathStroke, shouldUseOutlinedOpenPathStroke } from "@/lib/strokeAlign";
 import { outlineStroke } from "@/lib/outlineStroke";
 import {
   shouldRenderSvgPerSideStroke,
   svgPerSideStrokeBeforeFill,
   svgPerSideStrokeMarkup,
 } from "@/lib/svgPerSideStroke";
-import { textLayoutForEditorNode } from "@/lib/text/canonicalTextLayout";
+import { textLayoutForEditorNode, type TextLayoutForRender } from "@/lib/text/canonicalTextLayout";
 import {
   TEXT_BOX_PAD_X,
   TEXT_BOX_PAD_Y,
+  type TextAlign,
 } from "@/lib/text/textNodeModel";
 import {
   getTextMeasureContext,
@@ -39,7 +41,12 @@ import {
   lineTopY,
   measureStringWidth,
 } from "@/lib/text/textMeasure";
-import type { TextDecorationMode } from "@/lib/text/textAdvancedStyle";
+import {
+  strikethroughDecorationY,
+  textDecorationStrokeWidth,
+  underlineDecorationY,
+  type TextDecorationMode,
+} from "@/lib/text/textAdvancedStyle";
 import type { ResolvedTextTypo } from "@/lib/textTypography";
 import type { EditorNode, ImageFitMode } from "@/stores/useEditorStore";
 
@@ -53,6 +60,52 @@ export function escXml(s: string): string {
 
 export function svgSafeId(id: string): string {
   return id.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+/** Filled outline ring for gradient/image/video strokes (matches canvas React path). */
+function svgGradientOutlineStrokeMarkup(
+  n: EditorNode,
+  opts: {
+    nodeId: string;
+    width: number;
+    height: number;
+    registerGradient: (id: string, markup: string) => void;
+    renderScale?: number;
+    assets?: Record<string, EditorAsset>;
+    filter: string;
+  },
+): { markup: string; underlay: string } | null {
+  if (effectiveStrokeType(n) !== "gradient") return null;
+  const outlined = outlineStroke(n);
+  if (!outlined?.pathD) return null;
+  const stroke = resolveShapeStrokeAttr({
+    node: n,
+    width: opts.width,
+    height: opts.height,
+    nodeId: `pc-sg-${svgSafeId(opts.nodeId)}`,
+    registerGradient: opts.registerGradient,
+    renderScale: opts.renderScale,
+    assets: opts.assets,
+  });
+  const strokeFill =
+    stroke.strokeAttr !== "none"
+      ? stroke.strokeAttr.startsWith("url(")
+        ? stroke.strokeAttr
+        : escXml(stroke.strokeAttr)
+      : escXml(
+          effectColorToRgba(
+            outlined.fill ?? n.strokeColor ?? DEFAULT_SHAPE_STROKE,
+            outlined.fillOpacity ?? n.strokeOpacity ?? 1,
+          ),
+        );
+  const fillRuleAttr =
+    outlined.fillRule && outlined.fillRule !== "nonzero"
+      ? ` fill-rule="${outlined.fillRule}"`
+      : "";
+  return {
+    markup: `<path d="${escXml(outlined.pathD)}" fill="${strokeFill}" stroke="none"${fillRuleAttr}${opts.filter} />`,
+    underlay: stroke.underlayMarkup,
+  };
 }
 
 export function resolveImageDataUrl(
@@ -82,6 +135,7 @@ export function svgRectLike(
   const h = Math.max(1, n.height);
   let fillAttr: string;
   let underlay = "";
+  let strokeUnderlay = "";
   if (opts?.registerGradient && opts.nodeId) {
     const resolved = resolveShapeFillAttr({
       node: n,
@@ -108,7 +162,22 @@ export function svgRectLike(
   const nodeId = opts?.nodeId ?? n.id;
   const filterAttr = opts?.filterRef ? ` filter="url(#${opts.filterRef})"` : "";
 
+  const gradientOutlineStroke =
+    showStroke && opts?.registerGradient && !opts?.strokeOverride
+      ? svgGradientOutlineStrokeMarkup(n, {
+          nodeId,
+          width: w,
+          height: h,
+          registerGradient: opts.registerGradient,
+          renderScale: opts.renderScale,
+          assets: opts.assets,
+          filter,
+        })
+      : null;
+  if (gradientOutlineStroke) strokeUnderlay = gradientOutlineStroke.underlay;
+
   const alignedStrokeMarkup = (): string | null => {
+    if (gradientOutlineStroke) return gradientOutlineStroke.markup;
     if (!showStroke || !shouldUseAlignedPathStroke(n, true)) return null;
     const outlined = outlineStroke(n);
     if (!outlined?.pathD) return null;
@@ -174,7 +243,10 @@ export function svgRectLike(
           });
         }
         const usePerSide = Boolean(perSideMarkup);
-        const alignedStroke = !usePerSide ? alignedStrokeMarkup() : null;
+        const alignedStroke =
+          !usePerSide && (gradientOutlineStroke || shouldUseAlignedPathStroke(n, true))
+            ? alignedStrokeMarkup()
+            : null;
         const strokeAttr = showStroke && !usePerSide && !alignedStroke
           ? ` stroke="${escXml(sc)}" stroke-width="${sw}"${strokeExtra}`
           : ` stroke="none"`;
@@ -201,7 +273,7 @@ export function svgRectLike(
     }
     return "";
   })();
-  return underlay ? `${underlay}${shape}` : shape;
+  return underlay || strokeUnderlay ? `${underlay}${strokeUnderlay}${shape}` : shape;
 }
 
 export function svgLine(n: EditorNode): string {
@@ -212,8 +284,52 @@ export function svgLine(n: EditorNode): string {
   return `<line x1="0" y1="${y}" x2="${n.width}" y2="${y}" stroke="${escXml(lc)}" stroke-width="${lw}"${strokeExtra} />`;
 }
 
-function svgTextDecorationAttr(decoration: TextDecorationMode): string {
-  return decoration !== "none" ? ` text-decoration="${decoration}"` : "";
+function svgTextDecorationAttr(_decoration: TextDecorationMode): string {
+  return "";
+}
+
+/** Explicit SVG lines — `text-decoration` on `<tspan>` is unreliable across browsers. */
+function svgTextDecorationMarkup(
+  prepared: TextLayoutForRender,
+  typo: ResolvedTextTypo,
+  decoration: TextDecorationMode,
+  strokePaint: string,
+): string {
+  if (decoration === "none") return "";
+  const { layout, canonical, textAlign, innerW, blockOffsetY } = prepared;
+  const strokeW = textDecorationStrokeWidth(typo.fontSize);
+  const parts: string[] = [];
+
+  for (let i = 0; i < layout.lines.length; i++) {
+    const line = layout.lines[i]!;
+    if (!line.text) continue;
+    const isLast = i === layout.lines.length - 1;
+    const canonicalLine = canonical.lines[i];
+    const y = canonicalLine?.y ?? lineTopY(layout, i) + TEXT_BOX_PAD_Y + blockOffsetY;
+    const x =
+      canonicalLine?.x ??
+      lineOffsetX(line.width, innerW, textAlign, {
+        isLastLine: isLast,
+        fullLineText: line.text,
+        letterSpacing: typo.letterSpacing,
+      }) + TEXT_BOX_PAD_X;
+    const width = line.width;
+
+    if (decoration === "underline") {
+      const uy = underlineDecorationY(y, typo.fontSize, typo.lineHeight);
+      parts.push(
+        `<line x1="${x}" y1="${uy}" x2="${x + width}" y2="${uy}" stroke="${strokePaint}" stroke-width="${strokeW}" />`,
+      );
+    }
+    if (decoration === "strikethrough") {
+      const sy = strikethroughDecorationY(y, typo.fontSize, typo.lineHeight);
+      parts.push(
+        `<line x1="${x}" y1="${sy}" x2="${x + width}" y2="${sy}" stroke="${strokePaint}" stroke-width="${strokeW}" />`,
+      );
+    }
+  }
+
+  return parts.join("");
 }
 
 function svgJustifiedLineTspans(
@@ -250,16 +366,25 @@ function svgJustifiedLineTspans(
   return parts.join("");
 }
 
-export function svgTextMarkup(n: EditorNode): string {
+export type SvgTextMarkupOpts = {
+  nodeId?: string;
+  registerGradient?: (id: string, markup: string) => void;
+  renderScale?: number;
+  assets?: Record<string, EditorAsset>;
+};
+
+export function svgTextMarkup(n: EditorNode, opts?: SvgTextMarkupOpts): string {
   const prepared = textLayoutForEditorNode(n);
   if (!prepared) return "";
 
   const { layout, canonical, typo, textAlign, innerW, blockOffsetY, style } = prepared;
-  const color = escXml(typo.color);
   const ff = escXml(typo.fontFamily);
   const fontSize =
     style.textCase === "small-caps" ? Math.max(1, typo.fontSize * 0.82) : typo.fontSize;
-  const ls = typo.letterSpacing != null ? ` letter-spacing="${typo.letterSpacing}"` : "";
+  const ls =
+    canonical.source === "wasm" || typo.letterSpacing == null || typo.letterSpacing === 0
+      ? ""
+      : ` letter-spacing="${typo.letterSpacing}"`;
   const decorationAttr = svgTextDecorationAttr(style.textDecoration);
 
   const tspans: string[] = [];
@@ -294,7 +419,56 @@ export function svgTextMarkup(n: EditorNode): string {
     tspans.push(`<tspan x="${x}" y="${y}"${decorationAttr}>${escXml(line.text)}</tspan>`);
   }
 
-  return `<text fill="${color}" font-family="${ff}" font-size="${fontSize}" font-weight="${typo.fontWeight}" dominant-baseline="hanging"${ls}>${tspans.join("")}</text>`;
+  const tspansMarkup = tspans.join("");
+  const textAttrs = `font-family="${ff}" font-size="${fontSize}" font-weight="${typo.fontWeight}" dominant-baseline="hanging"${ls}`;
+  const w = Math.max(1, n.width);
+  const h = Math.max(1, n.height);
+  const fillNode = textNodeAsFillPaint(n);
+
+  if (!opts?.registerGradient || !opts.nodeId) {
+    const color = escXml(
+      n.fillEnabled === false ? "none" : fillPaintCss(fillNode, opts?.assets) || typo.color,
+    );
+    const decorations = svgTextDecorationMarkup(prepared, typo, style.textDecoration, color);
+    return `<text fill="${color}" ${textAttrs}>${tspansMarkup}</text>${decorations}`;
+  }
+
+  const gradId = `pc-text-${svgSafeId(opts.nodeId)}`;
+  const resolved = resolveShapeFillAttr({
+    node: fillNode,
+    width: w,
+    height: h,
+    nodeId: gradId,
+    registerGradient: opts.registerGradient,
+    renderScale: opts.renderScale,
+    assets: opts.assets,
+  });
+
+  let fillAttr = resolved.fillAttr;
+  if (fillAttr !== "none" && !fillAttr.startsWith("url(")) {
+    fillAttr = escXml(fillAttr);
+  }
+
+  const fillKind = effectiveFillType(fillNode);
+  const strokePaint =
+    fillAttr !== "none" && fillAttr.startsWith("url(") ? fillAttr : escXml(fillPaintCss(fillNode, opts?.assets) || typo.color);
+  const decorations = svgTextDecorationMarkup(prepared, typo, style.textDecoration, strokePaint);
+
+  if (textFillNeedsMask(fillKind, resolved.fillAttr, resolved.underlayMarkup)) {
+    const maskId = `${gradId}-mask`;
+    opts.registerGradient(
+      maskId,
+      `<mask id="${maskId}" maskUnits="userSpaceOnUse" x="0" y="0" width="${w}" height="${h}">` +
+        `<rect x="0" y="0" width="${w}" height="${h}" fill="black"/>` +
+        `<text ${textAttrs} fill="white">${tspansMarkup}</text></mask>`,
+    );
+    const fillContent =
+      resolved.underlayMarkup ||
+      `<rect x="0" y="0" width="${w}" height="${h}" fill="${fillAttr}"/>`;
+    return `<g mask="url(#${maskId})">${fillContent}</g>${decorations}`;
+  }
+
+  return `${resolved.underlayMarkup}<text fill="${fillAttr}" ${textAttrs}>${tspansMarkup}</text>${decorations}`;
 }
 
 function imageFitSvg(
@@ -366,6 +540,10 @@ export function createSvgFilterRegistry(): SvgFilterRegistry {
         } else if (e.type === "layer-blur") {
           const std = Math.max(0, (e.blur ?? 0) / 2);
           parts.push(`<feGaussianBlur stdDeviation="${std}" />`);
+        } else if (e.type === "background-blur") {
+          const std = Math.max(0, (e.blur ?? 0) / 2);
+          parts.push(`<feGaussianBlur in="BackgroundImage" stdDeviation="${std}" result="bgBlur" />`);
+          parts.push(`<feBlend in="SourceGraphic" in2="bgBlur" mode="normal" />`);
         }
       }
 
@@ -460,10 +638,7 @@ export function svgPathMarkup(
     assets?: Record<string, EditorAsset>;
   },
 ): string {
-  const d =
-    resolved.type === "path" && (resolved.pathPoints?.length ?? 0) > 0
-      ? pathOutlineD(resolved)
-      : resolved.flattenedPathData ?? pathOutlineD(resolved);
+  const d = resolvePathOutlineD(resolved, resolved.id);
   const w = Math.max(1, resolved.width);
   const h = Math.max(1, resolved.height);
   let fillAttr = "none";
@@ -488,13 +663,54 @@ export function svgPathMarkup(
   if (fillAttr !== "none" && fillAttr !== "transparent" && !fillAttr.startsWith("url(")) {
     fillAttr = escXml(fillAttr);
   }
-  const sc = escXml(resolved.strokeColor ?? DEFAULT_SHAPE_STROKE);
   const sw = resolved.strokeWidth ?? 2;
   const filter = opts?.filterRef ? ` filter="url(#${opts.filterRef})"` : "";
   const showStroke = strokeIsVisible(resolved) && sw > 0;
   const strokeExtra = showStroke ? ` ${strokeAttrsForSvgMarkup(resolved)}` : "";
   const fillRuleAttr =
-    opts?.fillRule && opts.fillRule !== "nonzero" ? ` fill-rule="${opts.fillRule}"` : "";
+    (opts?.fillRule ?? resolved.pathFillRule) &&
+    (opts?.fillRule ?? resolved.pathFillRule) !== "nonzero"
+      ? ` fill-rule="${opts?.fillRule ?? resolved.pathFillRule}"`
+      : "";
+
+  const gradientOutlineStroke =
+    showStroke && opts?.registerGradient && opts.nodeId
+      ? svgGradientOutlineStrokeMarkup(resolved, {
+          nodeId: opts.nodeId,
+          width: w,
+          height: h,
+          registerGradient: opts.registerGradient,
+          renderScale: opts.renderScale,
+          assets: opts.assets,
+          filter,
+        })
+      : null;
+  if (gradientOutlineStroke) {
+    underlay += gradientOutlineStroke.underlay;
+    const fillPath = `<path d="${escXml(d)}" fill="${fillAttr}" stroke="none"${fillRuleAttr}${filter} />`;
+    return `${underlay}${gradientOutlineStroke.markup}${fillPath}`;
+  }
+
+  const closed = resolved.pathClosed ?? false;
+  const openOutline =
+    showStroke && shouldUseOutlinedOpenPathStroke(resolved, closed)
+      ? outlineStroke(resolved)
+      : null;
+  if (openOutline?.pathD) {
+    const strokeFill = escXml(
+      effectColorToRgba(
+        openOutline.fill,
+        openOutline.fillOpacity ?? resolved.strokeOpacity ?? 1,
+      ),
+    );
+    const outlineRule =
+      openOutline.fillRule !== "nonzero" ? ` fill-rule="${openOutline.fillRule}"` : "";
+    const fillPath = `<path d="${escXml(d)}" fill="${fillAttr}" stroke="none"${fillRuleAttr}${filter} />`;
+    const strokePath = `<path d="${escXml(openOutline.pathD)}" fill="${strokeFill}" stroke="none"${outlineRule}${filter} />`;
+    return underlay ? `${underlay}${fillPath}${strokePath}` : `${fillPath}${strokePath}`;
+  }
+
+  const sc = escXml(resolved.strokeColor ?? DEFAULT_SHAPE_STROKE);
   const path = showStroke
     ? `<path d="${escXml(d)}" fill="${fillAttr}" stroke="${sc}" stroke-width="${sw}"${strokeExtra}${fillRuleAttr}${filter} />`
     : `<path d="${escXml(d)}" fill="${fillAttr}" stroke="none"${fillRuleAttr}${filter} />`;

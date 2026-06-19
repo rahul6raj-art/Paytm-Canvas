@@ -9,7 +9,7 @@ import {
   strokeEndpointLabel,
   type StrokeEndpoint,
 } from "@/lib/strokeEndpoints";
-import { appFieldRadius } from "@/lib/appFieldStyles";
+import { appFieldShellClass } from "@/lib/appFieldStyles";
 import { cn } from "@/lib/utils";
 import {
   anchoredMenuStyle,
@@ -47,7 +47,7 @@ export function StrokeEndpointPicker({
     <div
       ref={menuRef}
       role="listbox"
-      className="fixed z-[120] overflow-hidden rounded-md border border-app-border bg-app-panel py-1 shadow-xl"
+      className="fixed z-[120] overflow-hidden editor-floating-menu"
       style={anchoredMenuStyle(position)}
     >
       {STROKE_ENDPOINT_CAP_OPTIONS.map((opt) => (
@@ -87,9 +87,9 @@ export function StrokeEndpointPicker({
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          "flex h-6 w-full items-center gap-2 border border-app-border bg-app-field px-1.5 text-left text-ui text-app-fg hover:bg-app-hover disabled:opacity-40",
-          appFieldRadius,
-          open && "border-accent ring-1 ring-accent",
+          appFieldShellClass,
+          "w-full gap-2 px-1.5 text-left hover:bg-app-hover disabled:opacity-40",
+          open && "border-app-panel-edge ring-1 ring-app-panel-edge",
         )}
         aria-expanded={open}
         aria-haspopup="listbox"
@@ -121,8 +121,8 @@ function EndpointMenuItem({
       disabled={disabled}
       onClick={onPick}
       className={cn(
-        "flex w-full items-center gap-2 px-2 py-1.5 text-left text-ui text-app-fg hover:bg-accent/15 disabled:opacity-40",
-        selected && "bg-accent/10",
+        "flex w-full items-center gap-2 px-2 py-1.5 text-left text-ui text-app-fg hover:bg-app-hover disabled:opacity-40",
+        selected && "bg-app-inset",
       )}
     >
       <span className="flex w-4 shrink-0 justify-center">

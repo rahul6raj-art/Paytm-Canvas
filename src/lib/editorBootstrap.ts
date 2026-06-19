@@ -12,6 +12,7 @@ export type InitialDocumentFields = Pick<
   | "pages"
   | "pageOrder"
   | "activePageId"
+  | "activeSubPageId"
   | "zoom"
   | "pan"
   | "showGrid"
@@ -41,6 +42,7 @@ export function createEmptyDocumentFields(): InitialDocumentFields {
     pages: { [pageId]: page },
     pageOrder: [pageId],
     activePageId: pageId,
+    activeSubPageId: page.activeSubPageId ?? `${pageId}-sp-1`,
     zoom: page.zoom,
     pan: page.pan,
     showGrid: page.showGrid,
@@ -52,6 +54,7 @@ export function createEmptyDocumentFields(): InitialDocumentFields {
     designTokens: {},
     fileName: "Untitled",
     comments: [],
+    codeRoundTripLink: null,
   };
 }
 
@@ -72,6 +75,7 @@ export function mergeSampleDocumentFields(
     pages: pageInit.pages,
     pageOrder: pageInit.pageOrder,
     activePageId: activeId,
+    activeSubPageId: pageInit.activeSubPageId ?? active.activeSubPageId ?? `${activeId}-sp-1`,
     zoom: active.zoom,
     pan: active.pan,
     showGrid: active.showGrid,
@@ -83,6 +87,19 @@ export function mergeSampleDocumentFields(
     designTokens: {},
     fileName,
     comments: [],
+  };
+}
+
+/** Empty canvases always start with the layout grid hidden. */
+export function preferLayoutGridOffWhenEmpty<T extends InitialDocumentFields>(fields: T): T {
+  if (!isWorkspaceEmpty(fields)) return fields;
+  const { activePageId, pages } = fields;
+  const active = pages[activePageId];
+  if (!active) return { ...fields, showGrid: false };
+  return {
+    ...fields,
+    showGrid: false,
+    pages: { ...pages, [activePageId]: { ...active, showGrid: false } },
   };
 }
 

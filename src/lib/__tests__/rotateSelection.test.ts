@@ -11,6 +11,7 @@ import {
 } from "@/lib/rotation";
 import {
   rotationDeltaDegrees,
+  shortestAngleDeltaDegrees,
   snapRotationDegrees,
   snapRotationDeltaDegrees,
 } from "@/lib/rotation/rotateMath";
@@ -34,6 +35,14 @@ function node(partial: Partial<EditorNode> & Pick<EditorNode, "id">): EditorNode
 }
 
 describe("rotateMath", () => {
+  it("shortestAngleDeltaDegrees avoids ±360° jumps at atan2 branch cut", () => {
+    const from = Math.PI - 0.05;
+    const to = -Math.PI + 0.05;
+    const step = shortestAngleDeltaDegrees(from, to);
+    assert.ok(Math.abs(step) < 20);
+    assert.ok(Math.abs(step) > 0);
+  });
+
   it("snapRotationDegrees snaps to 15° with Shift", () => {
     assert.equal(snapRotationDegrees(47, true), 45);
     assert.equal(snapRotationDegrees(8, true), 15);
@@ -106,6 +115,25 @@ describe("rotateSelection single", () => {
     assert.equal(x, 0);
     assert.equal(y, 0);
     assert.notEqual(rotation, 0);
+  });
+
+  it("applySingleRotate accumulates rotation smoothly across atan2 branch cut", () => {
+    const n = node({ id: "a", x: 0, y: 0, width: 100, height: 100, rotation: 0 });
+    const nodes = { a: n };
+    const childOrder = { [EDITOR_ROOT_KEY]: ["a"] };
+    const center = getNodeWorldCenterFromChildOrder("a", nodes, childOrder);
+    const session = createSingleRotateSession("a", n, nodes, childOrder, {
+      x: center.x - 100,
+      y: center.y,
+    });
+    const { rotation } = applySingleRotate(
+      session,
+      { x: center.x - 100, y: center.y - 10 },
+      false,
+      nodes,
+      childOrder,
+    );
+    assert.ok(Math.abs(rotation) < 30);
   });
 
   it("applySingleRotate keeps frozen startGeom even if node x/y drift in store", () => {

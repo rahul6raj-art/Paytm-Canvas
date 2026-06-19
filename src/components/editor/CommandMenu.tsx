@@ -186,7 +186,7 @@ export function CommandMenu() {
       }}
     >
       <div
-        className="flex max-h-[min(90vh,640px)] w-full max-w-lg flex-col overflow-hidden rounded-lg border border-app-border bg-app-panel/95 shadow-2xl backdrop-blur-md"
+        className="flex max-h-[min(90vh,640px)] w-full max-w-lg flex-col overflow-hidden editor-floating-menu border border-app-border bg-app-panel/95 shadow-2xl backdrop-blur-md"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="border-b border-app-border-subtle px-2 py-1.5">

@@ -20,6 +20,7 @@ import { fillPaintCss, normalizeFillGradient } from "@/lib/fillGradient";
 import { ColorInput } from "@/components/editor/ColorInput";
 import { ColorLibrary } from "@/components/editor/ColorLibrary";
 import { cn } from "@/lib/utils";
+import { EditorHintWrap } from "./EditorHoverHint";
 
 function EmptyStyleHint({
   icon: Icon,
@@ -63,49 +64,50 @@ function TokenPreview({ token }: { token: DesignToken }) {
     const v = token.value;
     const op = v.opacity ?? 1;
     return (
-      <div
-        className="h-8 w-full rounded border border-app-border shadow-inner"
-        style={{ backgroundColor: v.hex, opacity: op }}
-        title={tokenValueSummary(token)}
-      />
+      <EditorHintWrap title={tokenValueSummary(token)} anchorClassName="contents">
+        <div
+          className="h-8 w-full rounded border border-app-border shadow-inner"
+          style={{ backgroundColor: v.hex, opacity: op }}
+        />
+      </EditorHintWrap>
     );
   }
   if (token.type === "gradient" && isGradientValue(token.value)) {
     return (
-      <div
-        className="h-8 w-full rounded border border-app-border shadow-inner"
-        style={{
-          background: fillPaintCss({
-            fillType: "gradient",
-            fillGradient: normalizeFillGradient(token.value),
-            fillEnabled: true,
-            fillOpacity: 1,
-          }),
-        }}
-        title={tokenValueSummary(token)}
-      />
+      <EditorHintWrap title={tokenValueSummary(token)} anchorClassName="contents">
+        <div
+          className="h-8 w-full rounded border border-app-border shadow-inner"
+          style={{
+            background: fillPaintCss({
+              fillType: "gradient",
+              fillGradient: normalizeFillGradient(token.value),
+              fillEnabled: true,
+              fillOpacity: 1,
+            }),
+          }}
+        />
+      </EditorHintWrap>
     );
   }
   if (token.type === "typography" && isTypographyValue(token.value)) {
     const v = token.value;
     return (
-      <div
-        className="flex h-8 w-full items-center justify-center overflow-hidden rounded border border-app-border bg-app-surface px-1"
-        title={tokenValueSummary(token)}
-      >
-        <span
-          className="truncate text-ui text-app-fg"
-          style={{
-            fontFamily: v.fontFamily,
-            fontSize: Math.min(v.fontSize, 14),
-            fontWeight: v.fontWeight,
-            lineHeight: 1.1,
-            letterSpacing: `${v.letterSpacing}px`,
-          }}
-        >
-          Ag
-        </span>
-      </div>
+      <EditorHintWrap title={tokenValueSummary(token)} anchorClassName="contents">
+        <div className="flex h-8 w-full items-center justify-center overflow-hidden rounded border border-app-border bg-app-surface px-1">
+          <span
+            className="truncate text-ui text-app-fg"
+            style={{
+              fontFamily: v.fontFamily,
+              fontSize: Math.min(v.fontSize, 14),
+              fontWeight: v.fontWeight,
+              lineHeight: 1.1,
+              letterSpacing: `${v.letterSpacing}px`,
+            }}
+          >
+            Ag
+          </span>
+        </div>
+      </EditorHintWrap>
     );
   }
   if (token.type === "spacing" && isSpacingValue(token.value)) {
@@ -123,14 +125,15 @@ function TokenPreview({ token }: { token: DesignToken }) {
     const fallbackShadow = !er.boxShadow && !er.filter ? effectValueToCssShadow(v) : undefined;
     return (
       <div className="flex h-8 w-full items-center justify-center rounded border border-app-border bg-app-field">
-        <div
-          className="h-4 w-10 rounded-sm bg-app-hover"
-          style={{
-            boxShadow: er.boxShadow ?? fallbackShadow,
-            filter: er.filter || undefined,
-          }}
-          title={tokenValueSummary(token)}
-        />
+        <EditorHintWrap title={tokenValueSummary(token)} anchorClassName="contents">
+          <div
+            className="h-4 w-10 rounded-sm bg-app-hover"
+            style={{
+              boxShadow: er.boxShadow ?? fallbackShadow,
+              filter: er.filter || undefined,
+            }}
+          />
+        </EditorHintWrap>
       </div>
     );
   }
@@ -269,15 +272,16 @@ export function StylesPanel() {
             >
               Add to library
             </button>
-            <button
-              type="button"
-              disabled={selectedIds.length === 0}
-              onClick={() => createColorTokenFromSelection(colorName.trim() || undefined)}
-              className="flex-1 rounded border border-app-border bg-app-hover py-1.5 text-ui font-medium text-white hover:bg-white/[0.1] disabled:opacity-40"
-              title="Save the selected layer's fill as a library color"
-            >
-              From selection
-            </button>
+            <EditorHintWrap title="Save the selected layer's fill as a library color">
+              <button
+                type="button"
+                disabled={selectedIds.length === 0}
+                onClick={() => createColorTokenFromSelection(colorName.trim() || undefined)}
+                className="flex-1 rounded border border-app-border bg-app-hover py-1.5 text-ui font-medium text-white hover:bg-white/[0.1] disabled:opacity-40"
+              >
+                From selection
+              </button>
+            </EditorHintWrap>
           </div>
           {hasColors ? (
             <button

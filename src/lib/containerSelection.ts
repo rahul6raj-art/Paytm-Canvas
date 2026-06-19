@@ -10,14 +10,23 @@ export function hasVisibleChildren(
   return layerPanelChildIds(nodeId, nodes, childOrder).some((cid) => nodes[cid]?.visible);
 }
 
-/** Empty frames are selectable by tapping anywhere; populated frames only via the title. */
+/** Empty frames are selectable by tapping anywhere; populated manual frames only via children.
+ * Auto-layout frames receive body hits when children are collapsed for group-style drag. */
 export function frameBodyReceivesPointerHits(
   nodeId: string,
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
+  deepSelect = false,
 ): boolean {
   const node = nodes[nodeId];
   if (node?.type !== "frame") return true;
+  if (
+    !deepSelect &&
+    isAutoLayoutContainerNode(node) &&
+    hasVisibleChildren(nodeId, nodes, childOrder)
+  ) {
+    return true;
+  }
   return !hasVisibleChildren(nodeId, nodes, childOrder);
 }
 
@@ -57,7 +66,7 @@ export function shouldCollapseContainerHits(
     return false;
   }
   if (deepSelect) return false;
-  if (isAutoLayoutContainerNode(node)) return false;
+  if (isAutoLayoutContainerNode(node)) return true;
   if (node.isBooleanGroup && !node.maskId) return true;
   if (node.type === "frame") return false;
   return node.type === "group";
@@ -84,7 +93,7 @@ export function selectionTargetForClick(
   if (!parent?.visible || parent.locked) return hitId;
   if (!hasVisibleChildren(parentId, nodes, childOrder)) return hitId;
   if (parent.type === "group" || parent.type === "frame") {
-    if (isAutoLayoutContainerNode(parent)) return hitId;
+    if (isAutoLayoutContainerNode(parent)) return parentId;
     if (parent.type === "frame") return hitId;
     return parentId;
   }

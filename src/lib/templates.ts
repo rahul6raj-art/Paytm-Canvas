@@ -277,7 +277,7 @@ function slice(
     selectedIds,
     zoom: 0.52,
     pan: { x: 48, y: 32 },
-    showGrid: true,
+    showGrid: false,
     showRulers: false,
     canvasBackgroundColor: "#e5e5e5",
     comments: [],

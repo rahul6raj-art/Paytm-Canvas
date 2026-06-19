@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Download, Plus, Search, Sparkles, Upload } from "lucide-react";
+import { Download, PanelLeft, Plus, Search, Sparkles, Upload } from "lucide-react";
 import { DashboardSidebar, type DashboardNavId } from "./DashboardSidebar";
+import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
 import { FileCard } from "./FileCard";
 import { FileCardSkeleton } from "./FileCardSkeleton";
 import { TemplateCard } from "./TemplateCard";
@@ -19,7 +20,6 @@ import type { EditorPersistSlice } from "@/lib/documentPersistence";
 import {
   documentToEditorPatch,
   parsePaytmCraftDocumentJson,
-  readLocalDocument,
 } from "@/lib/documentPersistence";
 import { isFigmaFigFile } from "@/lib/figImport";
 import { waitForNextPaint } from "@/lib/figImport/figImportRuntime";
@@ -74,9 +74,17 @@ import {
   writeDashboardActiveTeamId,
 } from "@/lib/dashboardTeamSwitcher";
 import { PaytmCraftApiModeBanner } from "@/components/PaytmCraftApiModeBanner";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { DashboardApiTokensPanel } from "@/components/dashboard/DashboardApiTokensPanel";
+import { DashboardTopChrome } from "@/components/dashboard/DashboardTopChrome";
+import { EditorDocumentPersistence } from "@/components/editor/EditorDocumentPersistence";
 import { apiTokenCreatedSuccessMessage, type ApiTokenResourceScope } from "@/lib/apiTokenManagement";
+import {
+  formatDashboardSavedFileEdited,
+  readDashboardSavedFiles,
+  removeDashboardSavedFile,
+  subscribeDashboardSavedFiles,
+  type DashboardSavedFile,
+} from "@/lib/dashboardSavedFiles";
 
 function matchesSearch(q: string, ...parts: string[]) {
   const s = q.trim().toLowerCase();
@@ -89,11 +97,11 @@ const SECTION_ORDER: MockWorkspace["section"][] = ["personal", "paytm-design", "
 function roleBadgeClass(role: MockMemberRole): string {
   switch (role) {
     case "owner":
-      return "border-amber-200 bg-amber-50 text-amber-900";
+      return "border-app-border-subtle bg-app-inset text-app-fg";
     case "editor":
-      return "border-sky-200 bg-sky-50 text-sky-900";
+      return "border-app-border-subtle bg-app-inset text-app-fg";
     default:
-      return "border-app-border bg-app-inset text-app-fg";
+      return "border-app-border-subtle bg-app-inset text-app-muted";
   }
 }
 
@@ -169,9 +177,9 @@ function DashboardTeamView({
         <p className="mb-4 text-ui-sm text-app-muted">Loading members…</p>
       ) : null}
 
-      <div className="mb-6 overflow-hidden rounded-xl border border-app-border bg-app-card shadow-sm">
-        <table className="w-full text-left text-ui-sm">
-          <thead className="border-b border-app-border-subtle bg-app-raised section-heading text-app-muted">
+      <div className="editor-sidebar-section mb-6 overflow-hidden shadow-none">
+        <table className="w-full text-left text-ui">
+          <thead className="border-b border-app-panel-edge bg-app-inset section-heading text-app-muted">
             <tr>
               <th className="px-4 py-2.5">Member</th>
               <th className="px-4 py-2.5">Email</th>
@@ -208,7 +216,7 @@ function DashboardTeamView({
         </table>
       </div>
 
-      <div className="mb-6 rounded-xl border border-app-border bg-app-card p-4 shadow-sm">
+      <div className="editor-sidebar-section mb-6 p-4 shadow-none">
         <h3 className="text-ui font-semibold text-app-fg">Invite by email</h3>
         <p className="mt-1 text-ui text-app-muted">
           {useApiMembers
@@ -221,7 +229,7 @@ function DashboardTeamView({
             onChange={(e) => setEmail(e.target.value)}
             placeholder="teammate@paytm.com"
             disabled={inviting}
-            className="h-9 min-w-0 flex-1 rounded-lg border border-app-border bg-app-card px-3 text-ui-sm text-app-fg outline-none ring-slate-900/10 placeholder:text-app-subtle focus:border-slate-300 focus:ring-2 disabled:opacity-60"
+            className="h-9 min-w-0 flex-1 rounded-lg border border-app-border bg-app-inset px-3 text-ui text-app-fg outline-none transition-colors placeholder:text-app-subtle hover:bg-app-hover focus:border-app-border disabled:opacity-60"
             onKeyDown={(e) => {
               if (e.key === "Enter") void handleInvite();
             }}
@@ -237,12 +245,12 @@ function DashboardTeamView({
         </div>
       </div>
 
-      <div className="rounded-xl border border-dashed border-app-border bg-app-raised/50 p-4">
+      <div className="editor-sidebar-section border-dashed p-4 shadow-none">
         <h3 className="text-ui font-semibold text-app-fg">Pending invites</h3>
         {(useApiMembers ? apiPending : pending).length === 0 ? (
           <p className="mt-2 text-ui-sm text-app-muted">No pending invites for this workspace.</p>
         ) : useApiMembers ? (
-          <ul className="mt-3 divide-y divide-slate-200 rounded-lg border border-app-border bg-app-card">
+          <ul className="mt-3 divide-y divide-app-panel-edge rounded-lg border border-app-border-subtle bg-app-inset">
             {apiPending.map((p) => (
               <li key={p.id} className="flex items-center justify-between gap-2 px-3 py-2.5 text-ui-sm">
                 <span className="font-medium text-app-fg">{p.email}</span>
@@ -253,7 +261,7 @@ function DashboardTeamView({
             ))}
           </ul>
         ) : (
-          <ul className="mt-3 divide-y divide-slate-200 rounded-lg border border-app-border bg-app-card">
+          <ul className="mt-3 divide-y divide-app-panel-edge rounded-lg border border-app-border-subtle bg-app-inset">
             {pending.map((p) => (
               <li key={p.id} className="flex items-center justify-between gap-2 px-3 py-2.5 text-ui-sm">
                 <span className="font-medium text-app-fg">{p.email}</span>
@@ -274,9 +282,9 @@ export function DashboardShell() {
   const importRef = useRef<HTMLInputElement>(null);
   const [nav, setNav] = useState<DashboardNavId>("home");
   const [search, setSearch] = useState("");
-  const [hasLocalDoc, setHasLocalDoc] = useState(false);
   const [authTick, setAuthTick] = useState(0);
   const [sidebarInviteEmail, setSidebarInviteEmail] = useState("");
+  const [leftSidebarVisible, setLeftSidebarVisible] = useState(true);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [storedActiveTeamId, setStoredActiveTeamId] = useState<string | null>(() =>
     typeof window !== "undefined" ? readDashboardActiveTeamId() : null,
@@ -299,8 +307,14 @@ export function DashboardShell() {
   const [apiTokens, setApiTokens] = useState<CraftApiTokenSummary[]>([]);
   const [apiTokensLoading, setApiTokensLoading] = useState(false);
   const [membersLoading, setMembersLoading] = useState(false);
+  const [savedFilesTick, setSavedFilesTick] = useState(0);
+  const [savedFilesReady, setSavedFilesReady] = useState(false);
 
   useEffect(() => subscribeMockAuth(() => setAuthTick((n) => n + 1)), []);
+  useEffect(() => {
+    setSavedFilesReady(true);
+  }, []);
+  useEffect(() => subscribeDashboardSavedFiles(() => setSavedFilesTick((n) => n + 1)), []);
   useEffect(() => subscribeRemoteAuthRefresh(() => setApiRefreshKey((k) => k + 1)), []);
   useEffect(() => subscribeDashboardActiveTeam(() => setStoredActiveTeamId(readDashboardActiveTeamId())), []);
 
@@ -537,38 +551,6 @@ export function DashboardShell() {
     return activeWorkspace;
   }, [isApi, workspacesForSidebar, activeWorkspace]);
 
-  const currentUserForSidebar = useMemo(() => {
-    if (isApi && apiUser) return craftUserToMockUser(apiUser);
-    return getMockCurrentUser();
-  }, [isApi, apiUser]);
-
-  const teamPreviewMembers = useMemo(() => {
-    if (isApi && activeOrgTeamId) {
-      const orgMembers = apiTeamMembersByTeam[activeOrgTeamId];
-      if (orgMembers && orgMembers.length > 0) {
-        return craftWorkspaceMembersToMockMembers(orgMembers);
-      }
-    }
-    const apiMembers = apiMembersByWorkspace[activeWorkspace.id];
-    if (isApi && apiMembers && apiMembers.length > 0) {
-      return craftWorkspaceMembersToMockMembers(apiMembers);
-    }
-    if (isApi && apiUser) return [ownerMemberFromCraftUser(apiUser)];
-    return activeWorkspaceForView.members;
-  }, [
-    isApi,
-    apiUser,
-    activeOrgTeamId,
-    apiTeamMembersByTeam,
-    apiMembersByWorkspace,
-    activeWorkspace.id,
-    activeWorkspaceForView.members,
-  ]);
-
-  useEffect(() => {
-    setHasLocalDoc(readLocalDocument() != null);
-  }, []);
-
   const openEditor = useCallback(
     async (
       slice: EditorPersistSlice,
@@ -583,6 +565,47 @@ export function DashboardShell() {
     },
     [router],
   );
+
+  const dashboardSavedFiles = useMemo(() => {
+    if (!savedFilesReady) return [];
+    void savedFilesTick;
+    return readDashboardSavedFiles();
+  }, [savedFilesReady, savedFilesTick]);
+
+  const openSavedFile = useCallback(
+    async (file: DashboardSavedFile) => {
+      const patch = documentToEditorPatch(file.document);
+      await openEditor(patch);
+    },
+    [openEditor],
+  );
+
+  const deleteSavedFile = useCallback((file: DashboardSavedFile) => {
+    const ok = window.confirm(`Delete "${file.name}" permanently? This cannot be undone.`);
+    if (!ok) return;
+    removeDashboardSavedFile(file.id);
+  }, []);
+
+  const savedFilesMatchingSearch = useMemo(() => {
+    const q = search;
+    return dashboardSavedFiles.filter((f) => matchesSearch(q, f.name));
+  }, [dashboardSavedFiles, search]);
+
+  const savedFilesForWorkspace = useCallback(
+    (workspaceId: string) =>
+      savedFilesMatchingSearch.filter((f) => f.workspaceId === workspaceId),
+    [savedFilesMatchingSearch],
+  );
+
+  const savedFilesForActiveNav = useMemo(() => {
+    if (nav !== "recent" && nav !== "drafts") return [];
+    return savedFilesMatchingSearch
+      .filter((f) => f.workspaceId === activeWorkspace.id)
+      .sort((a, b) => b.savedAt.localeCompare(a.savedAt));
+  }, [nav, savedFilesMatchingSearch, activeWorkspace.id]);
+
+  const localOwnerName = getMockCurrentUser().name;
+  const localOwnerInitials = getMockCurrentUser().initials;
 
   const openApiFileById = useCallback(
     async (fileId: string) => {
@@ -678,13 +701,6 @@ export function DashboardShell() {
     [openEditor],
   );
 
-  const onOpenRecovered = useCallback(async () => {
-    const doc = readLocalDocument();
-    if (!doc) return;
-    const patch = documentToEditorPatch(doc);
-    await openEditor({ ...patch });
-  }, [openEditor]);
-
   const mockFiltered = useMemo(() => {
     const q = search;
     return DASHBOARD_MOCK_FILES.filter((f) => matchesSearch(q, f.name, f.ownerName, f.workspaceName));
@@ -775,23 +791,62 @@ export function DashboardShell() {
   const apiOwnerName = apiUser?.displayName ?? "You";
   const apiOwnerInitials = apiUser ? craftUserToMockUser(apiUser).initials : "Y";
 
+  const renderSavedFileCard = useCallback(
+    (file: DashboardSavedFile, workspaceName: string) => (
+      <FileCard
+        key={file.id}
+        name={file.name}
+        lastEdited={formatDashboardSavedFileEdited(file.savedAt)}
+        ownerName={isApi ? apiOwnerName : localOwnerName}
+        ownerInitials={isApi ? apiOwnerInitials : localOwnerInitials}
+        workspaceName={workspaceName}
+        sharedInitials={[]}
+        fileBadge="draft"
+        accent={accentGradientForApiId(file.id)}
+        onOpen={() => void openSavedFile(file)}
+        onDelete={() => deleteSavedFile(file)}
+      />
+    ),
+    [
+      isApi,
+      apiOwnerName,
+      apiOwnerInitials,
+      localOwnerName,
+      localOwnerInitials,
+      openSavedFile,
+      deleteSavedFile,
+    ],
+  );
+
   if (isApi && apiLoading) {
     return (
-      <div className="flex min-h-dvh bg-app-bg text-app-fg antialiased">
-        <aside className="hidden w-[240px] shrink-0 border-r border-app-border bg-app-card md:block" aria-hidden />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header className="border-b border-app-border bg-app-card px-6 py-4">
-            <PaytmCraftApiModeBanner />
-            <div className="mt-3 h-5 w-48 animate-pulse rounded bg-slate-200" />
-            <div className="mt-2 h-3 w-72 max-w-full animate-pulse rounded bg-app-inset" />
-          </header>
-          <main className="flex-1 px-6 py-6">
-            <div className="mx-auto max-w-6xl">
-              <p className="mb-4 text-ui-sm font-medium text-app-muted">Loading workspaces and files…</p>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {Array.from({ length: 6 }, (_, i) => (
-                  <FileCardSkeleton key={i} />
-                ))}
+      <div
+        data-editor-shell
+        data-dashboard-shell
+        className="flex h-dvh flex-col overflow-hidden bg-transparent font-sans text-app-fg antialiased"
+      >
+        <div className="relative min-h-0 flex-1 overflow-hidden bg-[hsl(var(--pc-canvas-workspace))]">
+          <aside
+            className="editor-sidebar-shell absolute inset-y-0 left-0 z-30 flex h-full w-[352px] flex-col gap-2 overflow-hidden p-2"
+            aria-hidden
+          >
+            <div className="editor-sidebar-section h-12 animate-pulse bg-app-inset" />
+            <div className="editor-sidebar-section min-h-0 flex-1 animate-pulse bg-app-inset" />
+          </aside>
+          <main className="thin-scroll absolute inset-y-0 right-0 left-[352px] overflow-y-auto p-2">
+            <div className="pointer-events-auto mx-auto flex max-w-6xl flex-col gap-2">
+              <div className="editor-sidebar-section px-3.5 py-4 shadow-none">
+                <PaytmCraftApiModeBanner />
+                <div className="mt-3 h-5 w-48 animate-pulse rounded bg-app-inset" />
+                <div className="mt-2 h-3 w-72 max-w-full animate-pulse rounded bg-app-raised" />
+              </div>
+              <div className="editor-sidebar-section p-4 shadow-none">
+                <p className="mb-4 text-ui font-medium text-app-muted">Loading workspaces and files…</p>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {Array.from({ length: 6 }, (_, i) => (
+                    <FileCardSkeleton key={i} />
+                  ))}
+                </div>
               </div>
             </div>
           </main>
@@ -802,27 +857,33 @@ export function DashboardShell() {
 
   if (isApi && apiError) {
     return (
-      <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-app-bg px-6 text-app-fg antialiased">
-        <PaytmCraftApiModeBanner />
-        <p className="text-sm font-semibold text-red-800">Could not load dashboard</p>
-        <p className="max-w-md text-center text-ui-sm text-app-muted">{apiError}</p>
-        <div className="flex flex-wrap items-center justify-center gap-2">
-          {isRemote ? (
+      <div
+        data-editor-shell
+        data-dashboard-shell
+        className="flex h-dvh flex-col items-center justify-center gap-4 bg-[hsl(var(--pc-canvas-workspace))] px-6 font-sans text-app-fg antialiased"
+      >
+        <div className="editor-sidebar-section pointer-events-auto max-w-md p-6 text-center shadow-none">
+          <PaytmCraftApiModeBanner />
+          <p className="mt-4 text-ui font-semibold text-app-fg">Could not load dashboard</p>
+          <p className="mt-2 text-ui text-app-muted">{apiError}</p>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+            {isRemote ? (
+              <button
+                type="button"
+                onClick={() => setLoginModalOpen(true)}
+                className="rounded-lg border border-app-border-subtle bg-app-inset px-4 py-2 text-ui font-semibold text-app-fg transition-colors hover:bg-app-hover"
+              >
+                Sign in
+              </button>
+            ) : null}
             <button
               type="button"
-              onClick={() => setLoginModalOpen(true)}
-              className="rounded-lg border border-app-border bg-app-card px-4 py-2 text-ui-sm font-semibold text-app-fg hover:bg-app-raised"
+              onClick={() => setApiRefreshKey((k) => k + 1)}
+              className="rounded-lg border border-app-border-subtle bg-app-fg px-4 py-2 text-ui font-semibold text-app-bg transition-opacity hover:opacity-90"
             >
-              Sign in
+              Retry
             </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => setApiRefreshKey((k) => k + 1)}
-            className="rounded-lg bg-app-fg px-4 py-2 text-ui-sm font-semibold text-app-bg hover:bg-app-muted"
-          >
-            Retry
-          </button>
+          </div>
         </div>
         <RemoteAuthLoginModal
           open={loginModalOpen}
@@ -834,7 +895,11 @@ export function DashboardShell() {
   }
 
   return (
-    <div className="flex min-h-dvh bg-app-bg text-app-fg antialiased">
+    <div
+      data-editor-shell
+      data-dashboard-shell
+      className="flex h-dvh flex-col overflow-hidden bg-transparent font-sans text-app-fg antialiased"
+    >
       <AIGenerateModal />
       <ImportHub />
       <CodeRoundTripModal />
@@ -847,114 +912,97 @@ export function DashboardShell() {
         open={loginModalOpen}
         onClose={() => setLoginModalOpen(false)}
         onSuccess={() => setApiRefreshKey((k) => k + 1)}
-        defaultEmail="rahul.verma@paytm.com"
+        defaultEmail="rahul6.raj@paytm.com"
       />
-      <DashboardSidebar
-        active={nav}
-        onNavigate={setNav}
-        workspaces={workspacesForSidebar}
-        activeWorkspace={activeWorkspace}
-        onSwitchWorkspace={(id) => {
-          switchMockWorkspace(id);
-        }}
-        currentUser={currentUserForSidebar}
-        teamPreviewMembers={teamPreviewMembers}
-        inviteEmail={sidebarInviteEmail}
-        onInviteEmailChange={setSidebarInviteEmail}
-        onInviteSubmit={onSidebarInvite}
-        remoteAuthActions={
-          isRemote
-            ? {
-                onSignIn: () => setLoginModalOpen(true),
-                onSignOut: () => void handleRemoteSignOut(),
+      <EditorDocumentPersistence />
+
+      <div className="relative min-h-0 flex-1 overflow-hidden bg-[hsl(var(--pc-canvas-workspace))]">
+        <DashboardTopChrome leftSidebarVisible={leftSidebarVisible} />
+        {leftSidebarVisible ? (
+          <aside
+            data-dashboard-aside
+            className="editor-sidebar-shell absolute inset-y-0 left-0 z-30 flex h-full w-[352px] flex-col gap-2 overflow-hidden p-2"
+          >
+            <DashboardSidebar
+              active={nav}
+              onNavigate={setNav}
+              workspaces={workspacesForSidebar}
+              activeWorkspace={activeWorkspace}
+              onSwitchWorkspace={(id) => {
+                switchMockWorkspace(id);
+              }}
+              sidebarVisible={leftSidebarVisible}
+              onToggleSidebar={() => setLeftSidebarVisible(false)}
+              inviteEmail={sidebarInviteEmail}
+              onInviteEmailChange={setSidebarInviteEmail}
+              onInviteSubmit={onSidebarInvite}
+              teamGroups={visibleTeamGroups}
+              orgTeamName={activeOrgTeamName}
+              teamSwitcher={
+                teamSwitcherProps
+                  ? { ...teamSwitcherProps, onSwitchTeam: handleSwitchTeam }
+                  : undefined
               }
-            : undefined
-        }
-        teamGroups={visibleTeamGroups}
-        orgTeamName={activeOrgTeamName}
-        teamSwitcher={
-          teamSwitcherProps
-            ? { ...teamSwitcherProps, onSwitchTeam: handleSwitchTeam }
-            : undefined
-        }
-      />
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-app-border bg-app-card px-6 py-3">
-          <div className="min-w-0 flex-1">
-            <h1 className="text-base font-semibold tracking-tight text-app-fg">Paytm Craft</h1>
-            <p className="text-ui text-app-muted">
-              <span className="font-medium text-app-fg">{activeWorkspace.name}</span>
-              {activeOrgTeamName ? (
-                <>
-                  <span className="text-app-subtle"> · </span>
-                  <span>{activeOrgTeamName}</span>
-                </>
-              ) : null}
-              <span className="text-app-subtle"> · </span>
-              Design, prototype, and ship product UI.
-            </p>
-          </div>
-          {isApi ? <PaytmCraftApiModeBanner /> : null}
-          <div className="relative hidden max-w-md flex-1 basis-[200px] md:block">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-app-subtle" strokeWidth={2} />
-            <input
-              type="search"
-              placeholder="Search files and templates…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="h-9 w-full rounded-lg border border-app-border bg-app-raised pl-9 pr-3 text-ui-sm text-app-fg outline-none placeholder:text-app-subtle focus:border-accent/40 focus:bg-app-card focus:ring-1 focus:ring-accent/30"
             />
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <ThemeToggle size="sm" />
-            <Link
-              href="/demo-checklist"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hidden rounded-lg border border-app-border bg-app-raised px-2.5 py-1 text-ui font-medium text-app-muted transition-colors hover:border-slate-300 hover:bg-app-card sm:inline"
+          </aside>
+        ) : null}
+        {!leftSidebarVisible ? (
+          <EditorHintWrap title="Show sidebar" anchorClassName="contents">
+            <button
+              type="button"
+              aria-label="Show sidebar"
+              onClick={() => setLeftSidebarVisible(true)}
+              className="editor-sidebar-section pointer-events-auto absolute left-2 top-2 z-40 flex h-9 w-9 items-center justify-center text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
             >
-              Demo checklist
-            </Link>
-            <span className="hidden rounded-full border border-app-border bg-app-raised px-2.5 py-1 text-ui font-medium text-app-muted sm:inline">
-              {activeWorkspace.slug}
-            </span>
-          </div>
-        </header>
+              <PanelLeft className="size-icon-ui" strokeWidth={1.75} />
+            </button>
+          </EditorHintWrap>
+        ) : null}
 
-        <main className="thin-scroll flex-1 overflow-y-auto px-6 py-6">
-          <div className="mx-auto flex max-w-6xl flex-col gap-8">
+        <main
+          className={cn(
+            "thin-scroll absolute inset-y-0 right-0 overflow-y-auto p-2 pt-[72px]",
+            leftSidebarVisible ? "left-[352px]" : "left-0",
+          )}
+        >
+          <div className="pointer-events-auto mx-auto flex max-w-6xl flex-col gap-2">
+            <div className="editor-sidebar-section flex flex-col gap-6 p-4 shadow-none">
+            {isApi ? (
+              <div className="mb-2">
+                <PaytmCraftApiModeBanner />
+              </div>
+            ) : null}
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => void onNewDesign()}
-                className="inline-flex items-center gap-2 rounded-lg bg-app-fg px-4 py-2 text-ui-sm font-semibold text-app-bg shadow-sm transition-colors hover:bg-app-muted"
+                className="inline-flex items-center gap-2 rounded-lg border border-app-border-subtle bg-app-fg px-4 py-2 text-ui font-semibold text-app-bg transition-opacity hover:opacity-90"
               >
-                <Plus className="h-4 w-4" strokeWidth={2} />
+                <Plus className="size-icon-ui" strokeWidth={2} />
                 Create new design
               </button>
               <button
                 type="button"
                 onClick={() => openAIModal("dashboard")}
-                className="inline-flex items-center gap-2 rounded-lg border border-violet-400/40 bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2 text-ui-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-95"
+                className="inline-flex items-center gap-2 rounded-lg border border-app-border-subtle bg-app-inset px-4 py-2 text-ui font-semibold text-app-fg transition-colors hover:border-app-border hover:bg-app-hover"
               >
-                <Sparkles className="h-4 w-4 text-white" strokeWidth={2} />
+                <Sparkles className="size-icon-ui text-app-muted" strokeWidth={2} />
                 Generate with AI
               </button>
               <button
                 type="button"
                 onClick={() => openImportHub()}
-                className="inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-4 py-2 text-ui-sm font-semibold text-sky-900 shadow-sm transition-colors hover:border-sky-300 hover:bg-sky-100"
+                className="inline-flex items-center gap-2 rounded-lg border border-app-border-subtle bg-app-inset px-4 py-2 text-ui font-medium text-app-fg transition-colors hover:border-app-border hover:bg-app-hover"
               >
-                <Download className="h-4 w-4" strokeWidth={2} />
+                <Download className="size-icon-ui" strokeWidth={2} />
                 Import design…
               </button>
               <button
                 type="button"
                 onClick={() => importRef.current?.click()}
-                className="inline-flex items-center gap-2 rounded-lg border border-app-border bg-app-card px-4 py-2 text-ui-sm font-medium text-app-fg shadow-sm transition-colors hover:border-slate-300 hover:bg-app-raised"
+                className="inline-flex items-center gap-2 rounded-lg border border-app-border-subtle bg-app-inset px-4 py-2 text-ui font-medium text-app-fg transition-colors hover:border-app-border hover:bg-app-hover"
               >
-                <Upload className="h-4 w-4" strokeWidth={2} />
+                <Upload className="size-icon-ui" strokeWidth={2} />
                 Import file…
               </button>
               <input
@@ -975,26 +1023,20 @@ export function DashboardShell() {
               >
                 Open last editor session
               </Link>
+              <div className="relative ml-auto hidden min-w-[200px] max-w-md flex-1 basis-[220px] md:block">
+                <Search
+                  className="pointer-events-none absolute left-3 top-1/2 size-icon-ui -translate-y-1/2 text-app-subtle"
+                  strokeWidth={2}
+                />
+                <input
+                  type="search"
+                  placeholder="Search files and templates…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="h-9 w-full rounded-lg border border-app-border bg-app-inset pl-9 pr-3 text-ui text-app-fg outline-none transition-colors placeholder:text-app-subtle hover:bg-app-hover focus:border-app-border"
+                />
+              </div>
             </div>
-
-            {hasLocalDoc ? (
-              <section>
-                <h2 className="mb-3 section-heading text-app-muted">Recovered</h2>
-                <div className="max-w-sm rounded-xl border border-amber-200/80 bg-amber-50/80 p-4 shadow-sm">
-                  <p className="text-ui-sm font-medium text-amber-950">Recovered local document</p>
-                  <p className="mt-1 text-ui leading-relaxed text-amber-900/80">
-                    A file was found in this browser&apos;s storage. Open it to continue where you left off.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={onOpenRecovered}
-                    className="mt-3 rounded-lg bg-amber-900 px-3 py-1.5 text-ui font-semibold text-amber-50 hover:bg-amber-950"
-                  >
-                    Open recovered file
-                  </button>
-                </div>
-              </section>
-            ) : null}
 
             {nav === "team" ? (
               <>
@@ -1033,15 +1075,17 @@ export function DashboardShell() {
                               <h3 className="text-ui-sm font-semibold text-app-fg">{group.name}</h3>
                               {group.workspaces.map((ws) => {
                                 const files = apiFilesFilteredInWorkspace(ws.id);
+                                const saved = savedFilesForWorkspace(ws.id);
                                 return (
                                   <div key={ws.id}>
                                     <h4 className="mb-2 text-ui font-medium text-app-muted">{ws.name}</h4>
-                                    {files.length === 0 ? (
-                                      <p className="rounded-lg border border-dashed border-app-border bg-app-card px-4 py-6 text-ui-sm text-app-muted">
+                                    {files.length === 0 && saved.length === 0 ? (
+                                      <p className="rounded-lg border border-dashed border-app-border-subtle bg-app-inset px-4 py-6 text-ui text-app-muted">
                                         No files in this workspace match your search.
                                       </p>
                                     ) : (
                                       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                                        {saved.map((f) => renderSavedFileCard(f, ws.name))}
                                         {files.map((f) => (
                                           <FileCard
                                             key={f.id}
@@ -1067,15 +1111,17 @@ export function DashboardShell() {
                             const ws = workspacesForSidebar.find((w) => w.section === sec);
                             if (!ws) return null;
                             const files = apiFilesFilteredInWorkspace(ws.id);
+                            const saved = savedFilesForWorkspace(ws.id);
                             return (
                               <div key={ws.id}>
                                 <h3 className="mb-2 text-ui-sm font-semibold text-app-fg">{ws.name}</h3>
-                                {files.length === 0 ? (
-                                  <p className="rounded-lg border border-dashed border-app-border bg-app-card px-4 py-6 text-ui-sm text-app-muted">
+                                {files.length === 0 && saved.length === 0 ? (
+                                  <p className="rounded-lg border border-dashed border-app-border-subtle bg-app-inset px-4 py-6 text-ui text-app-muted">
                                     No files in this workspace match your search.
                                   </p>
                                 ) : (
                                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                                    {saved.map((f) => renderSavedFileCard(f, ws.name))}
                                     {files.map((f) => (
                                       <FileCard
                                         key={f.id}
@@ -1096,12 +1142,13 @@ export function DashboardShell() {
                             );
                           })}
                     </div>
-                  ) : apiFilesForActiveNav.length === 0 ? (
-                    <p className="rounded-lg border border-dashed border-app-border bg-app-card px-4 py-8 text-center text-ui-sm text-app-muted">
+                  ) : apiFilesForActiveNav.length === 0 && savedFilesForActiveNav.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-app-border-subtle bg-app-inset px-4 py-8 text-center text-ui text-app-muted">
                       No files match your search in this workspace.
                     </p>
                   ) : (
                     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      {savedFilesForActiveNav.map((f) => renderSavedFileCard(f, activeWorkspace.name))}
                       {apiFilesForActiveNav.map((f) => (
                         <FileCard
                           key={f.id}
@@ -1124,15 +1171,17 @@ export function DashboardShell() {
                       const ws = workspacesForSidebar.find((w) => w.section === sec);
                       if (!ws) return null;
                       const files = filesBySectionForHome.get(ws.id) ?? [];
+                      const saved = savedFilesForWorkspace(ws.id);
                       return (
                         <div key={ws.id}>
                           <h3 className="mb-2 text-ui-sm font-semibold text-app-fg">{ws.name}</h3>
-                          {files.length === 0 ? (
-                            <p className="rounded-lg border border-dashed border-app-border bg-app-card px-4 py-6 text-ui-sm text-app-muted">
+                          {files.length === 0 && saved.length === 0 ? (
+                            <p className="rounded-lg border border-dashed border-app-border-subtle bg-app-inset px-4 py-6 text-ui text-app-muted">
                               No files in this workspace match your search.
                             </p>
                           ) : (
                             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                              {saved.map((f) => renderSavedFileCard(f, ws.name))}
                               {files.map((f) => (
                                 <FileCard
                                   key={f.id}
@@ -1156,12 +1205,13 @@ export function DashboardShell() {
                       );
                     })}
                   </div>
-                ) : filesForNav.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-app-border bg-app-card px-4 py-8 text-center text-ui-sm text-app-muted">
+                ) : filesForNav.length === 0 && savedFilesForActiveNav.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-app-border-subtle bg-app-inset px-4 py-8 text-center text-ui text-app-muted">
                     No files match your search in this workspace.
                   </p>
                 ) : (
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {savedFilesForActiveNav.map((f) => renderSavedFileCard(f, activeWorkspace.name))}
                     {filesForNav.map((f) => (
                       <FileCard
                         key={f.id}
@@ -1188,7 +1238,7 @@ export function DashboardShell() {
               <section>
                 <h2 className="mb-3 section-heading text-app-muted">Templates</h2>
                 {templatesFiltered.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-app-border bg-app-card px-4 py-8 text-center text-ui-sm text-app-muted">
+                  <p className="rounded-lg border border-dashed border-app-border-subtle bg-app-inset px-4 py-8 text-center text-ui text-app-muted">
                     No templates match your search.
                   </p>
                 ) : (
@@ -1213,7 +1263,7 @@ export function DashboardShell() {
             {nav === "trash" ? (
               <section>
                 <h2 className="mb-3 section-heading text-app-muted">Trash</h2>
-                <div className="rounded-xl border border-dashed border-app-border bg-app-card px-6 py-16 text-center shadow-sm">
+                <div className="rounded-xl border border-dashed border-app-border-subtle bg-app-inset px-6 py-16 text-center">
                   <p className="text-sm font-medium text-app-fg">Trash is empty</p>
                   <p className="mx-auto mt-2 max-w-md text-ui-sm leading-relaxed text-app-muted">
                     Deleted files will appear here. This demo does not persist trash — connect a backend to sync deleted
@@ -1222,6 +1272,7 @@ export function DashboardShell() {
                 </div>
               </section>
             ) : null}
+            </div>
           </div>
         </main>
       </div>

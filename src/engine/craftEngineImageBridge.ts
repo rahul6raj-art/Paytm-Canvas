@@ -1,5 +1,6 @@
 import type { EditorAsset, EditorNode } from "@/stores/useEditorStore";
 import type { CraftEngineInstance } from "@/engine/craftEngineTypes";
+import { runCraftEngineAccess } from "@/engine/craftEngineMutation";
 
 const uploaded = new Set<string>();
 const pending = new Map<string, Promise<void>>();
@@ -60,7 +61,9 @@ export async function syncCraftEngineImageAssets(
 
     const task = decodeDataUrlToRgba(asset.dataUrl)
       .then(({ width, height, rgba }) => {
-        engine.registerImageAsset(assetId, width, height, rgba);
+        runCraftEngineAccess(() => {
+          engine.registerImageAsset(assetId, width, height, rgba);
+        });
         uploaded.add(assetId);
       })
       .finally(() => {

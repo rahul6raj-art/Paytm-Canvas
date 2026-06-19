@@ -9,7 +9,8 @@ export function isCanvasChromeTarget(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
   if (!el?.closest) return false;
   return Boolean(
-    el.closest("[data-frame-label]") ||
+      el.closest("[data-canvas-floating-page-name]") ||
+      el.closest("[data-canvas-floating-zoom]") ||
       el.closest("[data-autolayout-spacing-handle]") ||
       el.closest("[data-autolayout-padding-handle]") ||
       el.closest("[data-grid-toggle]") ||

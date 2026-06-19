@@ -25,8 +25,8 @@ export function EditorMenuDropdown({
   const menuRef = useRef<HTMLDivElement>(null);
   const position = useAnchoredDropdownPosition(anchorRef, open, 2, {
     viewportClamp: true,
-    maxHeight: 480,
-    width: 240,
+    maxHeight: 520,
+    width: 260,
     remeasureKey: items.length,
   });
   useDismissAnchoredDropdown(open, onClose, anchorRef, menuRef);
@@ -46,14 +46,15 @@ export function EditorMenuDropdown({
     <div
       ref={menuRef}
       role="menu"
+      data-editor-shell
       className={cn(
-        "fixed z-[120] min-w-[220px] overflow-y-auto rounded-md border border-app-border bg-app-surface py-1 shadow-xl thin-scroll",
+        "editor-menu-dropdown fixed z-[120] overflow-y-auto border border-app-border bg-app-surface shadow-xl thin-scroll",
       )}
       style={anchoredMenuStyle(position)}
     >
       {items.map((item, i) => {
         if (item === "divider") {
-          return <div key={`d-${i}`} className="my-1 border-t border-app-border" role="separator" />;
+          return <div key={`d-${i}`} className="my-1.5 border-t border-app-border" role="separator" />;
         }
         const shortcut = item.shortcut ? formatShortcutLabel(item.shortcut) : "";
         return (
@@ -63,7 +64,7 @@ export function EditorMenuDropdown({
             role="menuitem"
             disabled={item.disabled}
             className={cn(
-              "flex w-full items-center justify-between gap-4 px-3 py-1.5 text-left text-ui",
+              "editor-menu-dropdown-item",
               item.disabled
                 ? "cursor-not-allowed text-app-subtle"
                 : "text-app-fg hover:bg-app-hover",
@@ -76,7 +77,7 @@ export function EditorMenuDropdown({
           >
             <span>{item.label}</span>
             {shortcut ? (
-              <span className="shrink-0 font-mono text-ui tabular-nums text-app-subtle">{shortcut}</span>
+              <span className="editor-menu-dropdown-shortcut">{shortcut}</span>
             ) : null}
           </button>
         );

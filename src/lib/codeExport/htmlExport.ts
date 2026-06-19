@@ -23,6 +23,8 @@ export type HtmlExportOptions = {
   isFrameRoot?: boolean;
   isPcRoot?: boolean;
   pcRootId?: string;
+  /** When true, nodes with class export appearance via page CSS (no inline style). */
+  preferPageCss?: boolean;
 };
 
 const UNITLESS_PROPS = new Set([
@@ -79,6 +81,8 @@ function htmlComponentAttr(node: EditorNode): string {
 }
 
 function attrsForNode(node: EditorNode, styleCss: string, opts?: HtmlExportOptions): string {
+  const effectiveStyle =
+    opts?.preferPageCss && node.codeClassName?.trim() ? "" : styleCss;
   const parts = [
     htmlComponentAttr(node),
     opts?.isPcRoot && opts.pcRootId ? `${PC_ROOT_ATTR}="${escapeHtmlAttr(opts.pcRootId)}"` : "",
@@ -89,7 +93,7 @@ function attrsForNode(node: EditorNode, styleCss: string, opts?: HtmlExportOptio
   if (node.codeClassName) {
     parts.push(`class="${escapeHtmlAttr(node.codeClassName)}"`);
   }
-  if (styleCss) parts.push(`style="${escapeHtmlAttr(styleCss)}"`);
+  if (effectiveStyle) parts.push(`style="${escapeHtmlAttr(effectiveStyle)}"`);
   if (
     node.type === "rectangle" ||
     node.type === "ellipse" ||

@@ -23,6 +23,7 @@ import {
 import { useCanvasToWorld } from "./CanvasToWorldContext";
 import { clientToWorldFromDocument } from "@/lib/canvasCoordinates";
 import { useShapeEditHandlesGate } from "./useShapeEditHandles";
+import { EditorHintWrap } from "./EditorHoverHint";
 
 /** Figma-style start / end / midpoint handles for line layers. */
 export function LineHandles() {
@@ -108,29 +109,33 @@ export function LineHandles() {
   return (
     <>
       {handles.map(({ kind, x, y, size }) => (
-        <button
+        <EditorHintWrap
           key={kind}
-          type="button"
-          data-line-handle={kind}
-          aria-label={
-            kind === "start" ? "Line start" : kind === "end" ? "Line end" : "Move line"
-          }
           title={
             kind === "body"
               ? "Drag to move line"
               : `Drag to move ${kind} (Shift: 45°)`
           }
-          className="pointer-events-auto absolute z-[31] touch-none rounded-full border-2 border-[#18a0fb] bg-white will-change-transform"
-          style={{
-            left: x - size / 2,
-            top: y - size / 2,
-            width: size,
-            height: size,
-            boxShadow: `0 0 0 ${borderWorld}px ${CANVAS_VISUAL.selection}`,
-            transition: dragging ? "none" : undefined,
-          }}
-          onPointerDown={makePointerDown(kind)}
-        />
+          anchorClassName="contents"
+        >
+          <button
+            type="button"
+            data-line-handle={kind}
+            aria-label={
+              kind === "start" ? "Line start" : kind === "end" ? "Line end" : "Move line"
+            }
+            className="pointer-events-auto absolute z-[31] touch-none rounded-full border-2 border-[#18a0fb] bg-white will-change-transform"
+            style={{
+              left: x - size / 2,
+              top: y - size / 2,
+              width: size,
+              height: size,
+              boxShadow: `0 0 0 ${borderWorld}px ${CANVAS_VISUAL.selection}`,
+              transition: dragging ? "none" : undefined,
+            }}
+            onPointerDown={makePointerDown(kind)}
+          />
+        </EditorHintWrap>
       ))}
     </>
   );

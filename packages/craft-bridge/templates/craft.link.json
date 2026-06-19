@@ -1,0 +1,14 @@
+{
+  "craftUrl": "http://localhost:3000",
+  "repoRoot": ".",
+  "links": [
+    {
+      "sourcePath": "src/screens/ExampleScreen/ExampleScreen.tsx",
+      "cssPaths": ["src/screens/ExampleScreen/ExampleScreen.css"],
+      "previewUrl": "http://localhost:5173",
+      "syncMode": "manual",
+      "watchSource": false,
+      "conflictPolicy": "ask"
+    }
+  ]
+}

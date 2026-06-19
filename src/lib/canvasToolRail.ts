@@ -17,12 +17,12 @@ export function canvasToolRailTitle(label: string, shortcut?: string): string {
   return shortcut ? `${label} (${shortcut})` : label;
 }
 
-/** Bottom canvas tool rail sizing (buttons were 36px; now 40px). */
-export const CANVAS_TOOL_RAIL_BUTTON_CLASS = "h-10 w-10 leading-none [&_svg]:block";
+/** Bottom canvas tool rail sizing. */
+export const CANVAS_TOOL_RAIL_BUTTON_CLASS = "h-11 w-11 leading-none [&_svg]:block";
 /** Lift rail above status footer / overflow clip (12px was tight on some layouts). */
-export const CANVAS_TOOL_RAIL_BOTTOM_OFFSET = 20;
+export const CANVAS_TOOL_RAIL_BOTTOM_OFFSET = 16;
 /** @deprecated Use positioned drag layout; kept for layout tests referencing bottom inset. */
-export const CANVAS_TOOL_RAIL_OFFSET_CLASS = "bottom-5";
+export const CANVAS_TOOL_RAIL_OFFSET_CLASS = "bottom-4";
 
 const TOOL_RAIL_POSITION_KEY = "craft-canvas-tool-rail-position-v2";
 const TOOL_RAIL_POSITION_PAD = 8;
@@ -94,11 +94,11 @@ export function defaultCanvasToolRailPosition(
   );
 }
 /** Integer px size — pairs with Lucide absoluteStrokeWidth for sharp strokes. */
-export const CANVAS_TOOL_RAIL_ICON_SIZE = 16;
+export const CANVAS_TOOL_RAIL_ICON_SIZE = 18;
 export const CANVAS_TOOL_RAIL_ICON_STROKE = 1.75;
-export const CANVAS_TOOL_RAIL_SPLIT_MAIN_CLASS = "h-10 min-w-10 shrink-0 rounded-r-none px-1.5";
+export const CANVAS_TOOL_RAIL_SPLIT_MAIN_CLASS = "h-11 min-w-11 shrink-0 rounded-r-none px-2";
 export const CANVAS_TOOL_RAIL_SPLIT_CHEVRON_CLASS =
-  "h-10 w-6 shrink-0 rounded-l-none border-l border-app-border-subtle px-0";
+  "h-11 w-7 shrink-0 rounded-l-none border-l border-app-border-subtle px-0";
 
 /** Shape variants on the canvas tool rail (rectangle split button). */
 export type ShapeTool =

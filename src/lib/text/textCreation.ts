@@ -7,7 +7,7 @@ import {
   type ShapeModifiers,
 } from "@/lib/shapes/shapeCreation";
 import { computeTextBoxSize } from "@/lib/text/textLayout";
-import { MIN_TEXT_BOX, type TextResizeMode } from "@/lib/text/textNodeModel";
+import { MIN_TEXT_BOX, textResizePatch, type TextResizeMode } from "@/lib/text/textNodeModel";
 
 export type TextStyleSeed = Partial<
   Pick<
@@ -75,7 +75,7 @@ export function createTextNode(
     locked: false,
     expanded: true,
     content: "",
-    textResizeMode: mode,
+    ...textResizePatch(mode),
     textAlign: style?.textAlign ?? "left",
     verticalAlign: style?.verticalAlign ?? "top",
     fillEnabled: true,
@@ -114,11 +114,11 @@ export function createTextDraftNodeFromDrag(
 ): Omit<EditorNode, "id" | "parentId"> {
   const box = textGeometryPatchFromDrag(start, end, modifiers, phase);
   const mode: TextResizeMode =
-    Math.hypot(end.x - start.x, end.y - start.y) < 4 ? "auto-width" : "auto-height";
+    Math.hypot(end.x - start.x, end.y - start.y) < 4 ? "auto-width" : "fixed";
   return createTextNode(box.x, box.y, box.width, box.height, mode, style, phase);
 }
 
-/** Fixed-width text box from a drag gesture (auto height wrapping). */
+/** Fixed-size text box from a drag gesture (Figma area text). */
 export function createTextBoxFromDrag(
   start: Point,
   end: Point,

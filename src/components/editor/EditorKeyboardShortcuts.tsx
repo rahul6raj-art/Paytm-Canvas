@@ -13,6 +13,7 @@ import {
 import { KEYBOARD_ZOOM_STEP } from "@/lib/canvasZoom";
 import { cancelActiveMarqueeFromKeyboard } from "@/lib/canvasMarqueeController";
 import { screenPxToWorld } from "@/lib/canvasVisual";
+import { enterTextEditMode } from "@/lib/text/textEditMode";
 import { topLevelSelectedIds } from "@/lib/editorGraph";
 import { nodeSupportsStrokeWidth } from "@/lib/strokeAdjust";
 import { canAddAutoLayoutToSelection } from "@/lib/autoLayoutSelection";
@@ -25,6 +26,8 @@ import {
   shouldBlockDeleteSelectionShortcut,
   shouldYieldShortcutsToTyping,
   resolveToolFromKeyboardEvent,
+  isPageNameEditActive,
+  shouldBlockToolShortcutsForTyping,
 } from "@/lib/editorKeyboardFocus";
 import { pasteCanvasImageFromClipboard } from "@/lib/canvasImagePlace";
 import { isVectorEditableShape } from "@/lib/shapes/shapeToPath";
@@ -146,7 +149,8 @@ export function EditorKeyboardShortcuts() {
         const inTextOrStroke =
           Boolean(st.penDrawingNodeId) ||
           Boolean(st.pencilDrawingNodeId) ||
-          Boolean(st.layerRenameId);
+          Boolean(st.layerRenameId) ||
+          isPageNameEditActive();
 
         if (hasSelection && !inTextOrStroke) {
           e.stopPropagation();
@@ -181,9 +185,17 @@ export function EditorKeyboardShortcuts() {
 
       if (!mod && !e.altKey) {
         const nextTool = resolveToolFromKeyboardEvent(e);
+        if (shouldYieldShortcutsToTyping(e, e.target) && nextTool != null) {
+          return;
+        }
         if (nextTool) {
           const stTool = useEditorStore.getState();
-          if (!stTool.editingTextId && !stTool.layerRenameId && !isShortcutOverlayOpen(stTool)) {
+          if (
+            !stTool.editingTextId &&
+            !stTool.layerRenameId &&
+            !shouldBlockToolShortcutsForTyping(e.target) &&
+            !isShortcutOverlayOpen(stTool)
+          ) {
             const allowedInInspect = nextTool === "move" || nextTool === "hand";
             const modeOk =
               stTool.editorMode === "design" ||
@@ -246,8 +258,7 @@ export function EditorKeyboardShortcuts() {
           }
           if (!st.editingTextId && n?.type === "text" && n.visible && !n.locked) {
             e.preventDefault();
-            st.pushHistory();
-            st.setEditingTextId(id);
+            enterTextEditMode(id);
             return;
           }
           if (n && !n.locked && n.visible !== false) {

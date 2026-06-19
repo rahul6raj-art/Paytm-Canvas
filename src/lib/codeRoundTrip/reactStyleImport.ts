@@ -43,6 +43,12 @@ function parsePxValue(v: string | number | undefined): number | undefined {
   if (typeof v === "number") return Number.isFinite(v) ? v : undefined;
   const s = String(v).trim();
   if (s.endsWith("%")) return undefined;
+  if (s.endsWith("dvh") || s.endsWith("vh")) {
+    const n = parseFloat(s);
+    if (!Number.isFinite(n)) return undefined;
+    // Mobile preview screens — map viewport units to a phone artboard height.
+    return Math.round((n / 100) * 844);
+  }
   const n = parseFloat(s);
   return Number.isFinite(n) ? n : undefined;
 }
@@ -129,7 +135,7 @@ export function reactStyleToNodePatch(style: ReactStyleRecord): Partial<EditorNo
   if (w !== undefined) patch.width = Math.max(1, w);
   else if (minW !== undefined) patch.width = Math.max(1, minW);
   if (h !== undefined) patch.height = Math.max(1, h);
-  else if (minH !== undefined) patch.height = Math.max(1, minH);
+  else if (minH !== undefined && minH > 0) patch.height = Math.max(1, minH);
 
   const left = parsePxValue(style.left as string | number | undefined);
   const top = parsePxValue(style.top as string | number | undefined);

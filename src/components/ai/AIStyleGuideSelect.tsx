@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import {
   Check,
@@ -32,6 +32,7 @@ import {
   isBuiltinDesignMdId,
 } from "@/lib/builtinDesignMd";
 import { cn } from "@/lib/utils";
+import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
 
 export type StyleGuideMode = "design-md" | "style-guide";
 export type StyleGuideTheme = "auto" | AIStyleId;
@@ -57,6 +58,10 @@ type Props = {
   onSelectedDesignMdIdChange: (id: string | null) => void;
   theme: StyleGuideTheme;
   onThemeChange: (theme: StyleGuideTheme) => void;
+  controlAnchorRef?: RefObject<HTMLButtonElement | null>;
+  controlledOpen?: boolean;
+  onControlledOpenChange?: (open: boolean) => void;
+  hideButton?: boolean;
 };
 
 export function AIStyleGuideSelect({
@@ -71,12 +76,19 @@ export function AIStyleGuideSelect({
   onSelectedDesignMdIdChange,
   theme,
   onThemeChange,
+  controlAnchorRef,
+  controlledOpen,
+  onControlledOpenChange,
+  hideButton = false,
 }: Props) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = onControlledOpenChange ?? setInternalOpen;
   const [mounted, setMounted] = useState(false);
   const [search, setSearch] = useState("");
   const [reading, setReading] = useState(false);
-  const buttonRef = useRef<HTMLButtonElement>(null);
+  const internalButtonRef = useRef<HTMLButtonElement>(null);
+  const buttonRef = controlAnchorRef ?? internalButtonRef;
   const menuRef = useRef<HTMLDivElement>(null);
   const mdInputRef = useRef<HTMLInputElement>(null);
   const styleInputRef = useRef<HTMLInputElement>(null);
@@ -157,21 +169,26 @@ export function AIStyleGuideSelect({
         ref={menuRef}
         role="dialog"
         aria-label="Style Guide"
+        data-editor-shell
         className={cn(
-          "fixed flex w-[300px] flex-col overflow-hidden rounded-xl border border-app-border bg-app-panel shadow-2xl",
+          "editor-floating-menu fixed flex w-[300px] flex-col overflow-hidden border border-app-border bg-app-surface shadow-xl thin-scroll",
           menuZClass,
         )}
-        style={{ ...anchoredMenuStyle(position), zIndex: 500 }}
+        style={anchoredMenuStyle(position)}
       >
         <div className="shrink-0 border-b border-app-border-subtle p-2">
-          <div className="flex rounded-full border border-app-border bg-app-toolbar-well p-0.5">
+          <div
+            className="grid grid-cols-2 gap-1 rounded-xl bg-app-inset p-1"
+            role="tablist"
+            aria-label="Style guide source"
+          >
             <button
               type="button"
+              role="tab"
+              aria-selected={mode === "design-md"}
               className={cn(
-                "flex-1 rounded-full px-2 py-1 text-ui font-medium transition-colors",
-                mode === "design-md"
-                  ? "border border-app-border bg-app-panel text-accent shadow-sm"
-                  : "text-app-muted hover:text-app-fg",
+                "chrome-segmented-tab min-w-0 truncate border border-transparent",
+                mode === "design-md" ? "chrome-segmented-tab-active" : "text-app-muted hover:text-app-fg",
               )}
               onClick={() => onModeChange("design-md")}
             >
@@ -179,11 +196,11 @@ export function AIStyleGuideSelect({
             </button>
             <button
               type="button"
+              role="tab"
+              aria-selected={mode === "style-guide"}
               className={cn(
-                "flex-1 rounded-full px-2 py-1 text-ui font-medium transition-colors",
-                mode === "style-guide"
-                  ? "border border-app-border bg-app-panel text-accent shadow-sm"
-                  : "text-app-muted hover:text-app-fg",
+                "chrome-segmented-tab min-w-0 truncate border border-transparent",
+                mode === "style-guide" ? "chrome-segmented-tab-active" : "text-app-muted hover:text-app-fg",
               )}
               onClick={() => onModeChange("style-guide")}
             >
@@ -206,38 +223,39 @@ export function AIStyleGuideSelect({
                     className="min-w-0 flex-1 bg-transparent text-ui text-app-fg outline-none placeholder:text-app-muted"
                   />
                 </div>
-                <button
-                  type="button"
-                  disabled={reading || disabled}
-                  title="Add Design.md"
-                  aria-label="Add Design.md"
-                  onClick={() => mdInputRef.current?.click()}
-                  className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-dashed border-app-border px-2 text-ui font-medium text-app-muted transition-colors hover:border-accent/40 hover:bg-app-hover hover:text-app-fg disabled:opacity-40"
-                >
-                  {reading ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
-                  ) : (
-                    <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-                  )}
-                  Add
-                </button>
+                <EditorHintWrap title="Add Design.md">
+                  <button
+                    type="button"
+                    disabled={reading || disabled}
+                    aria-label="Add Design.md"
+                    onClick={() => mdInputRef.current?.click()}
+                    className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-dashed border-app-border-subtle px-2 text-ui font-medium text-app-muted transition-colors hover:border-app-border hover:bg-app-hover hover:text-app-fg disabled:opacity-40"
+                  >
+                    {reading ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
+                    ) : (
+                      <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+                    )}
+                    Add
+                  </button>
+                </EditorHintWrap>
               </div>
             </div>
 
             <button
               type="button"
               className={cn(
-                "flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-ui transition-colors",
-                selectedDesignMdId === null ? "bg-accent/10 text-app-fg" : "hover:bg-app-hover",
+                "editor-menu-dropdown-item !items-center !justify-start gap-2.5",
+                selectedDesignMdId === null ? "bg-app-inset text-app-fg" : "",
               )}
               onClick={() => onSelectedDesignMdIdChange(null)}
             >
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-app-border bg-app-panel">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-app-border-subtle bg-app-inset">
                 <FileCode className="h-4 w-4 text-app-muted" strokeWidth={1.75} />
               </span>
               <span className="min-w-0 flex-1 truncate font-medium">No reference</span>
               {selectedDesignMdId === null ? (
-                <Check className="h-4 w-4 shrink-0 text-accent" strokeWidth={2.5} />
+                <Check className="h-4 w-4 shrink-0 text-app-muted" strokeWidth={2.5} />
               ) : null}
             </button>
 
@@ -254,15 +272,15 @@ export function AIStyleGuideSelect({
                       key={entry.id}
                       type="button"
                       className={cn(
-                        "flex w-full items-center gap-2.5 px-3 py-2 text-left text-ui transition-colors",
-                        selected ? "bg-accent/10 text-app-fg" : "hover:bg-app-hover",
+                        "editor-menu-dropdown-item !items-center !justify-start gap-2.5",
+                        selected ? "bg-app-inset text-app-fg" : "",
                       )}
                       onClick={() => onSelectedDesignMdIdChange(id)}
                     >
                       <DesignMdBrandLogo logo={entry.logo} label={entry.label} />
                       <span className="min-w-0 flex-1 truncate font-medium text-app-fg">{entry.label}</span>
                       {selected ? (
-                        <Check className="h-4 w-4 shrink-0 text-accent" strokeWidth={2.5} />
+                        <Check className="h-4 w-4 shrink-0 text-app-muted" strokeWidth={2.5} />
                       ) : null}
                     </button>
                   );
@@ -281,20 +299,20 @@ export function AIStyleGuideSelect({
                 key={ref.id}
                 className={cn(
                   "flex w-full items-center gap-2 px-3 py-2",
-                  selectedDesignMdId === ref.id ? "bg-accent/10" : "hover:bg-app-hover",
+                  selectedDesignMdId === ref.id ? "bg-app-inset" : "hover:bg-app-hover",
                 )}
               >
                 <button
                   type="button"
-                  className="flex min-w-0 flex-1 items-center gap-2.5 text-left text-ui"
+                  className="editor-menu-dropdown-item !items-center !justify-start gap-2.5 !px-0 !py-0"
                   onClick={() => onSelectedDesignMdIdChange(ref.id)}
                 >
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-app-border bg-app-inset">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-app-border-subtle bg-app-inset">
                     <FileCode className="h-4 w-4 text-app-muted" strokeWidth={1.75} />
                   </span>
                   <span className="min-w-0 flex-1 truncate font-medium text-app-fg">{ref.name}</span>
                   {selectedDesignMdId === ref.id ? (
-                    <Check className="h-4 w-4 shrink-0 text-accent" strokeWidth={2.5} />
+                    <Check className="h-4 w-4 shrink-0 text-app-muted" strokeWidth={2.5} />
                   ) : null}
                 </button>
                 {!isBuiltinDesignMdId(ref.id) ? (
@@ -316,7 +334,7 @@ export function AIStyleGuideSelect({
                 type="button"
                 disabled={reading || disabled}
                 onClick={() => styleInputRef.current?.click()}
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-accent/15 px-3 py-2 text-ui font-semibold text-accent transition-colors hover:bg-accent/25 disabled:opacity-40"
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-app-border-subtle bg-app-inset px-3 py-2 text-ui font-medium text-app-fg transition-colors hover:border-app-border hover:bg-app-hover disabled:opacity-40"
               >
                 <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
                 Create New Style
@@ -328,17 +346,12 @@ export function AIStyleGuideSelect({
                 key={opt.id}
                 type="button"
                 className={cn(
-                  "flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-ui transition-colors",
-                  theme === opt.id ? "bg-accent/10" : "hover:bg-app-hover",
+                  "editor-menu-dropdown-item !items-center !justify-start gap-2.5",
+                  theme === opt.id ? "bg-app-inset text-app-fg" : "",
                 )}
                 onClick={() => onThemeChange(opt.id)}
               >
-                <span
-                  className={cn(
-                    "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-                    opt.id === "auto" ? "bg-violet-500/15 text-violet-400" : "bg-app-inset text-app-muted",
-                  )}
-                >
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-app-inset text-app-muted">
                   {opt.id === "auto" ? (
                     <Sparkles className="h-4 w-4" strokeWidth={2} />
                   ) : (
@@ -348,11 +361,11 @@ export function AIStyleGuideSelect({
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium text-app-fg">{opt.label}</span>
                   {opt.hint ? (
-                    <span className="block truncate text-ui text-app-subtle">{opt.hint}</span>
+                    <span className="block truncate text-ui font-normal text-app-subtle">{opt.hint}</span>
                   ) : null}
                 </span>
                 {theme === opt.id ? (
-                  <Check className="h-4 w-4 shrink-0 text-accent" strokeWidth={2.5} />
+                  <Check className="h-4 w-4 shrink-0 text-app-muted" strokeWidth={2.5} />
                 ) : null}
               </button>
             ))}
@@ -366,7 +379,7 @@ export function AIStyleGuideSelect({
                 type="button"
                 disabled={disabled}
                 onClick={() => styleInputRef.current?.click()}
-                className="flex w-full items-center justify-between px-3 py-2.5 text-ui font-medium text-app-fg transition-colors hover:bg-app-hover"
+                className="editor-menu-dropdown-item justify-between font-medium"
               >
                 Create Style
                 <ChevronRight className="h-4 w-4 text-app-muted" strokeWidth={2} />
@@ -398,34 +411,36 @@ export function AIStyleGuideSelect({
 
   return (
     <>
-      <button
-        ref={buttonRef}
-        type="button"
-        disabled={disabled}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        aria-label="Style Guide"
-        onClick={() => setOpen((v) => !v)}
-        className={cn(
-          "inline-flex min-w-0 items-center gap-1.5 rounded-full border border-app-border bg-app-panel py-1 pl-2.5 pr-1.5 text-ui font-medium text-app-fg shadow-sm transition-colors",
-          "hover:bg-app-hover disabled:cursor-not-allowed disabled:opacity-50",
-          open && "border-accent/40 bg-app-hover",
-          className,
-        )}
-      >
-        {mode === "design-md" && selectedBuiltin?.logo ? (
-          <DesignMdBrandLogo
-            logo={selectedBuiltin.logo}
-            label={selectedBuiltin.label}
-            boxClassName="h-5 w-5 rounded-full border-0 bg-white p-0.5"
-            className="h-3.5 w-3.5"
-          />
-        ) : (
-          <Palette className="h-3.5 w-3.5 shrink-0 text-app-muted" strokeWidth={2} />
-        )}
-        <span className="max-w-[100px] truncate">{pillLabel}</span>
-        <ChevronDown className="h-3 w-3 shrink-0 text-app-subtle" strokeWidth={2.5} />
-      </button>
+      {!hideButton ? (
+        <button
+          ref={buttonRef}
+          type="button"
+          disabled={disabled}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-label="Style Guide"
+          onClick={() => setOpen((v) => !v)}
+          className={cn(
+            "inline-flex min-w-0 items-center gap-1.5 rounded-full border border-app-border-subtle bg-app-inset py-1 pl-2 pr-1.5 text-ui font-medium text-app-fg transition-colors",
+            "hover:border-app-border hover:bg-app-hover disabled:cursor-not-allowed disabled:opacity-50",
+            open && "border-app-border bg-app-hover",
+            className,
+          )}
+        >
+          {mode === "design-md" && selectedBuiltin?.logo ? (
+            <DesignMdBrandLogo
+              logo={selectedBuiltin.logo}
+              label={selectedBuiltin.label}
+              boxClassName="h-5 w-5 rounded-full border-0 bg-white p-0.5"
+              className="h-3.5 w-3.5"
+            />
+          ) : (
+            <Palette className="h-3.5 w-3.5 shrink-0 text-app-muted" strokeWidth={2} />
+          )}
+          <span className="max-w-[100px] truncate">{pillLabel}</span>
+          <ChevronDown className="h-3 w-3 shrink-0 text-app-subtle" strokeWidth={2.5} />
+        </button>
+      ) : null}
       {menu && mounted ? createPortal(menu, document.body) : null}
     </>
   );

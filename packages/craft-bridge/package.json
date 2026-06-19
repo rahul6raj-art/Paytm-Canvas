@@ -1,0 +1,48 @@
+{
+  "name": "@paytm-craft/bridge",
+  "version": "0.1.0",
+  "description": "Design ↔ code round-trip bridge for Paytm Craft canvas and React/HTML source files",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rahul6raj-art/Craft.git",
+    "directory": "packages/craft-bridge"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "src",
+    "cli.mjs",
+    "templates"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts",
+    "./auth": "./src/auth.ts",
+    "./config": "./src/config.ts",
+    "./httpClient": "./src/httpClient.ts"
+  },
+  "bin": {
+    "craft-bridge": "./cli.mjs"
+  },
+  "scripts": {
+    "test": "tsx --test 'src/**/__tests__/*.test.ts'",
+    "pack:check": "npm pack --dry-run",
+    "prepublishOnly": "npm run test"
+  },
+  "keywords": [
+    "craft",
+    "design-to-code",
+    "code-to-design",
+    "figma",
+    "canvas",
+    "react",
+    "cursor"
+  ],
+  "devDependencies": {
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

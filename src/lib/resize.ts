@@ -16,6 +16,8 @@ export interface Bounds {
 export interface ResizeModifiers {
   shiftKey: boolean;
   altKey: boolean;
+  /** Inspector/canvas aspect ratio lock (constrain proportions). */
+  lockAspectRatio?: boolean;
 }
 
 export type ResizeKind =
@@ -36,8 +38,9 @@ export function isEdgeHandle(handle: ResizeHandle): boolean {
   return handle === "n" || handle === "s" || handle === "e" || handle === "w";
 }
 
-/** Figma-like proportional resize (Shift+Option, or Shift on a corner). */
+/** Figma-like proportional resize (Shift+Option, Shift on a corner, or aspect lock). */
 export function isProportionalResize(handle: ResizeHandle, modifiers: ResizeModifiers): boolean {
+  if (modifiers.lockAspectRatio) return true;
   if (modifiers.shiftKey && modifiers.altKey) return true;
   if (modifiers.shiftKey && !isEdgeHandle(handle)) return true;
   return false;
@@ -292,6 +295,41 @@ function shiftAltEdgeResize(handle: ResizeHandle, s: Bounds, px: number, py: num
   }
 }
 
+function proportionalEdgeResize(handle: ResizeHandle, s: Bounds, px: number, py: number): Bounds {
+  const L = s.x;
+  const T = s.y;
+  const W = s.width;
+  const H = s.height;
+  const R = L + W;
+  const B = T + H;
+  const ar = W / H;
+
+  switch (handle) {
+    case "e": {
+      const w = Math.max(MIN, px - L);
+      const h = Math.max(MIN, w / ar);
+      return { x: L, y: T, width: w, height: h };
+    }
+    case "w": {
+      const w = Math.max(MIN, R - px);
+      const h = Math.max(MIN, w / ar);
+      return { x: R - w, y: T, width: w, height: h };
+    }
+    case "s": {
+      const h = Math.max(MIN, py - T);
+      const w = Math.max(MIN, h * ar);
+      return { x: L, y: T, width: w, height: h };
+    }
+    case "n": {
+      const h = Math.max(MIN, B - py);
+      const w = Math.max(MIN, h * ar);
+      return { x: L, y: B - h, width: w, height: h };
+    }
+    default:
+      return shiftAnchoredResize(handle, s, px, py);
+  }
+}
+
 function normalizeLineBounds(handle: ResizeHandle, start: Bounds, raw: Bounds): Bounds {
   const hh = start.height;
   const R0 = start.x + start.width;
@@ -324,7 +362,7 @@ export function computeResizedBounds(
 ): Bounds {
   const px = currentPoint.x;
   const py = currentPoint.y;
-  const { shiftKey, altKey } = modifiers;
+  const { shiftKey, altKey, lockAspectRatio } = modifiers;
 
   let out: Bounds;
 
@@ -336,6 +374,10 @@ export function computeResizedBounds(
     }
   } else if (altKey) {
     out = altCenterResize(handle, startBounds, px, py);
+  } else if (lockAspectRatio) {
+    out = isEdgeHandle(handle)
+      ? proportionalEdgeResize(handle, startBounds, px, py)
+      : shiftAnchoredResize(handle, startBounds, px, py);
   } else if (shiftKey) {
     // Shift alone: one-axis / opposite-side anchored on edges; proportional on corners.
     out = isEdgeHandle(handle)

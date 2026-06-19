@@ -26,20 +26,10 @@ type ThemeContextValue = {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-function readInitialTheme(): { preference: ThemePreference; resolved: "light" | "dark" } {
-  if (typeof window === "undefined") {
-    return { preference: "system", resolved: "light" };
-  }
-  const preference = readThemePreference();
-  const resolved = resolveTheme(preference);
-  return { preference, resolved };
-}
-
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [preference, setPreferenceState] = useState<ThemePreference>(
-    () => readInitialTheme().preference,
-  );
-  const [resolved, setResolved] = useState<"light" | "dark">(() => readInitialTheme().resolved);
+  // Keep SSR and the first client render identical; sync real preference after mount.
+  const [preference, setPreferenceState] = useState<ThemePreference>("system");
+  const [resolved, setResolved] = useState<"light" | "dark">("light");
 
   const syncFromStorage = useCallback(() => {
     const pref = readThemePreference();

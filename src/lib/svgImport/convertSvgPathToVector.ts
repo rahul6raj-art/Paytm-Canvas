@@ -1,4 +1,4 @@
-import { newPathPointId, normalizePathNode, type PathPoint } from "@/lib/pathGeometry";
+import { newPathPointId, normalizePathNode, pathBounds, type PathPoint } from "@/lib/pathGeometry";
 import {
   absoluteSegmentsToPathD,
   parseSvgPathToAbsolute,
@@ -38,6 +38,7 @@ export function convertSvgPathToVector(
   const parentInv = invertMatrixSafe(parentWorldMatrix);
   const toParent = multiplyMatrix(parentInv, worldMatrix);
   const parentPts = points.map((p) => transformPathPoint(p, toParent, newPathPointId));
+  const bounds = pathBounds(parentPts);
 
   const normalized = normalizePathNode({
     type: "path",
@@ -52,7 +53,10 @@ export function convertSvgPathToVector(
     pathClosed && !segments.some((s) => s.type === "Z")
       ? [...segments, { type: "Z" as const }]
       : segments;
-  const flattenedPathData = absoluteSegmentsToPathD(transformSegments(flatSegments, toParent));
+  const flatInParent = transformSegments(flatSegments, toParent);
+  const flattenedPathData = absoluteSegmentsToPathD(
+    translatePathSegments(flatInParent, -bounds.x, -bounds.y),
+  );
 
   return {
     pathPoints: normalized.pathPoints ?? [],
@@ -94,6 +98,30 @@ function segmentsToPathPoints(segments: AbsolutePathSegment[]): PathPoint[] {
     }
   }
   return points;
+}
+
+export function translatePathSegments(
+  segments: AbsolutePathSegment[],
+  dx: number,
+  dy: number,
+): AbsolutePathSegment[] {
+  if (dx === 0 && dy === 0) return segments;
+  return segments.map((seg) => {
+    if (seg.type === "M") return { type: "M", x: seg.x + dx, y: seg.y + dy };
+    if (seg.type === "L") return { type: "L", x: seg.x + dx, y: seg.y + dy };
+    if (seg.type === "C") {
+      return {
+        type: "C",
+        x1: seg.x1 + dx,
+        y1: seg.y1 + dy,
+        x2: seg.x2 + dx,
+        y2: seg.y2 + dy,
+        x: seg.x + dx,
+        y: seg.y + dy,
+      };
+    }
+    return { type: "Z" };
+  });
 }
 
 function transformSegments(segments: AbsolutePathSegment[], m: Matrix2D): AbsolutePathSegment[] {

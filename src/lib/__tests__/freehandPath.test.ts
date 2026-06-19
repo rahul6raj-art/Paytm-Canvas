@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { shouldSampleFreehandPoint, simplifyPolyline } from "../freehandPath";
+import { pathToSvgD } from "../pathGeometry";
+import { shouldSampleFreehandPoint, simplifyPolyline, smoothPolylineToPathPoints } from "../freehandPath";
 
 describe("freehandPath", () => {
   it("samples when movement exceeds zoom-scaled spacing", () => {
@@ -19,5 +20,18 @@ describe("freehandPath", () => {
     assert.equal(out.length, 2);
     assert.deepEqual(out[0], { x: 0, y: 0 });
     assert.deepEqual(out[1], { x: 30, y: 0 });
+  });
+
+  it("smooths polylines into cubic bezier path points", () => {
+    const arc: { x: number; y: number }[] = [];
+    for (let i = 0; i <= 8; i++) {
+      const t = (i / 8) * Math.PI;
+      arc.push({ x: Math.cos(t) * 100, y: Math.sin(t) * 100 });
+    }
+    const smoothed = smoothPolylineToPathPoints(arc, false, () => "pt-test");
+    assert.ok(smoothed.length >= 3);
+    assert.ok(smoothed.some((p) => p.handleIn || p.handleOut));
+    const d = pathToSvgD(smoothed, false);
+    assert.match(d, / C /);
   });
 });

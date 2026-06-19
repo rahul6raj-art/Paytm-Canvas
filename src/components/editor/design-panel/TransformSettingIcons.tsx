@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { appFieldClass, appFieldRadius, inspectorControlHeightClass } from "@/lib/appFieldStyles";
+import { appFieldInnerClass, appFieldShellClass, inspectorRowGapClass } from "@/lib/appFieldStyles";
 import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
 import {
   inspectorFieldIconSlotClass,
@@ -14,6 +14,7 @@ import {
   Rotate90Icon,
   RotationAngleIcon,
 } from "./InspectorSettingIcons";
+import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
 
 function TransformIconBtn({
   active,
@@ -31,19 +32,20 @@ function TransformIconBtn({
   className?: string;
 }) {
   return (
-    <button
-      type="button"
-      title={title}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        inspectorTransformActionBtnClass,
-        active && "bg-accent/15 text-app-fg",
-        className,
-      )}
-    >
-      {children}
-    </button>
+    <EditorHintWrap title={title} disabled={disabled}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onClick}
+        className={cn(
+          inspectorTransformActionBtnClass,
+          active && "bg-accent/15 text-app-fg",
+          className,
+        )}
+      >
+        {children}
+      </button>
+    </EditorHintWrap>
   );
 }
 
@@ -102,13 +104,7 @@ function RotationAngleInput({
   };
 
   return (
-    <div
-      className={cn(
-        "flex min-w-0 flex-1 items-center overflow-hidden border border-app-border bg-app-inset",
-        inspectorControlHeightClass,
-        appFieldRadius,
-      )}
-    >
+    <div className={cn(appFieldShellClass, "min-w-0 flex-1")}>
       <span className={inspectorFieldIconSlotClass} aria-hidden>
         <RotationAngleIcon />
       </span>
@@ -117,11 +113,7 @@ function RotationAngleInput({
         inputMode="decimal"
         disabled={disabled}
         aria-label="Rotation"
-        className={cn(
-          appFieldClass,
-          "flex-1 rounded-none border-0 bg-transparent px-1.5 py-0 shadow-none",
-          "font-mono tabular-nums focus-visible:ring-0",
-        )}
+        className={cn(appFieldInnerClass, "font-mono tabular-nums")}
         value={text}
         onChange={(e) => setText(e.target.value)}
         onBlur={() => {
@@ -158,11 +150,7 @@ export function TransformActions({
 }) {
   return (
     <div
-      className={cn(
-        "flex shrink-0 items-center overflow-hidden border border-app-border bg-app-inset",
-        inspectorControlHeightClass,
-        appFieldRadius,
-      )}
+      className={cn(appFieldShellClass, "shrink-0")}
       role="group"
       aria-label="Transform"
     >
@@ -220,7 +208,7 @@ export function RotationTransformRow({
   return (
     <div>
       <div className="inspector-field-label">Rotation</div>
-      <div className="flex gap-1">
+      <div className={cn("flex", inspectorRowGapClass)}>
         <RotationAngleInput
           value={rotation}
           disabled={disabled}

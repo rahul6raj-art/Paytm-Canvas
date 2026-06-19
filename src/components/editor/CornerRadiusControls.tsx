@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { PropertyNumberInput } from "./PropertyInput";
+import { DimensionFieldsIconButton } from "./design-panel/DimensionFieldsIconButton";
 import {
   getShapeVertexCornerRadii,
   hasIndependentVertexCornerRadii,
 } from "@/lib/shapes/parametricCornerRadii";
 import { isPerCornerRadiusMode } from "@/lib/cornerRadius";
-import { appFieldRadius, inspectorControlHeightClass } from "@/lib/appFieldStyles";
+import { appFieldInnerClass, appFieldShellClass, inspectorRowGapClass, inspectorTwoColGridClass } from "@/lib/appFieldStyles";
 import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
 import { useInspectorValueScrub } from "@/lib/useInspectorValueScrub";
 import {
@@ -27,12 +28,7 @@ const CORNER_LABELS = ["TL", "TR", "BR", "BL"] as const;
 /** Figma 2×2 order: TL TR / BL BR */
 const APPEARANCE_CORNER_ORDER: readonly CornerIndex[] = [0, 1, 3, 2];
 
-const fieldShell = cn(
-  "flex min-w-0 items-center overflow-hidden border border-app-border bg-app-field",
-  inspectorControlHeightClass,
-  appFieldRadius,
-  "shadow-[inset_0_1px_0_0_hsl(var(--app-inset-highlight)/var(--app-inset-highlight-opacity))]",
-);
+const fieldShell = appFieldShellClass;
 
 function CompactRadiusInput({
   value,
@@ -92,10 +88,7 @@ function CompactRadiusInput({
         inputMode="numeric"
         disabled={disabled || locked}
         aria-label={ariaLabel}
-        {...bindScrubInput(
-          "min-w-0 flex-1 border-0 bg-transparent px-1.5 py-0 text-ui tabular-nums text-app-field-fg focus-visible:outline-none disabled:cursor-not-allowed",
-          focused,
-        )}
+        {...bindScrubInput(cn(appFieldInnerClass, "tabular-nums"), focused)}
         value={text}
         onFocus={() => {
           setFocused(true);
@@ -299,36 +292,33 @@ export function CornerRadiusControls({
   );
 
   const toggleButton = (
-    <button
-      type="button"
+    <DimensionFieldsIconButton
       title={independent ? "Use single radius for all corners" : "Set corners independently"}
+      ariaLabel={independent ? "Use single radius for all corners" : "Set corners independently"}
+      pressed={independent}
+      active={independent}
       disabled={locked}
       onClick={toggleIndependent}
-      className={cn(
-        "flex h-7 w-7 shrink-0 items-center justify-center rounded border border-app-border text-app-muted transition-colors",
-        locked ? "opacity-40" : "hover:bg-app-hover hover:text-app-fg",
-        independent && "border-accent/50 text-accent",
-      )}
     >
       <CornerRadiusIcon />
-    </button>
+    </DimensionFieldsIconButton>
   );
 
   if (variant === "appearance") {
     return (
       <div className="space-y-2">
-        <div className="flex items-start gap-3">
+        <div className={cn("flex items-start", inspectorRowGapClass)}>
           {opacitySlot}
           <div className="min-w-0 flex-1">
             <div className="inspector-field-label mb-0.5">Corner radius</div>
-            <div className="flex items-center gap-2">
+            <div className={cn("flex items-center", inspectorRowGapClass)}>
               {uniformField}
               {toggleButton}
             </div>
           </div>
         </div>
         {independent && focusedCornerIndex == null ? (
-          <div className="grid grid-cols-2 gap-2">
+          <div className={inspectorTwoColGridClass}>
             {APPEARANCE_CORNER_ORDER.map((cornerIndex) => (
               <CompactRadiusInput
                 key={cornerLabels[cornerIndex] ?? cornerIndex}
@@ -360,12 +350,12 @@ export function CornerRadiusControls({
     return (
       <div className="min-w-0 flex-1">
         <div className="inspector-field-label mb-0.5">Corner radius</div>
-        <div className="flex items-center gap-1">
+        <div className={cn("flex items-center", inspectorRowGapClass)}>
           {uniformField}
           {toggleButton}
         </div>
         {independent && focusedCornerIndex == null ? (
-          <div className="mt-1 grid grid-cols-2 gap-1">
+          <div className={cn("mt-1", inspectorTwoColGridClass)}>
             {APPEARANCE_CORNER_ORDER.map((cornerIndex) => (
               <CompactRadiusInput
                 key={cornerLabels[cornerIndex] ?? cornerIndex}
@@ -385,7 +375,7 @@ export function CornerRadiusControls({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-end gap-1">
+      <div className={cn("flex items-end", inspectorRowGapClass)}>
         {toggleButton}
         {!independent ? (
           <div className="min-w-0 flex-1">

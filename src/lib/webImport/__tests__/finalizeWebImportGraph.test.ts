@@ -70,6 +70,38 @@ describe("finalizeWebImportGraph", () => {
     assert.equal(next.right?.x, 360);
   });
 
+  it("does not push same-row horizontal siblings down as if they vertically overlap", () => {
+    const nodes: Record<string, EditorNode> = {
+      bar: frame("bar", null, 0, 0, 390, 44, { layoutMode: "horizontal" }),
+      logo: frame("logo", "bar", 0, 6, 34, 34),
+      title: {
+        id: "title",
+        parentId: "bar",
+        type: "text",
+        name: "Title",
+        x: 42,
+        y: 10,
+        width: 40,
+        height: 24,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        content: "More",
+        fontSize: 16,
+        textResizeMode: "auto-height",
+      },
+      rhs: frame("rhs", "bar", 310, 2, 80, 40),
+    };
+    const childOrder = {
+      [EDITOR_ROOT_KEY]: ["bar"],
+      bar: ["logo", "title", "rhs"],
+    };
+
+    const next = finalizeWebImportGraph(nodes, childOrder, 390, 844);
+    assert.equal(next.title?.y, 10);
+    assert.equal(next.rhs?.y, 2);
+  });
+
   it("drops overlapping name fields when an email field occupies the same slot", () => {
     const nodes: Record<string, EditorNode> = {
       root: frame("root", null, 0, 0, 500, 300, { layoutMode: "vertical", layoutGap: 0 }),
@@ -180,6 +212,133 @@ describe("finalizeWebImportGraph", () => {
     assert.deepEqual(childOrder.icon, ["p1", "p2"]);
   });
 
+  it("preserves evenodd fill rule and clears phantom stroke on fill-only svg paths", () => {
+    const nodes: Record<string, EditorNode> = {
+      root: frame("root", null, 0, 0, 100, 100),
+      icon: {
+        id: "icon",
+        parentId: "root",
+        type: "path",
+        name: "home",
+        x: 0,
+        y: 0,
+        width: 24,
+        height: 24,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        fill: "#282828",
+        fillEnabled: true,
+        pathFillRule: "evenodd",
+        pathClosed: true,
+        strokeEnabled: true,
+        strokeWidth: 2,
+        strokeColor: "#000000",
+      },
+    };
+    const childOrder = { [EDITOR_ROOT_KEY]: ["root"], root: ["icon"] };
+
+    finalizeWebImportGraph(nodes, childOrder, 100, 100);
+    assert.equal(nodes.icon?.pathFillRule, "evenodd");
+    assert.equal(nodes.icon?.strokeEnabled, false);
+    assert.equal(nodes.icon?.strokeWidth, 0);
+  });
+
+  it("expands clipped section titles when line-height is a unitless ratio", () => {
+    const nodes: Record<string, EditorNode> = {
+      root: frame("root", null, 0, 0, 200, 80),
+      title: {
+        id: "title",
+        parentId: "root",
+        type: "text",
+        name: "Section title",
+        x: 0,
+        y: 0,
+        width: 129,
+        height: 28,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        content: "Appearance",
+        fontSize: 22,
+        lineHeight: 1.2727272727272727,
+        fill: "#282828",
+        fillEnabled: true,
+      },
+    };
+    const childOrder = { [EDITOR_ROOT_KEY]: ["root"], root: ["title"] };
+
+    finalizeWebImportGraph(nodes, childOrder, 200, 80);
+    assert.ok((nodes.title?.width ?? 0) > 129);
+    assert.equal(nodes.title?.textResizeMode, "auto-width");
+  });
+
+  it("does not reflow overlapping svg icon subpaths inside an Svg frame", () => {
+    const nodes: Record<string, EditorNode> = {
+      root: frame("root", null, 0, 0, 24, 24),
+      svg: frame("svg", "root", 0, 0, 24, 24, { name: "Svg" }),
+      house: {
+        id: "house",
+        parentId: "svg",
+        type: "path",
+        name: "house",
+        x: 1.15,
+        y: 1.7,
+        width: 21.7,
+        height: 20.3,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        fill: "#282828",
+        fillEnabled: true,
+        pathClosed: true,
+      },
+      chimney: {
+        id: "chimney",
+        parentId: "svg",
+        type: "path",
+        name: "chimney",
+        x: 9.97,
+        y: 7.6,
+        width: 4.07,
+        height: 1.82,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        fill: "#282828",
+        fillEnabled: true,
+        pathClosed: true,
+      },
+    };
+    const childOrder = { [EDITOR_ROOT_KEY]: ["root"], root: ["svg"], svg: ["house", "chimney"] };
+
+    finalizeWebImportGraph(nodes, childOrder, 24, 24);
+    assert.ok((nodes.chimney?.y ?? 0) < 10);
+  });
+
+  it("preserves single-child card wrappers with card styling", () => {
+    const nodes: Record<string, EditorNode> = {
+      root: frame("root", null, 0, 0, 360, 200),
+      card: frame("card", "root", 16, 72, 328, 76, {
+        name: "Card",
+        codeClassName: "card pml-more-theme-card",
+        fill: "#ffffff",
+        fillEnabled: true,
+        cornerRadius: 24,
+      }),
+      row: frame("row", "card", 16, 24, 296, 28, {
+        name: "pml-more-theme-card__row",
+        fillEnabled: false,
+      }),
+    };
+    const childOrder = { [EDITOR_ROOT_KEY]: ["root"], root: ["card"], card: ["row"] };
+
+    finalizeWebImportGraph(nodes, childOrder, 360, 200);
+    assert.ok(nodes.card);
+    assert.equal(nodes.row?.parentId, "card");
+    assert.equal(nodes.card?.cornerRadius, 24);
+  });
+
   it("collapses single-child Div wrappers", () => {
     const nodes: Record<string, EditorNode> = {
       root: frame("root", null, 0, 0, 500, 400),
@@ -210,5 +369,60 @@ describe("finalizeWebImportGraph", () => {
     assert.equal(nodes.btn?.x, 10);
     assert.equal(nodes.btn?.y, 20);
     assert.deepEqual(childOrder.root, ["btn"]);
+  });
+
+  it("expands narrow imported text labels and recenters center-aligned copy", () => {
+    const nodes: Record<string, EditorNode> = {
+      root: frame("root", null, 0, 0, 390, 844),
+      label: {
+        id: "label",
+        parentId: "root",
+        type: "text",
+        name: "Label",
+        x: 40,
+        y: 100,
+        width: 28,
+        height: 16,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        content: "More",
+        fontFamily: "Inter, sans-serif",
+        fontSize: 12,
+        fontWeight: 400,
+        textAlign: "center",
+        textResizeMode: "fixed",
+      },
+    };
+    const childOrder = { [EDITOR_ROOT_KEY]: ["root"], root: ["label"] };
+
+    finalizeWebImportGraph(nodes, childOrder, 390, 844);
+    assert.ok((nodes.label?.width ?? 0) > 28);
+    assert.equal(nodes.label?.content, "More");
+    assert.equal(nodes.label?.x, 40);
+  });
+
+  it("disables clip on parents of overflowing glow layers", () => {
+    const nodes: Record<string, EditorNode> = {
+      root: frame("root", null, 0, 0, 390, 844),
+      wrap: frame("wrap", "root", 100, 200, 32, 32, { clipChildren: true, name: "Icon wrap" }),
+      glow: frame("glow", "wrap", -14, -14, 60, 60, {
+        fillGradient: {
+          kind: "radial",
+          stops: [{ id: "s1", color: "#00ff00", opacity: 0.4, position: 0 }],
+        },
+        fillEnabled: true,
+        name: "Glow",
+      }),
+      icon: frame("icon", "wrap", 4, 4, 24, 24, { name: "SVG" }),
+    };
+    const childOrder = {
+      [EDITOR_ROOT_KEY]: ["root"],
+      root: ["wrap"],
+      wrap: ["glow", "icon"],
+    };
+
+    finalizeWebImportGraph(nodes, childOrder, 390, 844);
+    assert.equal(nodes.wrap?.clipChildren, false);
   });
 });

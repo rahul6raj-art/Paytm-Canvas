@@ -222,3 +222,15 @@ export function absoluteSegmentsToPathD(segments: AbsolutePathSegment[]): string
   }
   return parts.join(" ");
 }
+
+/** Fast numeric scale for SVG path `d` without tessellation (import performance). */
+export function scaleSvgPathD(d: string, scale: number): string {
+  if (scale === 1) return d;
+  return d.replace(/-?\d*\.?\d+(?:e[-+]?\d+)?/gi, (token) => {
+    const v = parseFloat(token);
+    if (!Number.isFinite(v)) return token;
+    const scaled = v * scale;
+    const rounded = Math.abs(scaled) < 1e-6 ? 0 : Math.round(scaled * 1000) / 1000;
+    return String(rounded);
+  });
+}

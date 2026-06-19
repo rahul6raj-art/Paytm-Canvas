@@ -49,6 +49,7 @@ import {
   placementFromFigNode,
   sortedFigChildren,
 } from "@/lib/figImport/figNodeGeometry";
+import { textResizePatch } from "@/lib/text/textNodeModel";
 import {
   blendModeFromFigNode,
   buildTokensByVariableKey,
@@ -368,6 +369,8 @@ function textFieldsFromFigNode(
     }
   }
 
+  const textResizeMode = figTextResizeMode(styled) ?? "auto-height";
+
   return {
     content: styled.textData?.characters ?? "",
     textColor: runFill.fill ?? defaultFill ?? "#111111",
@@ -382,7 +385,7 @@ function textFieldsFromFigNode(
         : styled.textAlignHorizontal === "RIGHT"
           ? "right"
           : "left",
-    textResizeMode: figTextResizeMode(styled) ?? "auto-height",
+    ...textResizePatch(textResizeMode),
     ...(textStyleTokenId ? { textStyleTokenId } : {}),
   };
 }

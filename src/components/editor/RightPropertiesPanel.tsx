@@ -60,18 +60,18 @@ export function RightPropertiesPanel() {
   return (
     <div
       data-right-properties-panel
-      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-l border-app-panel-edge bg-chrome-panel shadow-app-panel"
+      className="editor-sidebar-section flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
       onPointerDownCapture={onPanelPointerDownCapture}
     >
-      <div className="shrink-0 bg-app-panel">
-        <EditorModeTabs variant="underline" stretch />
+      <div className="shrink-0 border-b border-app-panel-edge px-3.5 py-2.5">
+        <EditorModeTabs variant="segmented" stretch />
 
         {editorMode === "design" ? (
-          <div className="flex items-center gap-3 px-3 pb-2.5 pt-1">
-            <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div className="flex items-center gap-3 pt-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
               {(
                 [
-                  ["design", "Design"],
+                  ["design", "Properties"],
                   ["code", "Code"],
                 ] as const
               ).map(([id, label]) => (
@@ -80,8 +80,10 @@ export function RightPropertiesPanel() {
                   type="button"
                   onClick={() => setRightPanelTab(id)}
                   className={cn(
-                    "text-ui font-medium transition-colors",
-                    rightPanelTab === id ? "text-app-fg" : "text-app-subtle hover:text-app-fg",
+                    "rounded-md px-2.5 py-1.5 text-ui font-medium transition-colors",
+                    rightPanelTab === id
+                      ? "bg-app-hover text-app-fg"
+                      : "text-app-subtle hover:bg-app-hover hover:text-app-fg",
                   )}
                 >
                   {label}
@@ -91,7 +93,7 @@ export function RightPropertiesPanel() {
             <RightPanelQuickTools />
           </div>
         ) : (
-          <div className="px-3 pb-2.5 pt-1 text-ui text-app-subtle">Properties</div>
+          <div className="pt-2 text-ui text-app-subtle">Prototype & motion</div>
         )}
       </div>
 
@@ -137,7 +139,7 @@ export function RightPropertiesPanel() {
           {!node || selectedIds.length > 1 ? (
             <div className="px-3 py-4 inspector-helper-text">Select a layer to inspect</div>
           ) : (
-            <div className="px-3 py-3 space-y-3">
+            <div className="space-y-3 px-3 py-3">
               <InspectInspector node={node} />
               <FigmaFidelityInspector node={node} />
             </div>

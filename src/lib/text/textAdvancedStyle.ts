@@ -30,7 +30,30 @@ export const DEFAULT_TEXT_ADVANCED_STYLE: TextAdvancedStyle = {
 
 export function normalizeTextDecoration(value: unknown): TextDecorationMode {
   if (value === "underline" || value === "strikethrough") return value;
+  if (value === "line-through") return "strikethrough";
   return "none";
+}
+
+export function textDecorationStrokeWidth(fontSize: number): number {
+  return Math.max(1, fontSize / 12);
+}
+
+export function underlineDecorationY(
+  lineTopY: number,
+  fontSize: number,
+  lineHeight: number,
+): number {
+  const lineHeightPx = fontSize * lineHeight;
+  return lineTopY + lineHeightPx - Math.max(1, fontSize * 0.12);
+}
+
+export function strikethroughDecorationY(
+  lineTopY: number,
+  fontSize: number,
+  lineHeight: number,
+): number {
+  const lineHeightPx = fontSize * lineHeight;
+  return lineTopY + lineHeightPx * 0.45;
 }
 
 export function normalizeTextCase(value: unknown): TextCaseMode {

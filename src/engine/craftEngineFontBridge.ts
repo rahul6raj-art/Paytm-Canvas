@@ -1,5 +1,8 @@
 import type { EditorNode } from "@/stores/useEditorStore";
+import type { CraftEngineInstance } from "@/engine/craftEngineTypes";
+import { runCraftEngineAccess } from "@/engine/craftEngineMutation";
 import { clearCanonicalTextLayoutCache } from "@/lib/text/canonicalTextLayout";
+import { bumpTextLayoutEpoch } from "@/lib/text/textLayoutEpoch";
 import type { EditorFontAsset } from "@/lib/documentPersistence";
 import { fontAssetBytes } from "@/lib/editorFontAssets";
 import { fetchGoogleFontBinary } from "@/lib/fonts/googleFontBinary";
@@ -122,7 +125,9 @@ async function registerOne(
 
   const task = (async () => {
     const bytes = await bytesForRequest(request, fontAssets);
-    engine.registerFontFamily(request.family, request.weight, bytes);
+    runCraftEngineAccess(() => {
+      engine.registerFontFamily(request.family, request.weight, bytes);
+    });
     registered.add(key);
   })().finally(() => {
     pending.delete(key);
@@ -144,4 +149,5 @@ export async function syncCraftEngineTextFonts(
 
   await Promise.all(requests.map((request) => registerOne(engine, request, fontAssets)));
   clearCanonicalTextLayoutCache();
+  bumpTextLayoutEpoch();
 }

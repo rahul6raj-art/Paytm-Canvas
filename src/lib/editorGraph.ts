@@ -6,6 +6,7 @@ import {
   finiteDimension,
   getNodeLocalMatrix,
   getNodeWorldOrigin,
+  getRotatedRectCorners,
   hasRotation,
   invertMatrix,
   multiplyMatrix,
@@ -121,6 +122,39 @@ export function layerPanelChildIds(
       return n && (n.parentId ?? null) === expectedParent;
     })
     .sort((a, b) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0));
+}
+
+/** Figma-style layer list — front-most layer first (top of the panel). */
+export function layerPanelDisplayChildIds(
+  parentId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): string[] {
+  return [...layerPanelChildIds(parentId, nodes, childOrder)].reverse();
+}
+
+/** Map a layer-panel drop index to a childOrder insertion index. */
+export function childOrderIndexFromLayerPanelInsertBefore(
+  siblingCount: number,
+  insertBefore: number,
+): number {
+  return Math.max(0, Math.min(siblingCount, siblingCount - insertBefore));
+}
+
+/**
+ * Insert a duplicated node directly above its source in the layer panel and in front on canvas.
+ */
+export function insertDuplicatedSiblingInChildOrder(
+  childOrder: Record<string, string[]>,
+  parentKey: string,
+  sourceId: string,
+  duplicateId: string,
+): Record<string, string[]> {
+  const list = [...(childOrder[parentKey] ?? [])].filter((id) => id !== duplicateId);
+  const curIdx = list.indexOf(sourceId);
+  const insertAt = curIdx >= 0 ? curIdx + 1 : list.length;
+  list.splice(insertAt, 0, duplicateId);
+  return { ...childOrder, [parentKey]: list };
 }
 
 /** Insert a node into the correct parent list and remove it from all other lists. */
@@ -246,6 +280,40 @@ export function getNodeWorldMatrixFromChildOrder(
   } catch {
     return null;
   }
+}
+
+export type WorldCorner = { x: number; y: number };
+
+/** World-space box corners (nw, ne, se, sw) using the childOrder render tree — matches SVG scene. */
+export function getNodeTransformedWorldCornersFromChildOrder(
+  nodeId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): [WorldCorner, WorldCorner, WorldCorner, WorldCorner] | null {
+  const n = nodes[nodeId];
+  if (!n) return null;
+  const wm = getNodeWorldMatrixFromChildOrder(nodeId, nodes, childOrder);
+  if (!wm) {
+    const topLeft = getRenderedWorldTopLeft(nodeId, nodes, childOrder);
+    return getRotatedRectCorners(
+      { x: topLeft.x, y: topLeft.y, width: n.width, height: n.height },
+      n.rotation ?? 0,
+    );
+  }
+  const w = Math.max(1, n.width);
+  const h = Math.max(1, n.height);
+  const local = [
+    { x: 0, y: 0 },
+    { x: w, y: 0 },
+    { x: w, y: h },
+    { x: 0, y: h },
+  ] as const;
+  return local.map((p) => applyMatrixToPoint(wm, p)) as [
+    WorldCorner,
+    WorldCorner,
+    WorldCorner,
+    WorldCorner,
+  ];
 }
 
 /**

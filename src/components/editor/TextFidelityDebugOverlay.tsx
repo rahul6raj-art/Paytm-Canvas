@@ -2,10 +2,11 @@
 
 import { useMemo, useSyncExternalStore } from "react";
 import { useEditorStore } from "@/stores/useEditorStore";
-import { layoutTextCanonical } from "@/lib/text/canonicalTextLayout";
+import { textLayoutForEditorNode } from "@/lib/text/canonicalTextLayout";
 import { getFontWarnings } from "@/lib/text/textFontManager";
 import { getNodeWorldMatrixFromChildOrder } from "@/lib/editorGraph";
 import { matrixToCssTransform } from "@/lib/transformMath";
+import { autoResizeToTextResizeMode } from "@/lib/text/autoResizeMode";
 
 function readTextDebugEnabled(): boolean {
   if (typeof window === "undefined") return false;
@@ -30,6 +31,13 @@ export function TextFidelityDebugOverlay() {
       transform: string;
       width: number;
       height: number;
+      textResizeMode: string;
+      autoResize: string;
+      lineCount: number;
+      availableWidth: number;
+      wrapEnabled: boolean;
+      cacheKey: string;
+      lineWidths: number[];
       lines: Array<{ x: number; y: number; w: number; h: number }>;
       glyphs: Array<{ x: number; y: number; w: number; h: number }>;
       caretStops: Array<{ x: number; y: number }>;
@@ -38,8 +46,9 @@ export function TextFidelityDebugOverlay() {
 
     for (const node of Object.values(nodes)) {
       if (node.type !== "text" || node.visible === false) continue;
-      const canonical = layoutTextCanonical(node);
-      if (!canonical) continue;
+      const prepared = textLayoutForEditorNode(node);
+      if (!prepared) continue;
+      const { canonical, debug } = prepared;
       const wm = getNodeWorldMatrixFromChildOrder(node.id, nodes, childOrder);
       const warning = warnings.find((w) => w.nodeId === node.id);
       const label = warning
@@ -51,6 +60,13 @@ export function TextFidelityDebugOverlay() {
         transform: wm ? matrixToCssTransform(wm) : `translate(${node.x}px, ${node.y}px)`,
         width: node.width,
         height: node.height,
+        textResizeMode: node.textResizeMode ?? "auto-width",
+        autoResize: node.autoResize ?? autoResizeToTextResizeMode(node.textResizeMode),
+        lineCount: prepared.layout.lines.length,
+        availableWidth: debug.availableWidth,
+        wrapEnabled: debug.wrapEnabled,
+        cacheKey: debug.cacheKey,
+        lineWidths: debug.lineWidths,
         lines: canonical.lines.map((line) => ({
           x: line.x,
           y: line.y,
@@ -107,10 +123,17 @@ export function TextFidelityDebugOverlay() {
             />
           ))}
           <div
-            className="absolute left-0 top-0 max-w-full truncate bg-[#0f172a]/80 px-1 text-[9px] text-white"
+            className="absolute left-0 top-0 max-w-[min(100%,320px)] bg-[#0f172a]/90 px-1.5 py-1 text-[9px] leading-snug text-white"
             style={{ transform: "translateY(-100%)" }}
           >
-            {o.label}
+            <div>{o.label}</div>
+            <div className="tabular-nums text-[#94a3b8]">
+              {o.width}×{o.height} · {o.textResizeMode}/{o.autoResize} · {o.lineCount} lines · wrap=
+              {o.wrapEnabled ? "on" : "off"} · avail={Math.round(o.availableWidth)}
+            </div>
+            <div className="truncate text-[#64748b]" title={o.cacheKey}>
+              widths: [{o.lineWidths.map((w) => Math.round(w)).join(", ")}]
+            </div>
           </div>
         </div>
       ))}

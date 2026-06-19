@@ -25,6 +25,9 @@
     "paths": {
       "@/*": [
         "./src/*"
+      ],
+      "@paytm-craft/bridge": [
+        "./packages/craft-bridge/src/index.ts"
       ]
     }
   },

@@ -1,19 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Copy, Plus, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ChevronLeft, ChevronRight, Copy, Plus, X } from "lucide-react";
 import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/useEditorStore";
+import { EditorHintWrap } from "./EditorHoverHint";
 
 export function PageTabsBar() {
+  const router = useRouter();
   const pageOrder = useEditorStore((s) => s.pageOrder);
   const pages = useEditorStore((s) => s.pages);
   const activePageId = useEditorStore((s) => s.activePageId);
   const setActivePage = useEditorStore((s) => s.setActivePage);
   const addPage = useEditorStore((s) => s.addPage);
   const duplicatePage = useEditorStore((s) => s.duplicatePage);
-  const deletePage = useEditorStore((s) => s.deletePage);
+  const closePage = useEditorStore((s) => s.closePage);
   const renamePage = useEditorStore((s) => s.renamePage);
   const cycleActivePage = useEditorStore((s) => s.cycleActivePage);
 
@@ -70,15 +73,16 @@ export function PageTabsBar() {
 
   return (
     <div className="flex min-w-0 flex-1 items-stretch gap-0.5">
-      <button
-        type="button"
-        title="Previous page (⌘⌥↑)"
-        aria-label="Previous page"
-        onClick={() => cycleActivePage(-1)}
-        className="flex h-full w-6 shrink-0 items-center justify-center text-app-subtle transition-colors hover:bg-app-hover hover:text-app-fg"
-      >
-        <ChevronLeft className="h-3.5 w-3.5" strokeWidth={2} />
-      </button>
+      <EditorHintWrap title="Previous page (⌘⌥↑)">
+        <button
+          type="button"
+          aria-label="Previous page"
+          onClick={() => cycleActivePage(-1)}
+          className="flex h-full w-6 shrink-0 items-center justify-center text-app-subtle transition-colors hover:bg-app-hover hover:text-app-fg"
+        >
+          <ChevronLeft className="h-3.5 w-3.5" strokeWidth={2} />
+        </button>
+      </EditorHintWrap>
 
       <div
         ref={scrollRef}
@@ -116,16 +120,16 @@ export function PageTabsBar() {
                   className="h-full w-[min(140px,28vw)] min-w-[72px] border-0 bg-app-field px-2.5 text-ui font-medium text-white outline-none ring-1 ring-inset ring-accent"
                 />
               ) : (
-                <button
-                  ref={(el) => {
-                    if (el) tabRefs.current.set(pageId, el);
-                    else tabRefs.current.delete(pageId);
-                  }}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  title={page.name}
-                  onClick={() => setActivePage(pageId)}
+                <EditorHintWrap title={page.name} hintSide="bottom">
+                  <button
+                    ref={(el) => {
+                      if (el) tabRefs.current.set(pageId, el);
+                      else tabRefs.current.delete(pageId);
+                    }}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setActivePage(pageId)}
                   onDoubleClick={(e) => {
                     e.preventDefault();
                     setRenameId(pageId);
@@ -148,35 +152,38 @@ export function PageTabsBar() {
                 >
                   <span className="truncate">{page.name}</span>
                 </button>
+                </EditorHintWrap>
               )}
             </div>
           );
         })}
       </div>
 
-      <button
-        type="button"
-        title="Add page"
-        aria-label="Add page"
-        onClick={() => addPage()}
-        className="flex h-full shrink-0 items-center gap-1 border-l border-app-border-subtle px-2 text-ui font-medium text-app-subtle transition-colors hover:bg-app-hover hover:text-app-fg"
-      >
-        <Plus className="h-3.5 w-3.5" strokeWidth={2.25} />
-      </button>
+      <EditorHintWrap title="Add page">
+        <button
+          type="button"
+          aria-label="Add page"
+          onClick={() => addPage()}
+          className="flex h-full shrink-0 items-center gap-1 border-l border-app-border-subtle px-2 text-ui font-medium text-app-subtle transition-colors hover:bg-app-hover hover:text-app-fg"
+        >
+          <Plus className="h-3.5 w-3.5" strokeWidth={2.25} />
+        </button>
+      </EditorHintWrap>
 
-      <button
-        type="button"
-        title="Next page (⌘⌥↓)"
-        aria-label="Next page"
-        onClick={() => cycleActivePage(1)}
-        className="flex h-full w-6 shrink-0 items-center justify-center text-app-subtle transition-colors hover:bg-app-hover hover:text-app-fg"
-      >
-        <ChevronRight className="h-3.5 w-3.5" strokeWidth={2} />
-      </button>
+      <EditorHintWrap title="Next page (⌘⌥↓)">
+        <button
+          type="button"
+          aria-label="Next page"
+          onClick={() => cycleActivePage(1)}
+          className="flex h-full w-6 shrink-0 items-center justify-center text-app-subtle transition-colors hover:bg-app-hover hover:text-app-fg"
+        >
+          <ChevronRight className="h-3.5 w-3.5" strokeWidth={2} />
+        </button>
+      </EditorHintWrap>
 
       {contextPageId && pages[contextPageId] && contextAnchor ? (
         <div
-          className="fixed z-[80] min-w-[160px] rounded-md border border-app-border bg-app-surface py-1 shadow-xl"
+          className="fixed z-[80] min-w-[160px] editor-floating-menu border border-app-border bg-app-surface py-1 shadow-xl"
           style={{
             left: Math.max(
               8,
@@ -208,19 +215,18 @@ export function PageTabsBar() {
             <Copy className="h-3.5 w-3.5 opacity-80" strokeWidth={2} />
             Duplicate
           </button>
-          {pageOrder.length > 1 ? (
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ui text-red-300 hover:bg-red-500/15"
-              onClick={() => {
-                deletePage(contextPageId);
-                setContextPageId(null);
-              }}
-            >
-              <Trash2 className="h-3.5 w-3.5 opacity-80" strokeWidth={2} />
-              Delete
-            </button>
-          ) : null}
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ui text-app-fg hover:bg-app-hover"
+            onClick={() => {
+              const { emptied } = closePage(contextPageId);
+              setContextPageId(null);
+              if (emptied) router.push("/dashboard");
+            }}
+          >
+            <X className="h-3.5 w-3.5 opacity-80" strokeWidth={2} />
+            Close
+          </button>
         </div>
       ) : null}
     </div>

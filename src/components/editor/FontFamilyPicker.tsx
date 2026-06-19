@@ -24,11 +24,13 @@ import {
   type FontFamilyOption,
 } from "@/lib/fonts";
 import { cn } from "@/lib/utils";
+import { appFieldClass } from "@/lib/appFieldStyles";
 import {
   anchoredMenuStyle,
   useAnchoredDropdownPosition,
   useDismissAnchoredDropdown,
 } from "./useAnchoredDropdown";
+import { EditorHintWrap } from "./EditorHoverHint";
 
 type FontFamilyPickerProps = {
   value: string;
@@ -185,10 +187,10 @@ export function FontFamilyPicker({
         role="listbox"
         aria-label="Font family"
         onKeyDown={onMenuKeyDown}
-        className="fixed z-[120] flex w-[min(280px,calc(100vw-16px))] flex-col overflow-hidden rounded-md border border-app-border bg-app-panel shadow-xl"
+        className="editor-inspector-dialog fixed z-[120] w-[min(280px,calc(100vw-16px))]"
         style={anchoredMenuStyle(position)}
       >
-        <div className="shrink-0 border-b border-app-border-subtle p-2">
+        <div className="editor-inspector-dialog-body !py-2">
           <label htmlFor={inputId} className="sr-only">
             Search fonts
           </label>
@@ -209,7 +211,7 @@ export function FontFamilyPicker({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onMenuKeyDown}
-            className="h-8 w-full rounded-md border border-app-border bg-app-field px-2.5 text-ui text-app-field-fg placeholder:text-app-subtle focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            className={cn(appFieldClass, "w-full")}
           />
           <input
             ref={fileInputRef}
@@ -221,7 +223,7 @@ export function FontFamilyPicker({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-app-border py-1.5 text-ui text-[#aaa] hover:border-accent/40 hover:bg-app-hover hover:text-app-fg"
+            className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-app-border py-1.5 text-ui text-app-muted hover:border-app-border hover:bg-app-hover hover:text-app-fg"
           >
             <Upload className="h-3 w-3" />
             Upload TTF or OTF…
@@ -231,7 +233,7 @@ export function FontFamilyPicker({
               type="button"
               disabled={localStatus === "loading"}
               onClick={() => void refreshInstalled()}
-              className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md py-1 text-ui text-[#aaa] hover:bg-app-hover hover:text-app-fg disabled:opacity-50"
+              className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md py-1 text-ui text-app-muted hover:bg-app-hover hover:text-app-fg disabled:opacity-50"
             >
               <RefreshCw className={cn("h-3 w-3", localStatus === "loading" && "animate-spin")} />
               {localStatus === "loading"
@@ -241,7 +243,7 @@ export function FontFamilyPicker({
                   : "Load fonts installed on this device"}
             </button>
           ) : (
-            <p className="mt-1.5 px-0.5 text-ui leading-snug text-[#888]">
+            <p className="mt-1.5 px-0.5 text-ui leading-snug text-app-muted">
               Installed-font scan needs Chrome or Edge. Upload or use Google Fonts instead.
             </p>
           )}
@@ -255,7 +257,7 @@ export function FontFamilyPicker({
               </p>
               <button
                 type="button"
-                className="flex w-full items-center rounded-md px-2 py-1.5 text-left text-ui text-[#f0f0f0] bg-[rgba(13,153,255,0.12)]"
+                className="flex w-full items-center rounded-md px-2 py-1.5 text-left text-ui text-app-fg bg-app-inset"
                 style={{ fontFamily: value }}
                 onClick={() => setOpen(false)}
               >
@@ -265,7 +267,7 @@ export function FontFamilyPicker({
           ) : null}
 
           {filteredGroups.every((g) => g.fonts.length === 0) ? (
-            <p className="px-3 py-4 text-center text-ui text-[#888]" role="status">
+            <p className="px-3 py-4 text-center text-ui text-app-muted" role="status">
               No fonts match your search.
             </p>
           ) : (
@@ -293,8 +295,8 @@ export function FontFamilyPicker({
                         role="option"
                         aria-selected={selected}
                         className={cn(
-                          "flex w-full items-center rounded-md px-3 py-1.5 text-left text-ui text-[#e8e8e8] hover:bg-app-hover",
-                          selected && "bg-[rgba(13,153,255,0.15)] text-white",
+                          "flex w-full items-center rounded-md px-3 py-1.5 text-left text-ui text-app-fg hover:bg-app-hover",
+                          selected && "bg-app-inset text-app-fg",
                           active && !selected && "bg-app-hover",
                         )}
                         style={{ fontFamily: opt.value }}
@@ -316,33 +318,34 @@ export function FontFamilyPicker({
 
   return (
     <div className={cn("relative min-w-0", className)}>
-      <button
-        ref={anchorRef}
-        type="button"
-        disabled={disabled}
-        aria-label={`Font family, ${currentLabel}`}
-        aria-expanded={open}
-        aria-haspopup="listbox"
-        aria-controls={open ? listId : undefined}
-        title={currentLabel}
-        onClick={() => setOpen((v) => !v)}
-        onKeyDown={(e) => {
-          if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
-            if (!open) {
-              e.preventDefault();
-              setOpen(true);
+      <EditorHintWrap title={currentLabel}>
+        <button
+          ref={anchorRef}
+          type="button"
+          disabled={disabled}
+          aria-label={`Font family, ${currentLabel}`}
+          aria-expanded={open}
+          aria-haspopup="listbox"
+          aria-controls={open ? listId : undefined}
+          onClick={() => setOpen((v) => !v)}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
+              if (!open) {
+                e.preventDefault();
+                setOpen(true);
+              }
             }
-          }
-        }}
-        className={cn(
-          "flex h-7 max-w-full items-center gap-1 rounded-md border border-app-border bg-app-field pl-2 pr-1 text-ui text-app-field-fg hover:border-app-border disabled:opacity-45",
-          buttonClassName,
-        )}
-        style={{ fontFamily: value }}
-      >
-        <span className="min-w-0 flex-1 truncate text-left">{currentLabel}</span>
-        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
-      </button>
+          }}
+          className={cn(
+            "flex h-7 max-w-full items-center gap-1 rounded-md border border-app-border bg-app-inset pl-2 pr-1 text-ui text-app-field-fg hover:border-app-border disabled:opacity-45",
+            buttonClassName,
+          )}
+          style={{ fontFamily: value }}
+        >
+          <span className="min-w-0 flex-1 truncate text-left">{currentLabel}</span>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+        </button>
+      </EditorHintWrap>
       {mounted && menu ? createPortal(menu, document.body) : null}
     </div>
   );

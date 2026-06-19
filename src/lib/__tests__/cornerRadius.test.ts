@@ -4,6 +4,7 @@ import {
   clampCornerRadii,
   hasIndependentVertexCornerRadii,
   isPerCornerRadiusMode,
+  offsetRoundedRectPathD,
   roundedRectPathD,
 } from "@/lib/cornerRadius";
 
@@ -32,5 +33,11 @@ describe("cornerRadius/roundedRectPathD", () => {
   it("hasIndependentVertexCornerRadii detects mixed per-corner values", () => {
     assert.equal(hasIndependentVertexCornerRadii([8, 8, 8, 8]), false);
     assert.equal(hasIndependentVertexCornerRadii([305, 10, 20, 30]), true);
+  });
+
+  it("offsetRoundedRectPathD keeps arc commands for inset/outset", () => {
+    const d = offsetRoundedRectPathD(200, 150, [80, 80, 80, 80], 20);
+    assert.ok(d.includes(" A "), d);
+    assert.ok(!d.includes(" L "), d);
   });
 });

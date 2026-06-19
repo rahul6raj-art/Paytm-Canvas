@@ -143,7 +143,7 @@ function SizingDropdown({
       <div
         ref={menuRef}
         role="menu"
-        className="fixed z-[100] min-w-[200px] rounded-md border border-app-border bg-app-surface py-1 shadow-lg"
+        className="fixed z-[100] min-w-[200px] editor-floating-menu border border-app-border bg-app-surface py-1 shadow-lg"
         style={{ left: position.left, top: position.top }}
       >
         {OPTIONS.filter((o) => o.value !== "fill" || allowFill).map((opt) => {

@@ -66,6 +66,22 @@ export function wrapWidthForResizeMode(
   return textInnerWidth(boxWidth);
 }
 
+/** Available inner width for wrapping — always derived from the current node frame width. */
+export function availableWrapWidthForNode(node: EditorNode): number {
+  const mode = normalizeTextResizeMode(node.textResizeMode, node.autoResize);
+  return wrapWidthForResizeMode(Math.max(MIN_TEXT_BOX, node.width), mode);
+}
+
+/** Sync textResizeMode + autoResize and optional content before any layout pass. */
+export function nodeForTextLayout(node: EditorNode, content?: string): EditorNode {
+  const mode = normalizeTextResizeMode(node.textResizeMode, node.autoResize);
+  return {
+    ...node,
+    ...(content !== undefined ? { content } : {}),
+    ...textResizePatch(mode),
+  };
+}
+
 export function normalizeTextAlign(value: unknown): TextAlign {
   if (value === "center" || value === "right" || value === "justify") return value;
   return "left";

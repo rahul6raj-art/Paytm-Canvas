@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { X } from "lucide-react";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { formatShortcutLabel } from "@/lib/commands";
 import {
@@ -73,7 +74,7 @@ export function ShortcutOverlay() {
       }}
     >
       <div
-        className="max-h-[min(80vh,640px)] w-full max-w-lg overflow-y-auto rounded-lg border border-app-border bg-app-panel/95 p-4 shadow-2xl backdrop-blur-md"
+        className="editor-floating-menu max-h-[min(80vh,640px)] w-full max-w-lg overflow-y-auto border border-app-border bg-app-panel/95 p-4 shadow-2xl backdrop-blur-md"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-start justify-between gap-2">
@@ -87,11 +88,12 @@ export function ShortcutOverlay() {
             type="button"
             onClick={() => setOpen(false)}
             className={cn(
-              "rounded-md border border-app-border px-2 py-1 text-ui font-medium text-app-muted",
+              "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-app-muted transition-colors",
               "hover:bg-app-hover hover:text-app-fg",
             )}
+            aria-label="Close"
           >
-            Close
+            <X className="h-4 w-4" strokeWidth={2} />
           </button>
         </div>
         <div className="columns-1 sm:columns-2 sm:gap-6">

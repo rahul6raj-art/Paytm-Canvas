@@ -1,11 +1,11 @@
 import type { ResizeHandle } from "@/lib/resize";
-import { rotateGlyphSvg } from "@/lib/rotateHandleGlyph";
+import {
+  buildRotateCursorSvg,
+  ROTATE_CURSOR_HOTSPOT,
+} from "@/lib/rotateCursorSvg";
 
-/** Always-visible fallback when custom rotate cursor cannot load. */
+/** Fallback when custom rotate cursor cannot load. */
 export const CANVAS_ROTATE_CURSOR_FALLBACK = "default";
-
-const ROTATE_CURSOR_HOTSPOT = 16;
-const ROTATE_CURSOR_SIZE = 32;
 
 /** Base glyph bulges along this outward angle at 0° rotation (SE diagonal). */
 const GLYPH_BULGE_OUTWARD_DEG = 45;
@@ -30,13 +30,9 @@ function normalizeCursorAngle(deg: number): number {
   return n < 0 ? n + 360 : n;
 }
 
-/** Figma-style bidirectional quarter-arc rotate glyph (white outline, dark fill). */
+/** tldraw-style curved double-arrow rotate cursor. */
 function rotateCursorSvg(angleDeg: number): string {
-  return rotateGlyphSvg({
-    pixelSize: ROTATE_CURSOR_SIZE,
-    angleDeg,
-    variant: "cursor",
-  });
+  return buildRotateCursorSvg(angleDeg);
 }
 
 function rotateCursorDataUrl(angleDeg: number): string | null {
@@ -51,7 +47,7 @@ function rotateCursorDataUrl(angleDeg: number): string | null {
   }
 }
 
-/** Custom bidirectional arc cursor with grab fallback. */
+/** Custom bidirectional arc cursor oriented to `angleDeg`. */
 export function rotateCursorCssForAngle(angleDeg: number): string {
   const key = Math.round(angleDeg);
   const cached = cursorCssCache.get(key);

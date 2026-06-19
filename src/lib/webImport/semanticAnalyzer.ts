@@ -28,12 +28,12 @@ export function detectSemanticRole(node: DomSnapshotNode, depth = 0): SemanticRo
   if (tag === "li" || role === "listitem") return "list-item";
   if (tag === "a" && node.text) return node.styles.display?.includes("inline") ? "link" : "button";
   if (tag === "a") return "link";
+  if (cls.includes("badge") || cls.includes("chip") || cls.includes("tag")) return "badge";
   if (TEXT_TAGS.has(tag) && node.text) return "text";
   if (HEADER_TAGS.has(tag) || (depth <= 2 && node.rect.y < 120 && node.rect.height < 120)) return "header";
   if (FOOTER_TAGS.has(tag)) return "footer";
   if (NAV_TAGS.has(tag)) return "nav";
   if (tag === "main" && node.rect.height > 300) return "hero";
-  if (cls.includes("badge") || cls.includes("chip") || cls.includes("tag")) return "badge";
   if (isInputLikeDiv(node)) return "input";
   if (isCardLike(node) && !hasFormControls(node)) return "card";
   if (["section", "main", "article"].includes(tag)) return "section";

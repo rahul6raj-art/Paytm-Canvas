@@ -40,6 +40,7 @@ import {
   getDragPreviewSnapshot,
   subscribeDragPreview,
 } from "@/lib/canvasEphemeralTransform";
+import { EditorHintWrap } from "./EditorHoverHint";
 
 function localToWorld(
   nodeId: string,
@@ -246,17 +247,8 @@ export function EllipseArcHandles() {
         const half = dot ? dotHalf : handleHalf;
         const style = dot ? dotStyle : handleStyle;
         return (
-          <button
+          <EditorHintWrap
             key={kind}
-            type="button"
-            data-ellipse-arc-handle={kind}
-            aria-label={
-              kind === "ratio"
-                ? "Adjust inner radius ratio"
-                : kind === "start"
-                  ? "Adjust arc start"
-                  : "Adjust arc sweep"
-            }
             title={
               kind === "ratio"
                 ? "Drag to adjust inner radius (Shift: 5% steps)"
@@ -264,15 +256,28 @@ export function EllipseArcHandles() {
                   ? "Drag to adjust arc start"
                   : "Drag to adjust sweep (Shift: 15° steps)"
             }
-            className="pointer-events-auto absolute z-[31] touch-none will-change-transform"
-            style={{
-              ...style,
-              left: screen.x - half,
-              top: screen.y - half,
-              transition: dragging ? "none" : undefined,
-            }}
-            onPointerDown={makePointerDown(kind)}
-          />
+            anchorClassName="contents"
+          >
+            <button
+              type="button"
+              data-ellipse-arc-handle={kind}
+              aria-label={
+                kind === "ratio"
+                  ? "Adjust inner radius ratio"
+                  : kind === "start"
+                    ? "Adjust arc start"
+                    : "Adjust arc sweep"
+              }
+              className="pointer-events-auto absolute z-[31] touch-none will-change-transform"
+              style={{
+                ...style,
+                left: screen.x - half,
+                top: screen.y - half,
+                transition: dragging ? "none" : undefined,
+              }}
+              onPointerDown={makePointerDown(kind)}
+            />
+          </EditorHintWrap>
         );
       })}
       {dragLabelScreen ? (

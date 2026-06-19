@@ -1,9 +1,10 @@
 import {
   createGradientPaintStyle,
-  paintGradientFillInBox,
+  paintNodeFillInBox,
 } from "@/lib/canvasGradientPaint";
 import { screenPxToWorld, TEXT_CARET_SCREEN_PX } from "@/lib/canvasVisual";
-import { effectiveFillType, type FillPaintNode } from "@/lib/fillGradient";
+import { effectiveFillType } from "@/lib/fillGradient";
+import { textNodeAsFillPaint } from "@/lib/text/textFillPaint";
 import type { ResolvedTextTypo } from "@/lib/textTypography";
 
 /** Canvas caret color (must be a concrete color — CSS vars do not resolve on canvas). */
@@ -13,7 +14,10 @@ import {
   DEFAULT_TEXT_ADVANCED_STYLE,
   prepareTextForDisplay,
   rawIndexToDisplayIndex,
+  strikethroughDecorationY,
   textAdvancedStyleFromNode,
+  textDecorationStrokeWidth,
+  underlineDecorationY,
   type TextLayoutStyleOptions,
 } from "./textAdvancedStyle";
 import {
@@ -34,9 +38,9 @@ import {
   lineOffsetX,
   lineTopY,
   measureStringWidth,
+  resolveCaretDrawRect,
   type TextLayout,
 } from "./textMeasure";
-import { getCaretRect } from "./textMeasure";
 import { normalizedRange } from "./textCursor";
 import type { TextLayoutForRender } from "./canonicalTextLayout";
 
@@ -56,8 +60,10 @@ export type TextCanvasRenderOptions = {
   zoom?: number;
   dpr?: number;
   style?: TextLayoutStyleOptions;
-  /** When set and fillType is gradient, text glyphs are filled with fillGradient (all kinds). */
-  gradientNode?: FillPaintNode;
+  /** When set, non-solid fills (gradient, image, video) are painted into glyph shapes. */
+  gradientNode?: EditorNode;
+  /** Preloaded bitmap/video frame for media text fills during canvas edit. */
+  mediaFill?: { source: CanvasImageSource; width: number; height: number } | null;
   /** Precomputed canonical layout — avoids a second layout pass. */
   prepared?: TextLayoutForRender | null;
 };
@@ -149,16 +155,17 @@ export function paintTextLayoutToContext(
       TEXT_BOX_PAD_Y + blockOffsetY,
       displayStart,
       displayEnd,
+      opts.prepared?.canonical.lines,
     );
   }
 
-  const useGradient =
-    opts.gradientNode != null &&
-    opts.gradientNode.fillEnabled !== false &&
-    effectiveFillType(opts.gradientNode) === "gradient";
+  const fillPaint = opts.gradientNode ? textNodeAsFillPaint(opts.gradientNode) : null;
+  const fillKind = fillPaint ? effectiveFillType(fillPaint) : "solid";
+  const useMaskedFill =
+    fillPaint != null && fillPaint.fillEnabled !== false && fillKind !== "solid";
 
-  if (useGradient) {
-    paintGradientTextFill(ctx, opts, layout, innerW, blockOffsetY, style);
+  if (useMaskedFill) {
+    paintMaskedTextFill(ctx, opts, layout, innerW, blockOffsetY, style, fillPaint);
   } else {
     ctx.fillStyle = opts.typo.color;
     paintTextLinesAndDecorations(ctx, opts, layout, innerW, blockOffsetY, style);
@@ -166,15 +173,19 @@ export function paintTextLayoutToContext(
 
   if (opts.caretVisible && opts.caretIndex != null) {
     const displayCaret = rawIndexToDisplayIndex(opts.caretIndex, opts.text, style);
-    const caret = getCaretRect(displayCaret, layout, opts.typo, innerW, opts.textAlign);
+    const caret = resolveCaretDrawRect(
+      displayCaret,
+      layout,
+      opts.typo,
+      innerW,
+      opts.textAlign,
+      TEXT_BOX_PAD_X,
+      TEXT_BOX_PAD_Y,
+      blockOffsetY,
+    );
     const caretWidth = screenPxToWorld(TEXT_CARET_SCREEN_PX, opts.zoom ?? 1);
     ctx.fillStyle = TEXT_CARET_COLOR;
-    ctx.fillRect(
-      caret.x + TEXT_BOX_PAD_X,
-      caret.y + TEXT_BOX_PAD_Y + blockOffsetY,
-      Math.max(0.5, caretWidth),
-      caret.height,
-    );
+    ctx.fillRect(caret.x, caret.y, Math.max(0.5, caretWidth), caret.height);
   }
 
   ctx.globalAlpha = prevAlpha;
@@ -208,7 +219,7 @@ export function renderTextToCanvas(
   return paintTextLayoutToContext(ctx, opts);
 }
 
-function paintTextLinesAndDecorations(
+function paintTextGlyphs(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   opts: TextCanvasRenderOptions,
   layout: TextLayout,
@@ -226,7 +237,6 @@ function paintTextLinesAndDecorations(
     if (canonicalLine && canonicalLine.segments.length > 1) {
       for (const segment of canonicalLine.segments) {
         drawLineWithSpacing(ctx, segment.text, segment.x, segment.y, opts.typo, style.textCase === "small-caps");
-        drawLineDecorations(ctx, segment.text, segment.x, segment.y, opts.typo, style.textDecoration);
       }
       continue;
     }
@@ -244,12 +254,10 @@ function paintTextLinesAndDecorations(
     } else {
       drawLineWithSpacing(ctx, line.text, x, y, opts.typo, style.textCase === "small-caps");
     }
-    drawLineDecorations(ctx, line.text, x, y, opts.typo, style.textDecoration);
   }
 }
 
-/** Paint gradient into text glyph shapes via destination-in compositing. */
-function paintGradientTextFill(
+function paintTextDecorations(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   opts: TextCanvasRenderOptions,
   layout: TextLayout,
@@ -257,13 +265,53 @@ function paintGradientTextFill(
   blockOffsetY: number,
   style: TextLayoutStyleOptions,
 ): void {
-  const node = opts.gradientNode!;
+  if (style.textDecoration === "none") return;
+  const canonical = opts.prepared?.canonical;
+  for (let i = 0; i < layout.lines.length; i++) {
+    const line = layout.lines[i]!;
+    if (!line.text) continue;
+    const isLast = i === layout.lines.length - 1;
+    const canonicalLine = canonical?.lines[i];
+    const y = canonicalLine?.y ?? lineTopY(layout, i) + TEXT_BOX_PAD_Y + blockOffsetY;
+    const x =
+      canonicalLine?.x ??
+      lineOffsetX(line.width, innerW, opts.textAlign, {
+        isLastLine: isLast,
+        fullLineText: line.text,
+        letterSpacing: opts.typo.letterSpacing,
+      }) + TEXT_BOX_PAD_X;
+    drawLineDecorations(ctx, line.text, x, y, opts.typo, style.textDecoration);
+  }
+}
+
+function paintTextLinesAndDecorations(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  opts: TextCanvasRenderOptions,
+  layout: TextLayout,
+  innerW: number,
+  blockOffsetY: number,
+  style: TextLayoutStyleOptions,
+): void {
+  paintTextGlyphs(ctx, opts, layout, innerW, blockOffsetY, style);
+  paintTextDecorations(ctx, opts, layout, innerW, blockOffsetY, style);
+}
+
+/** Paint fill (gradient/media/solid+opacity) into text glyph shapes via destination-in compositing. */
+function paintMaskedTextFill(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  opts: TextCanvasRenderOptions,
+  layout: TextLayout,
+  innerW: number,
+  blockOffsetY: number,
+  style: TextLayoutStyleOptions,
+  fillPaint: ReturnType<typeof textNodeAsFillPaint>,
+): void {
   const w = Math.max(1, opts.width);
   const h = Math.max(1, opts.height);
 
   ctx.save();
-  if (!paintGradientFillInBox(ctx, node, w, h)) {
-    const grad = createGradientPaintStyle(ctx, node, w, h);
+  if (!paintNodeFillInBox(ctx, fillPaint, w, h, opts.mediaFill)) {
+    const grad = createGradientPaintStyle(ctx, fillPaint, w, h);
     if (grad) {
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, w, h);
@@ -277,9 +325,10 @@ function paintGradientTextFill(
   ctx.globalCompositeOperation = "destination-in";
   ctx.globalAlpha = 1;
   ctx.fillStyle = "#000000";
-  paintTextLinesAndDecorations(ctx, opts, layout, innerW, blockOffsetY, style);
+  paintTextGlyphs(ctx, opts, layout, innerW, blockOffsetY, style);
   ctx.globalAlpha = prevAlpha;
   ctx.globalCompositeOperation = "source-over";
+  paintTextDecorations(ctx, opts, layout, innerW, blockOffsetY, style);
   ctx.restore();
 }
 
@@ -351,17 +400,16 @@ function drawLineDecorations(
   if (!text || decoration === "none") return;
   const width = measureStringWidth(getTextMeasureContext(), text, typo.letterSpacing);
   ctx.strokeStyle = typo.color;
-  ctx.lineWidth = Math.max(1, typo.fontSize / 12);
-  const lineHeightPx = typo.fontSize * typo.lineHeight;
+  ctx.lineWidth = textDecorationStrokeWidth(typo.fontSize);
   if (decoration === "underline") {
-    const uy = y + lineHeightPx - Math.max(1, typo.fontSize * 0.12);
+    const uy = underlineDecorationY(y, typo.fontSize, typo.lineHeight);
     ctx.beginPath();
     ctx.moveTo(x, uy);
     ctx.lineTo(x + width, uy);
     ctx.stroke();
   }
   if (decoration === "strikethrough") {
-    const sy = y + lineHeightPx * 0.45;
+    const sy = strikethroughDecorationY(y, typo.fontSize, typo.lineHeight);
     ctx.beginPath();
     ctx.moveTo(x, sy);
     ctx.lineTo(x + width, sy);
@@ -448,11 +496,13 @@ function drawSelection(
   padY: number,
   start: number,
   end: number,
+  canonicalLines?: Array<{ x: number; y: number; text: string; startIndex: number }>,
 ): void {
   ctx.fillStyle = "rgba(24, 160, 251, 0.35)";
 
   for (let i = 0; i < layout.lines.length; i++) {
     const line = layout.lines[i]!;
+    const canonicalLine = canonicalLines?.[i];
     const lineStart = line.startIndex;
     const lineEnd = line.startIndex + line.text.length;
     if (end <= lineStart || start >= lineEnd) continue;
@@ -461,12 +511,13 @@ function drawSelection(
     const selEnd = Math.min(end, lineEnd) - lineStart;
     const before = line.text.slice(0, selStart);
     const selected = line.text.slice(selStart, selEnd);
+    const lineX =
+      canonicalLine?.x ??
+      lineOffsetX(line.width, innerWidth, align) + padX;
     const x0 =
-      lineOffsetX(line.width, innerWidth, align) +
-      measureStringWidth(getTextMeasureContext(), before, typo.letterSpacing) +
-      padX;
+      lineX + measureStringWidth(getTextMeasureContext(), before, typo.letterSpacing);
     const selW = measureStringWidth(getTextMeasureContext(), selected, typo.letterSpacing);
-    const y = lineTopY(layout, i) + padY;
+    const y = canonicalLine?.y ?? lineTopY(layout, i) + padY;
     ctx.fillRect(x0, y, Math.max(1, selW), layout.lineHeightPx);
   }
 }

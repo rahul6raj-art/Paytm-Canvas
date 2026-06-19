@@ -73,7 +73,8 @@ describe("pickDeepestNodeAtWorldPoint — auto-layout frame", () => {
 
     const hit = pickDeepestNodeAtWorldPoint(worldX, worldY, laidOut, result!.childOrder);
     assert.equal(hit, "a");
-    assert.equal(selectionTargetForClick(hit!, laidOut, result!.childOrder, null), "a");
+    assert.equal(selectionTargetForClick(hit!, laidOut, result!.childOrder, null), "f");
+    assert.equal(selectionTargetForClick(hit!, laidOut, result!.childOrder, null, true), "a");
   });
 
   it("picks child when childOrder is stale but parentId is correct", () => {
@@ -98,6 +99,7 @@ describe("pickDeepestNodeAtWorldPoint — auto-layout frame", () => {
 
     const hit = pickDeepestNodeAtWorldPoint(worldX, worldY, nodes, childOrder);
     assert.equal(hit, "a");
-    assert.equal(selectionTargetForClick(hit!, nodes, childOrder, null), "a");
+    assert.equal(selectionTargetForClick(hit!, nodes, childOrder, null), "f");
+    assert.equal(selectionTargetForClick(hit!, nodes, childOrder, null, true), "a");
   });
 });

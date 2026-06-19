@@ -1,13 +1,14 @@
 "use client";
 
 import { useRef } from "react";
-import { ImagePlus, PanelRight } from "lucide-react";
+import { ImagePlus, MessageSquare } from "lucide-react";
 import { ToolButton } from "./ToolButton";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { getLastCanvasWorldPoint } from "@/lib/canvasPointerMemory";
 import { isSvgLayerImportFile } from "@/lib/svgFileImport";
 import { isPaytmCraftHttpApiMode } from "@/lib/env";
 import { cn } from "@/lib/utils";
+import { EditorHintWrap } from "./EditorHoverHint";
 
 export function RightPanelQuickTools({ className }: { className?: string }) {
   const imageImportInputRef = useRef<HTMLInputElement>(null);
@@ -48,25 +49,29 @@ export function RightPanelQuickTools({ className }: { className?: string }) {
         active={false}
         aria-label="Import image"
         title="Import image"
+        hintSide="left"
         onClick={() => imageImportInputRef.current?.click()}
       >
         <ImagePlus className="size-icon-ui" strokeWidth={1.85} />
       </ToolButton>
       <ToolButton
         active={commentsPanelOpen}
-        aria-label="Comments panel"
-        title="Comments panel"
+        aria-label="Comments"
+        title="Comments"
+        hintSide="left"
         onClick={() => toggleCommentsPanel()}
       >
-        <PanelRight className="size-icon-ui" strokeWidth={1.85} />
+        <MessageSquare className="size-icon-ui" strokeWidth={1.85} />
       </ToolButton>
       {isApiMode && isApiBackedFile && apiCommentsStatus === "synced" ? (
-        <span
-          className="ml-1 min-w-0 shrink truncate text-ui text-emerald-300/90"
+        <EditorHintWrap
           title="Thread comments are stored on the mock API for this file"
+          hintSide="left"
         >
-          Synced
-        </span>
+          <span className="ml-1 min-w-0 shrink truncate text-ui text-emerald-300/90">
+            Synced
+          </span>
+        </EditorHintWrap>
       ) : null}
     </div>
   );

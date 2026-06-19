@@ -15,6 +15,7 @@ const ROOT = EDITOR_ROOT_KEY;
 export type AIDesignElementSpec = {
   type?: "rectangle" | "text" | "ellipse" | "frame";
   name?: string;
+  role?: "status" | "nav" | "hero" | "title" | "subtitle" | "input" | "button" | "card" | "list-item" | "badge" | "icon";
   x?: number;
   y?: number;
   width?: number;
@@ -24,6 +25,8 @@ export type AIDesignElementSpec = {
   fontSize?: number;
   fontWeight?: number;
   fontFamily?: string;
+  lineHeight?: number;
+  textAlign?: "left" | "center" | "right";
   cornerRadius?: number;
   stroke?: string;
 };
@@ -63,7 +66,30 @@ function promptFidelityRules(tokens?: ExtractedDesignTokens): string[] {
     "- design.md attachments: colors, typography, and spacing ONLY — never use them to pick which screen to build.",
     `- ${mobileFrame}`,
     "- Include every block the user names; do not add home/quick-action/bottom-nav patterns unless explicitly requested.",
-    "- Place elements at distinct x,y coordinates with realistic spacing; minimum 8 elements.",
+    "- Place elements at distinct x,y coordinates with realistic spacing.",
+    "- Minimum 20 elements for mobile screens, 28+ for auth/checkout, 35+ for home/dashboard.",
+    "- Use role-appropriate typography: hero/title 22–32px bold, body 14px, captions 12px, buttons 16px semibold.",
+    "- Inputs: 48px tall rounded rectangles with hairline border; primary buttons: 48–52px tall filled rectangles.",
+    "- Cards: white/surface fill, 12–24px corner radius, 16px internal padding implied by text placement.",
+  ];
+}
+
+function llmQualityRules(intent?: ScreenIntent): string[] {
+  if (intent === "dashboard" || intent === "landing") {
+    return [
+      "- Desktop frame: width 1200–1440, height 800–900 unless user specifies otherwise.",
+      "- Include nav bar, hero or header band, at least 3 content cards or metric tiles, and a primary CTA.",
+      "- Minimum 24 elements with clear vertical rhythm (24–32px gaps).",
+    ];
+  }
+  if (intent === "auth") {
+    return [
+      "- Auth layout: logo/brand mark, welcome headline, subtitle, 1–3 input fields, primary CTA, secondary footer link.",
+      "- Vertically center the form block; leave 24px horizontal gutter.",
+    ];
+  }
+  return [
+    "- Mobile product quality: status bar area, section headers, card groups, list rows with chevrons where appropriate.",
   ];
 }
 
@@ -75,7 +101,8 @@ export function buildAIDesignSystemPrompt(
 ): string {
   const palette = getPalette(style);
   return [
-    "You are a layout engine that materializes the user's request exactly — not a creative designer.",
+    "You are a senior product designer generating production-ready mobile and web UI layouts as structured JSON.",
+    "Output polished fintech/product screens — not wireframes. Every screen needs hierarchy, spacing, and realistic copy from the user prompt.",
     "Respond with ONLY valid JSON. No markdown fences, no commentary.",
     "",
     "JSON schema:",
@@ -84,18 +111,22 @@ export function buildAIDesignSystemPrompt(
     '  "flowLabel": "one-line screen description",',
     '  "frame": { "name": "Screen", "width": number, "height": number, "fill": "#hex", "cornerRadius": number },',
     '  "elements": [',
-    '    { "type": "rectangle" | "text" | "ellipse", "name": string, "x": number, "y": number, "width": number, "height": number,',
-    '      "fill": "#hex", "content": "for text only", "fontSize": number, "fontWeight": number, "cornerRadius": number, "fontFamily": "CSS stack" }',
+    '    { "type": "rectangle" | "text" | "ellipse", "role": "status|nav|hero|title|subtitle|input|button|card|list-item|badge|icon",',
+    '      "name": string, "x": number, "y": number, "width": number, "height": number,',
+    '      "fill": "#hex", "content": "for text only", "fontSize": number, "fontWeight": number,',
+    '      "lineHeight": number, "textAlign": "left|center|right", "cornerRadius": number, "fontFamily": "CSS stack" }',
     "  ]",
     "}",
     "",
     "Rules:",
-    "- Coordinates are relative to the frame top-left (0,0). Place every element at explicit x,y — no overlapping stacks.",
+    "- Coordinates are relative to the frame top-left (0,0). Place every element at explicit x,y — avoid overlapping stacks.",
     "- Every visible label, amount, merchant name, and section title should come from the user prompt when provided.",
     "- Do not invent a different screen type than the user requested.",
     ...promptFidelityRules(tokens),
+    ...llmQualityRules(intent),
     tokens ? `- Set fontFamily on every text element to: ${tokens.fontFamily}` : "",
-    "- Use rounded cards (cornerRadius 12–18), clear typography hierarchy, realistic spacing.",
+    tokens ? `- Title text: ${tokens.titleSize}px, body: ${tokens.bodySize}px, subtext: ${tokens.subtextSize}px, section headers: ${tokens.sectionHeaderSize}px` : "",
+    "- Use rounded cards (cornerRadius 12–24), clear typography hierarchy, 12–16px gutters, 24px section gaps.",
     "- Follow attached design.md tokens when provided — brand colors override defaults.",
     tokens ? designTokensPromptBlock(tokens) : "",
     tokens
@@ -252,16 +283,33 @@ export function buildDesignFromLLMSpec(
       expanded: true,
     };
     if (type === "text") {
+      const role = el.role;
+      const defaultSize =
+        role === "title" || role === "hero"
+          ? options.tokens?.titleSize ?? 22
+          : role === "subtitle"
+            ? options.tokens?.bodySize ?? 14
+            : options.tokens?.bodySize ?? 14;
+      const defaultWeight =
+        role === "title" || role === "hero" || role === "button" ? 700 : role === "subtitle" ? 400 : 500;
+      const defaultColor =
+        role === "subtitle"
+          ? options.tokens?.muted ?? palette.muted
+          : role === "button"
+            ? options.tokens?.onPrimary ?? palette.primaryText
+            : hexOr(el.fill, palette.text);
+      const lineHeightPx = num(el.lineHeight, options.tokens?.bodyLine ?? 20);
+      const fontSize = num(el.fontSize, defaultSize);
       nodes[id] = {
         ...base,
         type: "text",
         content: str(el.content, "Label"),
-        fill: hexOr(el.fill, palette.text),
-        fontSize: num(el.fontSize, options.tokens?.bodySize ?? 14),
-        fontWeight: num(el.fontWeight, 500),
-        ...(el.fontFamily || textFont
-          ? { fontFamily: str(el.fontFamily, textFont ?? "Inter, system-ui, sans-serif") }
-          : {}),
+        fill: defaultColor,
+        fontSize,
+        fontWeight: num(el.fontWeight, defaultWeight),
+        fontFamily: str(el.fontFamily, textFont ?? "Inter, system-ui, sans-serif"),
+        lineHeight: lineHeightPx / fontSize,
+        textAlign: el.textAlign ?? (role === "button" ? "center" : "left"),
       };
     } else if (type === "ellipse") {
       nodes[id] = {
@@ -270,13 +318,36 @@ export function buildDesignFromLLMSpec(
         fill: hexOr(el.fill, palette.primary),
       };
     } else {
+      const role = el.role;
+      const isInput = role === "input";
+      const isButton = role === "button";
+      const isCard = role === "card";
       nodes[id] = {
         ...base,
         type: "rectangle",
-        fill: hexOr(el.fill, i % 3 === 0 ? palette.primary : palette.surface),
-        cornerRadius: num(el.cornerRadius, 10),
-        strokeColor: el.stroke ? hexOr(el.stroke, palette.border) : palette.border,
-        strokeWidth: el.stroke ? 1 : 0,
+        fill: hexOr(
+          el.fill,
+          isButton
+            ? options.tokens?.primaryStrong ?? palette.primary
+            : isInput
+              ? options.tokens?.canvas ?? palette.surface
+              : isCard
+                ? options.tokens?.canvas ?? palette.surface
+                : i % 3 === 0
+                  ? palette.primary
+                  : palette.surface,
+        ),
+        cornerRadius: num(
+          el.cornerRadius,
+          isButton || isInput ? options.tokens?.radiusControl ?? 8 : isCard ? options.tokens?.radiusCard ?? 16 : 10,
+        ),
+        strokeColor: el.stroke
+          ? hexOr(el.stroke, palette.border)
+          : isInput
+            ? options.tokens?.hairline ?? palette.border
+            : palette.border,
+        strokeWidth: isInput || el.stroke ? 1 : 0,
+        height: num(el.height, isButton ? 52 : isInput ? 48 : 48),
       };
     }
     childIds.push(id);

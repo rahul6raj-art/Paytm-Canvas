@@ -33,6 +33,7 @@ import { useCanvasToWorld } from "./CanvasToWorldContext";
 import { clientToWorldFromDocument } from "@/lib/canvasCoordinates";
 import { useShapeEditHandlesGate } from "./useShapeEditHandles";
 import { CanvasEditValueBadge } from "./CanvasEditValueBadge";
+import { EditorHintWrap } from "./EditorHoverHint";
 
 function localToWorld(
   nodeId: string,
@@ -125,63 +126,67 @@ export function PolygonHandles() {
 
   return (
     <>
-      <button
-        type="button"
-        data-polygon-sides-handle
-        aria-label="Adjust polygon sides"
+      <EditorHintWrap
         title={`Sides: ${params?.sides ?? 6} — drag to change`}
-        className="pointer-events-auto absolute z-[34] touch-none rounded-sm border-2 border-[#18a0fb] bg-white will-change-transform"
-        style={{
-          left: sidesWorld.x - size / 2,
-          top: sidesWorld.y - size / 2,
-          width: size,
-          height: size,
-          boxShadow: `0 0 0 ${borderWorld}px ${CANVAS_VISUAL.selection}`,
-          transition: dragging === "sides" ? "none" : undefined,
-        }}
-        onPointerDown={(e) => {
-          if (!id) return;
-          e.stopPropagation();
-          e.preventDefault();
-          setDragging("sides");
-          beginPolygonSidesDrag({
-            nodeId: id,
-            pointerId: e.pointerId,
-            clientToWorld,
-            captureTarget: e.currentTarget,
-          });
-          const onEnd = () => {
-            setDragging(null);
-            window.removeEventListener("pointerup", onEnd);
-            window.removeEventListener("pointercancel", onEnd);
-          };
-          window.addEventListener("pointerup", onEnd);
-          window.addEventListener("pointercancel", onEnd);
-        }}
-      />
-      <button
-        type="button"
-        data-polygon-corner-handle
-        aria-label="Adjust polygon corner radius"
-        title="Drag to round polygon corners"
-        className="pointer-events-auto absolute z-[34] touch-none rounded-full border-2 border-[#18a0fb] bg-white/90 will-change-transform"
-        style={{
-          left: cornerWorld.x - size / 2,
-          top: cornerWorld.y - size / 2,
-          width: size,
-          height: size,
-          boxShadow: `0 0 0 ${borderWorld}px ${CANVAS_VISUAL.selection}`,
-          opacity: (params?.cornerRadius ?? 0) > 0 || dragging === "corner" ? 1 : 0.65,
-          transition: dragging === "corner" ? "none" : undefined,
-        }}
-        onPointerDown={(e) => {
-          if (!id) return;
-          e.stopPropagation();
-          e.preventDefault();
-          setDragging("corner");
-          beginPolygonCornerRadiusDrag({
-            nodeId: id,
-            pointerId: e.pointerId,
+        anchorClassName="contents"
+      >
+        <button
+          type="button"
+          data-polygon-sides-handle
+          aria-label="Adjust polygon sides"
+          className="pointer-events-auto absolute z-[34] touch-none rounded-sm border-2 border-[#18a0fb] bg-white will-change-transform"
+          style={{
+            left: sidesWorld.x - size / 2,
+            top: sidesWorld.y - size / 2,
+            width: size,
+            height: size,
+            boxShadow: `0 0 0 ${borderWorld}px ${CANVAS_VISUAL.selection}`,
+            transition: dragging === "sides" ? "none" : undefined,
+          }}
+          onPointerDown={(e) => {
+            if (!id) return;
+            e.stopPropagation();
+            e.preventDefault();
+            setDragging("sides");
+            beginPolygonSidesDrag({
+              nodeId: id,
+              pointerId: e.pointerId,
+              clientToWorld,
+              captureTarget: e.currentTarget,
+            });
+            const onEnd = () => {
+              setDragging(null);
+              window.removeEventListener("pointerup", onEnd);
+              window.removeEventListener("pointercancel", onEnd);
+            };
+            window.addEventListener("pointerup", onEnd);
+            window.addEventListener("pointercancel", onEnd);
+          }}
+        />
+      </EditorHintWrap>
+      <EditorHintWrap title="Drag to round polygon corners" anchorClassName="contents">
+        <button
+          type="button"
+          data-polygon-corner-handle
+          aria-label="Adjust polygon corner radius"
+          className="pointer-events-auto absolute z-[34] touch-none rounded-full border-2 border-[#18a0fb] bg-white/90 will-change-transform"
+          style={{
+            left: cornerWorld.x - size / 2,
+            top: cornerWorld.y - size / 2,
+            width: size,
+            height: size,
+            boxShadow: `0 0 0 ${borderWorld}px ${CANVAS_VISUAL.selection}`,
+            opacity: (params?.cornerRadius ?? 0) > 0 || dragging === "corner" ? 1 : 0.65,
+            transition: dragging === "corner" ? "none" : undefined,
+          }}
+          onPointerDown={(e) => {
+            if (!id) return;
+            e.stopPropagation();
+            e.preventDefault();
+            setDragging("corner");
+            beginPolygonCornerRadiusDrag({
+              nodeId: id,
+              pointerId: e.pointerId,
             clientX: e.clientX,
             clientY: e.clientY,
             clientToWorld,
@@ -196,6 +201,7 @@ export function PolygonHandles() {
           window.removeEventListener("pointercancel", onEnd);
         }}
       />
+      </EditorHintWrap>
       {cornerRadiusBadge ? (
         <CanvasEditValueBadge
           x={cornerRadiusBadge.x}

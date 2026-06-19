@@ -1,13 +1,18 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  isCanvasTextEditFieldElement,
+  isPageNameEditActive,
+  isPageNameEditFieldElement,
   isToolShortcutEvent,
   isShortcutOverlayOpen,
   resolveKeyboardFieldTarget,
   shouldAllowNativeFieldClipboard,
   shouldBlockDeleteSelectionShortcut,
+  shouldBlockToolShortcutsForTyping,
   shouldYieldShortcutsToTyping,
   resolveToolFromKeyboardEvent,
+  releaseFieldFocusForCanvas,
   toolFromShortcutKey,
 } from "@/lib/editorKeyboardFocus";
 
@@ -90,6 +95,132 @@ describe("editorKeyboardFocus shortcuts", () => {
       altKey: false,
     } as KeyboardEvent;
     assert.equal(shouldYieldShortcutsToTyping(e, fakeTextarea()), true);
+    assert.equal(shouldBlockDeleteSelectionShortcut(e, fakeTextarea()), true);
+  });
+
+  it("yields tool shortcut letters while renaming a canvas page", () => {
+    if (typeof document === "undefined") return;
+
+    const input = document.createElement("input");
+    input.setAttribute("data-page-name-editor", "");
+    document.body.appendChild(input);
+    input.focus();
+
+    try {
+      const e = {
+        key: "f",
+        code: "KeyF",
+        metaKey: false,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+      } as KeyboardEvent;
+      assert.equal(isToolShortcutEvent(e), true);
+      assert.equal(shouldYieldShortcutsToTyping(e, input), true);
+    } finally {
+      input.remove();
+    }
+  });
+
+  it("does not blur page name editor in releaseFieldFocusForCanvas", () => {
+    if (typeof document === "undefined") return;
+
+    const input = document.createElement("input");
+    input.setAttribute("data-page-name-editor", "");
+    document.body.appendChild(input);
+    input.focus();
+
+    try {
+      assert.equal(isPageNameEditFieldElement(input), true);
+      releaseFieldFocusForCanvas();
+      assert.equal(document.activeElement, input);
+    } finally {
+      input.remove();
+    }
+  });
+
+  it("treats mounted page name input as an active rename session even when canvas is focused", () => {
+    if (typeof document === "undefined") return;
+
+    const canvas = document.createElement("div");
+    canvas.tabIndex = 0;
+    const input = document.createElement("input");
+    input.setAttribute("data-page-name-editor", "");
+    document.body.appendChild(canvas);
+    document.body.appendChild(input);
+
+    try {
+      canvas.focus();
+      assert.equal(isPageNameEditActive(), true);
+      const e = {
+        key: "h",
+        code: "KeyH",
+        metaKey: false,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+      } as KeyboardEvent;
+      assert.equal(shouldYieldShortcutsToTyping(e, canvas), true);
+    } finally {
+      canvas.remove();
+      input.remove();
+    }
+  });
+
+  it("yields tool shortcut letters in left sidebar search input", () => {
+    if (typeof document === "undefined") return;
+
+    const aside = document.createElement("aside");
+    aside.setAttribute("data-left-sidebar", "");
+    const input = document.createElement("input");
+    aside.appendChild(input);
+    document.body.appendChild(aside);
+
+    try {
+      const e = {
+        key: "f",
+        code: "KeyF",
+        metaKey: false,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+      } as KeyboardEvent;
+      assert.equal(shouldYieldShortcutsToTyping(e, input), true);
+      assert.equal(shouldBlockToolShortcutsForTyping(input), true);
+    } finally {
+      aside.remove();
+    }
+  });
+
+  it("yields tool shortcut letters in marked sidebar typing fields outside aside", () => {
+    if (typeof document === "undefined") return;
+
+    const input = document.createElement("input");
+    input.setAttribute("data-sidebar-typing-field", "");
+    const e = {
+      key: "t",
+      code: "KeyT",
+      metaKey: false,
+      ctrlKey: false,
+      altKey: false,
+      shiftKey: false,
+    } as KeyboardEvent;
+    assert.equal(shouldBlockToolShortcutsForTyping(input), true);
+    assert.equal(shouldYieldShortcutsToTyping(e, input), true);
+  });
+
+  it("yields tool shortcut letters in multiline sidebar prompt textarea", () => {
+    const e = {
+      key: "t",
+      code: "KeyT",
+      metaKey: false,
+      ctrlKey: false,
+      altKey: false,
+      shiftKey: false,
+    } as KeyboardEvent;
+    assert.equal(isToolShortcutEvent(e), true);
+    assert.equal(shouldYieldShortcutsToTyping(e, fakeTextarea()), true);
+    assert.equal(shouldBlockToolShortcutsForTyping(fakeTextarea()), true);
   });
 
   it("applies tool shortcut letters even when an inspector input retains focus", () => {
@@ -200,5 +331,22 @@ describe("editorKeyboardFocus shortcuts", () => {
       } as never),
       true,
     );
+  });
+
+  it("does not blur canvas text edit textarea in releaseFieldFocusForCanvas", () => {
+    if (typeof document === "undefined") return;
+
+    const textarea = document.createElement("textarea");
+    textarea.setAttribute("data-text-editor", "text-1");
+    document.body.appendChild(textarea);
+    textarea.focus();
+
+    try {
+      assert.equal(isCanvasTextEditFieldElement(textarea), true);
+      releaseFieldFocusForCanvas();
+      assert.equal(document.activeElement, textarea);
+    } finally {
+      textarea.remove();
+    }
   });
 });

@@ -1,5 +1,6 @@
 import type { EditorNode } from "@/stores/useEditorStore";
 import { getActiveCraftEngine } from "@/engine/craftEngineRegistry";
+import { readCraftEngine } from "@/engine/craftEngineMutation";
 import {
   prepareTextForDisplay,
   textAdvancedStyleFromNode,
@@ -18,11 +19,12 @@ import {
 import {
   TEXT_BOX_PAD_X,
   TEXT_BOX_PAD_Y,
+  availableWrapWidthForNode,
+  nodeForTextLayout,
   textInnerHeight,
   textInnerWidth,
   textTypoFromModel,
   toTextNodeModel,
-  wrapWidthForResizeMode,
   type TextAlign,
 } from "./textNodeModel";
 import type { ResolvedTextTypo } from "@/lib/textTypography";
@@ -91,6 +93,15 @@ export type TextLayoutForRender = {
   innerH: number;
   blockOffsetY: number;
   style: TextAdvancedStyle;
+  /** Layout debug metadata (shown in ?textDebug=1 overlay). */
+  debug: TextLayoutDebugInfo;
+};
+
+export type TextLayoutDebugInfo = {
+  cacheKey: string;
+  wrapEnabled: boolean;
+  availableWidth: number;
+  lineWidths: number[];
 };
 
 type LayoutCacheEntry = {
@@ -102,25 +113,65 @@ const layoutCache = new Map<string, CanonicalTextLayout>();
 const LAYOUT_CACHE_MAX = 512;
 
 function layoutCacheKey(node: EditorNode, displayText: string, style: TextAdvancedStyle): string {
+  const layoutNode = nodeForTextLayout(node, displayText);
   return [
-    node.id,
+    layoutNode.id,
     displayText,
-    node.width,
-    node.height,
-    node.fontFamily ?? "",
-    node.fontSize ?? "",
-    node.fontWeight ?? "",
-    node.lineHeight ?? "",
-    node.letterSpacing ?? "",
-    node.textAlign ?? "",
-    node.verticalAlign ?? "",
-    node.textResizeMode ?? "",
-    node.autoResize ?? "",
+    layoutNode.width,
+    layoutNode.height,
+    layoutNode.fontFamily ?? "",
+    layoutNode.fontSize ?? "",
+    layoutNode.fontWeight ?? "",
+    layoutNode.lineHeight ?? "",
+    layoutNode.letterSpacing ?? "",
+    layoutNode.textAlign ?? "",
+    layoutNode.verticalAlign ?? "",
+    layoutNode.textResizeMode ?? "",
+    layoutNode.autoResize ?? "",
     style.paragraphSpacing,
     style.textCase,
     style.verticalTrim,
     style.textTruncate,
+    style.textDecoration,
   ].join("|");
+}
+
+function cacheHitIsValid(
+  node: EditorNode,
+  cached: CanonicalTextLayout,
+  cacheKey: string,
+): boolean {
+  const layoutNode = nodeForTextLayout(node);
+  const mode = layoutNode.textResizeMode ?? "auto-width";
+  const expectedInnerW = textInnerWidth(Math.max(1, layoutNode.width));
+  if (mode === "auto-width") {
+    // Auto-width uses content width for innerW; reject stale entries after explicit box resizes.
+    if (Math.abs(cached.innerW - expectedInnerW) <= 0.5) return true;
+    if (cached.innerW <= expectedInnerW + 0.5) return true;
+    if (typeof console !== "undefined") {
+      console.warn("[text-layout] stale auto-width cache hit; recomputing", {
+        nodeId: node.id,
+        cacheKey,
+        nodeWidth: layoutNode.width,
+        cachedInnerW: cached.innerW,
+        expectedInnerW,
+      });
+    }
+    return false;
+  }
+  if (Math.abs(cached.innerW - expectedInnerW) <= 0.5) return true;
+  if (typeof console !== "undefined") {
+    console.warn("[text-layout] stale layout cache hit; recomputing", {
+      nodeId: node.id,
+      cacheKey,
+      nodeWidth: layoutNode.width,
+      cachedInnerW: cached.innerW,
+      expectedInnerW,
+      textResizeMode: mode,
+      autoResize: layoutNode.autoResize,
+    });
+  }
+  return false;
 }
 
 function pruneLayoutCache(): void {
@@ -141,10 +192,10 @@ function buildLayoutRequest(
   style: TextAdvancedStyle,
   typo: ResolvedTextTypo,
 ): string {
+  const layoutNode = nodeForTextLayout(node, displayText);
   const payload = {
     node: {
-      ...node,
-      content: displayText,
+      ...layoutNode,
       fontSize: effectiveFontSize(typo, style),
       paragraphSpacing: style.paragraphSpacing,
     },
@@ -156,6 +207,17 @@ function buildLayoutRequest(
   return JSON.stringify(payload);
 }
 
+function isWebImportedNode(node: EditorNode): boolean {
+  return node.id.startsWith("web-") || Boolean(node.codeClassName);
+}
+
+function shouldUseWasmCanonicalLayout(node: EditorNode): boolean {
+  if (isWebImportedNode(node)) return false;
+  const engine = getActiveCraftEngine();
+  if (!engine?.layoutTextNode) return false;
+  return readCraftEngine(() => Boolean(engine.layoutTextNode), false);
+}
+
 function wasmLayout(
   node: EditorNode,
   displayText: string,
@@ -164,8 +226,12 @@ function wasmLayout(
 ): CanonicalTextLayout | null {
   const engine = getActiveCraftEngine();
   if (!engine?.layoutTextNode) return null;
+  const json = readCraftEngine(
+    () => engine.layoutTextNode(buildLayoutRequest(node, displayText, style, typo)),
+    null,
+  );
+  if (!json) return null;
   try {
-    const json = engine.layoutTextNode(buildLayoutRequest(node, displayText, style, typo));
     const parsed = JSON.parse(json) as CanonicalTextLayout;
     if (!parsed?.lines) return null;
     return { ...parsed, source: "wasm" };
@@ -279,34 +345,38 @@ export function canonicalToTextLayout(canonical: CanonicalTextLayout): TextLayou
 /** Canonical text layout — WASM rustybuzz when engine is ready, JS measureText bootstrap otherwise. */
 export function layoutTextCanonical(
   node: EditorNode,
-  opts?: { bypassCache?: boolean },
+  opts?: { bypassCache?: boolean; forceWasm?: boolean },
 ): CanonicalTextLayout | null {
-  const model = toTextNodeModel(node, false);
+  const layoutNode = nodeForTextLayout(node);
+  const model = toTextNodeModel(layoutNode, false);
   if (!model) return null;
 
   const typo = textTypoFromModel(model);
-  const style = textAdvancedStyleFromNode(node);
+  const style = textAdvancedStyleFromNode(layoutNode);
   const displayText = prepareTextForDisplay(model.text, style);
   const innerW = textInnerWidth(model.width);
   const innerH = textInnerHeight(model.height);
-  const wrapWidth = wrapWidthForResizeMode(model.width, model.textResizeMode);
+  const wrapWidth = availableWrapWidthForNode(layoutNode);
   const effectiveWrap =
     wrapWidth === Number.POSITIVE_INFINITY
       ? Number.POSITIVE_INFINITY
-      : Math.max(1, Math.min(wrapWidth, innerW));
+      : Math.max(1, wrapWidth);
 
-  const cacheKey = layoutCacheKey(node, displayText, style);
+  const cacheKey = layoutCacheKey(layoutNode, displayText, style);
   if (!opts?.bypassCache) {
     const cached = layoutCache.get(cacheKey);
-    if (cached) return cached;
+    if (cached && cacheHitIsValid(layoutNode, cached, cacheKey)) return cached;
+    if (cached) layoutCache.delete(cacheKey);
   }
 
-  const wasm = wasmLayout(node, displayText, style, typo);
+  const wasm = (opts?.forceWasm || shouldUseWasmCanonicalLayout(layoutNode))
+    ? wasmLayout(layoutNode, displayText, style, typo)
+    : null;
   const canonical =
     wasm ??
-    fallbackLayout(node, displayText, style, typo, innerW, innerH, effectiveWrap);
+    fallbackLayout(layoutNode, displayText, style, typo, innerW, innerH, effectiveWrap);
 
-  recordFontResolution(node.id, canonical.font);
+  recordFontResolution(layoutNode.id, canonical.font);
   layoutCache.set(cacheKey, canonical);
   pruneLayoutCache();
   return canonical;
@@ -324,16 +394,20 @@ export function clearCanonicalTextLayoutCache(nodeId?: string): void {
 
 /** Shared layout pipeline for SVG display, canvas editing, caret, and selection. */
 export function textLayoutForEditorNode(node: EditorNode): TextLayoutForRender | null {
-  const model = toTextNodeModel(node, false);
+  const layoutNode = nodeForTextLayout(node);
+  const model = toTextNodeModel(layoutNode, false);
   if (!model) return null;
 
   const typo = textTypoFromModel(model);
-  const style = textAdvancedStyleFromNode(node);
-  const canonical = layoutTextCanonical(node);
+  const style = textAdvancedStyleFromNode(layoutNode);
+  const canonical = layoutTextCanonical(layoutNode);
   if (!canonical) return null;
 
   let layout = canonicalToTextLayout(canonical);
   layout = applyTruncateFromCanonical(layout, typo, style, canonical.innerH, canonical.innerW);
+
+  const wrapWidth = availableWrapWidthForNode(layoutNode);
+  const cacheKey = layoutCacheKey(layoutNode, prepareTextForDisplay(model.text, style), style);
 
   return {
     layout,
@@ -344,6 +418,13 @@ export function textLayoutForEditorNode(node: EditorNode): TextLayoutForRender |
     innerH: canonical.innerH,
     blockOffsetY: canonical.blockOffsetY,
     style,
+    debug: {
+      cacheKey,
+      wrapEnabled: wrapWidth !== Number.POSITIVE_INFINITY,
+      availableWidth:
+        wrapWidth === Number.POSITIVE_INFINITY ? layout.width : wrapWidth,
+      lineWidths: layout.lines.map((line) => line.width),
+    },
   };
 }
 

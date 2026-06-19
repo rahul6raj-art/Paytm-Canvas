@@ -67,6 +67,8 @@ describe("code round trip", () => {
     });
 
     assert.ok(exported.source.includes("@paytm-craft-payload-start"));
+    assert.ok(exported.source.includes("/*\n@paytm-craft-payload-start"));
+    assert.ok(exported.source.includes("@paytm-craft-payload-end\n*/"));
     assert.ok(exported.source.includes("Hello"));
     assert.equal(exported.componentName, "Card");
 
@@ -115,6 +117,8 @@ export default function HomeScreen() {
       sourceHeader: imported.sourceHeader,
     });
     assert.ok(exported.source.includes("@paytm-craft-payload-start"));
+    assert.ok(exported.source.includes("/*\n@paytm-craft-payload-start"));
+    assert.ok(exported.source.includes("@paytm-craft-payload-end\n*/"));
     assert.ok(exported.source.includes("data-pc-id"));
     assert.ok(exported.source.includes("<Header"));
 
@@ -171,6 +175,116 @@ export default PMLHomePage;
       (n) => (n.type === "frame" || n.type === "group") && n.width < 200,
     );
     assert.equal(narrowFrames.length, 0, `narrow frames: ${narrowFrames.map((n) => n.name).join(", ")}`);
+  });
+
+  it("sizes pml-signup screen root to full mobile width (not clipped)", () => {
+    const source = `
+export const PMLSignupPage = () => (
+  <div className="pml-signup">
+    <Header className="pml-signup__header" />
+    <div className="pml-signup__main">
+      <div className="pml-signup__scroll">
+        <h1 className="pml-signup__hero-title">Create your account</h1>
+        <TextField label="Mobile number" />
+      </div>
+      <Button label="Continue" />
+      <HomeIndicator />
+    </div>
+  </div>
+);
+export default PMLSignupPage;
+`;
+    const imported = importReactSource(source);
+    assert.equal(imported.ok, true);
+    if (!imported.ok) return;
+    const root = imported.slice.nodes[imported.slice.selectedIds[0]!];
+    assert.ok(root && root.width >= 390, `root width ${root?.width}`);
+    assert.ok(root && root.height >= 600, `root height ${root?.height}`);
+    const title = Object.values(imported.slice.nodes).find((n) => n.content === "Create your account");
+    assert.ok(title);
+    const narrowIntrinsic = Object.values(imported.slice.nodes).filter(
+      (n) =>
+        (n.type === "frame" || n.type === "group") &&
+        n.codeJsxIntrinsic &&
+        n.width < 200,
+    );
+    assert.equal(
+      narrowIntrinsic.length,
+      0,
+      `narrow intrinsic frames: ${narrowIntrinsic.map((n) => n.name).join(", ")}`,
+    );
+  });
+
+  it("imports full PMLSignupPage-style screens with state, ternaries, and footer row", () => {
+    const source = `
+import { useState } from 'react';
+import { Button } from '../../components/Button';
+import { Checkbox } from '../../components/Checkbox';
+import { Header } from '../../components/Header';
+import { HomeIndicator } from '../../components/HomeIndicator';
+import { SectionHeader } from '../../components/SectionHeader';
+import { TextField } from '../../components/TextField';
+
+export const PMLSignupPage = ({
+  theme = 'dark',
+}: { theme?: string } = {}) => {
+  const [step, setStep] = useState('mobile');
+  const [agreedTerms, setAgreedTerms] = useState(false);
+
+  return (
+    <div className="pml-signup">
+      <Header className="pml-signup__header" />
+      <div className="pml-signup__main">
+        <div className="pml-signup__scroll">
+          <div className="pml-signup__body">
+            {step === 'mobile' ? (
+              <>
+                <div className="pml-signup__hero">
+                  <h1 className="pml-signup__hero-title">Create your account</h1>
+                </div>
+                <SectionHeader title="Enter mobile number" />
+                <div className="pml-signup__form">
+                  <TextField label="Mobile number" />
+                </div>
+              </>
+            ) : (
+              <SectionHeader title="Verify mobile number" />
+            )}
+          </div>
+        </div>
+        <div className="pml-signup__footer-zone">
+          <div className="pml-signup__footer">
+            {step === 'mobile' ? (
+              <>
+                <div className="pml-signup__tc">
+                  <Checkbox state={agreedTerms ? 'checked' : 'unchecked'} />
+                  <span className="pml-signup__tc-text">I agree to terms</span>
+                </div>
+                <Button label="Get OTP" />
+              </>
+            ) : (
+              <Button label="Create account" />
+            )}
+          </div>
+          <HomeIndicator />
+        </div>
+      </div>
+    </div>
+  );
+};
+export default PMLSignupPage;
+`;
+    const imported = importReactSource(source);
+    assert.equal(imported.ok, true);
+    if (!imported.ok) return;
+    const root = imported.slice.nodes[imported.slice.selectedIds[0]!];
+    assert.equal(root?.width, 390, `root width ${root?.width}`);
+    assert.ok((root?.height ?? 0) >= 600);
+    const checkbox = Object.values(imported.slice.nodes).find((n) => n.codeJsxTag === "Checkbox");
+    assert.ok(checkbox && checkbox.width <= 64, `checkbox width ${checkbox?.width}`);
+    assert.ok(Object.values(imported.slice.nodes).some((n) => n.content === "Create your account"));
+    assert.ok(Object.values(imported.slice.nodes).some((n) => n.codeJsxTag === "TextField"));
+    assert.ok(Object.values(imported.slice.nodes).some((n) => n.codeJsxTag === "Button"));
   });
 
   it("imports flex className and applies auto-layout positions", () => {

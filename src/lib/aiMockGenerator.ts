@@ -3,6 +3,7 @@ import type { EditorPersistSlice } from "@/lib/documentPersistence";
 import { wrapPersistSliceWithPages } from "@/lib/documentPersistence";
 import type { AIContextImagePayload } from "@/lib/aiContextImages";
 import { DEFAULT_AI_MODEL_ID, getAIModelById } from "@/lib/aiModels";
+import { tryRichGenerate } from "@/lib/aiGenerateFastPath";
 import type { EditorNode } from "@/stores/useEditorStore";
 
 const ROOT = EDITOR_ROOT_KEY;
@@ -559,6 +560,28 @@ export async function generateDesignFromPromptAsync(
   options: AIGenerateOptions,
 ): Promise<AIGenerateResult & { meta?: AIGenerateAsyncMeta }> {
   const model = options.model ?? DEFAULT_AI_MODEL_ID;
+
+  const local = tryRichGenerate({
+    prompt,
+    preset: options.preset,
+    style: options.style,
+    model,
+    contextPrompt: options.contextPrompt,
+    contextAttachmentCount: options.contextAttachmentCount,
+    contextImages: options.contextImages,
+  });
+  if (local?.ok && local.result?.slice && local.result.preview) {
+    return {
+      ...local.result,
+      preview: {
+        ...local.result.preview,
+        generationSource: "rich",
+        detectedIntent: local.detectedIntent ?? local.result.preview.detectedIntent,
+      },
+      meta: { source: "rich" },
+    };
+  }
+
   try {
     const res = await fetch("/api/v1/ai/generate", {
       method: "POST",
@@ -572,6 +595,7 @@ export async function generateDesignFromPromptAsync(
         contextAttachmentCount: options.contextAttachmentCount,
         contextImages: options.contextImages,
       }),
+      signal: AbortSignal.timeout(120_000),
     });
     const raw = await res.text();
     let data: {
