@@ -34,7 +34,7 @@ export function maskGroupChildHitOrder(
 
 export function shouldShowMaskLayer(
   group: EditorNode,
-  opts?: { objectEditModeNodeId?: string | null; selectedIds?: string[] },
+  opts?: { objectEditModeNodeId?: string | null; selectedIds?: readonly string[] },
 ): boolean {
   if (!group.maskId) return false;
   if (group.maskVisible) return true;

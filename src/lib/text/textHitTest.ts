@@ -6,7 +6,9 @@ import {
   MIN_TEXT_BOX,
   normalizeTextResizeMode,
   textInnerHeight,
+  textInnerWidth,
 } from "@/lib/text/textNodeModel";
+import { resolveTextTypo } from "@/lib/textTypography";
 import { verticalContentOffsetY } from "@/lib/text/textVerticalAlign";
 import type { TextLayout } from "@/lib/text/textMeasure";
 

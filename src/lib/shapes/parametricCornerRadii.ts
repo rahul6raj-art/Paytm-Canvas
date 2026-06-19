@@ -92,5 +92,5 @@ export function shapeSupportsIndividualCornerRadius(
     return true;
   }
   if (isPolygonNode(node) || isStarNode(node)) return true;
-  return pathSupportsCornerRadius(node);
+  return pathSupportsCornerRadius({ ...node, width: 1, height: 1 });
 }

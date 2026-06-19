@@ -41,7 +41,7 @@ export function isCompositeHiddenOperand(
   if (isBooleanGroup(composite)) return true;
 
   if (isMaskGroup(composite) && composite.maskId === nodeId) {
-    return !shouldShowMaskLayer(composite, { objectEditModeNodeId, selectedIds });
+    return !shouldShowMaskLayer(composite, { objectEditModeNodeId, selectedIds: [...selectedIds] });
   }
 
   return false;

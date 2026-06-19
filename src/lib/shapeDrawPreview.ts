@@ -6,7 +6,19 @@ import { isZeroAreaDraftNode } from "@/lib/shapes/shapeDraft";
 export type ShapeDrawPreviewKind = "none" | "box" | "line";
 
 export function shapeDrawPreviewKind(
-  node: Pick<EditorNode, "type" | "width" | "height" | "lineX1" | "lineY1" | "lineX2" | "lineY2">,
+  node: Pick<
+    EditorNode,
+    | "type"
+    | "width"
+    | "height"
+    | "lineX1"
+    | "lineY1"
+    | "lineX2"
+    | "lineY2"
+    | "x"
+    | "y"
+    | "rotation"
+  >,
 ): ShapeDrawPreviewKind {
   if (isZeroAreaDraftNode(node)) return "none";
   if (node.type === "line" || node.type === "arrow") return "line";
@@ -24,13 +36,16 @@ export function shapeDrawPreviewBoxBounds(
 }
 
 export function shapeDrawPreviewLineEndpoints(
-  node: Pick<EditorNode, "type" | "lineX1" | "lineY1" | "lineX2" | "lineY2" | "x" | "y" | "width" | "height">,
+  node: Pick<EditorNode, "type" | "lineX1" | "lineY1" | "lineX2" | "lineY2" | "x" | "y" | "width" | "height" | "rotation">,
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
   nodeId: string,
 ): { x1: number; y1: number; x2: number; y2: number } | null {
   if (node.type !== "line" && node.type !== "arrow") return null;
-  const local = lineEndpointsFromNode(node);
+  const local = lineEndpointsFromNode({
+    ...node,
+    rotation: node.rotation ?? 0,
+  });
   const b = getRenderedWorldBounds(nodeId, nodes, childOrder);
   return {
     x1: b.x + local.x1,

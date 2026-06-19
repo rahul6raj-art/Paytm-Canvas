@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "ES2017",
+    "target": "ES2018",
     "lib": [
       "dom",
       "dom.iterable",
@@ -38,6 +38,10 @@
     ".next/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "packages/craft-api/**",
+    "packages/craft-realtime/**",
+    "packages/craft-bridge-vscode/**",
+    "**/__tests__/**"
   ]
 }

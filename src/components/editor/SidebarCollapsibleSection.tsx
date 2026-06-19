@@ -67,9 +67,7 @@ export function SidebarCollapsibleSection({
     [controlledOpen, onOpenChange, open],
   );
   const isCard = variant === "card";
-  const hasContent = Children.toArray(children).some(
-    (child) => child !== null && child !== undefined && child !== false,
-  );
+  const hasContent = Children.toArray(children).length > 0;
   const showFooter = Boolean(footer) && !(hideFooterWhenCollapsed && !open);
   const isCompact = compactWhenCollapsed && !open;
 

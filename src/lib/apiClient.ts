@@ -141,6 +141,10 @@ export interface CraftFileVersionSummary {
   createdByDisplayName: string;
 }
 
+export interface CraftFileVersionDetail extends CraftFileVersionSummary {
+  documentJson: unknown;
+}
+
 export interface CraftAsset {
   id: string;
   workspaceId: string;

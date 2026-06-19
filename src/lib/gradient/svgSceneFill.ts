@@ -108,7 +108,7 @@ export function resolveShapeFillAttr(input: ShapeFillResolveInput): ShapeFillRes
         opacity,
         fit,
         fillKind === "pattern",
-        registerGradient,
+        (markup) => registerGradient(patternId, markup),
       );
       return { fillAttr: `url(#${patternId})`, underlayMarkup: "" };
     }
@@ -147,7 +147,7 @@ export function resolveShapeFillAttr(input: ShapeFillResolveInput): ShapeFillRes
 
   const patternId = `pc-pat-${nodeId}`;
   const scale = Math.max(1, renderScale);
-  if (registerHighResGradientPattern(node, width, height, patternId, registerGradient, scale)) {
+  if (registerHighResGradientPattern(node, width, height, patternId, (markup) => registerGradient(patternId, markup), scale)) {
     return { fillAttr: `url(#${patternId})`, underlayMarkup: "" };
   }
 

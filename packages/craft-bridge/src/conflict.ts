@@ -1,5 +1,4 @@
-export type CraftBridgeConflictPolicy = "ask" | "source-wins" | "canvas-wins";
-
+import type { CraftBridgeConflictPolicy } from "./types";
 export type SyncConflictKind = "none" | "source-only" | "both";
 
 export type SyncConflictInput = {

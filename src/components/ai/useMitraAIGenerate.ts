@@ -47,7 +47,7 @@ export function useMitraAIGenerate() {
   const clearAIGenerateError = useEditorStore((s) => s.clearAIGenerateError);
   const aiGenerateFailedJob = useEditorStore((s) => s.aiGenerateFailedJob);
   const aiGenerateError = useEditorStore((s) => s.aiGenerateError);
-  const aiGenerateBusy = useEditorStore((s) => s.aiGenerateBusy);
+  const aiGenerateActive = useEditorStore((s) => s.aiGenerateActive);
 
   const { modelId, setModelId, optionGroups: modelOptionGroups } = useAIModelSelectOptions();
 
@@ -120,7 +120,7 @@ export function useMitraAIGenerate() {
   const contextCount = readyAttachmentCount(allContextAttachments);
   const effectiveStyle = effectiveStyleFromTheme(styleGuideTheme);
   const canGenerate = Boolean(prompt.trim() || preset || contextPrompt);
-  const busy = submitting || aiGenerateBusy;
+  const busy = submitting || aiGenerateActive;
 
   const hasImageAttachments = useMemo(
     () => attachments.some((a) => a.kind === "image" && a.status === "ready"),

@@ -512,7 +512,7 @@ export function renderShapeStrokeLayers(
     !usesPerEdgeStroke(node) &&
     effectiveStrokeType(node) === "gradient"
   ) {
-    const outlined = outlineStroke(node);
+    const outlined = outlineStroke(node as EditorNode);
     if (outlined?.pathD) {
       const fillLayer =
         opts.fill !== "none" ? (

@@ -5,6 +5,6 @@ export const CRAFT_ENGINE_VERSION = "3.44.0";
 export const CRAFT_ENGINE_SYNC_NODE_CAP = 2_500;
 
 export function readEngineVersionFromLibRs(libRs: string): string | null {
-  const match = libRs.match(/engine_version\(\)[^"]*"(\d+\.\d+\.\d+)"/s);
+  const match = libRs.match(/engine_version\(\)[\s\S]*?"(\d+\.\d+\.\d+)"/);
   return match?.[1] ?? null;
 }

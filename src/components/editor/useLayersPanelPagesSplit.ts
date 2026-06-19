@@ -10,8 +10,8 @@ import {
 
 export function useLayersPanelPagesSplit(enabled: boolean) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [pagesHeight, setPagesHeight] = useState(LAYERS_PANEL_PAGES_SPLIT.defaultPages);
-  const preferredPagesHeightRef = useRef(LAYERS_PANEL_PAGES_SPLIT.defaultPages);
+  const [pagesHeight, setPagesHeight] = useState<number>(LAYERS_PANEL_PAGES_SPLIT.defaultPages);
+  const preferredPagesHeightRef = useRef<number>(LAYERS_PANEL_PAGES_SPLIT.defaultPages);
   const dragStartHeightRef = useRef(0);
   const availableHeightRef = useRef(0);
   const isDraggingRef = useRef(false);

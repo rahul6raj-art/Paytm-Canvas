@@ -154,8 +154,8 @@ function makeFrame(
     paddingLeft: padX,
     layoutSizingHorizontal: opts.sizingH ?? "fixed",
     layoutSizingVertical: opts.sizingV ?? "fixed",
-    primaryAxisAlign: opts.primaryAxisAlign ?? "min",
-    counterAxisAlign: opts.counterAxisAlign ?? "min",
+    primaryAxisAlign: opts.primaryAxisAlign ?? "start",
+    counterAxisAlign: opts.counterAxisAlign ?? "start",
   };
 }
 
@@ -220,7 +220,7 @@ function wrapCluster(
     layoutGap: mode === "horizontal" ? layout.gridGap : mode === "vertical" ? layout.sectionGap : 0,
     sizingH: mode === "none" ? "fixed" : "fill",
     sizingV: mode === "none" ? "fixed" : "hug",
-    counterAxisAlign: mode === "horizontal" && name === "Footer" ? "center" : "min",
+    counterAxisAlign: mode === "horizontal" && name === "Footer" ? "center" : "start",
   });
 
   const list = childOrder[parentId] ?? [];
@@ -564,8 +564,8 @@ export function organizeRichScreenHierarchy(
       paddingRight: 0,
       paddingBottom: 0,
       paddingLeft: 0,
-      primaryAxisAlign: "min",
-      counterAxisAlign: "min",
+      primaryAxisAlign: "start",
+      counterAxisAlign: "start",
     };
   }
 

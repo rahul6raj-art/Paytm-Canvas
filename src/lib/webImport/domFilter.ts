@@ -38,7 +38,7 @@ function isAccessibilityHidden(node: DomSnapshotNode): boolean {
     return true;
   }
   const fs = parsePx(node.styles.fontSize, 16);
-  if (fs < 1) return true;
+  if (fs != null && fs < 1) return true;
   if (node.text && isTailwindUtilityText(node.text)) return true;
   return false;
 }

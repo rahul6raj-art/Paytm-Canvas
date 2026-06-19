@@ -210,7 +210,7 @@ export function ColorInput({
             >
               <span
                 className="block h-full w-full rounded-[2px] border border-app-border"
-                style={{ background: fillCss(previewHex, opacity) }}
+                style={{ background: fillCss(previewHex, opacity, visible) }}
               />
             </button>
             {libraryName ? (
@@ -407,7 +407,7 @@ export function ColorInput({
         >
           <span
             className="block h-full w-full rounded-[2px] border border-app-border"
-            style={{ background: fillCss(previewHex, opacity) }}
+            style={{ background: fillCss(previewHex, opacity, visible) }}
           />
         </button>
         {libraryName ? (

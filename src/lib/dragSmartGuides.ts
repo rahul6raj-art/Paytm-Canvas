@@ -38,7 +38,7 @@ function isDescendantOf(
 function canvasRootId(nodes: Record<string, EditorNode>, nodeId: string): string | null {
   let cur: string | null = nodeId;
   while (cur) {
-    const parentId = nodes[cur]?.parentId ?? null;
+    const parentId: string | null = nodes[cur]?.parentId ?? null;
     if (parentId == null || parentId === EDITOR_ROOT_KEY) return cur;
     cur = parentId;
   }

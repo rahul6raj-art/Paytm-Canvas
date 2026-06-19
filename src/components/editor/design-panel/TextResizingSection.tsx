@@ -48,11 +48,13 @@ export function TextResizingSection({
   instanceKey,
   locked,
   onStyle,
+  onPatch,
 }: {
   node: EditorNode;
   instanceKey: string;
   locked: boolean;
   onStyle: (p: NodeStylePatch) => void;
+  onPatch: (p: Partial<EditorNode>) => void;
 }) {
   const nodes = useEditorStore((s) => s.nodes);
   const setTextResizeMode = useEditorStore((s) => s.setTextResizeMode);
@@ -119,7 +121,7 @@ export function TextResizingSection({
           showAspectLock={false}
           decimals={2}
           onCommitDimensions={({ width, height }) => {
-            const patch: NodeStylePatch = {};
+            const patch: Partial<EditorNode> = {};
             if (!widthDisabled) patch.width = width;
             if (!heightDisabled) {
               patch.height = height;
@@ -127,7 +129,7 @@ export function TextResizingSection({
               // Aspect lock scaled height while W is the editable axis (auto-height).
               patch.height = height;
             }
-            if (Object.keys(patch).length > 0) onStyle(patch);
+            if (Object.keys(patch).length > 0) onPatch(patch);
           }}
         />
       </div>

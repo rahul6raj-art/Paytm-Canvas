@@ -419,7 +419,7 @@ export function AIStyleGuideSelect({
           aria-haspopup="dialog"
           aria-expanded={open}
           aria-label="Style Guide"
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => setOpen(!open)}
           className={cn(
             "inline-flex min-w-0 items-center gap-1.5 rounded-full border border-app-border-subtle bg-app-inset py-1 pl-2 pr-1.5 text-ui font-medium text-app-fg transition-colors",
             "hover:border-app-border hover:bg-app-hover disabled:cursor-not-allowed disabled:opacity-50",

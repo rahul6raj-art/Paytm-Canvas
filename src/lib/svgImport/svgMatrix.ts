@@ -61,8 +61,7 @@ export function viewBoxRootMatrix(
   else if (align.includes("YMax")) ty = viewportH - contentH;
 
   return multiplyMatrix(
-    translateMatrix(tx, ty),
-    scaleMatrix(scaleX, scaleY),
+    multiplyMatrix(translateMatrix(tx, ty), scaleMatrix(scaleX, scaleY)),
     translateMatrix(-viewBox.minX, -viewBox.minY),
   );
 }

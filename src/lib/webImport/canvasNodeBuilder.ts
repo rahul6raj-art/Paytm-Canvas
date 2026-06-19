@@ -605,6 +605,12 @@ function scaleSceneNode(
   return scaled;
 }
 
+function mapEditorNodeType(type: import("@/stores/useEditorStore").EditorNode["type"]): ImportWebSceneNode["type"] {
+  if (type === "ellipse") return "rectangle";
+  if (type === "line" || type === "arrow" || type === "polygon") return "path";
+  return type;
+}
+
 function editorNodeToScene(
   node: import("@/stores/useEditorStore").EditorNode,
   nodes: Record<string, import("@/stores/useEditorStore").EditorNode>,
@@ -613,7 +619,7 @@ function editorNodeToScene(
 ): ImportWebSceneNode {
   const scene: ImportWebSceneNode = {
     id: nextId("web"),
-    type: node.type === "ellipse" ? "rectangle" : node.type,
+    type: mapEditorNodeType(node.type),
     name: node.name,
     x: node.x,
     y: node.y,
@@ -630,7 +636,7 @@ function editorNodeToScene(
     strokeWidth: node.strokeWidth,
     strokeEnabled: node.strokeEnabled,
     cornerRadius: node.cornerRadius,
-    cornerRadii: node.cornerRadii,
+    cornerRadii: node.cornerRadii as import("@/lib/cornerRadius").CornerRadii | undefined,
     opacity: node.opacity,
     effects: node.effects,
     content: node.content,

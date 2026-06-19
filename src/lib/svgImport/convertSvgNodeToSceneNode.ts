@@ -564,7 +564,7 @@ function expandUseReference(
     convertShape(ref, parentId, useM, placementParentWorldM, paintIn, ctx);
     return;
   }
-  warnDiag(ctx.diag, `<use> references unsupported element: ${ref.tag}`);
+  warnDiag(ctx.diag, `<use> references unsupported element: ${ref.tagLower}`);
 }
 
 function convertGroup(

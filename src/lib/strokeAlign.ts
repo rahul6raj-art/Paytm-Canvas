@@ -313,13 +313,14 @@ export function strokeUsesAxisAlignedRects(
     | "strokeColor"
     | "strokeOpacity"
     | "strokeEnabled"
+    | "strokeWidth"
     | "cornerRadius"
     | "cornerRadii"
   >,
   width: number,
   height: number,
 ): boolean {
-  if (strokeUsesCssIndividualBorders(node)) return false;
+  if (strokeUsesCssIndividualBorders({ ...node, width, height, strokeWidth: node.strokeWidth ?? 0 })) return false;
   if (!usesPerEdgeStroke(node)) return false;
   const [tl, tr, br, bl] = clampCornerRadii(
     getNodeCornerRadii(node),

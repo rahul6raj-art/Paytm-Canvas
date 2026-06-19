@@ -78,9 +78,7 @@ function SideColorSwatch({
     onOpenChange?.(open);
   }, [onOpenChange, open]);
 
-  useDismissAnchoredDropdown(open, () => setOpen(false), swatchRef, undefined, {
-    ignoreRefs: [menuRef],
-  });
+  useDismissAnchoredDropdown(open, () => setOpen(false), swatchRef, menuRef);
 
   return (
     <>
@@ -97,7 +95,7 @@ function SideColorSwatch({
             "h-5 w-5 shrink-0 rounded border border-app-border p-px disabled:cursor-not-allowed",
             open && "border-app-panel-edge ring-1 ring-app-panel-edge",
           )}
-          style={{ background: fillCss(safe, opacity) }}
+          style={{ background: fillCss(safe, opacity, true) }}
           aria-label={`${side} stroke color`}
           aria-expanded={open}
           aria-haspopup="dialog"
@@ -295,7 +293,7 @@ function SideMenuItem({
   selected: boolean;
   mode: StrokeSidesMode;
   label: string;
-  onClick?: () => void;
+  onClick?: (e: MouseEvent) => void;
   onMouseDown?: (e: MouseEvent) => void;
 }) {
   return (
@@ -508,8 +506,7 @@ export function StrokeSidesPicker({
               <InspectorHintIconButton
                 title="Reset side weights and colors"
                 disabled={disabled}
-                onClick={(e) => {
-                  e.stopPropagation();
+                onClick={() => {
                   resetCustomSides();
                 }}
                 className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-muted hover:bg-app-hover hover:text-app-fg disabled:cursor-not-allowed disabled:opacity-40"

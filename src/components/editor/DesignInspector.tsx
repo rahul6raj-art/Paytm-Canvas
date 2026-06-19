@@ -415,6 +415,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
           instanceKey={key}
           locked={locked}
           onStyle={style}
+          onPatch={patch}
         />
       ) : null}
 

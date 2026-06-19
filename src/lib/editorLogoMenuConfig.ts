@@ -228,11 +228,13 @@ export function buildResolvedSubmenuItems(
   menuId: string,
   getState: () => EditorState,
 ): (ResolvedMenuItem | "divider")[] {
-  return buildResolvedSubmenuEntries(menuId, getState).flatMap((entry) => {
-    if (entry.type === "divider") return ["divider" as const];
-    if (entry.type === "item") return [entry.item];
-    return [];
-  });
+  return buildResolvedSubmenuEntries(menuId, getState).flatMap(
+    (entry): (ResolvedMenuItem | "divider")[] => {
+      if (entry.type === "divider") return ["divider"];
+      if (entry.type === "item") return [entry.item];
+      return [];
+    },
+  );
 }
 
 export function logoMenuLabelForId(menuId: string): string {

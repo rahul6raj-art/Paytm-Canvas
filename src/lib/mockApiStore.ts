@@ -532,7 +532,7 @@ export const mockApiStore = {
   inviteWorkspaceMember(
     workspaceId: string,
     input: { email: string; role?: MockApiWorkspaceRole },
-  ): ReturnType<typeof memberToDto> | { code: "NOT_FOUND" } | { code: "VALIDATION" } {
+  ): ReturnType<typeof memberToDto> | { code: "NOT_FOUND" } | { code: "VALIDATION" } | { code: "CONFLICT" } {
     const outcome = mockApiStore.inviteToWorkspace(workspaceId, input);
     if ("code" in outcome) return outcome;
     if (outcome.kind === "invite") return { code: "NOT_FOUND" };

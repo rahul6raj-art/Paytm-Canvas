@@ -26,7 +26,7 @@ function SelectionColorSwatch({
       style={{
         width: size,
         height: size,
-        background: fillCss(hex, opacity),
+        background: fillCss(hex, opacity, true),
       }}
       aria-hidden
     />

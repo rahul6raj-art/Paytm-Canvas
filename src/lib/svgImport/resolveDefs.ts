@@ -7,7 +7,7 @@ import { warnDiag, warnUnsupportedElement } from "@/lib/svgImport/svgImportDiagn
 import type { NodeEffect } from "@/lib/nodeEffects";
 
 export type DefsRegistry = {
-  gradients: Map<string, never>;
+  gradients: Map<string, unknown>;
   /** Every element with an id inside <defs> (paths, groups, symbols, …). */
   elements: Map<string, SvgElement>;
   symbols: Map<string, SvgElement>;
@@ -52,7 +52,7 @@ function registerElement(defs: DefsRegistry, el: SvgElement, diag: SvgImportDiag
     if (pattern) defs.patterns.set(id, pattern);
   } else if (tag === "filter") {
     const blur = parseFilterBlurEffect(el);
-    defs.filters.set(id, { el, blur });
+    defs.filters.set(id, { el, blur: blur ?? undefined });
   } else if (
     tag !== "path" &&
     tag !== "g" &&
@@ -66,7 +66,7 @@ function registerElement(defs: DefsRegistry, el: SvgElement, diag: SvgImportDiag
     tag !== "image" &&
     tag !== "use"
   ) {
-    warnUnsupportedElement(diag, el.tag, "defs child");
+    warnUnsupportedElement(diag, el.tagLower, "defs child");
   }
 }
 

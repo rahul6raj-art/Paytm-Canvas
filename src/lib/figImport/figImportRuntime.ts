@@ -10,12 +10,18 @@ export function resetImportYieldTick(): void {
 
 let importYieldTick = 0;
 
+function schedulerYield(): Promise<void> | null {
+  const sched = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler;
+  return typeof sched?.yield === "function" ? sched.yield() : null;
+}
+
 /** Cooperative yield during long .fig tree walks (keeps overlay animation alive). */
 export async function yieldImportTick(every = FIG_IMPORT_YIELD_EVERY_NODES): Promise<void> {
   importYieldTick += 1;
   if (importYieldTick % every !== 0) return;
-  if (typeof scheduler !== "undefined" && typeof scheduler.yield === "function") {
-    await scheduler.yield();
+  const yielded = schedulerYield();
+  if (yielded) {
+    await yielded;
     return;
   }
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -76,9 +82,8 @@ export function deferFigImportSave(save: () => Promise<void>): void {
 /** Yield between document apply and mounting the heavy canvas/layers UI. */
 export async function settleImportedDocumentUi(layerCount: number): Promise<void> {
   await waitForNextPaint();
-  if (typeof scheduler !== "undefined" && typeof scheduler.yield === "function") {
-    await scheduler.yield();
-  }
+  const yielded = schedulerYield();
+  if (yielded) await yielded;
   if (layerCount > 200) {
     await new Promise<void>((resolve) => {
       if (typeof requestIdleCallback === "function") {

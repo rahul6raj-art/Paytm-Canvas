@@ -1,5 +1,5 @@
 import { clamp01, hexToRgb, normalizeHex } from "@/lib/color";
-import type { FillGradient, GradientKind, GradientStop, LegacyLinearFillGradient, PersistedFillGradient } from "./types";
+import type { FillGradient, FillType, GradientKind, GradientStop, LegacyLinearFillGradient, PersistedFillGradient } from "./types";
 import { defaultHandlesForKind, linearGradientAngleDeg, setLinearGradientAngle, setAngularGradientRefAngle, cssConicStartDeg, cssLinearAngleDeg } from "./handles";
 
 export const DEFAULT_GRADIENT_TRANSFORM = {

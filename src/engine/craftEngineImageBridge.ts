@@ -1,4 +1,5 @@
-import type { EditorAsset, EditorNode } from "@/stores/useEditorStore";
+import type { EditorNode } from "@/stores/useEditorStore";
+import type { EditorAsset } from "@/lib/documentPersistence";
 import type { CraftEngineInstance } from "@/engine/craftEngineTypes";
 import { runCraftEngineAccess } from "@/engine/craftEngineMutation";
 

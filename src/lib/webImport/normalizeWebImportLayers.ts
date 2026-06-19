@@ -513,7 +513,7 @@ function worldY(
   let y = 0;
   let cur: string | null | undefined = id;
   while (cur) {
-    const n = nodes[cur];
+    const n: EditorNode | undefined = nodes[cur];
     if (!n) break;
     y += n.y;
     cur = n.parentId;

@@ -20,6 +20,7 @@ import {
 import { useDismissAnchoredDropdown } from "../useAnchoredDropdown";
 import { StrokeAdvancedPanel } from "./StrokeAdvancedPanel";
 import { StrokeEndpointPicker } from "./StrokeEndpointPicker";
+import type { StrokeEndpoint } from "@/lib/strokeEndpoints";
 import {
   appFieldClass,
   appFieldInnerClass,

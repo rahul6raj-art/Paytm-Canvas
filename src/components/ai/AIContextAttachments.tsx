@@ -236,7 +236,7 @@ export function AIContextAttachments({
           aria-haspopup="menu"
           aria-expanded={menuOpen}
           aria-label="Attach context"
-          onClick={() => setMenuOpen((v) => !v)}
+          onClick={() => setMenuOpen(!menuOpen)}
           className={cn(
             "flex h-8 w-8 items-center justify-center rounded-full border border-app-border bg-app-panel text-app-muted transition-colors",
             "hover:bg-app-hover hover:text-app-fg disabled:cursor-not-allowed disabled:opacity-40",
@@ -257,7 +257,7 @@ export function AIContextAttachments({
         disabled={busy || atLimit}
         aria-haspopup="menu"
         aria-expanded={menuOpen}
-        onClick={() => setMenuOpen((v) => !v)}
+        onClick={() => setMenuOpen(!menuOpen)}
         className={cn(
           "mb-2 flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2.5 text-left transition-colors",
           "border-app-border bg-black/30 text-app-fg hover:border-white/[0.14] hover:bg-black/40",

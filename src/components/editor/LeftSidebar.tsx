@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useState, type LucideIcon } from "react";
-import { ChevronDown, Component, FileStack, Image, Library } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { ChevronDown, Component, FileStack, Image, Library, type LucideIcon } from "lucide-react";
 import { LayersPanel } from "./LayersPanel";
 import { ComponentsPanel } from "./ComponentsPanel";
 import { AssetsPanel } from "./AssetsPanel";

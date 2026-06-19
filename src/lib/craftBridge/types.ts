@@ -2,7 +2,6 @@ export type {
   CodeRoundTripLink,
   CodeRoundTripSyncMode,
   CraftBridgeConflictPolicy,
-  CraftBridgePendingImport,
   CraftBridgeWriteSourceRequest,
   CraftBridgeWriteSourceResponse,
   CraftLinkManifest,

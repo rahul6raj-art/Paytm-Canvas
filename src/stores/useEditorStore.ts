@@ -46,7 +46,6 @@ import {
   type LayoutNode,
   type LayoutPatch,
   type LayoutPositioning,
-  type LayoutSizingMode,
   type PrimaryAxisAlign,
 } from "@/lib/autoLayout";
 import {
@@ -328,6 +327,7 @@ import { mirrorGeometryPatchesToWasm, mirrorNodeGeometryToWasm } from "@/engine/
 import { flushDeferredWasmReconcile, clearDeferredWasmReconcile } from "@/engine/craftEngineAuthorityMirror";
 import type { WasmSnapshotStorePatch } from "@/engine/craftEngineSnapshotApply";
 import { mergeWasmSnapshotWithStore } from "@/engine/craftEngineSnapshotApply";
+import type { DocumentMutationResult } from "@/engine/craftEngineWasmFirstMutation";
 import {
   commitDocumentMutation,
   syncWasmDocumentAfterStoreUpdate,
@@ -736,6 +736,7 @@ export type NodeStylePatch = Partial<
     | "fillImageAssetId"
     | "fillVideoAssetId"
     | "fillPatternAssetId"
+    | "fillTokenId"
     | "stroke"
     | "strokeColor"
     | "strokeType"
@@ -1815,14 +1816,7 @@ function editableTopLevelSelection(
   });
 }
 
-type StructuralDocumentResult = {
-  nodes: Record<string, EditorNode>;
-  childOrder: Record<string, string[]>;
-  ui: Record<string, unknown>;
-  assets?: Record<string, EditorAsset>;
-  designTokens?: Record<string, DesignToken>;
-  fontAssets?: Record<string, EditorFontAsset>;
-};
+type StructuralDocumentResult = DocumentMutationResult;
 
 const PAGE_SCOPED_UI_KEYS = [
   "layoutGuides",
@@ -3201,7 +3195,7 @@ const finishTextDragUi = (nodeId: string) => ({
 });
 
 function buildFinishTextDragClickResult(
-  s: Pick<EditorState, "nodes" | "childOrder" | "canvasBackgroundColor">,
+  s: Pick<EditorState, "nodes" | "childOrder" | "canvasBackgroundColor" | "selectedIds">,
   nodeId: string,
   start: { x: number; y: number },
 ): StructuralDocumentResult | null {
@@ -3221,7 +3215,6 @@ function buildFinishTextDragClickResult(
       y: Math.round(localStart.y),
       width: emptySize.width,
       height: emptySize.height,
-      textResizeMode: "auto-width" as const,
       ...textResizePatch("auto-width"),
       content: "",
     },
@@ -3230,7 +3223,7 @@ function buildFinishTextDragClickResult(
 }
 
 function buildFinishTextDragBoxResult(
-  s: Pick<EditorState, "nodes" | "childOrder" | "canvasBackgroundColor">,
+  s: Pick<EditorState, "nodes" | "childOrder" | "canvasBackgroundColor" | "selectedIds">,
   nodeId: string,
   start: { x: number; y: number },
   end: { x: number; y: number },
@@ -3247,7 +3240,6 @@ function buildFinishTextDragBoxResult(
     y: draft.y,
     width: draft.width,
     height: draft.height,
-    textResizeMode: "fixed" as const,
     ...textResizePatch("fixed"),
   };
   if (isZeroAreaDraftNode(next)) return null;
@@ -5331,7 +5323,7 @@ function buildImportFontAssetResult(
 }
 
 function buildSetCanvasBackgroundColorResult(
-  s: Pick<EditorState, "nodes" | "childOrder" | "canvasBackgroundColor">,
+  s: Pick<EditorState, "nodes" | "childOrder" | "canvasBackgroundColor" | "selectedIds">,
   hex: string,
 ): StructuralDocumentResult | null {
   const normalized = normalizeHex(hex.startsWith("#") ? hex : `#${hex}`);
@@ -5532,7 +5524,7 @@ function buildDeleteCommentResult(
 }
 
 function buildAddTextToolbarResult(
-  s: Pick<EditorState, "nodes" | "childOrder" | "canvasBackgroundColor">,
+  s: Pick<EditorState, "nodes" | "childOrder" | "canvasBackgroundColor" | "selectedIds">,
 ): StructuralDocumentResult {
   const ts = textStyleFromSelection(s);
   const typo = resolveTextTypo(ts);

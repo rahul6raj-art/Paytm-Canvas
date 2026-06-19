@@ -17,10 +17,10 @@ export function useLeftSidebarSplitHeight(
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [availableHeight, setAvailableHeight] = useState(0);
-  const [layersHeight, setLayersHeight] = useState(LEFT_SIDEBAR_SPLIT.defaultLayers);
+  const [layersHeight, setLayersHeight] = useState<number>(LEFT_SIDEBAR_SPLIT.defaultLayers);
   const [mitraPanelHeight, setMitraPanelHeight] = useState<number | undefined>(undefined);
-  const preferredLayersHeightRef = useRef(LEFT_SIDEBAR_SPLIT.defaultLayers);
-  const mitraRequiredHeightRef = useRef(LEFT_SIDEBAR_SPLIT.defaultMitra);
+  const preferredLayersHeightRef = useRef<number>(LEFT_SIDEBAR_SPLIT.defaultLayers);
+  const mitraRequiredHeightRef = useRef<number>(LEFT_SIDEBAR_SPLIT.defaultMitra);
   const dragStartHeightRef = useRef(0);
   const availableHeightRef = useRef(0);
   const isDraggingRef = useRef(false);

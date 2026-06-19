@@ -117,7 +117,7 @@ export class ApiSyncProvider implements SyncProvider {
   async publishPatch(patch: DocumentPatch): Promise<void> {
     if (!isPaytmCraftRealtimeEnabled() || !isRealtimeSyncConnected()) return;
     if (patch && typeof patch === "object" && !ArrayBuffer.isView(patch) && "version" in patch) {
-      pushRealtimeDocument(patch as PaytmCraftDocument);
+      pushRealtimeDocument(patch as unknown as PaytmCraftDocument);
     }
   }
 

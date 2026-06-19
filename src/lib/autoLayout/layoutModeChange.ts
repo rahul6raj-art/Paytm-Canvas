@@ -13,6 +13,24 @@ export type LayoutModePatch = {
   counterAxisAlign?: CrossAxisAlign;
 };
 
+/** Map swapped alignment to valid primary-axis values (stretch/space-between → start). */
+function alignToPrimary(
+  value: PrimaryAxisAlign | CrossAxisAlign | undefined,
+): PrimaryAxisAlign | undefined {
+  if (value === undefined) return undefined;
+  if (value === "stretch" || value === "space-between") return "start";
+  return value;
+}
+
+/** Map swapped alignment to valid counter-axis values (space-between → start). */
+function alignToCounter(
+  value: PrimaryAxisAlign | CrossAxisAlign | undefined,
+): CrossAxisAlign | undefined {
+  if (value === undefined) return undefined;
+  if (value === "space-between") return "start";
+  return value;
+}
+
 /** Figma-style flow rotation: swap H/V sizing and primary/counter alignment. */
 export function expandLayoutModePatch(
   parent: {
@@ -42,8 +60,8 @@ export function expandLayoutModePatch(
   const primary = parent.primaryAxisAlign;
   const counter = parent.counterAxisAlign;
   if (primary !== undefined || counter !== undefined) {
-    expanded.primaryAxisAlign = counter ?? primary;
-    expanded.counterAxisAlign = primary ?? counter;
+    expanded.primaryAxisAlign = alignToPrimary(counter ?? primary);
+    expanded.counterAxisAlign = alignToCounter(primary ?? counter);
   }
 
   return expanded;

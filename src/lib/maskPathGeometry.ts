@@ -9,6 +9,5 @@ export {
   worldPathDToGroupLocalPathD,
   maskLocalPathDToGroupLocalPathD,
   buildMaskClipPathForGroup as buildMaskClipPathDForGroup,
-  type ExactPathD,
-  type MaskClipPathResult,
 } from "@/lib/mask/buildExactMaskPath";
+export type { ExactPathD, MaskClipPathResult } from "@/lib/mask/types";

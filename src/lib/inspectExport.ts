@@ -815,7 +815,7 @@ export async function downloadNodePdf(
   const jpeg = jpegDataUrlToBytes(dataUrl);
   if (!jpeg) throw new Error("PDF export failed");
   const pdf = buildSinglePageJpegPdf(jpeg, canvas.width, canvas.height);
-  const blob = new Blob([pdf], { type: "application/pdf" });
+  const blob = new Blob([Uint8Array.from(pdf)], { type: "application/pdf" });
   await saveBlobWithDialog(blob, filename, {
     description: "PDF document",
     mimeType: "application/pdf",

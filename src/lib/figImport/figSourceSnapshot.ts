@@ -31,7 +31,7 @@ function detectUnsupported(source: FigNode, rawFills: FigPaint[] | undefined): s
   if (stackMode === "GRID") out.push("grid-auto-layout");
   if (SKIP_TYPES.has(source.type)) out.push(`skipped-type:${source.type}`);
   for (const paint of rawFills ?? []) {
-    const t = (paint as { type?: number }).type;
+    const t = (paint as unknown as { type?: number }).type;
     if (t === 6) out.push("emoji-fill");
     if (t === 7) out.push("video-fill");
   }

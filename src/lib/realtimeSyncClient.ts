@@ -1,3 +1,4 @@
+import * as Y from "yjs";
 import type { PaytmCraftDocument } from "@/lib/documentPersistence";
 import type { PresenceUser } from "@/lib/presence";
 import {

@@ -12,9 +12,10 @@ import { EMPTY_CHILD_IDS } from "@/lib/editorConstants";
 import {
   ROOT,
   useEditorStore,
-  type EditorAsset,
   type EditorNode,
 } from "@/stores/useEditorStore";
+import type { EditorAsset, EditorFontAsset } from "@/lib/documentPersistence";
+import type { DesignToken } from "@/lib/designTokens";
 
 export type WasmFirstDocumentSlice = {
   nodes: Record<string, EditorNode>;
@@ -23,6 +24,9 @@ export type WasmFirstDocumentSlice = {
 
 export type DocumentMutationResult = WasmFirstDocumentSlice & {
   ui: Record<string, unknown>;
+  assets?: Record<string, EditorAsset>;
+  designTokens?: Record<string, DesignToken>;
+  fontAssets?: Record<string, EditorFontAsset>;
 };
 
 /** When true, structural edits apply to WASM first; Zustand mirrors the WASM snapshot. */

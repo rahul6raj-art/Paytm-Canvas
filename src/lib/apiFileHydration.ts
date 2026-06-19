@@ -6,7 +6,7 @@ import {
 } from "@/lib/documentPersistence";
 import { isPaytmCraftHttpApiMode } from "@/lib/env";
 import { blankWorkspace } from "@/lib/templates";
-import type { EditorPersistSlice } from "@/stores/useEditorStore";
+import type { EditorPersistSlice } from "@/lib/documentPersistence";
 import { useEditorStore } from "@/stores/useEditorStore";
 
 const ROUTE_FILE_ID_PARAM = "fileId";

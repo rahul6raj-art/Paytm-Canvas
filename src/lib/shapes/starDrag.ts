@@ -175,7 +175,7 @@ function beginStarDrag(
           starOuterCornerRadius: nextOuter,
         });
         setPreview(d.nodeId, nextParams);
-        scheduleStoreUpdate({ outerCornerRadius: nextOuter });
+        scheduleStoreUpdate({ starOuterCornerRadius: nextOuter });
       }
     }
   };

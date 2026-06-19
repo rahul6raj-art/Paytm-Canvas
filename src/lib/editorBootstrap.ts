@@ -24,6 +24,7 @@ export type InitialDocumentFields = Pick<
   | "designTokens"
   | "fileName"
   | "comments"
+  | "codeRoundTripLink"
 >;
 
 export function readInitialDocumentFields(): InitialDocumentFields | null {
@@ -87,6 +88,7 @@ export function mergeSampleDocumentFields(
     designTokens: {},
     fileName,
     comments: [],
+    codeRoundTripLink: null,
   };
 }
 

@@ -117,15 +117,16 @@ async function writeLinkedSourceFile(input: {
 export async function computeCanvasExportHash(input: SyncSourceInput): Promise<string | null> {
   const read = await fetchLinkedSourceContent(input.link);
   if ("ok" in read && read.ok === false) return null;
+  const sourceRead = read as ReadSourceResponse;
   if (
     linkedSourceFormat(input.link.sourcePath) === "react" &&
-    shouldUseSemanticBridgeSync(input.link, read.content)
+    shouldUseSemanticBridgeSync(input.link, sourceRead.content)
   ) {
     const cssFiles = await fetchLinkedCssFiles(input.link);
     const bundle = await buildSemanticBridgeExportBundle({
       sourcePath: input.link.sourcePath,
       cssPaths: input.link.cssPaths ?? [],
-      sourceContent: read.content,
+      sourceContent: sourceRead.content,
       cssFiles,
       nodes: input.nodes,
       designTokens: input.designTokens,

@@ -17,7 +17,7 @@ self.onmessage = (event: MessageEvent<FigImportWorkerRequest>) => {
     const json = JSON.stringify(result);
     const buffer = new TextEncoder().encode(json).buffer;
     const response: FigImportWorkerResponse = { id, ok: true, buffer };
-    self.postMessage(response, [buffer]);
+    self.postMessage(response, { transfer: [buffer] });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Fig import worker failed";
     const response: FigImportWorkerResponse = { id, ok: false, error: message };

@@ -6,7 +6,7 @@ import {
   sweepDegToPercent,
   sweepPercentToDeg,
 } from "@/lib/shapes/ellipseArc";
-import { appFieldShellClassCompact } from "@/lib/appFieldStyles";
+import { appFieldClass, appFieldShellClassCompact } from "@/lib/appFieldStyles";
 import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
 import { EditorHintWrap } from "@/components/editor/EditorHoverHint";

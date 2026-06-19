@@ -12,7 +12,7 @@
     "dev:sync": "node scripts/mock-yjs-sync-server.mjs",
     "dev": "next dev -p 3000",
     "dev:clean": "rm -rf .next && next dev -p 3000",
-    "build": "next build",
+    "build": "npm run db:generate -w @paytm-craft/api && next build",
     "build:with-engine": "npm run build:engine && npm run build",
     "verify:engine": "node scripts/verify-craft-engine-artifacts.mjs",
     "verify:golden": "node scripts/verify-golden-native-render.mjs",

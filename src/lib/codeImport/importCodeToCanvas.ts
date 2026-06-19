@@ -59,7 +59,7 @@ export async function parseCodeToCanvasSlice(
         layerCount: body.layerCount ?? Object.keys(body.slice.nodes).length,
       };
     }
-    if (!res.ok && body.error) {
+    if (!res.ok && "error" in body && body.error) {
       return { ok: false, error: body.error };
     }
   } catch {

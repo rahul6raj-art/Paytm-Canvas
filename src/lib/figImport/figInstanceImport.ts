@@ -4,7 +4,7 @@ import { cloneEditorSubtree, stripComponentFields } from "@/lib/componentModel";
 import type { EditorNode } from "@/stores/useEditorStore";
 import { finalizeFigContainer } from "@/lib/figImport/figMaskImport";
 import type { ImportCtx } from "@/lib/figImport/figImportTypes";
-import type { InstanceOverridePatch } from "@/lib/figImport/figImportProperties";
+import type { InstanceOverridePatch } from "@/lib/componentModel";
 
 const ROOT = EDITOR_ROOT_KEY;
 

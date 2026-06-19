@@ -20,9 +20,9 @@ type TextImportCtx = {
   diag: import("@/lib/svgImport/svgImportDiagnostics").SvgImportDiagnostics;
 };
 
-type TextDeps = {
-  nextId: (ctx: TextImportCtx, prefix: string) => string;
-  appendChild: (ctx: TextImportCtx, parentId: string, childId: string) => void;
+type TextDeps<Ctx extends TextImportCtx = TextImportCtx> = {
+  nextId: (ctx: Ctx, prefix: string) => string;
+  appendChild: (ctx: Ctx, parentId: string, childId: string) => void;
   baseNode: (
     id: string,
     parentId: string,
@@ -64,14 +64,14 @@ function tspanRuns(el: SvgElement): SvgElement[] {
   return el.childElements().filter((c) => c.tagLower === "tspan");
 }
 
-export function convertSvgTextElement(
+export function convertSvgTextElement<Ctx extends TextImportCtx>(
   el: SvgElement,
   parentId: string,
   worldM: Matrix2D,
   placementParentWorldM: Matrix2D,
   paintIn: TextPaint,
-  ctx: TextImportCtx,
-  deps: TextDeps,
+  ctx: Ctx,
+  deps: TextDeps<Ctx>,
 ): void {
   const hasTextPath = el.childElements().some((c) => c.tagLower === "textpath");
   if (hasTextPath) {

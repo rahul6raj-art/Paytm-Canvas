@@ -1,5 +1,6 @@
 import { ROOT } from "@/stores/useEditorStore";
-import type { EditorAsset, EditorNode } from "@/stores/useEditorStore";
+import type { EditorNode } from "@/stores/useEditorStore";
+import type { EditorAsset } from "@/lib/documentPersistence";
 import { EMPTY_CHILD_IDS } from "@/lib/editorConstants";
 import type { CraftEngineAssetSummary, CraftEngineDocument } from "@/engine/craftEngineTypes";
 

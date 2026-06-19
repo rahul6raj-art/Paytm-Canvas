@@ -29,7 +29,7 @@ export function svgArcToCubics(
 ): CubicBezier[] {
   if (x1 === x2 && y1 === y2) return [];
   if (rx === 0 || ry === 0) {
-    return [{ x1: x1, y1: y1, x2: x2, y2: y2, x, x2, y: y2 }];
+    return [{ x1, y1, x2, y2, x: x2, y: y2 }];
   }
 
   const phi = (xAxisRotationDeg * Math.PI) / 180;

@@ -9,6 +9,7 @@ import type { ResolvedTextTypo } from "@/lib/textTypography";
 
 /** Canvas caret color (must be a concrete color — CSS vars do not resolve on canvas). */
 const TEXT_CARET_COLOR = "#18a0fb";
+type TextCanvasContext = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 import type { EditorNode } from "@/stores/useEditorStore";
 import {
   DEFAULT_TEXT_ADVANCED_STYLE,
@@ -333,7 +334,7 @@ function paintMaskedTextFill(
 }
 
 function drawJustifiedLine(
-  ctx: CanvasRenderingContext2D,
+  ctx: TextCanvasContext,
   text: string,
   x: number,
   y: number,
@@ -365,7 +366,7 @@ function drawJustifiedLine(
 }
 
 function drawLineWithSpacing(
-  ctx: CanvasRenderingContext2D,
+  ctx: TextCanvasContext,
   text: string,
   x: number,
   y: number,
@@ -390,7 +391,7 @@ function drawLineWithSpacing(
 }
 
 function drawLineDecorations(
-  ctx: CanvasRenderingContext2D,
+  ctx: TextCanvasContext,
   text: string,
   x: number,
   y: number,
@@ -487,7 +488,7 @@ function applyTruncate(
 }
 
 function drawSelection(
-  ctx: CanvasRenderingContext2D,
+  ctx: TextCanvasContext,
   layout: TextLayout,
   typo: ResolvedTextTypo,
   align: TextAlign,

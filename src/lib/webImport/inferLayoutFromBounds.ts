@@ -32,7 +32,7 @@ export function inferLayoutFromChildPositions(node: DesignNode): DesignNode {
 function inferStackLayout(
   children: DesignNode[],
 ): { kind: "flex" | "stack"; layoutMode: LayoutMode; gap: number } | null {
-  const visible = children.filter((c) => c.style.visible !== false);
+  const visible = children.filter((c) => c.style.opacity !== 0);
   if (visible.length < 2) return null;
 
   const xs = visible.map((c) => c.bounds.x);
