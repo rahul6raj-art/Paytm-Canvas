@@ -1,0 +1,8 @@
+.next/cache
+.git
+.cursor
+**/__tests__
+tsconfig.tsbuildinfo
+packages/craft-engine/target
+packages/craft-bridge-vscode/*.vsix
+*.vsix
