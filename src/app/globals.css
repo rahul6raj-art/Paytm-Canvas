@@ -4,7 +4,7 @@
 
 :root {
   /* Global UI scale — fonts, icons, and rem-based spacing */
-  --ui-scale: 1;
+  --ui-scale: 0.875;
   --ui-font-ui: calc(12px * var(--ui-scale));
   --ui-leading-ui: calc(17px * var(--ui-scale));
   /* Single chrome type scale — legacy tokens alias to ui for minimal rhythm */
@@ -22,8 +22,8 @@
   --ui-leading-ui-sm: var(--ui-leading-ui);
   --ui-icon-toolbar: calc(15px * var(--ui-scale));
   --ui-icon-canvas-rail: calc(18px * var(--ui-scale));
-  --inspector-control-height: 1.75rem;
-  --inspector-control-height-compact: 1.5rem;
+  --inspector-control-height: 1.5rem;
+  --inspector-control-height-compact: 1.25rem;
 
   --app-bg: 0 0% 96%;
   --app-fg: 0 0% 9%;
@@ -107,17 +107,17 @@
   color-scheme: dark;
 }
 
-/* Editor chrome — slightly larger type, icons, and touch targets than the app default. */
+/* Editor chrome — compact type; rem spacing follows global scale on html. */
 [data-editor-shell] {
-  --ui-scale: 1.125;
-  --editor-chrome-radius: 1rem;
+  --ui-scale: 0.9375;
+  --editor-chrome-radius: 0.875rem;
   --editor-sidebar-radius: var(--editor-chrome-radius);
-  --ui-font-ui: calc(13px * var(--ui-scale));
-  --ui-leading-ui: calc(19px * var(--ui-scale));
-  --ui-icon-toolbar: calc(17px * var(--ui-scale));
-  --ui-icon-canvas-rail: calc(21px * var(--ui-scale));
-  --inspector-control-height: 2rem;
-  --inspector-control-height-compact: 1.75rem;
+  --ui-font-ui: calc(12px * var(--ui-scale));
+  --ui-leading-ui: calc(16px * var(--ui-scale));
+  --ui-icon-toolbar: calc(14px * var(--ui-scale));
+  --ui-icon-canvas-rail: calc(17px * var(--ui-scale));
+  --inspector-control-height: 1.625rem;
+  --inspector-control-height-compact: 1.375rem;
   font-size: var(--ui-font-ui);
   line-height: var(--ui-leading-ui);
 }
@@ -179,17 +179,14 @@ body {
   }
 
   .editor-floating-menu {
-    --ui-scale: 1.125;
-    --ui-font-ui: calc(13px * var(--ui-scale));
-    --ui-leading-ui: calc(19px * var(--ui-scale));
-    border-radius: var(--editor-chrome-radius, 1rem);
+    border-radius: var(--editor-chrome-radius, 0.875rem);
     font-size: var(--ui-font-ui);
     line-height: var(--ui-leading-ui);
-    @apply border border-app-border-subtle bg-app-panel py-1.5 shadow-xl;
+    @apply border border-app-border-subtle bg-app-panel py-1 shadow-xl;
   }
 
   .editor-floating-menu [role="menuitem"] {
-    @apply flex w-full min-h-9 items-center gap-2 px-3.5 py-2 text-left text-ui font-medium text-app-fg transition-colors hover:bg-app-hover;
+    @apply flex w-full min-h-8 items-center gap-2 px-3 py-1.5 text-left text-ui font-medium text-app-fg transition-colors hover:bg-app-hover;
   }
 
   .editor-floating-menu .section-heading {

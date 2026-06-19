@@ -1,5 +1,8 @@
-/** Default editor zoom when creating a page or loading without saved canvas zoom (100%). */
-export const DEFAULT_CANVAS_ZOOM = 1;
+/** Default editor zoom when creating a page or loading without saved canvas zoom (20%). */
+export const DEFAULT_CANVAS_ZOOM = 0.2;
+
+/** Upper bound when auto-fitting artboards into the viewport (matches default zoom). */
+export const VIEWPORT_MAX_FIT_ZOOM = DEFAULT_CANVAS_ZOOM;
 
 /** Minimum canvas zoom (1% — wide enough to see the full 6000×6000 workspace). */
 export const CANVAS_MIN_ZOOM = 0.01;
@@ -157,7 +160,9 @@ export function viewportForRootNodes(
   const pad = 56;
   const bw = Math.max(1, bounds.maxX - bounds.minX + pad * 2);
   const bh = Math.max(1, bounds.maxY - bounds.minY + pad * 2);
-  const zoom = clampCanvasZoom(Math.min((viewportW * 0.92) / bw, (viewportH * 0.88) / bh, 1.25));
+  const zoom = clampCanvasZoom(
+    Math.min((viewportW * 0.92) / bw, (viewportH * 0.88) / bh, VIEWPORT_MAX_FIT_ZOOM),
+  );
   const cx = (bounds.minX + bounds.maxX) / 2;
   const cy = (bounds.minY + bounds.maxY) / 2;
   return {

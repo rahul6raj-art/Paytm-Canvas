@@ -10,7 +10,7 @@ describe("canvasZoom viewport fit", () => {
     };
     assert.deepEqual(pickViewportRootIds(nodes, ["a", "b"]), ["a", "b"]);
     const vp = viewportForRootNodes(nodes, ["a", "b"], 1200, 800, { fit: "primary" });
-    assert.ok(vp && vp.zoom > 0.2);
+    assert.ok(vp && vp.zoom >= 0.2);
   });
 
   it("fits the largest root when roots are far apart", () => {
@@ -23,8 +23,8 @@ describe("canvasZoom viewport fit", () => {
     const vp = viewportForRootNodes(nodes, ["small", "main", "stray"], 1200, 800, {
       fit: "primary",
     });
-    assert.ok(vp && vp.zoom > 0.15);
-    assert.ok(vp.zoom < 1.25);
+    assert.ok(vp && vp.zoom >= 0.15);
+    assert.ok(vp.zoom <= 0.2);
   });
 
   it("skips oversized pasteboard roots when picking primary", () => {
