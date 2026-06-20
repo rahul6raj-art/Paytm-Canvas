@@ -325,8 +325,9 @@ export function NativeSceneCompositor({
       </div>
       {loadError ? (
         <div
-          className="pointer-events-none absolute bottom-3 left-3 z-[3] max-w-sm rounded-md border border-red-500/40 bg-red-950/80 px-3 py-2 text-xs text-red-100"
+          className="pointer-events-auto fixed bottom-6 left-1/2 z-[240] w-[min(92vw,28rem)] -translate-x-1/2 rounded-xl border border-red-500/40 bg-red-950/95 px-4 py-3 text-ui-sm leading-relaxed text-red-100 shadow-xl"
           data-native-engine-error
+          role="alert"
         >
           Native engine failed: {loadError}. Run <code>npm run build:engine</code>, hard-refresh the
           page, and reload.
@@ -334,8 +335,9 @@ export function NativeSceneCompositor({
       ) : null}
       {!loadError && syncWarning ? (
         <div
-          className="pointer-events-none absolute bottom-3 left-3 z-[3] max-w-sm rounded-md border border-amber-500/40 bg-amber-950/80 px-3 py-2 text-xs text-amber-100"
+          className="pointer-events-auto fixed bottom-6 left-1/2 z-[240] w-[min(92vw,28rem)] -translate-x-1/2 rounded-xl border border-amber-500/40 bg-amber-950/95 px-4 py-3 text-ui-sm leading-relaxed text-amber-100 shadow-xl"
           data-native-engine-warning
+          role="status"
         >
           {syncWarning}
         </div>
