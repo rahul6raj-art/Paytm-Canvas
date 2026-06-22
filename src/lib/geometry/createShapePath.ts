@@ -22,6 +22,7 @@ export type ShapePathInput = Pick<
   | "polygonSides"
   | "cornerRadius"
   | "cornerRadii"
+  | "cornerSmoothing"
   | "starPoints"
   | "starInnerRadius"
   | "starOuterCornerRadius"
@@ -45,20 +46,27 @@ function starPointsForNode(node: ShapePathInput): Point2[] {
 }
 
 /** SVG path `d` for polygon, star, or vector path shapes. */
-export function createShapePathSvgD(node: ShapePathInput): string {
+export function createShapePathSvgD(
+  node: ShapePathInput,
+): string {
+  const smoothing = node.cornerSmoothing ?? 0;
   if (isPolygonNode(node)) {
     const points = polygonPointsForNode(node);
     const radii = getPolygonVertexCornerRadii(node);
-    return createRoundedPathWithRadiiSvgD(points, radii, true);
+    return createRoundedPathWithRadiiSvgD(points, radii, true, { cornerSmoothing: smoothing });
   }
   if (node.type !== "path") return "";
   if (isStarNode(node)) {
     const points = starPointsForNode(node);
     const radii = getStarVertexCornerRadii(node);
-    return createRoundedPathWithRadiiSvgD(points, radii, true);
+    return createRoundedPathWithRadiiSvgD(points, radii, true, { cornerSmoothing: smoothing });
   }
   const pts = node.pathPoints ?? [];
-  return createRoundedVectorPathSvgD({ points: pts, closed: node.pathClosed ?? false });
+  return createRoundedVectorPathSvgD({
+    points: pts,
+    closed: node.pathClosed ?? false,
+    cornerSmoothing: smoothing,
+  });
 }
 
 export function createShapePath2D(node: ShapePathInput): Path2D {

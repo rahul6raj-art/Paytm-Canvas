@@ -4,6 +4,7 @@ import { screenDeltaToWorld } from "@/lib/canvasCoordinates";
 import { screenPxToWorld } from "@/lib/canvasVisual";
 import { cancelCanvasMarqueeSession } from "@/lib/canvasMarqueeSession";
 import { cancelCanvasNodeDrag } from "@/lib/canvasNodeDrag";
+import { cancelSelectionSpacingDrag } from "@/lib/selectionSpacingDrag";
 import { worldPointToParentLocalFromChildOrder } from "@/lib/editorGraph";
 import { flowChildIds } from "@/lib/layoutEngine/layoutAutoNode";
 import { freezeAutoLayoutGap, inferAutoLayoutGap } from "@/lib/layoutEngine/inferGap";
@@ -465,6 +466,7 @@ export function beginSpacingDrag(opts: {
 }): boolean {
   cancelCanvasMarqueeSession();
   cancelCanvasNodeDrag();
+  cancelSelectionSpacingDrag();
 
   const st = useEditorStore.getState();
   const parent = st.nodes[opts.nodeId];

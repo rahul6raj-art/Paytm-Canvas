@@ -31,12 +31,12 @@ describe("starGeometry", () => {
     assert.ok(v[0]!.y < v[1]!.y);
   });
 
-  it("starPathD includes quadratic fillets when corner radius > 0", () => {
+  it("starPathD includes circular fillets when corner radius > 0", () => {
     const sharp = starPathD(100, 100, 5, 0.4, 0);
     const round = starPathD(100, 100, 5, 0.4, 8);
     assert.ok(sharp.includes("L "));
-    assert.ok(!sharp.includes(" Q "));
-    assert.ok(round.includes(" Q "));
+    assert.ok(!sharp.includes(" A "));
+    assert.ok(round.includes(" A "));
     assert.ok(round.endsWith(" Z"));
   });
 
@@ -62,8 +62,8 @@ describe("starGeometry", () => {
       cornerRadius: 0,
       cornerRadii: [10, 2, 8, 0, 6, 0, 4, 0, 2, 0],
     });
-    assert.ok(uniform.includes(" Q "));
-    assert.ok(mixed.includes(" Q "));
+    assert.ok(uniform.includes(" A "));
+    assert.ok(mixed.includes(" A "));
     assert.notEqual(uniform, mixed);
   });
 
@@ -97,12 +97,18 @@ describe("starGeometry", () => {
     ];
     const r = 8;
     const d = roundedPolygonPathD(verts, r);
-    const quadMatch = /Q\s+50\s+0\s+([\d.]+)\s+([\d.]+)/.exec(d);
-    assert.ok(quadMatch, "expected quadratic fillet at top vertex");
-    const endX = Number(quadMatch[1]);
-    const endY = Number(quadMatch[2]);
-    assert.ok(endX > 50 && endY > 0, "top corner curve should trim into the triangle");
-    assert.ok(endY < r + 2, "top corner curve should not bulge above the vertex");
+    const arcs = [...d.matchAll(/A\s+([\d.]+)\s+([\d.]+)\s+0\s+0\s+[01]\s+([\d.]+)\s+([\d.]+)/g)];
+    assert.ok(arcs.length > 0, "expected circular fillets");
+    const trim = r / Math.tan(Math.PI / 6);
+    const topArc = arcs.find((m) => {
+      const endX = Number(m[3]);
+      const endY = Number(m[4]);
+      return endX > 50 && endY > 0 && endY < trim + 2;
+    });
+    assert.ok(topArc, "expected fillet at top vertex");
+    const endY = Number(topArc![4]);
+    assert.ok(endY > 0, "top corner curve should trim into the triangle");
+    assert.ok(endY < trim + 2, "top corner curve should not bulge above the vertex");
   });
 
   it("maxStarCornerRadius is positive for default star", () => {

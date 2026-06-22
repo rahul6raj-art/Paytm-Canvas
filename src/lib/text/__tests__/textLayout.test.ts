@@ -4,8 +4,15 @@ import assert from "node:assert/strict";
 function installTextMeasureDomStub(): void {
   const ctx = {
     font: "",
+    textBaseline: "alphabetic",
     measureText(text: string) {
-      return { width: text.length * 7 };
+      return {
+        width: text.length * 7,
+        actualBoundingBoxAscent: 11,
+        actualBoundingBoxDescent: 3,
+        fontBoundingBoxAscent: 11,
+        fontBoundingBoxDescent: 3,
+      };
     },
     fillText() {},
   };
@@ -85,6 +92,13 @@ describe("text layout patch helpers", () => {
     assert.ok(twoLines.height > oneLine.height);
   });
 
+  it("auto-width hugs ink height instead of the full line-height box", () => {
+    const typo = resolveTextTypo({ fontSize: 14, lineHeight: 1.25, fontWeight: 500 });
+    const size = computeTextBoxSize("Rahul", typo, "auto-width", 0, 0);
+    const lineHeightBoxH = Math.ceil(14 * 1.25) + TEXT_BOX_PAD_Y * 2;
+    assert.ok(size.height < lineHeightBoxH);
+  });
+
   it("switches narrowed auto-width text to wrapped auto-height on width resize", () => {
     const node = {
       ...textNode(),
@@ -153,6 +167,20 @@ describe("text layout patch helpers", () => {
     assert.ok(narrow.height > wide.height);
   });
 
+  it("computeTextBoxSize works without DOM during bridge import", () => {
+    const prev = globalThis.document;
+    // @ts-expect-error SSR has no document
+    delete globalThis.document;
+    try {
+      const typo = resolveTextTypo({ fontSize: 14, lineHeight: 1.25, fontWeight: 500 });
+      const size = computeTextBoxSize("More", typo, "auto-width", 0, 0);
+      assert.ok(size.width > TEXT_BOX_PAD_X * 2);
+      assert.ok(size.height >= TEXT_BOX_PAD_Y * 2 + typo.fontSize);
+    } finally {
+      globalThis.document = prev;
+    }
+  });
+
   it("uses caret-only size for empty auto-width point text", () => {
     const typo = resolveTextTypo({ fontSize: 14, lineHeight: 1.25 });
     const empty = computeTextBoxSize("", typo, "auto-width", 0, 0);
@@ -162,7 +190,9 @@ describe("text layout patch helpers", () => {
     assert.equal(cleared.width, empty.width);
     assert.equal(cleared.height, empty.height);
     assert.equal(empty.width, TEXT_BOX_PAD_X * 2 + 2);
-    assert.ok(empty.height >= typo.fontSize * typo.lineHeight + TEXT_BOX_PAD_Y * 2);
+    const lineHeightBoxH = Math.ceil(typo.fontSize * typo.lineHeight) + TEXT_BOX_PAD_Y * 2;
+    assert.ok(empty.height <= lineHeightBoxH);
+    assert.ok(empty.height >= TEXT_BOX_PAD_Y * 2 + typo.fontSize);
   });
 
   it("does not auto-grow height when truncate is enabled", () => {

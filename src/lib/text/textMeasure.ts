@@ -91,6 +91,30 @@ export function measureStringWidth(
   return w;
 }
 
+/** Average glyph width heuristic when canvas measurement is unavailable (SSR / bridge import). */
+export function estimateGlyphWidthPx(typo: ResolvedTextTypo): number {
+  return typo.fontSize * 0.58;
+}
+
+/** Canvas width when DOM is available; heuristic on server. */
+export function measureStringWidthForTypo(text: string, typo: ResolvedTextTypo): number {
+  if (typeof document !== "undefined") {
+    const ctx = getTextMeasureContext();
+    ctx.font = buildFontString(typo);
+    return measureStringWidth(ctx, text, typo.letterSpacing);
+  }
+  const glyph = estimateGlyphWidthPx(typo);
+  const ls = typo.letterSpacing;
+  if (!text) return 0;
+  if (!ls) return text.length * glyph;
+  let w = 0;
+  for (let i = 0; i < text.length; i++) {
+    w += glyph;
+    if (i < text.length - 1) w += ls;
+  }
+  return w;
+}
+
 function configureMeasureCtx(ctx: CanvasRenderingContext2D, typo: ResolvedTextTypo): void {
   ctx.font = buildFontString(typo);
   ctx.textBaseline = "alphabetic";
@@ -103,11 +127,8 @@ function wrapParagraph(
   maxWidth: number,
   typo: ResolvedTextTypo,
 ): TextLine[] {
-  const ctx = getTextMeasureContext();
-  configureMeasureCtx(ctx, typo);
-
   if (maxWidth <= 0 || !Number.isFinite(maxWidth)) {
-    const width = measureStringWidth(ctx, paragraph, typo.letterSpacing);
+    const width = measureStringWidthForTypo(paragraph, typo);
     return [{ text: paragraph, startIndex, width, paragraphStart: true }];
   }
 
@@ -123,7 +144,7 @@ function wrapParagraph(
     lines.push({
       text: line,
       startIndex: startIndex + lineStart,
-      width: measureStringWidth(ctx, line, typo.letterSpacing),
+      width: measureStringWidthForTypo(line, typo),
       paragraphStart: lineStart === 0,
     });
     lineStart += line.length;
@@ -134,18 +155,18 @@ function wrapParagraph(
   for (const token of tokens) {
     if (!token) continue;
     const candidate = line + token;
-    const candidateWidth = measureStringWidth(ctx, candidate, typo.letterSpacing);
+    const candidateWidth = measureStringWidthForTypo(candidate, typo);
     if (candidateWidth <= maxWidth) {
       line = candidate;
       continue;
     }
     if (line) flush();
-    if (measureStringWidth(ctx, token, typo.letterSpacing) <= maxWidth) {
+    if (measureStringWidthForTypo(token, typo) <= maxWidth) {
       line = token;
     } else {
       for (const ch of token) {
         const next = line + ch;
-        if (measureStringWidth(ctx, next, typo.letterSpacing) <= maxWidth || !line) {
+        if (measureStringWidthForTypo(next, typo) <= maxWidth || !line) {
           line = next;
         } else {
           flush();
@@ -168,8 +189,6 @@ export function layoutText(
   typo: ResolvedTextTypo,
   style: TextLayoutStyleOptions = DEFAULT_TEXT_ADVANCED_STYLE,
 ): TextLayout {
-  const ctx = getTextMeasureContext();
-  configureMeasureCtx(ctx, typo);
   const lineHeightPx = typo.fontSize * typo.lineHeight;
   const paragraphSpacing = Math.max(0, style.paragraphSpacing ?? 0);
   const verticalTrimTop = verticalTrimInsetPx(typo.fontSize, style.verticalTrim);

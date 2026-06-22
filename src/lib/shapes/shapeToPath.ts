@@ -1,3 +1,4 @@
+import { finiteDimension } from "@/lib/transformMath";
 import {
   clampCornerRadii,
   getNodeCornerRadii,
@@ -320,24 +321,26 @@ export function cornerRadiusHandlePosition(
   cornerIndex: 0 | 1 | 2 | 3,
   minInset = 0,
 ): { x: number; y: number } {
-  const [tl, tr, br, bl] = clampCornerRadii(radii, w, h);
-  const width = Math.max(1, w);
-  const height = Math.max(1, h);
+  const width = finiteDimension(w);
+  const height = finiteDimension(h);
+  const safeMinInset =
+    typeof minInset === "number" && Number.isFinite(minInset) && minInset >= 0 ? minInset : 0;
+  const [tl, tr, br, bl] = clampCornerRadii(radii, width, height);
   switch (cornerIndex) {
     case 0: {
-      const inset = cornerRadiusDisplayInset(tl, minInset, width, height);
+      const inset = cornerRadiusDisplayInset(tl, safeMinInset, width, height);
       return { x: inset, y: inset };
     }
     case 1: {
-      const inset = cornerRadiusDisplayInset(tr, minInset, width, height);
+      const inset = cornerRadiusDisplayInset(tr, safeMinInset, width, height);
       return { x: width - inset, y: inset };
     }
     case 2: {
-      const inset = cornerRadiusDisplayInset(br, minInset, width, height);
+      const inset = cornerRadiusDisplayInset(br, safeMinInset, width, height);
       return { x: width - inset, y: height - inset };
     }
     case 3: {
-      const inset = cornerRadiusDisplayInset(bl, minInset, width, height);
+      const inset = cornerRadiusDisplayInset(bl, safeMinInset, width, height);
       return { x: inset, y: height - inset };
     }
     default:

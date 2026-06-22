@@ -1,3 +1,4 @@
+use crate::clip::{push_clip, should_clip_children};
 use crate::document::{parse_color, DocumentInput, NodeInput, ROOT_KEY};
 use crate::gradient::resolve_fill_rgba;
 use crate::gradient_gpu::GradientGpuTable;
@@ -121,8 +122,8 @@ fn node_local_transform(node: &NodeInput) -> WorldTransform {
 }
 
 pub fn node_world_bounds(node: &NodeInput, world: WorldTransform) -> WorldRect {
-    let w = node.width.max(1.0);
-    let h = node.height.max(1.0);
+    let w = finite_dim(node.width);
+    let h = finite_dim(node.height);
     let corners = [
         world.apply_point(0.0, 0.0),
         world.apply_point(w, 0.0),
@@ -134,16 +135,36 @@ pub fn node_world_bounds(node: &NodeInput, world: WorldTransform) -> WorldRect {
     let mut max_x = corners[0].0;
     let mut max_y = corners[0].1;
     for (x, y) in corners.iter().copied().skip(1) {
-        min_x = min_x.min(x);
-        min_y = min_y.min(y);
-        max_x = max_x.max(x);
-        max_y = max_y.max(y);
+        if x.is_finite() {
+            min_x = min_x.min(x);
+            max_x = max_x.max(x);
+        }
+        if y.is_finite() {
+            min_y = min_y.min(y);
+            max_y = max_y.max(y);
+        }
+    }
+    if !min_x.is_finite() || !min_y.is_finite() || !max_x.is_finite() || !max_y.is_finite() {
+        return WorldRect {
+            x: 0.0,
+            y: 0.0,
+            width: 1.0,
+            height: 1.0,
+        };
     }
     WorldRect {
         x: min_x,
         y: min_y,
         width: (max_x - min_x).max(1.0),
         height: (max_y - min_y).max(1.0),
+    }
+}
+
+fn finite_dim(value: f32) -> f32 {
+    if value.is_finite() && value >= 1.0 {
+        value
+    } else {
+        1.0
     }
 }
 
@@ -318,8 +339,8 @@ fn walk_node(
     );
 
     let node_bounds = node_world_bounds(node, world);
-    let child_clip = if node.clip_children.unwrap_or(false) {
-        Some(node_bounds)
+    let child_clip = if should_clip_children(node) {
+        push_clip(clip, node_bounds)
     } else {
         clip
     };
@@ -376,8 +397,8 @@ fn walk_image_draws(
         }
     }
     let node_bounds = node_world_bounds(node, world);
-    let child_clip = if node.clip_children.unwrap_or(false) {
-        Some(node_bounds)
+    let child_clip = if should_clip_children(node) {
+        push_clip(clip, node_bounds)
     } else {
         clip
     };

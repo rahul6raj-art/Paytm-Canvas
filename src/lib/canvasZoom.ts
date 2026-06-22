@@ -1,8 +1,8 @@
 /** Default editor zoom when creating a page or loading without saved canvas zoom (20%). */
 export const DEFAULT_CANVAS_ZOOM = 0.2;
 
-/** Upper bound when auto-fitting artboards into the viewport (matches default zoom). */
-export const VIEWPORT_MAX_FIT_ZOOM = DEFAULT_CANVAS_ZOOM;
+/** Max zoom when auto-fitting frames into the viewport (⇧1 / ⇧2). Separate from default zoom. */
+export const VIEWPORT_MAX_FIT_ZOOM = 1.25;
 
 /** Minimum canvas zoom (1% — wide enough to see the full 6000×6000 workspace). */
 export const CANVAS_MIN_ZOOM = 0.01;

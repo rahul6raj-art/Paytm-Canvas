@@ -18,7 +18,7 @@ describe("canvasToolRail", () => {
   });
 
   it("offsets bottom rail above status chrome", () => {
-    assert.equal(CANVAS_TOOL_RAIL_BOTTOM_OFFSET, 20);
+    assert.equal(CANVAS_TOOL_RAIL_BOTTOM_OFFSET, 16);
   });
 
   it("centers default tool rail position near workspace bottom", () => {

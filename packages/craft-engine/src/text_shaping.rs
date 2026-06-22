@@ -72,7 +72,7 @@ pub fn shape_text_run(font_bytes: &[u8], text: &str, font_size: f32, letter_spac
             y: gy,
         });
         pen_x += pos.x_advance as f32 * scale;
-        if letter_spacing > 0.0 && idx + 1 < infos.len() {
+        if idx + 1 < infos.len() {
             pen_x += letter_spacing;
         }
     }
@@ -197,5 +197,12 @@ mod tests {
         assert!(!run.glyphs.is_empty());
         assert!(run.width > 0.0);
         assert_eq!(run.direction, Direction::RightToLeft);
+    }
+
+    #[test]
+    fn negative_letter_spacing_reduces_width() {
+        let normal = shape_text_run(INTER_REGULAR_BYTES, "Hello", 16.0, 0.0).width;
+        let tight = shape_text_run(INTER_REGULAR_BYTES, "Hello", 16.0, -1.0).width;
+        assert!(tight < normal);
     }
 }

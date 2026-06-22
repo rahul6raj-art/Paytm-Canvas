@@ -9,7 +9,8 @@ import {
   wrapWidthForResizeMode,
 } from "./textNodeModel";
 import { layoutTextCanonical, canonicalToTextLayout, clearCanonicalTextLayoutCache } from "./canonicalTextLayout";
-import { layoutText } from "./textMeasure";
+import { layoutText, type TextLayout } from "./textMeasure";
+import { hugContentHeightForLayout } from "./textBaseline";
 import type { EditorNode } from "@/stores/useEditorStore";
 import { resolveTextTypo } from "@/lib/textTypography";
 import { nodeForTextLayout } from "./textNodeModel";
@@ -49,10 +50,12 @@ export function computeTextBoxSize(
         })()
       : layoutText(displayText, wrapWidth, typo, style);
 
+  const contentHeight = hugContentHeightForLayout(layout, typo);
+
   if (mode === "auto-width") {
     const isEmpty = displayText.length === 0;
     const width = Math.ceil(layout.width) + TEXT_BOX_PAD_X * 2;
-    const height = Math.ceil(layout.height) + TEXT_BOX_PAD_Y * 2;
+    const height = Math.ceil(contentHeight) + TEXT_BOX_PAD_Y * 2;
     if (isEmpty) {
       return {
         width: Math.max(TEXT_BOX_PAD_X * 2 + EMPTY_TEXT_CARET_INNER_WIDTH, width),
@@ -68,7 +71,7 @@ export function computeTextBoxSize(
     // Width is user-controlled (drag / inspector); only height follows wrapped content.
     return {
       width: Math.max(MIN_TEXT_BOX, currentWidth),
-      height: Math.max(MIN_TEXT_BOX, layout.height + TEXT_BOX_PAD_Y * 2),
+      height: Math.max(MIN_TEXT_BOX, contentHeight + TEXT_BOX_PAD_Y * 2),
     };
   }
   // Fixed (NONE): both axes are user-controlled; text wraps inside and may overflow.

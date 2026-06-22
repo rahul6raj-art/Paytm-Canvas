@@ -13,13 +13,13 @@ npm run extension:pack
 In Cursor:
 
 1. `Cmd+Shift+P` → **Extensions: Install from VSIX…**
-2. Select `packages/craft-bridge-vscode/craft-bridge-0.1.7.vsix`
+2. Select `packages/craft-bridge-vscode/craft-bridge-0.1.8.vsix`
 3. Reload Cursor
 
 Or:
 
 ```bash
-/Applications/Cursor.app/Contents/Resources/app/bin/cursor --install-extension packages/craft-bridge-vscode/craft-bridge-0.1.7.vsix
+/Applications/Cursor.app/Contents/Resources/app/bin/cursor --install-extension packages/craft-bridge-vscode/craft-bridge-0.1.8.vsix
 ```
 
 ## Workflow (manual sync)
@@ -61,6 +61,7 @@ Or:
 
 ## Notes
 
+- **v0.1.8** — Bundled bridge CLI + Cursor hooks refresh. Pair with latest Craft dev server for hug-contents text frame sizing (tighter vertical bounds on auto-width text).
 - **v0.1.7** — Light-mode live capture (`?theme=light`), unique `bridgeId` per push so canvas reloads reliably, bundled CLI passes preview theme. Requires Craft dev server + PML preview running.
 - **v0.1.6** — Auto live-capture from `http://localhost:5173` for PML screens (`?screen=more`, `signup`, etc.) when `previewUrl` is omitted. Requires Vite preview running for real colors/shapes (not grey placeholders).
 - **v0.1.5** — Push auto-appends preview routes (e.g. `?screen=signup` for PML signup pages) when `previewUrl` is bare localhost. Requires Craft server with latest bridge import fixes for full canvas layout.

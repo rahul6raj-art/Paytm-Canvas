@@ -84,7 +84,7 @@ describe("svgFileImport", () => {
     assert.ok(paths.every((n) => n.flattenedPathData && n.flattenedPathData.length > 0));
     assert.ok(paths.every((n) => n.pathPoints!.some((p) => p.handleIn || p.handleOut)));
     assert.deepEqual(
-      paths.map((n) => n.fill).sort(),
+      paths.map((n) => n.fill?.toUpperCase()).sort(),
       ["#34A853", "#4285F4", "#EB4335", "#FBBC05"].sort(),
     );
     assert.equal(result.nodes[result.rootId]?.clipChildren, false);

@@ -62,6 +62,42 @@ describe("craftEngineSnapshotApply", () => {
     assert.equal(merged.nodes.a?.x, 12);
   });
 
+  it("preserves store transform box during WASM mirror reconcile", () => {
+    const previous = node("a", {
+      x: 18548,
+      y: 12032,
+      width: 580,
+      height: 598,
+      rotation: 14,
+    });
+    const patch = wasmSnapshotToStorePatch(
+      JSON.stringify({
+        rootIds: ["a"],
+        childOrder: { __root__: ["a"] },
+        nodes: {
+          a: {
+            id: "a",
+            type: "rectangle",
+            x: 0,
+            y: 0,
+            width: 7.697682711372,
+            height: 7.697682711372,
+            rotation: 14,
+          },
+        },
+      }),
+    );
+    assert.ok(patch);
+    const merged = mergeWasmSnapshotWithStore({ a: previous }, patch!, {
+      preserveStoreGeometry: true,
+    });
+    assert.equal(merged.nodes.a?.x, 18548);
+    assert.equal(merged.nodes.a?.y, 12032);
+    assert.equal(merged.nodes.a?.width, 580);
+    assert.equal(merged.nodes.a?.height, 598);
+    assert.equal(merged.nodes.a?.rotation, 14);
+  });
+
   it("assigns numbered names for WASM-only nodes", () => {
     const patch = wasmSnapshotToStorePatch(
       JSON.stringify({

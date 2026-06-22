@@ -830,7 +830,15 @@ export function CanvasObject({
         if (!node.visible) return;
         e.preventDefault();
         e.stopPropagation();
-        openContextMenu(id, e.clientX, e.clientY);
+        const st = useEditorStore.getState();
+        const targetId = selectionTargetForClick(
+          id,
+          st.nodes,
+          st.childOrder,
+          st.objectEditModeNodeId,
+          isDeepSelectClick(e),
+        );
+        openContextMenu(targetId, e.clientX, e.clientY);
       }}
     >
       <div

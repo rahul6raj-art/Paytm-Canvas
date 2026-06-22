@@ -48,6 +48,8 @@ export const EDITOR_MENUS: EditorMenuDef[] = [
         document.querySelector<HTMLInputElement>("[data-editor-import-input]")?.click();
       }),
       action("Import from Web…", (s) => s.openImportWebModal()),
+      action("Import from Figma…", (s) => s.openImportFigmaModal()),
+      action("MCP connections…", (s) => s.openMcpConnectionsModal()),
       action("Design ↔ Code (export)…", (s) => s.openCodeRoundTrip("export")),
       action("Design ↔ Code (import)…", (s) => s.openCodeRoundTrip("import")),
       div(),
@@ -211,6 +213,7 @@ export const EDITOR_MENUS: EditorMenuDef[] = [
     id: "plugins",
     label: "Plugins",
     items: [
+      cmd("open-mcp-connections"),
       cmd("plugins-open-marketplace"),
       cmd("ai-generate-design"),
       div(),

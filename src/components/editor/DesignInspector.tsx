@@ -335,7 +335,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
 
       {canAlignLayer ? (
         <PropertiesSection title="Alignment" defaultOpen>
-          <AlignControls variant="panel" className="!space-y-1.5" />
+          <AlignControls variant="panel" />
         </PropertiesSection>
       ) : null}
 
@@ -404,9 +404,12 @@ export function DesignInspector({ node }: { node: EditorNode }) {
         locked={locked}
         parentAutoLayout={parentAutoLayout}
         isContainer={isContainer}
+        isAutoLayoutContainer={isContainer && layoutMode !== "none"}
+        nodesAll={nodesAll}
         hideDimensions={isText}
         onPatch={patch}
         onResizeFrame={(width, height) => resizeFrameWithConstraints(id, { width, height })}
+        onUpdateLayout={(layoutPatch) => updateLayout(id, layoutPatch)}
       />
 
       {isText ? (
@@ -734,16 +737,10 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                   checked={shouldClipChildren(node)}
                   disabled={locked}
                   onChange={(e) => {
-                    const enabled = e.target.checked;
-                    const next: Partial<EditorNode> = { clipChildren: enabled };
-                    if (enabled && layoutMode !== "none") {
-                      next.layoutSizingHorizontal = "fixed";
-                      next.layoutSizingVertical = "fixed";
-                    }
-                    patch(next);
+                    patch({ clipChildren: e.target.checked });
                   }}
                 />
-                <span className="text-ui text-app-fg">Wrap content</span>
+                <span className="text-ui text-app-fg">Clip content</span>
               </label>
           ) : null}
         </PropertiesSection>

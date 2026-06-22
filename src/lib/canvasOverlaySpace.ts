@@ -44,7 +44,18 @@ export function worldPointToOverlay(
   worldY: number,
   space: OverlaySpace,
 ): { x: number; y: number } {
+  if (!Number.isFinite(worldX) || !Number.isFinite(worldY)) {
+    return { x: 0, y: 0 };
+  }
   if (!space.screenSpace) return { x: worldX, y: worldY };
+  if (
+    !Number.isFinite(space.zoom) ||
+    space.zoom <= 0 ||
+    !Number.isFinite(space.pan.x) ||
+    !Number.isFinite(space.pan.y)
+  ) {
+    return { x: 0, y: 0 };
+  }
   const p = worldToViewport(worldX, worldY, space.pan, space.zoom);
   return { x: snapOverlayPx(p.x), y: snapOverlayPx(p.y) };
 }

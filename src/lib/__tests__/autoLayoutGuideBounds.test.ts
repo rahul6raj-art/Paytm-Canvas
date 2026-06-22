@@ -8,7 +8,7 @@ import {
 import type { EditorNode } from "@/stores/useEditorStore";
 
 describe("autoLayoutGuideBounds", () => {
-  it("uses frame size for padding guides when clip content is enabled", () => {
+  it("uses full content extent for padding guides even when clip content is enabled", () => {
     const nodes: Record<string, EditorNode> = {
       f: {
         id: "f",
@@ -68,7 +68,7 @@ describe("autoLayoutGuideBounds", () => {
     const extent = flowContentExtentLocal("f", nodes, childOrder);
     assert.ok(extent.width > 120);
     const guide = autoLayoutPaddingGuideSize("f", nodes, childOrder);
-    assert.equal(guide.width, 120);
+    assert.equal(guide.width, extent.width);
     assert.equal(guide.height, 80);
   });
 
@@ -123,7 +123,7 @@ describe("autoLayoutGuideBounds", () => {
     assert.equal(guide.height, 80);
   });
 
-  it("detects points outside a clipped frame guide box", () => {
+  it("detects points outside layout guide box (full content, not clip)", () => {
     const parent: EditorNode = {
       id: "f",
       parentId: null,

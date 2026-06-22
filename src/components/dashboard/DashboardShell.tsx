@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Download, PanelLeft, Plus, Search, Sparkles, Upload } from "lucide-react";
 import { DashboardSidebar, type DashboardNavId } from "./DashboardSidebar";
@@ -27,9 +26,12 @@ import { FigImportFinishEffect } from "@/components/import/FigImportFinishEffect
 import { FigImportOverlay } from "@/components/import/FigImportOverlay";
 import { FigImportToast } from "@/components/import/FigImportToast";
 import { AIGenerateModal } from "@/components/ai/AIGenerateModal";
+import { AIKeysProvider } from "@/components/ai/useAIKeys";
+import { AIAddKeyModal, AIKeysManageModal } from "@/components/ai/AIKeysModals";
 import { ImportHub } from "@/components/import/ImportHub";
 import { CodeRoundTripModal } from "@/components/code/CodeRoundTripModal";
 import { ImportFigmaModal } from "@/components/import/ImportFigmaModal";
+import { McpConnectionsModal } from "@/components/mcp/McpConnectionsModal";
 import { ImportWebModal } from "@/components/import/ImportWebModal";
 import {
   getActiveMockWorkspace,
@@ -834,7 +836,7 @@ export function DashboardShell() {
             <div className="editor-sidebar-section min-h-0 flex-1 animate-pulse bg-app-inset" />
           </aside>
           <main className="thin-scroll absolute inset-y-0 right-0 left-[352px] overflow-y-auto p-2">
-            <div className="pointer-events-auto mx-auto flex max-w-6xl flex-col gap-2">
+            <div className="pointer-events-auto flex w-full flex-col gap-2">
               <div className="editor-sidebar-section px-3.5 py-4 shadow-none">
                 <PaytmCraftApiModeBanner />
                 <div className="mt-3 h-5 w-48 animate-pulse rounded bg-app-inset" />
@@ -895,15 +897,19 @@ export function DashboardShell() {
   }
 
   return (
+    <AIKeysProvider>
     <div
       data-editor-shell
       data-dashboard-shell
       className="flex h-dvh flex-col overflow-hidden bg-transparent font-sans text-app-fg antialiased"
     >
       <AIGenerateModal />
+      <AIAddKeyModal />
+      <AIKeysManageModal />
       <ImportHub />
       <CodeRoundTripModal />
       <ImportFigmaModal onImportFigFile={onImportFile} />
+      <McpConnectionsModal />
       <FigImportOverlay />
       <FigImportFinishEffect />
       <FigImportToast />
@@ -965,7 +971,7 @@ export function DashboardShell() {
             leftSidebarVisible ? "left-[352px]" : "left-0",
           )}
         >
-          <div className="pointer-events-auto mx-auto flex max-w-6xl flex-col gap-2">
+          <div className="pointer-events-auto flex w-full flex-col gap-2">
             <div className="editor-sidebar-section flex flex-col gap-6 p-4 shadow-none">
             {isApi ? (
               <div className="mb-2">
@@ -1017,12 +1023,6 @@ export function DashboardShell() {
                   void onImportFile(f ?? null);
                 }}
               />
-              <Link
-                href="/editor"
-                className="text-ui font-medium text-app-muted underline-offset-2 hover:text-app-fg hover:underline"
-              >
-                Open last editor session
-              </Link>
               <div className="relative ml-auto hidden min-w-[200px] max-w-md flex-1 basis-[220px] md:block">
                 <Search
                   className="pointer-events-none absolute left-3 top-1/2 size-icon-ui -translate-y-1/2 text-app-subtle"
@@ -1277,5 +1277,6 @@ export function DashboardShell() {
         </main>
       </div>
     </div>
+    </AIKeysProvider>
   );
 }

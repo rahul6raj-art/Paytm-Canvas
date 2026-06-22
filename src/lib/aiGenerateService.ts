@@ -19,6 +19,7 @@ import { isCursorConfigured } from "@/lib/cursorModels";
 import { generateWithOllama } from "@/lib/ollamaGenerate";
 import { generateWithOpenAI, isOpenAIConfigured } from "@/lib/openaiGenerate";
 import type { AIContextImagePayload } from "@/lib/aiContextImages";
+import type { ResolvedAIApiKeys } from "@/lib/aiKeys/types";
 import type { ExtractedDesignTokens } from "@/lib/aiDesignTokens";
 
 export type AIGenerateRequest = {
@@ -29,6 +30,8 @@ export type AIGenerateRequest = {
   contextPrompt?: string;
   contextAttachmentCount?: number;
   contextImages?: AIContextImagePayload[];
+  /** Per-request keys from the browser (device-local storage). */
+  apiKeys?: ResolvedAIApiKeys;
 };
 
 export type AIGenerateResponse = {
@@ -87,6 +90,7 @@ async function callLLM(
       intent,
       contextImages: request.contextImages,
       userPromptOverride: userPromptOverride,
+      apiKey: request.apiKeys?.openai,
     });
     return { raw: out.content, apiError: out.error };
   }
@@ -102,6 +106,7 @@ async function callLLM(
       intent,
       contextImages: request.contextImages,
       userPromptOverride: userPromptOverride,
+      apiKey: request.apiKeys?.cursor,
     });
     return { raw: out.content, apiError: out.error };
   }
@@ -116,6 +121,7 @@ async function callLLM(
     intent,
     contextImages: request.contextImages,
     userPromptOverride: userPromptOverride,
+    apiKey: request.apiKeys?.openai,
   });
   return { raw: out.content, apiError: out.error };
 }
@@ -129,8 +135,8 @@ function buildParseFailureMessage(model: string, llmRaw: string | null, apiError
     return "Ollama returned invalid layout JSON. Try GPT-4o Mini for structured layouts.";
   }
   if (isCursorModelId(model)) {
-    if (!isCursorConfigured()) {
-      return "CURSOR_API_KEY is not set. Add it to .env.local for Cursor model generation.";
+    if (!isCursorConfigured() && !request.apiKeys?.cursor) {
+      return "Add your Cursor key in the model menu, or set CURSOR_API_KEY in .env.local.";
     }
     if (!llmRaw?.trim()) {
       return "Cursor returned no response. Check your API key and try again.";
@@ -138,8 +144,8 @@ function buildParseFailureMessage(model: string, llmRaw: string | null, apiError
     return "Cursor returned invalid layout JSON. Attach Design.md and use a specific screen prompt, or try GPT-4o Mini.";
   }
   if (isOpenAIModelId(model)) {
-    if (!isOpenAIConfigured()) {
-      return "OPENAI_API_KEY is not set. Add it to .env.local for fast generation.";
+    if (!isOpenAIConfigured() && !request.apiKeys?.openai) {
+      return "Add your OpenAI key in the model menu, or set OPENAI_API_KEY in .env.local.";
     }
     if (!llmRaw?.trim()) {
       return "The model returned an empty response. Try again or switch models.";

@@ -13,6 +13,7 @@ import { useDraggableFloatingPanel } from "./useDraggableFloatingPanel";
 import { ColorLibraryPickerBody } from "./ColorLibraryPickerBody";
 import { getColorDesignTokens } from "./LibraryColorPickerMenu";
 import { EditorHintWrap } from "./EditorHoverHint";
+import { inspectorHeaderActionBtnClass, inspectorLucideProps } from "@/lib/inspectorIconStyles";
 import { cn } from "@/lib/utils";
 
 type ColorLibraryView = "grid" | "list";
@@ -142,10 +143,10 @@ export function ColorLibraryDialog({
             type="button"
             onClick={onClose}
             onPointerDown={(e) => e.stopPropagation()}
-            className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-lg text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
+            className={cn(inspectorHeaderActionBtnClass, "pointer-events-auto rounded-lg")}
             aria-label={`Close ${title.toLowerCase()}`}
           >
-            <X className="h-3.5 w-3.5" strokeWidth={2} />
+            <X {...inspectorLucideProps()} />
           </button>
         </div>
       </div>

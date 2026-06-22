@@ -18,6 +18,7 @@ export async function POST(request: Request) {
     contextPrompt?: string;
     contextAttachmentCount?: number;
     contextImages?: { name?: string; mimeType?: string; dataUrl?: string }[];
+    apiKeys?: { openai?: string; cursor?: string; anthropic?: string };
   };
 
   const prompt = typeof payload.prompt === "string" ? payload.prompt : "";
@@ -62,6 +63,7 @@ export async function POST(request: Request) {
       contextPrompt,
       contextAttachmentCount,
       contextImages,
+      apiKeys: payload.apiKeys,
     });
 
     if (!out.ok || !out.result) {

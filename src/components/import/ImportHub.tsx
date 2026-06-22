@@ -1,6 +1,6 @@
 "use client";
 
-import { Code2, Figma, Globe, X } from "lucide-react";
+import { Code2, Figma, Globe, Link2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/useEditorStore";
 
@@ -13,6 +13,7 @@ export function ImportHub() {
   const openImportWebModal = useEditorStore((s) => s.openImportWebModal);
   const openImportFigmaModal = useEditorStore((s) => s.openImportFigmaModal);
   const openCodeRoundTrip = useEditorStore((s) => s.openCodeRoundTrip);
+  const openMcpConnectionsModal = useEditorStore((s) => s.openMcpConnectionsModal);
 
   if (!open) return null;
 
@@ -49,7 +50,7 @@ export function ImportHub() {
           </button>
         </div>
 
-        <div className="grid gap-4 p-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 p-6 sm:grid-cols-2 lg:grid-cols-4">
           <button
             type="button"
             onClick={() => openImportFigmaModal()}
@@ -94,6 +95,22 @@ export function ImportHub() {
               <h3 className="text-base font-semibold text-app-fg">Design ↔ Code</h3>
               <p className="mt-1 text-ui-sm leading-relaxed text-app-muted">
                 Capture live React from Storybook, edit on canvas, export code
+              </p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => openMcpConnectionsModal()}
+            className={cn(importOptionClass, "hover:border-emerald-500/30")}
+          >
+            <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-700 text-white">
+              <Link2 className="h-6 w-6" strokeWidth={1.75} />
+            </span>
+            <div>
+              <h3 className="text-base font-semibold text-app-fg">MCP connections</h3>
+              <p className="mt-1 text-ui-sm leading-relaxed text-app-muted">
+                Connect Figma, GitHub, or custom MCP servers to the canvas
               </p>
             </div>
           </button>

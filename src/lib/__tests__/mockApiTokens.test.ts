@@ -64,6 +64,6 @@ describe("mockApiTokens", () => {
     resetMockApiStoreForTests();
     const auth = resolveMockApiRequestAuth(new Request("http://localhost/api/v1/me"));
     assert.equal(auth.kind, "session");
-    assert.equal(auth.user.email, "rahul.verma@paytm.com");
+    assert.equal(auth.user.email, mockApiStore.getCurrentUser().email);
   });
 });

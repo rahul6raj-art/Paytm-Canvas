@@ -115,7 +115,7 @@ describe("shapeToPath", () => {
     assert.equal(pathSupportsCornerRadius(node), true);
     assert.equal(pathPointCornerIndex(node, p1), 1);
     const d = pathOutlineD(node);
-    assert.ok(d.includes(" Q "), "quad outline uses quadratic fillets for radius");
+    assert.ok(d.includes(" A "), "quad outline uses circular fillets for radius");
   });
 
   it("rounds corners on a closed triangle path", () => {
@@ -138,7 +138,7 @@ describe("shapeToPath", () => {
     assert.equal(pathSupportsCornerRadius(node), true);
     assert.equal(pathPointCornerIndex(node, p2), 2);
     const d = pathOutlineD(node);
-    assert.ok(d.includes(" Q "), "triangle outline uses quadratic fillets for radius");
+    assert.ok(d.includes(" A "), "triangle outline uses circular fillets for radius");
   });
 
   it("uses fill hit for open paths with a visible fill", () => {

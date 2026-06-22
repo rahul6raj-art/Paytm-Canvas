@@ -16,6 +16,20 @@ function escapeHtmlAttr(text: string): string {
     .replace(/'/g, "&#39;");
 }
 
+/** SVG/canvas path for a boolean composite preview. */
+export function booleanClipperPathD(render: BooleanRenderModel): string | null {
+  if (render.op === "clipper") return render.pathD;
+  if (render.op === "subtract") return render.baseD;
+  if ("pathDs" in render && render.pathDs.length > 0) return render.pathDs.join(" ");
+  return null;
+}
+
+export function booleanClipperFillRule(render: BooleanRenderModel): "nonzero" | "evenodd" {
+  if (render.op === "clipper") return render.fillRule;
+  if (render.op === "subtract" || render.op === "exclude") return "evenodd";
+  return "nonzero";
+}
+
 export function booleanStrokeAttrParts(node: EditorNode): string {
   const sw = node.strokeWidth ?? 0;
   if (sw <= 0 || !node.strokeColor) return "";
@@ -29,19 +43,6 @@ function pathAttrs(fillAttr: string, strokeAttrs: string, fillOpacity: number): 
   return `fill="${fillAttr}"${opacity}${strokeAttrs}`;
 }
 
-function clipperPathD(render: BooleanRenderModel): string | null {
-  if (render.op === "clipper") return render.pathD;
-  if (render.op === "subtract") return render.baseD;
-  if ("pathDs" in render && render.pathDs.length > 0) return render.pathDs.join(" ");
-  return null;
-}
-
-function clipperFillRule(render: BooleanRenderModel): "nonzero" | "evenodd" {
-  if (render.op === "clipper") return render.fillRule;
-  if (render.op === "subtract" || render.op === "exclude") return "evenodd";
-  return "nonzero";
-}
-
 /** SVG path for boolean preview (canvas and code export) — Clipper2 result. */
 export function svgInnerMarkupFromBooleanRender(
   render: BooleanRenderModel,
@@ -51,12 +52,12 @@ export function svgInnerMarkupFromBooleanRender(
   strokeAttrs = "",
   fillOpacity = 1,
 ): string {
-  const pathD = clipperPathD(render);
+  const pathD = booleanClipperPathD(render);
   if (!pathD) return "";
 
   const d = escapeSvgPathD(pathD);
   const rule =
-    clipperFillRule(render) === "evenodd" ? ` fill-rule="evenodd"` : ` fill-rule="nonzero"`;
+    booleanClipperFillRule(render) === "evenodd" ? ` fill-rule="evenodd"` : ` fill-rule="nonzero"`;
   const pa = pathAttrs(fillAttr, strokeAttrs, fillOpacity);
   return `<path d="${d}"${rule} ${pa}/>`;
 }
@@ -128,7 +129,7 @@ export function booleanGroupSceneInnerMarkup(opts: {
   const useCssPathsFill = rawFill === "none" && Boolean(underlayMarkup);
   const pathFillAttr = useCssPathsFill ? "none" : fillAttr;
 
-  const pathD = clipperPathD(render);
+  const pathD = booleanClipperPathD(render);
 
   let cssMaskAndUnderlay = "";
   if (useCssPathsFill && pathD) {

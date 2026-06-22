@@ -8,6 +8,7 @@ import {
   getRenderedWorldTopLeft,
   insertNodeInChildOrder,
   needsChildOrderReconcile,
+  needsNodeGeometryRepair,
   repairNodeHierarchy,
   reconcileChildOrderWithParents,
   getRenderedWorldBounds,
@@ -219,5 +220,24 @@ describe("childOrderReconcile", () => {
     };
     assert.deepEqual(layerPanelChildIds(EDITOR_ROOT_KEY, nodes, childOrder), ["f1"]);
     assert.deepEqual(layerPanelChildIds("f1", nodes, childOrder), ["r1"]);
+  });
+
+  it("needsNodeGeometryRepair ignores rotated local transform boxes", () => {
+    const r1 = { ...rect("r1", null, 100, 80), width: 200, height: 120, rotation: 24 };
+    const nodes = { r1 };
+    const childOrder = { [EDITOR_ROOT_KEY]: ["r1"] };
+    assert.equal(needsNodeGeometryRepair(nodes, childOrder), false);
+  });
+
+  it("repairNodeHierarchy preserves rotated node local geometry", () => {
+    const r1 = { ...rect("r1", null, 100, 80), width: 200, height: 120, rotation: 24 };
+    const nodes = { r1 };
+    const childOrder = { [EDITOR_ROOT_KEY]: ["r1"] };
+    const fixed = repairNodeHierarchy(nodes, childOrder);
+    assert.equal(fixed.nodes.r1!.x, 100);
+    assert.equal(fixed.nodes.r1!.y, 80);
+    assert.equal(fixed.nodes.r1!.width, 200);
+    assert.equal(fixed.nodes.r1!.height, 120);
+    assert.equal(fixed.nodes.r1!.rotation, 24);
   });
 });

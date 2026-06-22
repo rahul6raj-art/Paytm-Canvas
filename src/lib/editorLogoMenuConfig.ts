@@ -106,7 +106,7 @@ export const EDITOR_LOGO_MENU_ROOT: LogoMenuRootEntry[] = [
   { type: "submenu", menuId: "plugins", label: "Plugins" },
   { type: "divider" },
   { type: "command", commandId: "open-help-demo-checklist", label: "Docs" },
-  { type: "command", commandId: "plugins-open-marketplace", label: "MCP" },
+  { type: "command", commandId: "open-mcp-connections", label: "MCP connections…" },
   { type: "command", commandId: "show-shortcuts", label: "Keyboard Shortcuts" },
 ];
 

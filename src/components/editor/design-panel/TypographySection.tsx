@@ -18,7 +18,7 @@ import { getTypographyDesignTokens } from "../LibraryTypographyPickerMenu";
 import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { appFieldClass, appFieldRadius, inspectorControlHeightClass } from "@/lib/appFieldStyles";
 import { cn } from "@/lib/utils";
-import { inspectorIconClass, inspectorIconStroke } from "@/lib/inspectorIconStyles";
+import { inspectorIconClass, inspectorIconStroke, inspectorHeaderActionBtnClass, inspectorFieldIconButtonCompactClass } from "@/lib/inspectorIconStyles";
 import {
   adjacentPanelDialogStyle,
   useAdjacentPanelDialogPosition,
@@ -139,7 +139,7 @@ export function TypographySection({
           <button
             type="button"
             onClick={() => setMoreOpen(false)}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
+            className={cn(inspectorHeaderActionBtnClass, "rounded-lg")}
             aria-label="Close typography settings"
           >
             <X className="h-3.5 w-3.5" strokeWidth={2} />
@@ -174,7 +174,7 @@ export function TypographySection({
             aria-expanded={moreOpen}
             onClick={() => setMoreOpen((o) => !o)}
             className={cn(
-              "flex h-6 w-6 items-center justify-center rounded border border-app-border bg-app-panel text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg disabled:opacity-40",
+              inspectorFieldIconButtonCompactClass,
               moreOpen && "border-app-panel-edge bg-app-inset text-app-fg",
             )}
           >

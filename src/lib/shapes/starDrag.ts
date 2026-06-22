@@ -19,6 +19,7 @@ export type StarPreview = {
   cornerRadius: number;
   outerCornerRadius: number;
   innerCornerRadius: number;
+  vertexIndex: number;
 } | null;
 
 type StarDragKind = "ratio" | "cornerRadius";
@@ -28,6 +29,7 @@ type StarDragSession = {
   pointerId: number;
   nodeId: string;
   pointCount: number;
+  vertexIndex: number;
   grabRatio: number;
   grabCornerRadius: number;
   grabLocalX: number;
@@ -57,7 +59,7 @@ export function getStarPreview(): StarPreview {
   return livePreview;
 }
 
-function setPreview(nodeId: string, params: StarParams): void {
+function setPreview(nodeId: string, params: StarParams, vertexIndex = 0): void {
   livePreview = {
     nodeId,
     pointCount: params.pointCount,
@@ -65,6 +67,7 @@ function setPreview(nodeId: string, params: StarParams): void {
     cornerRadius: params.cornerRadius,
     outerCornerRadius: params.outerCornerRadius,
     innerCornerRadius: params.innerCornerRadius,
+    vertexIndex,
   };
   notifyPreview();
 }
@@ -105,6 +108,7 @@ function beginStarDrag(
     clientY: number;
     clientToWorld: ClientToWorldFn;
     captureTarget: Element;
+    vertexIndex?: number;
   },
 ): boolean {
   const state = useEditorStore.getState();
@@ -117,19 +121,21 @@ function beginStarDrag(
   const pointCount = n.starPoints ?? 5;
   const ratio = n.starInnerRadius ?? 0.4;
   const params = effectiveStarParams(n);
+  const vertexIndex = opts.vertexIndex ?? 0;
 
   activeDrag = {
     kind,
     pointerId: opts.pointerId,
     nodeId: opts.nodeId,
     pointCount,
+    vertexIndex,
     grabRatio: ratio,
     grabCornerRadius: params.outerCornerRadius,
     grabLocalX: local.x,
     grabLocalY: local.y,
   };
 
-  setPreview(opts.nodeId, params);
+  setPreview(opts.nodeId, params, vertexIndex);
 
   try {
     opts.captureTarget.setPointerCapture(opts.pointerId);
@@ -169,13 +175,15 @@ function beginStarDrag(
           node.starInnerRadius ?? 0.4,
           node.width,
           node.height,
+          d.vertexIndex,
         );
         const nextParams = effectiveStarParams({
           ...node,
           starOuterCornerRadius: nextOuter,
+          cornerRadius: nextOuter,
         });
-        setPreview(d.nodeId, nextParams);
-        scheduleStoreUpdate({ starOuterCornerRadius: nextOuter });
+        setPreview(d.nodeId, nextParams, d.vertexIndex);
+        scheduleStoreUpdate({ starOuterCornerRadius: nextOuter, cornerRadius: nextOuter });
       }
     }
   };
@@ -218,6 +226,7 @@ export function beginStarCornerRadiusDrag(opts: {
   clientY: number;
   clientToWorld: ClientToWorldFn;
   captureTarget: Element;
+  vertexIndex?: number;
 }): boolean {
   return beginStarDrag("cornerRadius", opts);
 }

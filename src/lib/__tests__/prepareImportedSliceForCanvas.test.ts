@@ -45,7 +45,7 @@ describe("prepareImportedSliceForCanvas", () => {
     const out = prepareImportedSliceForCanvas(slice);
     assert.equal(out.nodes.root?.fill, "#FFFFFF");
     assert.equal(out.nodes.root?.fillEnabled, true);
-    assert.equal(out.nodes.root?.clipChildren, false);
+    assert.equal(out.nodes.root?.clipChildren, true);
   });
 
   it("gives root artboards a visible backdrop when live capture omits fill", () => {
@@ -63,7 +63,7 @@ describe("prepareImportedSliceForCanvas", () => {
       },
     });
     const out = prepareImportedSliceForCanvas(slice);
-    assert.equal(out.nodes.root?.fill, "#101010");
+    assert.equal(out.nodes.root?.fill, "#FFFFFF");
     assert.equal(out.nodes.root?.fillEnabled, true);
   });
 });

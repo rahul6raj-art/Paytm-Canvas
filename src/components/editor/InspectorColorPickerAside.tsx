@@ -12,6 +12,7 @@ import {
 } from "./useAdjacentPanelDialogPosition";
 import { useDismissAnchoredDropdown } from "./useAnchoredDropdown";
 import { useDraggableFloatingPanel } from "./useDraggableFloatingPanel";
+import { inspectorHeaderActionBtnClass } from "@/lib/inspectorIconStyles";
 import { cn } from "@/lib/utils";
 
 export function InspectorColorPickerAside({
@@ -107,7 +108,7 @@ export function InspectorColorPickerAside({
         <button
           type="button"
           onClick={onClose}
-          className="flex h-7 w-7 items-center justify-center rounded-lg text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
+          className={cn(inspectorHeaderActionBtnClass, "rounded-lg")}
           aria-label={`Close ${title.toLowerCase()}`}
         >
           <X className="h-3.5 w-3.5" strokeWidth={2} />

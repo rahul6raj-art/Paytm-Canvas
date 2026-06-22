@@ -25,6 +25,8 @@ type PropertyNumberInputProps = {
   step?: number;
   /** Leading icon inside the field (hides the text label, uses aria-label). */
   leadingIcon?: ReactNode;
+  /** When true and not focused, display "Mixed" instead of the numeric value. */
+  mixed?: boolean;
 };
 
 function parseDraftNumber(raw: string, fallback: number): number {
@@ -53,6 +55,7 @@ export function PropertyNumberInput({
   decimals = 0,
   step: stepProp,
   leadingIcon,
+  mixed = false,
 }: PropertyNumberInputProps) {
   const format = (n: number) => {
     if (!Number.isFinite(n)) return "0";
@@ -99,12 +102,15 @@ export function PropertyNumberInput({
   });
 
   useEffect(() => {
-    if (!focused && !scrubbing && !scrubActiveRef.current) setText(format(value));
-  }, [value, instanceKey, decimals, focused, scrubbing, scrubActiveRef]);
+    if (!focused && !scrubbing && !scrubActiveRef.current && !mixed) setText(format(value));
+  }, [value, instanceKey, decimals, focused, scrubbing, scrubActiveRef, mixed]);
+
+  const showMixed = mixed && !focused && !scrubbing && !scrubActiveRef.current;
 
   const onBlur = () => {
     if (scrubActiveRef.current) return;
     setFocused(false);
+    if (showMixed) return;
     if (!apply(text)) setText(format(value));
   };
 
@@ -112,9 +118,13 @@ export function PropertyNumberInput({
     type: "text" as const,
     inputMode: "decimal" as const,
     disabled,
-    value: text,
-    onFocus: () => setFocused(true),
+    value: showMixed ? "Mixed" : text,
+    onFocus: () => {
+      setFocused(true);
+      if (mixed) setText(format(value));
+    },
     onChange: (e: ChangeEvent<HTMLInputElement>) => {
+      if (showMixed) return;
       const next = e.target.value;
       setText(next);
       if (commitOnInput) apply(next);
@@ -134,6 +144,7 @@ export function PropertyNumberInput({
   const inputClassName = cn(
     appFieldInnerClass,
     "font-mono tabular-nums",
+    showMixed && "text-app-muted",
   );
 
   const fieldShell = (

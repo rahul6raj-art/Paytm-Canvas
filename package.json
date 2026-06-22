@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=20"
+    "node": "20.x"
   },
   "workspaces": [
     "packages/craft-api",
@@ -75,6 +75,7 @@
   "dependencies": {
     "@babel/parser": "^7.29.7",
     "@cursor/sdk": "^1.0.18",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@paytm-craft/bridge": "*",
     "clipper2-js": "^1.2.4",
     "clsx": "^2.1.1",

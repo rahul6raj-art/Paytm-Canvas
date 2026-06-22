@@ -5,6 +5,13 @@
 
 export type LayoutMode = "none" | "horizontal" | "vertical";
 export type LayoutSizingMode = "fixed" | "hug" | "fill";
+
+/** Figma-aligned sizing mode constants (values match {@link LayoutSizingMode}). */
+export const SIZING_MODE = {
+  FIXED: "fixed",
+  HUG_CONTENTS: "hug",
+  FILL_CONTAINER: "fill",
+} as const;
 export type LayoutPositioning = "auto" | "absolute";
 export type PrimaryAxisAlign = "start" | "center" | "end" | "space-between";
 export type CrossAxisAlign = "start" | "center" | "end" | "stretch";
@@ -51,7 +58,7 @@ export interface LayoutEngineNode {
   constraintsHorizontal?: "left" | "right" | "left-right" | "center" | "scale";
   constraintsVertical?: "top" | "bottom" | "top-bottom" | "center" | "scale";
 
-  /** When true, gap/fixed-axis relayout respects clip (see applyGapResponsivePrimarySize). */
+  /** When true, children are visually clipped at render/hit-test time only (not layout). */
   clipChildren?: boolean;
 
   /** Text hug measurement */

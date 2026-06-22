@@ -58,9 +58,17 @@ export function useCanvasHitHandlers(clientToWorld: ClientToWorldFn) {
   const onContextMenu = useCallback((e: React.MouseEvent, nodeId: string) => {
     e.preventDefault();
     e.stopPropagation();
-    const n = useEditorStore.getState().nodes[nodeId];
+    const st = useEditorStore.getState();
+    const n = st.nodes[nodeId];
     if (!n?.visible) return;
-    useEditorStore.getState().openContextMenu(nodeId, e.clientX, e.clientY);
+    const targetId = selectionTargetForClick(
+      nodeId,
+      st.nodes,
+      st.childOrder,
+      st.objectEditModeNodeId,
+      isDeepSelectClick(e),
+    );
+    st.openContextMenu(targetId, e.clientX, e.clientY);
   }, []);
 
   const onDoubleClick = useCallback(

@@ -1,9 +1,3 @@
-import {
-  isWasmDocumentMutationIdle,
-  reconcileStoreFromWasmWhenIdle,
-  requestDeferredWasmReconcile,
-} from "@/engine/craftEngineAuthorityMirror";
-import { isWasmFirstMutationsMode } from "@/engine/craftEngineWasmFirstMutation";
 import { isNativeRendererEnabled } from "@/lib/craftPublicConfig";
 import { isWasmDocumentAuthority } from "@/engine/craftEngineAuthority";
 import {
@@ -59,10 +53,24 @@ export function buildGeometryDocumentOp(
     };
   }
 
+  const fields: Record<string, unknown> = {
+    x: node.x,
+    y: node.y,
+    width: node.width,
+    height: node.height,
+    rotation: node.rotation ?? 0,
+  };
+  if (node.lineX1 != null) fields.lineX1 = node.lineX1;
+  if (node.lineY1 != null) fields.lineY1 = node.lineY1;
+  if (node.lineX2 != null) fields.lineX2 = node.lineX2;
+  if (node.lineY2 != null) fields.lineY2 = node.lineY2;
+  if (node.flipHorizontal != null) fields.flipHorizontal = node.flipHorizontal;
+  if (node.flipVertical != null) fields.flipVertical = node.flipVertical;
+
   return {
     op: "updateNode",
     nodeId,
-    fields: { node },
+    fields,
   };
 }
 
@@ -118,11 +126,6 @@ export function mirrorGeometryPatchesToWasm(entries: GeometryMirrorEntry[]): boo
       }
     });
     advanceSyncBaseline(state, baselineUpdates);
-    if (isWasmFirstMutationsMode() && !isWasmDocumentMutationIdle()) {
-      requestDeferredWasmReconcile();
-    } else {
-      reconcileStoreFromWasmWhenIdle();
-    }
     return true;
   } catch {
     return false;

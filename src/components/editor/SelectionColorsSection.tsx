@@ -46,7 +46,7 @@ export function SelectionColorsSection() {
     [selectedIds, nodes],
   );
 
-  if (colors.length === 0) return null;
+  if (colors.length <= 1) return null;
 
   const headerSwatches = colors.slice(0, HEADER_SWATCH_LIMIT);
   const overflow = colors.length - headerSwatches.length;

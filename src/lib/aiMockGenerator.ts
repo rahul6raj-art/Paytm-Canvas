@@ -2,6 +2,8 @@ import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import type { EditorPersistSlice } from "@/lib/documentPersistence";
 import { wrapPersistSliceWithPages } from "@/lib/documentPersistence";
 import type { AIContextImagePayload } from "@/lib/aiContextImages";
+import type { ResolvedAIApiKeys } from "@/lib/aiKeys/types";
+import { resolveClientAIApiKeys } from "@/lib/aiKeys/storage";
 import { DEFAULT_AI_MODEL_ID, getAIModelById } from "@/lib/aiModels";
 import { tryRichGenerate } from "@/lib/aiGenerateFastPath";
 import type { EditorNode } from "@/stores/useEditorStore";
@@ -26,6 +28,8 @@ export interface AIGenerateOptions {
   detectedIntent?: string;
   /** Base64 reference images for OpenAI vision. */
   contextImages?: AIContextImagePayload[];
+  /** Device-local API keys forwarded to the generate API. */
+  apiKeys?: ResolvedAIApiKeys;
 }
 
 export interface AIGeneratePreview {
@@ -594,6 +598,7 @@ export async function generateDesignFromPromptAsync(
         contextPrompt: options.contextPrompt,
         contextAttachmentCount: options.contextAttachmentCount,
         contextImages: options.contextImages,
+        apiKeys: options.apiKeys ?? resolveClientAIApiKeys(),
       }),
       signal: AbortSignal.timeout(120_000),
     });

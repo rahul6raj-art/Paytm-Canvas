@@ -6,6 +6,7 @@ import {
   computeAutoLayout,
   inferAutoLayoutGap,
   inferAutoLayoutPadding,
+  layoutSizingPatchesForManualResize,
   sortIdsForAutoLayoutFlow,
   type LayoutNode,
 } from "@/lib/autoLayout";
@@ -287,5 +288,24 @@ describe("auto layout", () => {
     assert.equal(vertical.parent!.layoutMode, "vertical");
     assert.equal(vertical.b!.x, 0);
     assert.equal(vertical.b!.y, 50);
+  });
+
+  it("layoutSizingPatchesForManualResize pins only changed axes", () => {
+    const node = {
+      layoutMode: "horizontal" as const,
+      layoutSizingHorizontal: "hug" as const,
+      layoutSizingVertical: "hug" as const,
+    };
+    assert.deepEqual(layoutSizingPatchesForManualResize(node, true, false), {
+      layoutSizingHorizontal: "fixed",
+    });
+    assert.deepEqual(layoutSizingPatchesForManualResize(node, false, true), {
+      layoutSizingVertical: "fixed",
+    });
+    assert.deepEqual(layoutSizingPatchesForManualResize(node, true, true), {
+      layoutSizingHorizontal: "fixed",
+      layoutSizingVertical: "fixed",
+    });
+    assert.deepEqual(layoutSizingPatchesForManualResize(node, false, false), {});
   });
 });

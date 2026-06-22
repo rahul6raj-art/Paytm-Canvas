@@ -2,7 +2,7 @@
 
 import type { ReactNode, Ref } from "react";
 import { cn } from "@/lib/utils";
-import { appFieldRadius, inspectorControlHeightClass } from "@/lib/appFieldStyles";
+import { inspectorFieldIconButtonClass } from "@/lib/inspectorIconStyles";
 import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
 
 /** Icon button beside W/H fields (aspect lock, fit to content, etc.). */
@@ -35,12 +35,10 @@ export function DimensionFieldsIconButton({
         aria-pressed={pressed}
         onClick={onClick}
         className={cn(
-          "flex w-7 shrink-0 items-center justify-center border border-app-border bg-app-panel transition-colors disabled:opacity-40",
-          inspectorControlHeightClass,
-          appFieldRadius,
+          inspectorFieldIconButtonClass,
           active
             ? "border-app-panel-edge bg-app-inset text-app-fg hover:bg-app-inset"
-            : "text-app-muted hover:bg-app-hover hover:text-app-fg",
+            : undefined,
         )}
       >
         {children}

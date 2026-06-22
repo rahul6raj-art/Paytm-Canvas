@@ -35,6 +35,22 @@ function moveNodeByWorldDelta(
   return { ...nodes, [nodeId]: next };
 }
 
+/** Move multiple layers by the same world delta (used by selection gap drag). */
+export function moveNodesByWorldDelta(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  nodeIds: string[],
+  dx: number,
+  dy: number,
+): Record<string, EditorNode> {
+  if (dx === 0 && dy === 0) return nodes;
+  let next = nodes;
+  for (const id of nodeIds) {
+    next = moveNodeByWorldDelta(next, childOrder, id, dx, dy);
+  }
+  return next;
+}
+
 function unionBounds(bounds: RectBounds[]): RectBounds | null {
   if (bounds.length === 0) return null;
   let minX = Infinity;

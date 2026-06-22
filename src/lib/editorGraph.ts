@@ -979,11 +979,21 @@ export function repairNodeHierarchy(
   for (const id of orderedIds) {
     const wb = renderBounds.get(id);
     if (!wb) continue;
+    const node = out[id];
+    if (!node || nodeUsesLocalTransformBox(node)) continue;
     const wantParent = parentOf.has(id) ? parentOf.get(id)! : null;
-    out[id] = nodeWithWorldBoundsAsParentLocal(out[id]!, wantParent, wb, out, co);
+    out[id] = nodeWithWorldBoundsAsParentLocal(node, wantParent, wb, out, co);
   }
 
   return { nodes: out, childOrder: co };
+}
+
+/** Nodes whose x/y/width/height are a local transform box — not axis-aligned world bounds. */
+function nodeUsesLocalTransformBox(node: EditorNode): boolean {
+  if (hasRotation(node.rotation)) return true;
+  if (node.flipHorizontal || node.flipVertical) return true;
+  if (node.type === "line" || node.type === "arrow" || node.type === "path") return true;
+  return false;
 }
 
 /** True when childOrder disagrees with nodes[].parentId (e.g. child listed at root and under a frame). */
@@ -1017,6 +1027,7 @@ export function needsNodeGeometryRepair(
   for (const id of Object.keys(nodes)) {
     const n = nodes[id];
     if (!n) continue;
+    if (nodeUsesLocalTransformBox(n)) continue;
     const rendered = getRenderedWorldBounds(id, nodes, childOrder);
     const parentId = parentOf.get(id) ?? null;
     let expectedOrigin = { x: n.x, y: n.y };

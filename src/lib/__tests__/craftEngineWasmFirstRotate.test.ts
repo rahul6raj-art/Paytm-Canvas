@@ -42,16 +42,50 @@ describe("craftEngineWasmFirstRotate", () => {
     assert.equal(useEditorStore.getState().transformInteractionMode, "none");
   });
 
-  it("endRotateInteraction no-ops when snapshot missing", () => {
-    const id = `rect-rot2-${Date.now()}`;
+  it("endRotateInteraction preserves large-canvas geometry after rotate drag", () => {
+    const id = `rect-rot-large-${Date.now()}`;
     useEditorStore.setState({
-      nodes: { [id]: baseRect(id) },
+      nodes: {
+        [id]: { ...baseRect(id, 18548, 12032), width: 580, height: 598 },
+      },
+      childOrder: { [ROOT]: [id] },
+      transformInteractionMode: "rotate",
+      rotateGeomSnapshot: {
+        nodeId: id,
+        x: 18548,
+        y: 12032,
+        width: 580,
+        height: 598,
+      },
+    });
+    useEditorStore.getState().updateNode(
+      id,
+      { rotation: 352, x: 18548, y: 12032 },
+      { skipHistory: true },
+    );
+    useEditorStore.getState().endRotateInteraction(id, 352);
+    const n = useEditorStore.getState().nodes[id];
+    assert.equal(n?.rotation, 352);
+    assert.equal(n?.x, 18548);
+    assert.equal(n?.y, 12032);
+    assert.equal(n?.width, 580);
+    assert.equal(n?.height, 598);
+  });
+
+  it("endRotateInteraction falls back to rotateGeomSnapshots", () => {
+    const id = `rect-rot-fallback-${Date.now()}`;
+    useEditorStore.setState({
+      nodes: { [id]: { ...baseRect(id, 12, 24), width: 120, height: 90 } },
       childOrder: { [ROOT]: [id] },
       transformInteractionMode: "rotate",
       rotateGeomSnapshot: null,
+      rotateGeomSnapshots: { [id]: { x: 12, y: 24, width: 120, height: 90 } },
     });
-    useEditorStore.getState().endRotateInteraction(id, 90);
-    assert.equal(useEditorStore.getState().nodes[id]?.rotation, 0);
-    assert.equal(useEditorStore.getState().transformInteractionMode, "none");
+    useEditorStore.getState().updateNode(id, { rotation: 30 }, { skipHistory: true });
+    useEditorStore.getState().endRotateInteraction(id, 30);
+    const n = useEditorStore.getState().nodes[id];
+    assert.equal(n?.rotation, 30);
+    assert.equal(n?.width, 120);
+    assert.equal(n?.height, 90);
   });
 });

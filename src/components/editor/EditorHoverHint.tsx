@@ -3,7 +3,9 @@
 import {
   Children,
   cloneElement,
+  createContext,
   isValidElement,
+  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -14,8 +16,32 @@ import {
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { parseEditorHintTitle } from "@/lib/editorHoverHint";
+import {
+  resolveEditorHintVisible,
+  type EditorHintPolicy,
+  type EditorHintPriority,
+} from "@/lib/editorHintPolicy";
 
 export type EditorHoverHintSide = "top" | "bottom" | "left" | "right";
+
+/** Default: only show hints that include a keyboard shortcut. */
+const EditorHintPolicyContext = createContext<EditorHintPolicy>("shortcuts-only");
+
+export function EditorHintPolicyProvider({
+  policy,
+  children,
+}: {
+  policy: EditorHintPolicy;
+  children: ReactNode;
+}) {
+  return (
+    <EditorHintPolicyContext.Provider value={policy}>{children}</EditorHintPolicyContext.Provider>
+  );
+}
+
+export function useEditorHintPolicy(): EditorHintPolicy {
+  return useContext(EditorHintPolicyContext);
+}
 
 const HINT_GAP = 8;
 const POINTER_HINT_OFFSET_X = 12;
@@ -110,6 +136,7 @@ export function EditorHoverHint({
   className,
   anchorClassName,
   followPointer,
+  hintPriority,
   children,
 }: {
   label: string;
@@ -122,8 +149,15 @@ export function EditorHoverHint({
   anchorClassName?: string;
   /** Position the hint near the cursor instead of the anchor box. */
   followPointer?: boolean;
+  /** Force show or hide regardless of surrounding hint policy. */
+  hintPriority?: EditorHintPriority;
   children: ReactElement;
 }) {
+  const policy = useEditorHintPolicy();
+  const showHint = resolveEditorHintVisible({ policy, priority: hintPriority, shortcut });
+
+  if (!showHint) return children;
+
   const anchorRef = useRef<HTMLSpanElement>(null);
   const tipRef = useRef<HTMLSpanElement>(null);
   const [mounted, setMounted] = useState(false);
@@ -235,6 +269,7 @@ export function EditorHintWrap({
   hintLabel,
   hintShortcut,
   hintSide = "top",
+  hintPriority,
   disabled,
   className,
   anchorClassName,
@@ -245,6 +280,7 @@ export function EditorHintWrap({
   hintLabel?: string;
   hintShortcut?: string;
   hintSide?: EditorHoverHintSide;
+  hintPriority?: EditorHintPriority;
   disabled?: boolean;
   /** @deprecated Use anchorClassName */
   className?: string;
@@ -270,6 +306,7 @@ export function EditorHintWrap({
       label={label}
       shortcut={shortcut}
       side={hintSide}
+      hintPriority={hintPriority}
       disabled={disabled}
       className={className}
       anchorClassName={anchorClassName}

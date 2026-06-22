@@ -1,4 +1,6 @@
 export * from "./roundedCornerUtils";
+export * from "./fitVerticesToBox";
+export * from "./roundedPolygon";
 export * from "./createSharpPath";
 export * from "./createRoundedPath";
 export * from "./generatePolygonPoints";

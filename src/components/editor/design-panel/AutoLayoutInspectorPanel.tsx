@@ -17,7 +17,6 @@ import {
   StretchVertical,
 } from "lucide-react";
 import { PropertyNumberInput } from "../PropertyInput";
-import { LayoutSizingControls } from "../LayoutSizingControls";
 import { AutoLayoutAlignmentGrid } from "./AutoLayoutAlignmentGrid";
 import {
   GapHorizontalIcon,
@@ -37,7 +36,9 @@ import { LAYOUT_GAP_MAX, sanitizeLayoutGapForFrame } from "@/lib/autoLayout/spac
 import { computeMinLayoutGap } from "@/lib/layoutEngine/minLayoutGap";
 import { appFieldInnerClass, appFieldInnerClassCompact, appFieldRadius, appFieldShellClass, appFieldShellClassCompact, inspectorControlHeightClass, inspectorRowGapClass, inspectorTwoColGridClass } from "@/lib/appFieldStyles";
 import {
+  inspectorFieldIconButtonClass,
   inspectorFieldIconSlotClass,
+  inspectorHeaderActionBtnClass,
   inspectorIconClass,
   inspectorIconStroke,
 } from "@/lib/inspectorIconStyles";
@@ -260,7 +261,8 @@ function AutoLayoutGapField({
             aria-label="Gap mode"
             onClick={() => setMenuOpen((v) => !v)}
             className={cn(
-              "flex h-full w-7 shrink-0 items-center justify-center border-l border-app-border text-app-muted transition-colors",
+              inspectorFieldIconSlotClass,
+              "border-r-0 border-l text-app-muted transition-colors",
               locked ? "opacity-45" : "hover:bg-app-hover hover:text-app-fg",
             )}
           >
@@ -530,7 +532,8 @@ export function AutoLayoutInspectorPanel({
                 aria-label="Individual padding"
                 onClick={() => setPaddingExpanded(true)}
                 className={cn(
-                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-app-border bg-app-inset text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg disabled:opacity-40",
+                  inspectorFieldIconButtonClass,
+                  "rounded-md bg-app-inset",
                   hasIndividualPadding && "border-accent/40 text-accent",
                 )}
               >
@@ -563,7 +566,6 @@ export function AutoLayoutInspectorPanel({
               {node.layoutWrap ? "On" : "Off"}
             </button>
           </div>
-          <LayoutSizingControls node={node} nodes={nodesAll} locked={locked} />
           <div className="flex flex-wrap gap-0.5">
             {(layoutHorizontal
               ? ([

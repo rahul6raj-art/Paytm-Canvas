@@ -237,7 +237,14 @@ function paintTextGlyphs(
 
     if (canonicalLine && canonicalLine.segments.length > 1) {
       for (const segment of canonicalLine.segments) {
-        drawLineWithSpacing(ctx, segment.text, segment.x, segment.y, opts.typo, style.textCase === "small-caps");
+        drawLineWithSpacing(
+          ctx,
+          segment.text,
+          segment.x,
+          segment.y,
+          opts.typo,
+          style.textCase === "small-caps",
+        );
       }
       continue;
     }

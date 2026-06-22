@@ -540,6 +540,19 @@ export function createSvgFilterRegistry(): SvgFilterRegistry {
         } else if (e.type === "layer-blur") {
           const std = Math.max(0, (e.blur ?? 0) / 2);
           parts.push(`<feGaussianBlur stdDeviation="${std}" />`);
+        } else if (e.type === "inner-shadow") {
+          const dx = e.x ?? 0;
+          const dy = e.y ?? 0;
+          const std = Math.max(0, (e.blur ?? 0) / 2);
+          const rgba = effectColorToRgba(e.color, e.opacity ?? 1);
+          parts.push(
+            `<feOffset dx="${dx}" dy="${dy}" in="SourceAlpha" result="pc-inner-offset-${svgSafeId(nodeId)}" />`,
+            `<feGaussianBlur in="pc-inner-offset-${svgSafeId(nodeId)}" stdDeviation="${std}" result="pc-inner-blur-${svgSafeId(nodeId)}" />`,
+            `<feComposite in="pc-inner-blur-${svgSafeId(nodeId)}" in2="SourceAlpha" operator="out" result="pc-inner-inverse-${svgSafeId(nodeId)}" />`,
+            `<feFlood flood-color="${escXml(rgba)}" flood-opacity="1" result="pc-inner-color-${svgSafeId(nodeId)}" />`,
+            `<feComposite in="pc-inner-color-${svgSafeId(nodeId)}" in2="pc-inner-inverse-${svgSafeId(nodeId)}" operator="in" result="pc-inner-shadow-${svgSafeId(nodeId)}" />`,
+            `<feComposite in="pc-inner-shadow-${svgSafeId(nodeId)}" in2="SourceGraphic" operator="over" />`,
+          );
         } else if (e.type === "background-blur") {
           const std = Math.max(0, (e.blur ?? 0) / 2);
           parts.push(`<feGaussianBlur in="BackgroundImage" stdDeviation="${std}" result="bgBlur" />`);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
-import { collectSelectionFillColors } from "@/lib/selectionColors";
+import { collectSelectionFillColors, shouldShowSelectionColorsSection } from "@/lib/selectionColors";
 import type { EditorNode } from "@/stores/useEditorStore";
 
 function rect(id: string, fill: string, fillOpacity = 1): EditorNode {
@@ -66,5 +66,28 @@ describe("collectSelectionFillColors", () => {
     const colors = collectSelectionFillColors(["a", "b"], nodes);
     assert.equal(colors.length, 1);
     assert.deepEqual(colors[0]!.nodeIds.sort(), ["a", "b"]);
+  });
+});
+
+describe("shouldShowSelectionColorsSection", () => {
+  it("is false when all selected layers share one fill", () => {
+    const nodes = {
+      a: rect("a", "#3366ff"),
+      b: rect("b", "#3366ff"),
+    };
+    assert.equal(shouldShowSelectionColorsSection(["a", "b"], nodes), false);
+  });
+
+  it("is true when the selection has multiple distinct fills", () => {
+    const nodes = {
+      a: rect("a", "#3366ff"),
+      b: rect("b", "#ff0000"),
+    };
+    assert.equal(shouldShowSelectionColorsSection(["a", "b"], nodes), true);
+  });
+
+  it("is false for a single selected layer", () => {
+    const nodes = { a: rect("a", "#3366ff") };
+    assert.equal(shouldShowSelectionColorsSection(["a"], nodes), false);
   });
 });

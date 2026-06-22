@@ -10,7 +10,7 @@ import {
 } from "./StrokeSettingIcons";
 import { appFieldClassCompact, appFieldShellClassCompact, inspectorRowGapClass, inspectorTwoColGridClass } from "@/lib/appFieldStyles";
 import { cn } from "@/lib/utils";
-import { inspectorIconClass, inspectorIconStroke } from "@/lib/inspectorIconStyles";
+import { inspectorFieldIconButtonCompactClass, inspectorIconClass, inspectorIconStroke } from "@/lib/inspectorIconStyles";
 import {
   defaultDashGapForStyle,
   resolveStrokeDashGap,
@@ -148,7 +148,7 @@ export function StrokeAdvancedPanel({
             disabled={locked}
             onClick={() => onStyle({ strokeWidthProfileFlipped: !strokeWidthProfileFlipped })}
             className={cn(
-              "flex h-6 w-6 shrink-0 items-center justify-center rounded border border-app-border bg-app-panel text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg disabled:opacity-40",
+              inspectorFieldIconButtonCompactClass,
               strokeWidthProfileFlipped && "border-accent/40 bg-accent/10 text-accent",
             )}
           >

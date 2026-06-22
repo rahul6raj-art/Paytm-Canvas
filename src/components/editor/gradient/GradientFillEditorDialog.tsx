@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import type { FillGradient } from "@/lib/gradient";
 import { cn } from "@/lib/utils";
+import { inspectorHeaderActionBtnClass, inspectorLucideProps } from "@/lib/inspectorIconStyles";
 import {
   adjacentPanelDialogStyle,
   useAdjacentPanelDialogPosition,
@@ -115,10 +116,10 @@ export function GradientFillEditorDialog({
           <button
             type="button"
             onClick={onClose}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
+            className={cn(inspectorHeaderActionBtnClass, "rounded-lg")}
             aria-label="Close gradient editor"
           >
-            <X className="h-3.5 w-3.5" strokeWidth={2} />
+            <X {...inspectorLucideProps()} />
           </button>
         </div>
         <div className="editor-inspector-dialog-body">

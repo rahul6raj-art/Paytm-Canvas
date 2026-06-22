@@ -19,6 +19,8 @@ export type CursorGenerateInput = {
   intent?: ScreenIntent;
   contextImages?: AIContextImagePayload[];
   userPromptOverride?: string;
+  /** Browser-provided key; falls back to CURSOR_API_KEY env. */
+  apiKey?: string;
 };
 
 export type CursorGenerateResult = {
@@ -63,11 +65,11 @@ function toCursorSdkImages(images: AIContextImagePayload[]) {
 
 /** Call a Cursor cloud agent for structured UI JSON. */
 export async function generateWithCursor(input: CursorGenerateInput): Promise<CursorGenerateResult> {
-  const apiKey = process.env.CURSOR_API_KEY?.trim();
+  const apiKey = input.apiKey?.trim() || process.env.CURSOR_API_KEY?.trim();
   if (!apiKey) {
     return {
       content: null,
-      error: "CURSOR_API_KEY is not set. Add it to .env.local and restart `npm run dev`.",
+      error: "Add your Cursor key in the model menu, or set CURSOR_API_KEY in .env.local.",
     };
   }
 

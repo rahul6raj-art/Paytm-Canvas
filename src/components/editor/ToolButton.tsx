@@ -2,8 +2,14 @@
 
 import { cn } from "@/lib/utils";
 import { parseEditorHintTitle } from "@/lib/editorHoverHint";
-import { EditorHoverHint, type EditorHoverHintSide } from "./EditorHoverHint";
+import { resolveEditorHintVisible } from "@/lib/editorHintPolicy";
+import {
+  EditorHoverHint,
+  useEditorHintPolicy,
+  type EditorHoverHintSide,
+} from "./EditorHoverHint";
 import type { ButtonHTMLAttributes } from "react";
+import type { EditorHintPriority } from "@/lib/editorHintPolicy";
 
 export function ToolButton({
   active,
@@ -11,6 +17,7 @@ export function ToolButton({
   hintLabel,
   hintShortcut,
   hintSide = "top",
+  hintPriority,
   title,
   disabled,
   ...props
@@ -19,7 +26,9 @@ export function ToolButton({
   hintLabel?: string;
   hintShortcut?: string;
   hintSide?: EditorHoverHintSide;
+  hintPriority?: EditorHintPriority;
 }) {
+  const policy = useEditorHintPolicy();
   const parsed = title && !hintLabel ? parseEditorHintTitle(title) : null;
   const label = hintLabel ?? parsed?.label;
   const shortcut = hintShortcut ?? parsed?.shortcut;
@@ -40,10 +49,21 @@ export function ToolButton({
     />
   );
 
-  if (!label) return button;
+  if (
+    !label ||
+    !resolveEditorHintVisible({ policy, priority: hintPriority, shortcut })
+  ) {
+    return button;
+  }
 
   return (
-    <EditorHoverHint label={label} shortcut={shortcut} side={hintSide} disabled={disabled}>
+    <EditorHoverHint
+      label={label}
+      shortcut={shortcut}
+      side={hintSide}
+      hintPriority={hintPriority}
+      disabled={disabled}
+    >
       {button}
     </EditorHoverHint>
   );

@@ -574,17 +574,7 @@ pub fn ellipse_outline(w: f32, h: f32) -> Vec<(f32, f32)> {
 }
 
 pub fn polygon_outline(w: f32, h: f32, sides: u32) -> Vec<(f32, f32)> {
-    let n = sides.clamp(3, 12) as usize;
-    let cx = w * 0.5;
-    let cy = h * 0.5;
-    let rx = w * 0.5;
-    let ry = h * 0.5;
-    (0..n)
-        .map(|i| {
-            let t = i as f32 / n as f32 * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2;
-            (cx + rx * t.cos(), cy + ry * t.sin())
-        })
-        .collect()
+    crate::tessellate::regular_polygon_local(w, h, sides)
 }
 
 fn rect_stroke_outline(w: f32, h: f32, node: &NodeInput) -> Vec<(f32, f32)> {

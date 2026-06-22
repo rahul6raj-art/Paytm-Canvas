@@ -5,9 +5,11 @@ import { ChevronDown, Eye, EyeOff, Minus } from "lucide-react";
 import { normalizeHex, parseHexInputLive, fillCss } from "@/lib/color";
 import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
 import { useInspectorValueScrub } from "@/lib/useInspectorValueScrub";
-import { appFieldInnerClass, appFieldInnerClassCompact, appFieldShellClass, appFieldShellClassCompact, inspectorRowGapClass } from "@/lib/appFieldStyles";
+import { appFieldInnerClass, appFieldInnerClassCompact, appFieldShellClass, appFieldShellClassCompact, inspectorOpacityInputClass, inspectorOpacityInputCompactClass, inspectorOpacitySegmentClass, inspectorOpacitySegmentCompactClass, inspectorOpacitySuffixClass, inspectorRowGapClass } from "@/lib/appFieldStyles";
 import { cn } from "@/lib/utils";
 import {
+  inspectorFieldIconSlotClass,
+  inspectorFieldIconSlotCompactClass,
   inspectorIconClass,
   inspectorIconStroke,
   inspectorLucideProps,
@@ -19,6 +21,18 @@ import { ColorLibraryDialog } from "./ColorLibraryDialog";
 import { EditorHintWrap } from "./EditorHoverHint";
 
 export type ColorCommitOptions = { skipHistory?: boolean };
+
+const inspectorColorFieldActiveClass = "border-app-panel-edge ring-1 ring-app-panel-edge";
+
+const inspectorColorMainSegmentClass = cn(
+  appFieldShellClass,
+  "min-w-0 flex-1 basis-0 rounded-r-none border-r-0",
+);
+
+const inspectorColorMainSegmentCompactClass = cn(
+  appFieldShellClassCompact,
+  "min-w-0 flex-1 basis-0 rounded-r-none border-r-0",
+);
 
 type ColorInputProps = {
   variant?: "default" | "inspectorRow";
@@ -180,148 +194,157 @@ export function ColorInput({
   if (variant === "inspectorRow") {
     const rowDisabled = disabled || !visible;
     const showMixedHex = hexMixed && !focused;
+    const fieldActive = focused || opacityFocused || colorPickerOpen;
+    const fieldShellStateClass = cn(
+      rowDisabled && "opacity-45",
+      fieldActive && inspectorColorFieldActiveClass,
+    );
+    const opacityInputClass = inspectorOpacityInputClass;
+    const opacityInput = onCommitOpacity ? (
+      <>
+        <input
+          type="text"
+          inputMode="numeric"
+          disabled={rowDisabled}
+          aria-label="Opacity percent"
+          {...bindOpacityScrub(opacityInputClass, opacityFocused)}
+          value={opacityText}
+          onFocus={() => setOpacityFocused(true)}
+          onChange={(e) => {
+            const digits = e.target.value.replace(/[^\d]/g, "").slice(0, 3);
+            setOpacityText(digits);
+            if (digits !== "") {
+              const n = parseInt(digits, 10);
+              if (Number.isFinite(n)) commitOpacityPercent(n);
+            }
+          }}
+          onBlur={() => {
+            if (opacityScrubActiveRef.current) return;
+            setOpacityFocused(false);
+            if (!applyOpacityDraft(opacityText)) {
+              setOpacityText(String(Math.round(opacity * 100)));
+            }
+          }}
+          onKeyDown={(e) => {
+            handlePanelFieldKeyDown(e, {
+              onEnter: () => {
+                if (!applyOpacityDraft(opacityText)) {
+                  setOpacityText(String(Math.round(opacity * 100)));
+                }
+                e.currentTarget.blur();
+              },
+              onArrowNudge: (dir, shift, alt) => {
+                const step = keyboardNudgeStep(1, 0, shift, alt) * dir;
+                const current = parseInt(opacityText, 10);
+                const base = Number.isFinite(current)
+                  ? current
+                  : Math.round(opacity * 100);
+                commitOpacityPercent(base + step);
+              },
+            });
+          }}
+        />
+        <span className={inspectorOpacitySuffixClass}>%</span>
+      </>
+    ) : null;
     return (
       <div>
         {label ? (
           <div className="mb-1.5 text-ui font-medium leading-4 text-app-subtle">{label}</div>
         ) : null}
         <div className={cn("flex items-center", inspectorRowGapClass)}>
-          <div
-            className={cn(
-              appFieldShellClass,
-              "min-w-0 flex-1",
-              rowDisabled && "opacity-45",
-              (focused || opacityFocused || colorPickerOpen) &&
-                "border-app-panel-edge ring-1 ring-app-panel-edge",
-            )}
-          >
-            <button
-              ref={swatchRef}
-              type="button"
-              disabled={rowDisabled}
-              onClick={() => setColorPickerOpen((o) => !o)}
-              className={cn(
-                "flex h-7 w-7 shrink-0 items-center justify-center border-r border-app-border p-1 disabled:cursor-not-allowed",
-                colorPickerOpen && "bg-accent/10",
-              )}
-              aria-label={pickerTitleText}
-              aria-expanded={colorPickerOpen}
-              aria-haspopup="dialog"
-            >
-              <span
-                className="block h-full w-full rounded-[2px] border border-app-border"
-                style={{ background: fillCss(previewHex, opacity, visible) }}
-              />
-            </button>
-            {libraryName ? (
-              canPickLibrary ? (
-                <EditorHintWrap title={`${libraryName} — change library color`}>
-                  <button
-                    ref={libraryAnchorRef}
-                    type="button"
-                    disabled={rowDisabled}
-                    onClick={() => setLibraryPickerOpen((o) => !o)}
-                    className={cn(
-                      "max-w-[40%] shrink-0 truncate border-r border-app-border bg-app-surface px-1.5 text-left text-ui font-medium text-accent hover:bg-app-hover",
-                      libraryPickerOpen && "bg-accent/10",
-                    )}
-                  >
-                    {libraryName}
-                  </button>
-                </EditorHintWrap>
-              ) : (
-                <span className="max-w-[40%] shrink-0 truncate border-r border-app-border bg-app-surface px-1.5 text-ui font-medium text-accent">
-                  {libraryName}
-                </span>
-              )
-            ) : null}
-            <EditorHintWrap title={showMixedHex ? "Mixed colors" : "6-digit hex"}>
-              <input
-                type="text"
+          <div className="flex min-w-0 flex-1 basis-0 items-stretch overflow-visible">
+            <div className={cn(inspectorColorMainSegmentClass, fieldShellStateClass)}>
+              <button
+                ref={swatchRef}
+                type="button"
                 disabled={rowDisabled}
-                spellCheck={false}
-                autoComplete="off"
-                maxLength={showMixedHex ? undefined : 6}
-                aria-label={label ? `${label} hex` : "Color hex"}
+                onClick={() => setColorPickerOpen((o) => !o)}
                 className={cn(
-                  appFieldInnerClass,
-                  "font-mono uppercase",
-                  showMixedHex && "text-app-muted",
+                  inspectorFieldIconSlotClass,
+                  "p-1 disabled:cursor-not-allowed",
+                  colorPickerOpen && "bg-accent/10",
                 )}
-                value={showMixedHex ? "Mixed" : text}
-                onFocus={() => {
-                  if (hexMixed) setText(safe.replace("#", "").toUpperCase());
-                  setFocused(true);
-                }}
-                onChange={(e) => {
-                  if (showMixedHex) return;
-                  handleTextChange(e.target.value);
-                }}
-                onBlur={finishEditing}
-                onKeyDown={(e) => {
-                  handlePanelFieldKeyDown(e, {
-                    onEnter: () => {
-                      finishEditing();
-                      e.currentTarget.blur();
-                    },
-                    onEscape: () => {
-                      dirtyLiveRef.current = false;
-                      setText(safe.replace("#", "").toUpperCase());
-                      lastAppliedRef.current = safe;
-                      setFocused(false);
-                      e.currentTarget.blur();
-                    },
-                  });
-                }}
-              />
-            </EditorHintWrap>
-            <div className="h-5 w-px shrink-0 bg-app-border" aria-hidden />
-            <input
-              type="text"
-              inputMode="numeric"
-              disabled={rowDisabled || !onCommitOpacity}
-              aria-label="Opacity percent"
-              {...bindOpacityScrub(
-                cn(appFieldInnerClass, "w-9 shrink-0 text-right tabular-nums"),
-                opacityFocused,
-              )}
-              value={opacityText}
-              onFocus={() => setOpacityFocused(true)}
-              onChange={(e) => {
-                const digits = e.target.value.replace(/[^\d]/g, "").slice(0, 3);
-                setOpacityText(digits);
-                if (digits !== "") {
-                  const n = parseInt(digits, 10);
-                  if (Number.isFinite(n)) commitOpacityPercent(n);
-                }
-              }}
-              onBlur={() => {
-                if (opacityScrubActiveRef.current) return;
-                setOpacityFocused(false);
-                if (!applyOpacityDraft(opacityText)) {
-                  setOpacityText(String(Math.round(opacity * 100)));
-                }
-              }}
-              onKeyDown={(e) => {
-                handlePanelFieldKeyDown(e, {
-                  onEnter: () => {
-                    if (!applyOpacityDraft(opacityText)) {
-                      setOpacityText(String(Math.round(opacity * 100)));
-                    }
-                    e.currentTarget.blur();
-                  },
-                  onArrowNudge: (dir, shift, alt) => {
-                    const step = keyboardNudgeStep(1, 0, shift, alt) * dir;
-                    const current = parseInt(opacityText, 10);
-                    const base = Number.isFinite(current)
-                      ? current
-                      : Math.round(opacity * 100);
-                    commitOpacityPercent(base + step);
-                  },
-                });
-              }}
-            />
-            <span className="shrink-0 pr-2 text-ui text-app-subtle">%</span>
+                aria-label={pickerTitleText}
+                aria-expanded={colorPickerOpen}
+                aria-haspopup="dialog"
+              >
+                <span
+                  className="block h-full w-full rounded-[2px] border border-app-border"
+                  style={{ background: fillCss(previewHex, opacity, visible) }}
+                />
+              </button>
+              {libraryName ? (
+                canPickLibrary ? (
+                  <EditorHintWrap title={`${libraryName} — change library color`}>
+                    <button
+                      ref={libraryAnchorRef}
+                      type="button"
+                      disabled={rowDisabled}
+                      onClick={() => setLibraryPickerOpen((o) => !o)}
+                      className={cn(
+                        "max-w-[5.5rem] shrink-0 truncate border-r border-app-border bg-app-surface px-1.5 text-left text-ui font-medium text-accent hover:bg-app-hover",
+                        libraryPickerOpen && "bg-accent/10",
+                      )}
+                    >
+                      {libraryName}
+                    </button>
+                  </EditorHintWrap>
+                ) : (
+                  <span className="max-w-[5.5rem] shrink-0 truncate border-r border-app-border bg-app-surface px-1.5 text-ui font-medium text-accent">
+                    {libraryName}
+                  </span>
+                )
+              ) : null}
+              <EditorHintWrap
+                title={showMixedHex ? "Mixed colors" : "6-digit hex"}
+                anchorClassName="min-w-0 flex-1 overflow-hidden"
+              >
+                <input
+                  type="text"
+                  disabled={rowDisabled}
+                  spellCheck={false}
+                  autoComplete="off"
+                  maxLength={showMixedHex ? undefined : 6}
+                  aria-label={label ? `${label} hex` : "Color hex"}
+                  className={cn(
+                    appFieldInnerClass,
+                    "w-full min-w-0 font-mono uppercase",
+                    showMixedHex && "text-app-muted",
+                  )}
+                  value={showMixedHex ? "Mixed" : text}
+                  onFocus={() => {
+                    if (hexMixed) setText(safe.replace("#", "").toUpperCase());
+                    setFocused(true);
+                  }}
+                  onChange={(e) => {
+                    if (showMixedHex) return;
+                    handleTextChange(e.target.value);
+                  }}
+                  onBlur={finishEditing}
+                  onKeyDown={(e) => {
+                    handlePanelFieldKeyDown(e, {
+                      onEnter: () => {
+                        finishEditing();
+                        e.currentTarget.blur();
+                      },
+                      onEscape: () => {
+                        dirtyLiveRef.current = false;
+                        setText(safe.replace("#", "").toUpperCase());
+                        lastAppliedRef.current = safe;
+                        setFocused(false);
+                        e.currentTarget.blur();
+                      },
+                    });
+                  }}
+                />
+              </EditorHintWrap>
+            </div>
+            {opacityInput ? (
+              <div className={cn(inspectorOpacitySegmentClass, fieldShellStateClass)}>
+                {opacityInput}
+              </div>
+            ) : null}
           </div>
           {onToggleVisible ? (
             <EditorHintWrap title={visible ? "Hide fill" : "Show fill"}>
@@ -377,115 +400,123 @@ export function ColorInput({
     );
   }
 
+  const fieldActive =
+    focused ||
+    opacityFocused ||
+    colorPickerOpen ||
+    (libraryPickerOpen && canPickLibrary);
+  const compactFieldShellStateClass = cn(
+    disabled && "opacity-45",
+    fieldActive && inspectorColorFieldActiveClass,
+  );
+  const compactOpacityInputClass = inspectorOpacityInputCompactClass;
+
   return (
     <div>
       {label ? (
         <div className="mb-1.5 text-ui font-medium leading-4 text-app-subtle">{label}</div>
       ) : null}
-      <div
-        className={cn(
-          appFieldShellClassCompact,
-          "min-w-0 focus-within:border-accent focus-within:ring-1 focus-within:ring-accent",
-          disabled && "opacity-45",
-          (focused || opacityFocused || colorPickerOpen) &&
-            "border-app-panel-edge ring-1 ring-app-panel-edge",
-          libraryPickerOpen && canPickLibrary && "border-app-panel-edge ring-1 ring-app-panel-edge",
-        )}
-      >
-        <button
-          ref={swatchRef}
-          type="button"
-          disabled={disabled}
-          onClick={() => setColorPickerOpen((o) => !o)}
+      <div className="flex min-w-0 items-stretch overflow-visible focus-within:[&_input]:border-accent">
+        <div
           className={cn(
-            "flex h-full w-9 shrink-0 items-center justify-center border-r border-app-border p-px disabled:cursor-not-allowed",
-            colorPickerOpen && "bg-app-inset",
+            inspectorColorMainSegmentCompactClass,
+            "focus-within:border-accent focus-within:ring-1 focus-within:ring-accent",
+            compactFieldShellStateClass,
           )}
-          aria-label={pickerTitleText}
-          aria-expanded={colorPickerOpen}
-          aria-haspopup="dialog"
         >
-          <span
-            className="block h-full w-full rounded-[2px] border border-app-border"
-            style={{ background: fillCss(previewHex, opacity, visible) }}
-          />
-        </button>
-        {libraryName ? (
-          canPickLibrary ? (
-            <EditorHintWrap title={`${libraryName} — click to change library color`}>
-              <button
-                ref={libraryAnchorRef}
-                type="button"
-                disabled={disabled}
-                onClick={() => setLibraryPickerOpen((o) => !o)}
-                className={cn(
-                  "flex max-w-[55%] shrink-0 items-center gap-0.5 truncate border-r border-app-border bg-app-surface px-1.5 text-left text-ui font-medium leading-4 text-app-fg transition-colors hover:bg-app-hover",
-                  libraryPickerOpen && "bg-app-inset",
-                )}
-                aria-expanded={libraryPickerOpen}
-                aria-haspopup="dialog"
-              >
-                <span className="truncate">{libraryName}</span>
-                <ChevronDown
-                  className={cn(
-                    "h-3 w-3 shrink-0 opacity-70 transition-transform",
-                    libraryPickerOpen && "rotate-180",
-                  )}
-                  aria-hidden
-                />
-              </button>
-            </EditorHintWrap>
-          ) : (
-            <EditorHintWrap title={libraryName}>
-              <span className="flex max-w-[55%] shrink-0 items-center truncate border-r border-app-border bg-app-surface px-1.5 text-ui font-medium leading-4 text-app-fg">
-                {libraryName}
-              </span>
-            </EditorHintWrap>
-          )
-        ) : null}
-        <EditorHintWrap
-          title={disabled ? "Enable fill to edit color" : "Type 6-digit hex — shape updates when complete"}
-        >
-          <input
-            type="text"
+          <button
+            ref={swatchRef}
+            type="button"
             disabled={disabled}
-            spellCheck={false}
-            autoComplete="off"
-            aria-label={label ? `${label} hex` : "Color hex"}
-            className={cn(appFieldInnerClassCompact, "font-mono leading-4")}
-            value={text}
-            onFocus={() => setFocused(true)}
-            onChange={(e) => handleTextChange(e.target.value)}
-            onBlur={finishEditing}
-            onKeyDown={(e) => {
-              handlePanelFieldKeyDown(e, {
-                onEnter: () => {
-                  finishEditing();
-                  e.currentTarget.blur();
-                },
-                onEscape: () => {
-                  dirtyLiveRef.current = false;
-                  setText(safe);
-                  lastAppliedRef.current = safe;
-                  setFocused(false);
-                  e.currentTarget.blur();
-                },
-              });
-            }}
-          />
-        </EditorHintWrap>
+            onClick={() => setColorPickerOpen((o) => !o)}
+            className={cn(
+              inspectorFieldIconSlotCompactClass,
+              "p-px disabled:cursor-not-allowed",
+              colorPickerOpen && "bg-app-inset",
+            )}
+            aria-label={pickerTitleText}
+            aria-expanded={colorPickerOpen}
+            aria-haspopup="dialog"
+          >
+            <span
+              className="block h-full w-full rounded-[2px] border border-app-border"
+              style={{ background: fillCss(previewHex, opacity, visible) }}
+            />
+          </button>
+          {libraryName ? (
+            canPickLibrary ? (
+              <EditorHintWrap title={`${libraryName} — click to change library color`}>
+                <button
+                  ref={libraryAnchorRef}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => setLibraryPickerOpen((o) => !o)}
+                  className={cn(
+                    "flex max-w-[5.5rem] shrink-0 items-center gap-0.5 truncate border-r border-app-border bg-app-surface px-1.5 text-left text-ui font-medium leading-4 text-app-fg transition-colors hover:bg-app-hover",
+                    libraryPickerOpen && "bg-app-inset",
+                  )}
+                  aria-expanded={libraryPickerOpen}
+                  aria-haspopup="dialog"
+                >
+                  <span className="truncate">{libraryName}</span>
+                  <ChevronDown
+                    className={cn(
+                      "h-3 w-3 shrink-0 opacity-70 transition-transform",
+                      libraryPickerOpen && "rotate-180",
+                    )}
+                    aria-hidden
+                  />
+                </button>
+              </EditorHintWrap>
+            ) : (
+              <EditorHintWrap title={libraryName}>
+                <span className="flex max-w-[5.5rem] shrink-0 items-center truncate border-r border-app-border bg-app-surface px-1.5 text-ui font-medium leading-4 text-app-fg">
+                  {libraryName}
+                </span>
+              </EditorHintWrap>
+            )
+          ) : null}
+          <EditorHintWrap
+            title={disabled ? "Enable fill to edit color" : "Type 6-digit hex — shape updates when complete"}
+            anchorClassName="min-w-0 flex-1 overflow-hidden"
+          >
+            <input
+              type="text"
+              disabled={disabled}
+              spellCheck={false}
+              autoComplete="off"
+              aria-label={label ? `${label} hex` : "Color hex"}
+              className={cn(appFieldInnerClassCompact, "w-full min-w-0 font-mono leading-4")}
+              value={text}
+              onFocus={() => setFocused(true)}
+              onChange={(e) => handleTextChange(e.target.value)}
+              onBlur={finishEditing}
+              onKeyDown={(e) => {
+                handlePanelFieldKeyDown(e, {
+                  onEnter: () => {
+                    finishEditing();
+                    e.currentTarget.blur();
+                  },
+                  onEscape: () => {
+                    dirtyLiveRef.current = false;
+                    setText(safe);
+                    lastAppliedRef.current = safe;
+                    setFocused(false);
+                    e.currentTarget.blur();
+                  },
+                });
+              }}
+            />
+          </EditorHintWrap>
+        </div>
         {onCommitOpacity ? (
-          <>
-            <div className="h-5 w-px shrink-0 bg-app-border" aria-hidden />
+          <div className={cn(inspectorOpacitySegmentCompactClass, compactFieldShellStateClass)}>
             <input
               type="text"
               inputMode="numeric"
               disabled={disabled}
               aria-label="Opacity percent"
-              {...bindOpacityScrub(
-                cn(appFieldInnerClassCompact, "w-9 shrink-0 text-right tabular-nums"),
-                opacityFocused,
-              )}
+              {...bindOpacityScrub(compactOpacityInputClass, opacityFocused)}
               value={opacityText}
               onFocus={() => setOpacityFocused(true)}
               onChange={(e) => {
@@ -522,8 +553,8 @@ export function ColorInput({
                 });
               }}
             />
-            <span className="shrink-0 pr-2 text-ui text-app-subtle">%</span>
-          </>
+            <span className={inspectorOpacitySuffixClass}>%</span>
+          </div>
         ) : null}
       </div>
       {canPickLibrary ? (

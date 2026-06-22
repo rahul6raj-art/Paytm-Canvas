@@ -2,10 +2,18 @@ import type { EditorNode } from "@/stores/useEditorStore";
 import { newPathPointId, type PathPoint } from "@/lib/pathGeometry";
 import { screenPxToWorld } from "@/lib/canvasVisual";
 import { resizeCornerRadiiForCount } from "@/lib/cornerRadius";
+import { fitVerticesToBoundingBox } from "@/lib/geometry/fitVerticesToBox";
+import {
+  cornerRadiusToPercent,
+  maxUniformFilletRadius,
+  percentToCornerRadius,
+  scaleRadiiToEdgeConstraints,
+} from "@/lib/geometry/roundedPolygon";
 import {
   maxCornerRadiusAtVertex,
   roundedPolygonPathD,
   roundedPolygonPathDWithRadii,
+  vertexInwardBisector,
   type Point2,
 } from "@/lib/shapes/starGeometry";
 
@@ -33,36 +41,61 @@ export function polygonVertices(
   height: number,
 ): Point2[] {
   const n = clampPolygonSides(sides);
-  const cx = width / 2;
-  const cy = height / 2;
-  const rx = Math.max(1e-6, width / 2);
-  const ry = Math.max(1e-6, height / 2);
-  const verts: Point2[] = [];
+  const w = Math.max(1, width);
+  const h = Math.max(1, height);
+  const cx = w / 2;
+  const cy = h / 2;
+  const rx = w / 2;
+  const ry = h / 2;
+  const raw: Point2[] = [];
   for (let i = 0; i < n; i++) {
     const angle = -Math.PI / 2 + (i * 2 * Math.PI) / n;
-    verts.push({
+    raw.push({
       x: cx + rx * Math.cos(angle),
       y: cy + ry * Math.sin(angle),
     });
   }
-  return verts;
+  return fitVerticesToBoundingBox(raw, w, h);
 }
 
 export function maxPolygonCornerRadius(
   sides: number,
   width: number,
   height: number,
+  cornerSmoothing = 0,
 ): number {
-  const verts = polygonVertices(sides, width, height);
-  const n = verts.length;
-  let max = Infinity;
-  for (let i = 0; i < n; i++) {
-    const prev = verts[(i - 1 + n) % n]!;
-    const curr = verts[i]!;
-    const next = verts[(i + 1) % n]!;
-    max = Math.min(max, maxCornerRadiusAtVertex(prev, curr, next));
-  }
-  return Number.isFinite(max) ? max : 0;
+  return maxUniformFilletRadius(
+    polygonVertices(sides, width, height),
+    cornerSmoothing,
+  );
+}
+
+export function polygonCornerRadiusPercent(
+  sides: number,
+  width: number,
+  height: number,
+  cornerRadius: number,
+  cornerSmoothing = 0,
+): number {
+  return cornerRadiusToPercent(
+    polygonVertices(sides, width, height),
+    cornerRadius,
+    cornerSmoothing,
+  );
+}
+
+export function polygonCornerRadiusFromPercent(
+  sides: number,
+  width: number,
+  height: number,
+  radiusPercent: number,
+  cornerSmoothing = 0,
+): number {
+  return percentToCornerRadius(
+    polygonVertices(sides, width, height),
+    radiusPercent,
+    cornerSmoothing,
+  );
 }
 
 export function clampPolygonCornerRadius(
@@ -70,8 +103,12 @@ export function clampPolygonCornerRadius(
   width: number,
   height: number,
   radius: number,
+  cornerSmoothing = 0,
 ): number {
-  return Math.max(0, Math.min(maxPolygonCornerRadius(sides, width, height), radius));
+  return Math.max(
+    0,
+    Math.min(maxPolygonCornerRadius(sides, width, height, cornerSmoothing), radius),
+  );
 }
 
 export function clampPolygonVertexCornerRadii(
@@ -79,28 +116,31 @@ export function clampPolygonVertexCornerRadii(
   width: number,
   height: number,
   radii: readonly number[],
+  cornerSmoothing = 0,
 ): number[] {
   const n = clampPolygonSides(sides);
   const verts = polygonVertices(n, width, height);
-  return Array.from({ length: n }, (_, i) => {
-    const r = Math.max(0, radii[i] ?? 0);
-    const prev = verts[(i - 1 + n) % n]!;
-    const curr = verts[i]!;
-    const next = verts[(i + 1) % n]!;
-    return Math.max(0, Math.min(r, maxCornerRadiusAtVertex(prev, curr, next)));
-  });
+  const maxR = maxUniformFilletRadius(verts, cornerSmoothing);
+  const clamped = Array.from({ length: n }, (_, i) =>
+    Math.max(0, Math.min(maxR, radii[i] ?? radii[0] ?? 0)),
+  );
+  return scaleRadiiToEdgeConstraints(verts, clamped, cornerSmoothing);
 }
 
 export function getPolygonVertexCornerRadii(
-  node: Pick<EditorNode, "polygonSides" | "cornerRadius" | "cornerRadii" | "width" | "height">,
+  node: Pick<
+    EditorNode,
+    "polygonSides" | "cornerRadius" | "cornerRadii" | "width" | "height" | "cornerSmoothing"
+  >,
 ): number[] {
   const sides = clampPolygonSides(node.polygonSides ?? DEFAULT_POLYGON_SIDES);
+  const smoothing = node.cornerSmoothing ?? 0;
   const base = resizeCornerRadiiForCount(
     node.cornerRadii,
     sides,
     node.cornerRadius ?? 0,
   );
-  return clampPolygonVertexCornerRadii(sides, node.width, node.height, base);
+  return clampPolygonVertexCornerRadii(sides, node.width, node.height, base, smoothing);
 }
 
 export function polygonPathD(
@@ -108,12 +148,13 @@ export function polygonPathD(
   height: number,
   sides: number,
   cornerRadius = 0,
+  cornerSmoothing = 0,
 ): string {
   const w = Math.max(1, width);
   const h = Math.max(1, height);
   const n = clampPolygonSides(sides);
-  const cr = clampPolygonCornerRadius(n, w, h, cornerRadius);
-  return roundedPolygonPathD(polygonVertices(n, w, h), cr);
+  const cr = clampPolygonCornerRadius(n, w, h, cornerRadius, cornerSmoothing);
+  return roundedPolygonPathD(polygonVertices(n, w, h), cr, cornerSmoothing);
 }
 
 export type PolygonParams = {
@@ -135,22 +176,27 @@ export function effectivePolygonParams(
 }
 
 export function polygonPathDForNode(
-  node: Pick<EditorNode, "width" | "height" | "polygonSides" | "cornerRadius" | "cornerRadii">,
-  override?: Partial<PolygonParams>,
+  node: Pick<
+    EditorNode,
+    "width" | "height" | "polygonSides" | "cornerRadius" | "cornerRadii" | "cornerSmoothing"
+  >,
+  override?: Partial<PolygonParams & { cornerSmoothing?: number }>,
 ): string {
   const sides = clampPolygonSides(override?.sides ?? node.polygonSides ?? DEFAULT_POLYGON_SIDES);
   const w = Math.max(1, node.width);
   const h = Math.max(1, node.height);
+  const smoothing = override?.cornerSmoothing ?? node.cornerSmoothing ?? 0;
   const verts = polygonVertices(sides, w, h);
   if (override?.cornerRadius != null) {
-    const cr = clampPolygonCornerRadius(sides, w, h, override.cornerRadius);
+    const cr = clampPolygonCornerRadius(sides, w, h, override.cornerRadius, smoothing);
     return roundedPolygonPathDWithRadii(
       verts,
       Array.from({ length: sides }, () => cr),
+      smoothing,
     );
   }
-  const radii = getPolygonVertexCornerRadii({ ...node, polygonSides: sides });
-  return roundedPolygonPathDWithRadii(verts, radii);
+  const radii = getPolygonVertexCornerRadii({ ...node, polygonSides: sides, cornerSmoothing: smoothing });
+  return roundedPolygonPathDWithRadii(verts, radii, smoothing);
 }
 
 /** Legacy path anchor points (sharp vertices). */
@@ -328,37 +374,45 @@ export function polygonSidesFromLocalPoint(
   return clampPolygonSides(sides);
 }
 
-/** Corner-radius handle at top vertex (local). */
+/** Corner-radius handle at a polygon vertex (local). */
+export function polygonCornerRadiusHandleAtVertex(
+  sides: number,
+  width: number,
+  height: number,
+  radii: readonly number[],
+  vertexIndex: number,
+  minInset = 0,
+): Point2 {
+  const n = clampPolygonSides(sides);
+  const clamped = clampPolygonVertexCornerRadii(sides, width, height, radii);
+  const verts = polygonVertices(n, width, height);
+  const i = ((vertexIndex % n) + n) % n;
+  const prev = verts[(i - 1 + n) % n]!;
+  const curr = verts[i]!;
+  const next = verts[(i + 1) % n]!;
+  const bis = vertexInwardBisector(prev, curr, next);
+  const r = clamped[i] ?? 0;
+  const maxAt = maxCornerRadiusAtVertex(prev, curr, next);
+  const inset = r > 0 ? r : Math.max(0, Math.min(minInset, maxAt));
+  return { x: curr.x + bis.x * inset, y: curr.y + bis.y * inset };
+}
+
+/** @deprecated Use polygonCornerRadiusHandleAtVertex with radii array. */
 export function polygonCornerRadiusHandleLocal(
   sides: number,
   width: number,
   height: number,
   cornerRadius: number,
+  vertexIndex = 0,
 ): Point2 {
-  const verts = polygonVertices(sides, width, height);
-  const curr = verts[0]!;
-  const prev = verts[verts.length - 1]!;
-  const next = verts[1]!;
-  const v0x = prev.x - curr.x;
-  const v0y = prev.y - curr.y;
-  const v1x = next.x - curr.x;
-  const v1y = next.y - curr.y;
-  const len0 = Math.hypot(v0x, v0y);
-  const len1 = Math.hypot(v1x, v1y);
-  const u0x = len0 > 1e-6 ? v0x / len0 : 0;
-  const u0y = len0 > 1e-6 ? v0y / len0 : 0;
-  const u1x = len1 > 1e-6 ? v1x / len1 : 0;
-  const u1y = len1 > 1e-6 ? v1y / len1 : 0;
-  let bx = u0x + u1x;
-  let by = u0y + u1y;
-  const bl = Math.hypot(bx, by);
-  if (bl < 1e-6) bx = 0;
-  else {
-    bx /= bl;
-    by /= bl;
-  }
-  const r = clampPolygonCornerRadius(sides, width, height, cornerRadius);
-  return { x: curr.x + bx * r, y: curr.y + by * r };
+  const n = clampPolygonSides(sides);
+  return polygonCornerRadiusHandleAtVertex(
+    sides,
+    width,
+    height,
+    Array.from({ length: n }, () => cornerRadius),
+    vertexIndex,
+  );
 }
 
 export function polygonCornerRadiusFromLocalPoint(
@@ -367,27 +421,29 @@ export function polygonCornerRadiusFromLocalPoint(
   sides: number,
   width: number,
   height: number,
+  vertexIndex = 0,
 ): number {
-  const verts = polygonVertices(sides, width, height);
-  const curr = verts[0]!;
-  const prev = verts[verts.length - 1]!;
-  const next = verts[1]!;
-  const v0x = prev.x - curr.x;
-  const v0y = prev.y - curr.y;
-  const v1x = next.x - curr.x;
-  const v1y = next.y - curr.y;
-  const len0 = Math.hypot(v0x, v0y);
-  const len1 = Math.hypot(v1x, v1y);
-  const u0x = len0 > 1e-6 ? v0x / len0 : 0;
-  const u0y = len0 > 1e-6 ? v0y / len0 : 0;
-  const u1x = len1 > 1e-6 ? v1x / len1 : 0;
-  const u1y = len1 > 1e-6 ? v1y / len1 : 0;
-  let bx = u0x + u1x;
-  let by = u0y + u1y;
-  const bl = Math.hypot(bx, by);
-  if (bl < 1e-6) return 0;
-  bx /= bl;
-  by /= bl;
-  const metric = (localX - curr.x) * bx + (localY - curr.y) * by;
-  return clampPolygonCornerRadius(sides, width, height, Math.max(0, metric));
+  const n = clampPolygonSides(sides);
+  const verts = polygonVertices(n, width, height);
+  const i = ((vertexIndex % n) + n) % n;
+  const prev = verts[(i - 1 + n) % n]!;
+  const curr = verts[i]!;
+  const next = verts[(i + 1) % n]!;
+  const bis = vertexInwardBisector(prev, curr, next);
+  const metric = (localX - curr.x) * bis.x + (localY - curr.y) * bis.y;
+  const maxAt = maxCornerRadiusAtVertex(prev, curr, next);
+  return Math.max(0, Math.min(maxAt, metric));
+}
+
+export function polygonCornerRadiiPatch(
+  node: Pick<EditorNode, "width" | "height" | "polygonSides" | "cornerRadius" | "cornerRadii">,
+  radii: readonly number[],
+): Pick<EditorNode, "cornerRadius" | "cornerRadii"> {
+  const sides = clampPolygonSides(node.polygonSides ?? DEFAULT_POLYGON_SIDES);
+  const clamped = clampPolygonVertexCornerRadii(sides, node.width, node.height, radii);
+  const allSame = clamped.length > 0 && clamped.every((r) => r === clamped[0]);
+  if (allSame) {
+    return { cornerRadius: clamped[0], cornerRadii: undefined };
+  }
+  return { cornerRadius: undefined, cornerRadii: clamped };
 }

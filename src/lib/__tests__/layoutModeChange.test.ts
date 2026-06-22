@@ -17,7 +17,7 @@ describe("expandLayoutModePatch", () => {
     assert.equal(expanded.layoutMode, "vertical");
     assert.equal(expanded.layoutSizingHorizontal, "fixed");
     assert.equal(expanded.layoutSizingVertical, "hug");
-    assert.equal(expanded.primaryAxisAlign, "stretch");
+    assert.equal(expanded.primaryAxisAlign, "start");
     assert.equal(expanded.counterAxisAlign, "center");
   });
 

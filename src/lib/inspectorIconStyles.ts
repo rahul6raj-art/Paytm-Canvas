@@ -1,4 +1,8 @@
 import { cn } from "@/lib/utils";
+import {
+  inspectorIconButtonBaseClass,
+  inspectorIconButtonBaseCompactClass,
+} from "@/lib/appFieldStyles";
 
 /** Crisp 16px inspector icons (avoids blurry 14px / h-3.5 sizing). */
 export const inspectorIconClass = "inspector-icon h-4 w-4 shrink-0";
@@ -6,18 +10,52 @@ export const inspectorIconClass = "inspector-icon h-4 w-4 shrink-0";
 /** Lucide stroke at 16px — 2px reads sharper than 1.75. */
 export const inspectorIconStroke = 2;
 
-export const inspectorHeaderActionBtnClass =
-  "flex h-7 w-7 shrink-0 items-center justify-center rounded text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg disabled:opacity-40";
+const inspectorIconBtnInteractive =
+  "text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg disabled:opacity-40";
 
-export const inspectorRowActionBtnClass =
-  "flex h-7 w-7 shrink-0 items-center justify-center rounded text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg disabled:opacity-40";
+export const inspectorHeaderActionBtnClass = cn(
+  inspectorIconButtonBaseClass,
+  "inspector-icon-btn rounded",
+  inspectorIconBtnInteractive,
+);
+
+export const inspectorRowActionBtnClass = cn(
+  inspectorIconButtonBaseClass,
+  "inspector-icon-btn rounded",
+  inspectorIconBtnInteractive,
+);
 
 /** Icon buttons inside grouped transform / inset tool strips (no per-button rounding). */
-export const inspectorTransformActionBtnClass =
-  "inspector-icon-btn flex h-7 w-7 shrink-0 items-center justify-center rounded-none text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg disabled:opacity-40";
+export const inspectorTransformActionBtnClass = cn(
+  inspectorIconButtonBaseClass,
+  "inspector-icon-btn rounded-none",
+  inspectorIconBtnInteractive,
+);
 
-export const inspectorFieldIconSlotClass =
-  "flex h-7 w-8 shrink-0 items-center justify-center border-r border-app-border text-app-muted";
+/** Leading label slot inside property number fields (W, H, X, Y, etc.). */
+export const inspectorFieldIconSlotClass = cn(
+  inspectorIconButtonBaseClass,
+  "inspector-icon-btn rounded-none border-r border-app-border bg-transparent text-app-muted",
+);
+
+/** Bordered icon button aligned to property field rows (aspect lock, stroke sides, etc.). */
+export const inspectorFieldIconButtonClass = cn(
+  inspectorIconButtonBaseClass,
+  "inspector-icon-btn rounded-md border border-app-border bg-app-panel",
+  inspectorIconBtnInteractive,
+);
+
+export const inspectorFieldIconButtonCompactClass = cn(
+  inspectorIconButtonBaseCompactClass,
+  "inspector-icon-btn rounded-md border border-app-border bg-app-panel",
+  inspectorIconBtnInteractive,
+);
+
+/** Leading swatch / icon slot in compact color rows. */
+export const inspectorFieldIconSlotCompactClass = cn(
+  inspectorIconButtonBaseCompactClass,
+  "inspector-icon-btn rounded-none border-r border-app-border bg-transparent text-app-muted",
+);
 
 export function inspectorLucideProps(className?: string) {
   return {

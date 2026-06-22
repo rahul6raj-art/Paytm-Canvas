@@ -49,7 +49,7 @@ export function useMitraAIGenerate() {
   const aiGenerateError = useEditorStore((s) => s.aiGenerateError);
   const aiGenerateActive = useEditorStore((s) => s.aiGenerateActive);
 
-  const { modelId, setModelId, optionGroups: modelOptionGroups } = useAIModelSelectOptions();
+  const { modelId, setModelId } = useAIModelSelectOptions();
 
   const [prompt, setPrompt] = useState("");
   const [preset, setPreset] = useState<string | undefined>(undefined);
@@ -211,7 +211,6 @@ export function useMitraAIGenerate() {
     setAttachments,
     modelId,
     setModelId,
-    modelOptionGroups,
     attachMenuOpen,
     setAttachMenuOpen,
     styleGuideOpen,

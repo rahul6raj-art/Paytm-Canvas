@@ -16,6 +16,7 @@ import {
   type AutoLayoutReorderContext,
 } from "@/lib/autoLayoutReorder";
 import { isAutoLayoutHandleDragActive } from "@/lib/autoLayout/spacingPaddingDrag";
+import { isSelectionSpacingDragActive } from "@/lib/selectionSpacingDragSession";
 import { screenDeltaToWorld } from "@/lib/canvasCoordinates";
 import {
   computeDragSmartGuides,
@@ -26,7 +27,6 @@ import { getNodeTransformedWorldBounds } from "@/lib/transformMath";
 import {
   getRenderedWorldBounds,
   isAncestorOf,
-  topLevelSelectedIds,
   worldOriginToNodeXYFromChildOrder,
   worldPointToParentLocalFromChildOrder,
 } from "@/lib/editorGraph";
@@ -268,6 +268,7 @@ export function beginCanvasNodeDrag(opts: {
 }): boolean {
   if (useEditorStore.getState().transformInteractionMode !== "none") return false;
   if (isAutoLayoutHandleDragActive()) return false;
+  if (isSelectionSpacingDragActive()) return false;
 
   const s1 = useEditorStore.getState();
   const dragTargets = s1.selectedIds.filter((sid) => {
@@ -276,27 +277,25 @@ export function beginCanvasNodeDrag(opts: {
   });
   if (dragTargets.length === 0) return false;
 
-  const tops = topLevelSelectedIds(s1.selectedIds, s1.nodes);
   const swapCandidates = swapCandidatesForMultiSelect(
     opts.nodeId,
     s1.selectedIds,
     s1.nodes,
     s1.childOrder,
   );
-  const swapMode =
-    swapCandidates.length > 0 &&
-    (opts.forceSwapDrag === true || (tops.length === 2 && dragTargets.includes(opts.nodeId)));
+  const swapMode = opts.forceSwapDrag === true && swapCandidates.length > 0;
 
   if (opts.forceSwapDrag && swapCandidates.length === 0) return false;
 
   const primaryId = dragTargets.includes(opts.nodeId) ? opts.nodeId : dragTargets[0]!;
-  const movingIds = swapMode && dragTargets.includes(opts.nodeId) ? [opts.nodeId] : dragTargets;
+  const movingIds = swapMode ? [opts.nodeId] : dragTargets;
 
   const dragNode = s1.nodes[opts.nodeId];
   const dragContainerUnit =
     dragNode?.type === "frame" || dragNode?.type === "group";
+  // Multi-select always moves the whole selection; in-flow reorder is single-layer only.
   const alContext =
-    swapMode || dragContainerUnit
+    swapMode || dragContainerUnit || dragTargets.length > 1
       ? null
       : getAutoLayoutReorderContext([opts.nodeId], s1.nodes, s1.nodes);
 

@@ -2,10 +2,9 @@
 
 import { PanelLeft } from "lucide-react";
 import { LeftSidebar } from "./LeftSidebar";
-import { EditorHintWrap } from "./EditorHoverHint";
+import { EditorHintPolicyProvider, EditorHintWrap } from "./EditorHoverHint";
 import { Canvas } from "./Canvas";
 import { CanvasToolRail } from "./CanvasToolRail";
-import { CanvasFloatingZoom } from "./CanvasFloatingZoom";
 import { CanvasFloatingPageName } from "./CanvasFloatingPageName";
 import { RightPropertiesPanel } from "./RightPropertiesPanel";
 import { EditorRightActionsCard } from "./EditorRightActionsCard";
@@ -21,6 +20,8 @@ import { EditorMockPresence } from "./EditorMockPresence";
 import { EditorRealtimeSync } from "./EditorRealtimeSync";
 import { CommandMenu } from "./CommandMenu";
 import { ShortcutOverlay } from "./ShortcutOverlay";
+import { AIKeysProvider } from "@/components/ai/useAIKeys";
+import { AIAddKeyModal, AIKeysManageModal } from "@/components/ai/AIKeysModals";
 import { AIGenerateModal } from "@/components/ai/AIGenerateModal";
 import { AIGenerateCanvasController } from "@/components/ai/AIGenerateCanvasController";
 import { PluginMarketplace } from "@/components/plugins/PluginMarketplace";
@@ -37,9 +38,11 @@ import { TextEditPortal } from "./TextEditPortal";
 import { UiChromeHiddenHint } from "./UiChromeHiddenHint";
 import { FigImportOverlay } from "@/components/import/FigImportOverlay";
 import { FigImportFinishEffect } from "@/components/import/FigImportFinishEffect";
+import { EditorAckToast } from "@/components/editor/EditorAckToast";
 import { FigImportToast } from "@/components/import/FigImportToast";
 import { ImportNoticeToast } from "@/components/editor/ImportNoticeToast";
 import { ImportFigmaModal } from "@/components/import/ImportFigmaModal";
+import { McpConnectionsModal } from "@/components/mcp/McpConnectionsModal";
 import { ImportHub } from "@/components/import/ImportHub";
 import { ImportWebModal } from "@/components/import/ImportWebModal";
 import { DocumentHydrationOverlay } from "@/components/editor/DocumentHydrationOverlay";
@@ -194,7 +197,6 @@ function AppShellChrome() {
         </EditorHintWrap>
       ) : null}
       {uiChromeVisible ? <EditorChromeRightColumn /> : null}
-      {uiChromeVisible ? <CanvasFloatingZoom /> : null}
       {uiChromeVisible ? (
         <CanvasFloatingPageName leftSidebarVisible={leftSidebarVisible} />
       ) : null}
@@ -209,6 +211,8 @@ export function AppShell() {
   }, []);
 
   return (
+    <AIKeysProvider>
+    <EditorHintPolicyProvider policy="shortcuts-only">
     <div
       data-editor-shell
       className={cn(
@@ -239,6 +243,8 @@ export function AppShell() {
       <ShortcutOverlay />
       <AIGenerateModal />
       <AIGenerateCanvasController />
+      <AIAddKeyModal />
+      <AIKeysManageModal />
       <CodeRoundTripModal />
       <PluginMarketplace />
       <ShareModal />
@@ -251,11 +257,13 @@ export function AppShell() {
       <ImportFigmaModal
         onImportFigFile={(file) => useEditorStore.getState().importFigmaFile(file)}
       />
+      <McpConnectionsModal />
       <ImportHub />
       <ImportWebModal />
       <FigImportOverlay />
       <FigImportFinishEffect />
       <FigImportToast />
+      <EditorAckToast />
       <ImportNoticeToast />
       <PrototypePreviewModal />
       <EditorKeyboardShortcuts />
@@ -263,5 +271,7 @@ export function AppShell() {
       <TextEditLayer />
       <AppShellChrome />
     </div>
+    </EditorHintPolicyProvider>
+    </AIKeysProvider>
   );
 }

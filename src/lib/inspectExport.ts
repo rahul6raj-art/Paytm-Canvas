@@ -34,9 +34,17 @@ import {
   isBooleanGroup,
 } from "@/lib/booleanGeometry";
 import {
+  booleanClipperFillRule,
+  booleanClipperPathD,
   booleanRenderFillAttr,
   svgInnerMarkupFromBooleanRender,
 } from "@/lib/codeExport/booleanRenderSvg";
+import {
+  effectiveEllipseArc,
+  ellipseArcPathD,
+  hasEllipseArcInnerHole,
+  isFullEllipseArc,
+} from "@/lib/shapes/ellipseArc";
 import { ellipseArcExportStyle } from "@/lib/shapes/ellipseArcExport";
 import {
   clampCornerRadii,
@@ -47,7 +55,7 @@ import {
   roundedRectPathD,
 } from "@/lib/cornerRadius";
 import type { LayoutMode } from "@/lib/autoLayout";
-import { buildSinglePageJpegPdf, jpegDataUrlToBytes } from "@/lib/pdfExport";
+import { getRenderedWorldBounds, getRenderedWorldTopLeft } from "@/lib/editorGraph";
 
 export function nearestAncestorFrameId(
   nodes: Record<string, EditorNode>,
@@ -582,6 +590,69 @@ export function nodeToSvg(
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${rotated}</svg>`;
 }
 
+function paintBooleanGroupToCanvas(
+  ctx: CanvasRenderingContext2D,
+  drawNode: EditorNode,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  opts: {
+    fill: string;
+    useGradientFill: boolean;
+    sw: number;
+    sc: string;
+    paintShapeFill: (w: number, h: number) => void;
+  },
+): boolean {
+  const kids = (childOrder[drawNode.id] ?? []).filter((cid) => {
+    const c = nodes[cid];
+    return c && c.visible && !c.locked;
+  });
+  const render = buildBooleanRenderForGroup(
+    drawNode.id,
+    kids,
+    nodes,
+    drawNode.booleanOperation ?? "union",
+    childOrder,
+  );
+  if (!render) return false;
+
+  const pathD = booleanClipperPathD(render);
+  if (!pathD) return false;
+
+  const fillRule = booleanClipperFillRule(render);
+  const boolPath = new Path2D(pathD);
+  const { fill, useGradientFill, sw, sc, paintShapeFill } = opts;
+
+  const paintFill = () => {
+    if (drawNode.fillEnabled === false) return;
+    if (useGradientFill) {
+      paintShapeFill(drawNode.width, drawNode.height);
+      return;
+    }
+    const solid = fill !== "transparent" ? fill : render.fill;
+    if (!solid || solid === "transparent") return;
+    ctx.fillStyle = solid;
+    ctx.fill(boolPath, fillRule);
+  };
+
+  if (useGradientFill) {
+    ctx.save();
+    ctx.clip(boolPath, fillRule);
+    paintFill();
+    ctx.restore();
+  } else {
+    paintFill();
+  }
+
+  if (sw > 0 && sc) {
+    ctx.strokeStyle = sc;
+    ctx.lineWidth = sw;
+    ctx.stroke(boolPath);
+  }
+
+  return true;
+}
+
 async function renderNodeToCanvas(
   ctx: CanvasRenderingContext2D,
   node: EditorNode,
@@ -613,21 +684,33 @@ async function renderNodeToCanvas(
     }
   };
 
-  if (drawNode.type === "rectangle" || drawNode.type === "frame" || drawNode.type === "group") {
-    ctx.beginPath();
-    if (drawNode.type === "group") {
-      ctx.rect(0, 0, drawNode.width, drawNode.height);
-    } else {
-      addNodeRoundedRectPath(ctx, drawNode, 0, 0, drawNode.width, drawNode.height);
-    }
-    if (useGradientFill) {
-      ctx.save();
-      ctx.clip();
-      paintShapeFill(drawNode.width, drawNode.height);
-      ctx.restore();
-    } else {
-      paintShapeFill(drawNode.width, drawNode.height);
-    }
+  const paintedBoolean =
+    drawNode.type === "group" &&
+    isBooleanGroup(drawNode) &&
+    paintBooleanGroupToCanvas(ctx, drawNode, nodes, childOrder, {
+      fill,
+      useGradientFill,
+      sw,
+      sc,
+      paintShapeFill,
+    });
+
+  if (!paintedBoolean) {
+    if (drawNode.type === "rectangle" || drawNode.type === "frame" || drawNode.type === "group") {
+      ctx.beginPath();
+      if (drawNode.type === "group") {
+        ctx.rect(0, 0, drawNode.width, drawNode.height);
+      } else {
+        addNodeRoundedRectPath(ctx, drawNode, 0, 0, drawNode.width, drawNode.height);
+      }
+      if (useGradientFill) {
+        ctx.save();
+        ctx.clip();
+        paintShapeFill(drawNode.width, drawNode.height);
+        ctx.restore();
+      } else {
+        paintShapeFill(drawNode.width, drawNode.height);
+      }
     if (sw > 0 && sc) {
       ctx.strokeStyle = sc;
       ctx.lineWidth = sw;
@@ -638,20 +721,80 @@ async function renderNodeToCanvas(
       ctx.stroke();
     }
   } else if (drawNode.type === "ellipse") {
-    ctx.beginPath();
-    ctx.ellipse(drawNode.width / 2, drawNode.height / 2, drawNode.width / 2, drawNode.height / 2, 0, 0, Math.PI * 2);
+    const arc = effectiveEllipseArc(drawNode);
+    const useArcPath =
+      !isFullEllipseArc(arc.sweepDeg) || hasEllipseArcInnerHole(arc.innerRadiusRatio);
+    const fillRule: CanvasFillRule =
+      hasEllipseArcInnerHole(arc.innerRadiusRatio) && isFullEllipseArc(arc.sweepDeg)
+        ? "evenodd"
+        : "nonzero";
+    const arcPath = useArcPath
+      ? new Path2D(
+          ellipseArcPathD(
+            drawNode.width,
+            drawNode.height,
+            arc.startDeg,
+            arc.sweepDeg,
+            arc.innerRadiusRatio,
+          ),
+        )
+      : null;
+
+    const traceFullEllipse = () => {
+      ctx.beginPath();
+      ctx.ellipse(
+        drawNode.width / 2,
+        drawNode.height / 2,
+        drawNode.width / 2,
+        drawNode.height / 2,
+        0,
+        0,
+        Math.PI * 2,
+      );
+    };
+
+    const clipEllipse = () => {
+      if (arcPath) {
+        ctx.clip(arcPath, fillRule);
+      } else {
+        traceFullEllipse();
+        ctx.clip();
+      }
+    };
+
+    const fillEllipse = () => {
+      if (drawNode.fillEnabled === false) return;
+      if (useGradientFill && paintGradientFillInBox(ctx, drawNode, drawNode.width, drawNode.height)) {
+        return;
+      }
+      if (fill === "transparent") return;
+      ctx.fillStyle = fill;
+      if (arcPath) {
+        ctx.fill(arcPath, fillRule);
+      } else {
+        traceFullEllipse();
+        ctx.fill();
+      }
+    };
+
     if (useGradientFill) {
       ctx.save();
-      ctx.clip();
-      paintShapeFill(drawNode.width, drawNode.height);
+      clipEllipse();
+      fillEllipse();
       ctx.restore();
     } else {
-      paintShapeFill(drawNode.width, drawNode.height);
+      fillEllipse();
     }
+
     if (sw > 0 && sc) {
       ctx.strokeStyle = sc;
       ctx.lineWidth = sw;
-      ctx.stroke();
+      if (arcPath) {
+        ctx.stroke(arcPath);
+      } else {
+        traceFullEllipse();
+        ctx.stroke();
+      }
     }
   } else if (drawNode.type === "line" || drawNode.type === "arrow") {
     const lw = drawNode.strokeWidth ?? 2;
@@ -707,8 +850,9 @@ async function renderNodeToCanvas(
       ctx.fillText("Image", 6, 16);
     }
   }
+  }
 
-  if (drawNode.type === "frame" || drawNode.type === "group") {
+  if ((drawNode.type === "frame" || drawNode.type === "group") && !paintedBoolean) {
     ctx.save();
     if (drawNode.type === "frame") {
       ctx.beginPath();
@@ -741,6 +885,30 @@ export function pngExportFilename(baseName: string, scale: number): string {
   return `${stem}@${scale}x.png`;
 }
 
+function unionExportBounds(
+  boxes: { x: number; y: number; width: number; height: number }[],
+): { x: number; y: number; width: number; height: number } | null {
+  if (boxes.length === 0) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const b of boxes) {
+    minX = Math.min(minX, b.x);
+    minY = Math.min(minY, b.y);
+    maxX = Math.max(maxX, b.x + b.width);
+    maxY = Math.max(maxY, b.y + b.height);
+  }
+  if (!Number.isFinite(minX)) return null;
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+export type NodeExportCanvasOptions = {
+  scale?: number;
+  /** When true (default), fills the export bounds with white before drawing. */
+  whiteBackground?: boolean;
+};
+
 export async function renderNodeExportCanvas(
   node: EditorNode,
   nodes: Record<string, EditorNode>,
@@ -748,6 +916,7 @@ export async function renderNodeExportCanvas(
   assets?: Record<string, EditorAsset>,
   designTokens?: Record<string, DesignToken>,
   scale = 1,
+  whiteBackground = true,
 ): Promise<HTMLCanvasElement | null> {
   const exportScale = Math.max(0.25, scale);
   const logicalW = Math.max(1, Math.ceil(node.width));
@@ -760,10 +929,120 @@ export async function renderNodeExportCanvas(
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
   ctx.scale(exportScale, exportScale);
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, logicalW, logicalH);
+  if (whiteBackground) {
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, logicalW, logicalH);
+  }
   await renderNodeToCanvas(ctx, node, nodes, childOrder, 0, 0, assets, designTokens);
   return canvas;
+}
+
+/** Render one or more top-level nodes into a single PNG-ready canvas. */
+export async function renderSelectionExportCanvas(
+  nodeIds: readonly string[],
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  assets?: Record<string, EditorAsset>,
+  designTokens?: Record<string, DesignToken>,
+  options: NodeExportCanvasOptions = {},
+): Promise<HTMLCanvasElement | null> {
+  const ids = nodeIds.filter((id) => {
+    const n = nodes[id];
+    return n && n.visible;
+  });
+  if (ids.length === 0) return null;
+
+  const scale = Math.max(0.25, options.scale ?? 1);
+  const whiteBackground = options.whiteBackground !== false;
+
+  if (ids.length === 1) {
+    const node = nodes[ids[0]!]!;
+    return renderNodeExportCanvas(
+      node,
+      nodes,
+      childOrder,
+      assets,
+      designTokens,
+      scale,
+      whiteBackground,
+    );
+  }
+
+  const bounds = unionExportBounds(
+    ids.map((id) => getRenderedWorldBounds(id, nodes, childOrder)),
+  );
+  if (!bounds) return null;
+
+  const logicalW = Math.max(1, Math.ceil(bounds.width));
+  const logicalH = Math.max(1, Math.ceil(bounds.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.ceil(logicalW * scale));
+  canvas.height = Math.max(1, Math.ceil(logicalH * scale));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.scale(scale, scale);
+  if (whiteBackground) {
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, logicalW, logicalH);
+  }
+
+  for (const id of ids) {
+    const node = nodes[id];
+    if (!node) continue;
+    const origin = getRenderedWorldTopLeft(id, nodes, childOrder);
+    await renderNodeToCanvas(
+      ctx,
+      node,
+      nodes,
+      childOrder,
+      origin.x - bounds.x,
+      origin.y - bounds.y,
+      assets,
+      designTokens,
+    );
+  }
+  return canvas;
+}
+
+export async function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  const blob = await new Promise<Blob | null>((resolve) => {
+    canvas.toBlob(resolve, "image/png", 1);
+  });
+  if (!blob) throw new Error("PNG export failed");
+  return blob;
+}
+
+export async function copyPngBlobToClipboard(blob: Blob): Promise<void> {
+  if (typeof ClipboardItem === "undefined" || !navigator.clipboard?.write) {
+    throw new Error("Copy as PNG is not supported in this browser");
+  }
+  await navigator.clipboard.write([
+    new ClipboardItem({
+      "image/png": blob,
+    }),
+  ]);
+}
+
+export async function copySelectionAsPng(input: {
+  nodeIds: readonly string[];
+  nodes: Record<string, EditorNode>;
+  childOrder: Record<string, string[]>;
+  assets?: Record<string, EditorAsset>;
+  designTokens?: Record<string, DesignToken>;
+  scale?: number;
+}): Promise<boolean> {
+  const canvas = await renderSelectionExportCanvas(
+    input.nodeIds,
+    input.nodes,
+    input.childOrder,
+    input.assets,
+    input.designTokens,
+    { scale: input.scale ?? 2, whiteBackground: false },
+  );
+  if (!canvas) return false;
+  const blob = await canvasToPngBlob(canvas);
+  await copyPngBlobToClipboard(blob);
+  return true;
 }
 
 export async function downloadNodePng(

@@ -176,7 +176,7 @@ export function VectorInspector({ node }: { node: EditorNode }) {
       </div>
 
       <PropertiesSection title="Alignment" defaultOpen>
-        <AlignControls variant="panel" className="!space-y-1.5" />
+        <AlignControls variant="panel" />
       </PropertiesSection>
 
       <PropertiesSection title="Position" defaultOpen>

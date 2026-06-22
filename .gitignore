@@ -8,3 +8,4 @@ packages/craft-realtime/.env
 .DS_Store
 .craft-mock-api/
 .craft-bridge/
+.vercel

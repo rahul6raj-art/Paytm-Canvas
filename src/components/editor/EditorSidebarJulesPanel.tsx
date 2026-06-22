@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { ArrowUp, FileText, Paperclip, Plus, Sparkles, Zap } from "lucide-react";
 import { AIContextAttachments } from "@/components/ai/AIContextAttachments";
 import { AIStyleGuideSelect } from "@/components/ai/AIStyleGuideSelect";
+import { AIModelPillSelect } from "@/components/ai/AIModelPillSelect";
 import { FloatingPillSelect } from "@/components/ai/FloatingPillSelect";
 import { MITRA_SCREEN_PRESETS, useMitraAIGenerate } from "@/components/ai/useMitraAIGenerate";
 import type { AIContextKind } from "@/lib/aiGenerateContext";
@@ -104,7 +105,7 @@ function MitraPlusMenu({
           disabled={disabled}
           onClick={() => setOpen((v) => !v)}
           className={cn(
-            "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-app-subtle transition-colors hover:bg-app-hover hover:text-app-fg",
+            "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-app-subtle transition-colors hover:bg-app-hover hover:text-app-fg",
             open && "bg-app-hover text-app-fg",
           )}
         >
@@ -155,7 +156,6 @@ export function EditorSidebarJulesPanel({
     setAttachments,
     modelId,
     setModelId,
-    modelOptionGroups,
     attachMenuOpen,
     setAttachMenuOpen,
     styleGuideOpen,
@@ -264,15 +264,13 @@ export function EditorSidebarJulesPanel({
                 onAttachFile={() => setAttachMenuOpen(true)}
                 onAttachSkills={() => pickContextKindRef.current?.("skills")}
               />
-              <FloatingPillSelect
+              <AIModelPillSelect
                 icon={Sparkles}
-                label="Model"
                 value={modelId}
+                onChange={setModelId}
                 disabled={busy}
                 menuZClass={MITRA_MENU_Z}
-                optionGroups={modelOptionGroups}
-                className="py-1 pl-2 pr-1.5 text-ui"
-                onChange={setModelId}
+                className="text-ui"
               />
               <div className="min-w-0 flex-1" />
               <EditorHintWrap title="Send to Mitra" disabled={!canGenerate || busy}>
@@ -280,7 +278,7 @@ export function EditorSidebarJulesPanel({
                   type="button"
                   aria-label="Send"
                   disabled={!canGenerate || busy}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-app-fg text-app-bg transition-opacity disabled:opacity-30"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-app-fg text-app-bg transition-opacity disabled:opacity-30"
                   onClick={() => runGenerate()}
                 >
                   <ArrowUp className="h-4 w-4" strokeWidth={2} />
@@ -312,7 +310,7 @@ export function EditorSidebarJulesPanel({
                 value={preset ?? ""}
                 disabled={busy}
                 menuZClass={MITRA_MENU_Z}
-                className="py-1 pl-2 pr-1.5 text-ui"
+                className="text-ui"
                 onChange={(v) => setPreset(v || undefined)}
                 options={[
                   { value: "", label: "Any screen" },
@@ -332,7 +330,7 @@ export function EditorSidebarJulesPanel({
                 onThemeChange={setStyleGuideTheme}
                 controlledOpen={styleGuideOpen}
                 onControlledOpenChange={setStyleGuideOpen}
-                className="py-1 pl-2 pr-1.5 text-ui"
+                className="text-ui"
               />
             </div>
             <AIContextAttachments

@@ -56,14 +56,13 @@ export function isPageNameEditActive(): boolean {
   return Boolean(document.querySelector("[data-page-name-editor]"));
 }
 
-/** True when canvas tool shortcuts must not fire — user is typing in a prompt or rename field. */
+/** True when canvas tool shortcuts must not fire — user is typing in any field. */
 export function shouldBlockToolShortcutsForTyping(target: EventTarget | null): boolean {
   if (isPageNameEditFieldElement(target) || isPageNameEditActive()) return true;
   const field = resolveKeyboardFieldTarget(target);
   if (!field) return false;
-  if (isMultilineEditableElement(field)) return true;
-  if (isLeftSidebarTypingFieldElement(field)) return true;
-  return false;
+  if (isCanvasTextEditFieldElement(field)) return false;
+  return isEditableFieldElement(field);
 }
 
 /** Left sidebar inputs/textareas — search, Mitra prompt, layer rename, etc. */
@@ -173,20 +172,24 @@ export function shouldBlockDeleteSelectionShortcut(
   return Boolean(resolveKeyboardFieldTarget(target));
 }
 
-/** Let inputs/textareas handle clipboard & undo/redo (code panel import, inspector fields). */
+export function isUndoRedoShortcut(e: KeyboardEvent): boolean {
+  if (!(e.metaKey || e.ctrlKey)) return false;
+  return e.code === "KeyZ" || e.code === "KeyY";
+}
+
+/** Let inputs/textareas handle clipboard in fields (not undo/redo — those stay on the canvas stack). */
 export function shouldAllowNativeFieldClipboard(
   e: KeyboardEvent,
   target: EventTarget | null,
 ): boolean {
   if (!resolveKeyboardFieldTarget(target)) return false;
   if (!(e.metaKey || e.ctrlKey)) return false;
+  if (isUndoRedoShortcut(e)) return false;
   return (
     e.code === "KeyV" ||
     e.code === "KeyC" ||
     e.code === "KeyX" ||
-    e.code === "KeyA" ||
-    e.code === "KeyZ" ||
-    e.code === "KeyY"
+    e.code === "KeyA"
   );
 }
 
@@ -195,6 +198,9 @@ export function shouldAllowNativeFieldClipboard(
  * Modifier shortcuts (undo, copy, etc.) still reach the canvas handler when appropriate.
  */
 export function shouldYieldShortcutsToTyping(e: KeyboardEvent, target: EventTarget | null): boolean {
+  // Canvas undo/redo must work even when an inspector field still has focus (Figma-style).
+  if (isUndoRedoShortcut(e)) return false;
+
   const st = useEditorStore.getState();
   if (st.editingTextId || st.layerRenameId) {
     if (e.metaKey || e.ctrlKey) return false;
@@ -206,26 +212,12 @@ export function shouldYieldShortcutsToTyping(e: KeyboardEvent, target: EventTarg
     if (e.key === "Escape") return false;
     return true;
   }
-  // Figma-style: V/R/P/F… switch tools even when a single-line inspector field retains focus.
-  if (isToolShortcutEvent(e)) return false;
   const field = resolveKeyboardFieldTarget(target);
   if (shouldAllowNativeFieldClipboard(e, target)) return true;
   if (e.metaKey || e.ctrlKey) return false;
   if (e.key === "Escape") return false;
   if (shouldBlockDeleteSelectionShortcut(e, target)) return true;
-  // Allow canvas nudge/reorder when a single-line field is focused but empty.
-  if (
-    elementTagName(field) === "INPUT" &&
-    !isMultilineEditableElement(field) &&
-    (e.code === "ArrowUp" ||
-      e.code === "ArrowDown" ||
-      e.code === "ArrowLeft" ||
-      e.code === "ArrowRight")
-  ) {
-    const raw = (field as { value?: string }).value ?? "";
-    if (raw.trim() === "") return false;
-  }
-  return true;
+  return false;
 }
 
 /** Blur inspector/sidebar fields so canvas shortcuts (V, R, Delete, …) apply. */

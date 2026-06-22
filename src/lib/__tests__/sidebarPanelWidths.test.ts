@@ -35,9 +35,9 @@ describe("sidebarPanelWidths", () => {
   });
 
   it("clamps panel widths to bounds", () => {
-    assert.equal(clampPanelWidth(100, LEFT_SIDEBAR_BOUNDS), 240);
-    assert.equal(clampPanelWidth(999, LEFT_SIDEBAR_BOUNDS), 520);
-    assert.equal(clampPanelWidth(220.4, LEFT_SIDEBAR_BOUNDS), 240);
+    assert.equal(clampPanelWidth(100, LEFT_SIDEBAR_BOUNDS), 252);
+    assert.equal(clampPanelWidth(999, LEFT_SIDEBAR_BOUNDS), 560);
+    assert.equal(clampPanelWidth(220.4, LEFT_SIDEBAR_BOUNDS), 252);
   });
 
   it("caps panel max against viewport and reserved chrome", () => {
@@ -47,7 +47,7 @@ describe("sidebarPanelWidths", () => {
     };
     const cap = 1000 - 300 - MIN_CANVAS_WORKSPACE_WIDTH;
     assert.equal(clampPanelWidthInLayout(500, LEFT_SIDEBAR_BOUNDS, layout), cap);
-    assert.equal(clampPanelWidthInLayout(200, LEFT_SIDEBAR_BOUNDS, layout), 240);
+    assert.equal(clampPanelWidthInLayout(200, LEFT_SIDEBAR_BOUNDS, layout), 252);
   });
 
   it("persists left and right panel widths separately", () => {

@@ -421,7 +421,7 @@ export function AIStyleGuideSelect({
           aria-label="Style Guide"
           onClick={() => setOpen(!open)}
           className={cn(
-            "inline-flex min-w-0 items-center gap-1.5 rounded-full border border-app-border-subtle bg-app-inset py-1 pl-2 pr-1.5 text-ui font-medium text-app-fg transition-colors",
+            "inline-flex min-h-[var(--pill-control-min-height,2rem)] min-w-0 items-center gap-2 rounded-full border border-app-border-subtle bg-app-inset py-1.5 pl-2.5 pr-2 text-ui font-medium text-app-fg transition-colors",
             "hover:border-app-border hover:bg-app-hover disabled:cursor-not-allowed disabled:opacity-50",
             open && "border-app-border bg-app-hover",
             className,
@@ -432,13 +432,13 @@ export function AIStyleGuideSelect({
               logo={selectedBuiltin.logo}
               label={selectedBuiltin.label}
               boxClassName="h-5 w-5 rounded-full border-0 bg-white p-0.5"
-              className="h-3.5 w-3.5"
+              className="h-4 w-4"
             />
           ) : (
-            <Palette className="h-3.5 w-3.5 shrink-0 text-app-muted" strokeWidth={2} />
+            <Palette className="h-4 w-4 shrink-0 text-app-muted" strokeWidth={2} />
           )}
           <span className="max-w-[100px] truncate">{pillLabel}</span>
-          <ChevronDown className="h-3 w-3 shrink-0 text-app-subtle" strokeWidth={2.5} />
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-app-subtle" strokeWidth={2.5} />
         </button>
       ) : null}
       {menu && mounted ? createPortal(menu, document.body) : null}

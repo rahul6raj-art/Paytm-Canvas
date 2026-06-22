@@ -8,11 +8,9 @@ import {
   type TextAdvancedStyle,
 } from "./textAdvancedStyle";
 import {
-  buildFontString,
-  getTextMeasureContext,
   layoutText,
   lineTopY,
-  measureStringWidth,
+  measureStringWidthForTypo,
   type TextLayout,
   type TextLine,
 } from "./textMeasure";
@@ -21,6 +19,7 @@ import {
   TEXT_BOX_PAD_Y,
   availableWrapWidthForNode,
   nodeForTextLayout,
+  normalizeTextResizeMode,
   textInnerHeight,
   textInnerWidth,
   textTypoFromModel,
@@ -28,6 +27,7 @@ import {
   type TextAlign,
 } from "./textNodeModel";
 import type { ResolvedTextTypo } from "@/lib/textTypography";
+import { textBlockContentHeight } from "./textBaseline";
 import { verticalContentOffsetY } from "./textVerticalAlign";
 import { recordFontResolution } from "./textFontManager";
 
@@ -250,7 +250,9 @@ function fallbackLayout(
   effectiveWrap: number,
 ): CanonicalTextLayout {
   const layout = layoutText(displayText, effectiveWrap, typo, style);
-  const blockOffsetY = verticalContentOffsetY(layout.height, innerH, node.verticalAlign);
+  const mode = normalizeTextResizeMode(node);
+  const contentHeight = textBlockContentHeight(layout, typo, mode);
+  const blockOffsetY = verticalContentOffsetY(contentHeight, innerH, node.verticalAlign);
   const lines = layout.lines.map((line, i) => {
     const y = lineTopYFromLayout(layout, i) + TEXT_BOX_PAD_Y + blockOffsetY;
     const x =
@@ -280,7 +282,7 @@ function fallbackLayout(
     source: "fallback",
     lines,
     width: layout.width,
-    height: layout.height,
+    height: contentHeight,
     lineHeightPx: layout.lineHeightPx,
     paragraphSpacing: layout.paragraphSpacing,
     verticalTrimTop: layout.verticalTrimTop,
@@ -316,9 +318,7 @@ function lineOffsetFromLayout(
 }
 
 function measureFallbackWidth(text: string, typo: ResolvedTextTypo): number {
-  const ctx = getTextMeasureContext();
-  ctx.font = buildFontString(typo);
-  return measureStringWidth(ctx, text, typo.letterSpacing);
+  return measureStringWidthForTypo(text, typo);
 }
 
 export function canonicalToTextLayout(canonical: CanonicalTextLayout): TextLayout {
@@ -339,6 +339,32 @@ export function canonicalToTextLayout(canonical: CanonicalTextLayout): TextLayou
     linePositions: canonical.lines.map((line) => ({ x: line.x, y: line.y })),
     glyphs: canonical.glyphs,
     font: canonical.font,
+  };
+}
+
+function alignCanonicalBlockOffset(
+  node: EditorNode,
+  layout: TextLayout,
+  typo: ResolvedTextTypo,
+  canonical: CanonicalTextLayout,
+): CanonicalTextLayout {
+  const mode = normalizeTextResizeMode(node);
+  const contentHeight = textBlockContentHeight(layout, typo, mode);
+  const blockOffsetY = verticalContentOffsetY(contentHeight, canonical.innerH, node.verticalAlign);
+  const deltaY = blockOffsetY - canonical.blockOffsetY;
+  if (Math.abs(deltaY) < 0.01 && Math.abs(canonical.height - contentHeight) < 0.01) {
+    return canonical;
+  }
+  return {
+    ...canonical,
+    blockOffsetY,
+    height: contentHeight,
+    lines: canonical.lines.map((line) => ({
+      ...line,
+      y: line.y + deltaY,
+      segments: line.segments.map((seg) => ({ ...seg, y: seg.y + deltaY })),
+    })),
+    caretStops: canonical.caretStops.map((stop) => ({ ...stop, y: stop.y + deltaY })),
   };
 }
 
@@ -372,9 +398,9 @@ export function layoutTextCanonical(
   const wasm = (opts?.forceWasm || shouldUseWasmCanonicalLayout(layoutNode))
     ? wasmLayout(layoutNode, displayText, style, typo)
     : null;
-  const canonical =
-    wasm ??
-    fallbackLayout(layoutNode, displayText, style, typo, innerW, innerH, effectiveWrap);
+  const raw = wasm ?? fallbackLayout(layoutNode, displayText, style, typo, innerW, innerH, effectiveWrap);
+  const layout = canonicalToTextLayout(raw);
+  const canonical = alignCanonicalBlockOffset(layoutNode, layout, typo, raw);
 
   recordFontResolution(layoutNode.id, canonical.font);
   layoutCache.set(cacheKey, canonical);
@@ -451,18 +477,16 @@ function applyTruncateFromCanonical(
   const last = lines[maxLines - 1]!;
   let truncated = last.text;
   const ellipsis = "…";
-  const ctx = getTextMeasureContext();
-  ctx.font = buildFontString(typo);
   while (
     truncated.length > 0 &&
-    measureStringWidth(ctx, truncated + ellipsis, typo.letterSpacing) > boxInnerWidth
+    measureStringWidthForTypo(truncated + ellipsis, typo) > boxInnerWidth
   ) {
     truncated = truncated.slice(0, -1);
   }
   lines[maxLines - 1] = {
     ...last,
     text: truncated + ellipsis,
-    width: measureStringWidth(ctx, truncated + ellipsis, typo.letterSpacing),
+    width: measureStringWidthForTypo(truncated + ellipsis, typo),
   };
 
   let paragraphGaps = 0;

@@ -21,6 +21,12 @@ export function canvasToolRailTitle(label: string, shortcut?: string): string {
 export const CANVAS_TOOL_RAIL_BUTTON_CLASS = "h-11 w-11 leading-none [&_svg]:block";
 /** Lift rail above status footer / overflow clip (12px was tight on some layouts). */
 export const CANVAS_TOOL_RAIL_BOTTOM_OFFSET = 16;
+/** p-1.5 + h-11 buttons (+ border); used for toast placement above default rail. */
+export const CANVAS_TOOL_RAIL_ESTIMATED_HEIGHT = 50;
+export const CANVAS_TOOL_RAIL_TOAST_GAP = 10;
+/** Fallback bottom inset when the rail element is not measurable. */
+export const CANVAS_TOOL_RAIL_ACK_TOAST_BOTTOM_OFFSET =
+  CANVAS_TOOL_RAIL_BOTTOM_OFFSET + CANVAS_TOOL_RAIL_ESTIMATED_HEIGHT + CANVAS_TOOL_RAIL_TOAST_GAP;
 /** @deprecated Use positioned drag layout; kept for layout tests referencing bottom inset. */
 export const CANVAS_TOOL_RAIL_OFFSET_CLASS = "bottom-4";
 

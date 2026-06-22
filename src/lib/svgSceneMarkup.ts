@@ -17,6 +17,7 @@ import {
   svgRectLike,
   svgSafeId,
   svgTextMarkup,
+  wrapSvgNodeFilter,
 } from "@/lib/svgMarkupCore";
 import { shouldClipChildren } from "@/lib/clipChildren";
 import { normalizeTextResizeMode } from "@/lib/text/textNodeModel";
@@ -189,12 +190,14 @@ function renderNode(nodeId: string, ctx: BuildCtx): string {
   if (node.type === "text") {
     const markup = svgTextMarkup(paintNode, shapeOpts);
     const resizeMode = normalizeTextResizeMode(node.textResizeMode, node.autoResize);
-    if (resizeMode === "auto-width") {
-      return wrapOpacity(markup);
+    let wrapped = markup;
+    if (resizeMode !== "auto-width") {
+      const clipId = `pc-text-clip-${svgSafeId(nodeId)}`;
+      registerClipRect(ctx.defs, clipId, w, h);
+      wrapped = `<g clip-path="url(#${clipId})">${wrapped}</g>`;
     }
-    const clipId = `pc-text-clip-${svgSafeId(nodeId)}`;
-    registerClipRect(ctx.defs, clipId, w, h);
-    return wrapOpacity(`<g clip-path="url(#${clipId})">${markup}</g>`);
+    wrapped = wrapSvgNodeFilter(wrapped, filterRef);
+    return wrapOpacity(wrapped);
   }
 
   if (node.type === "image") {

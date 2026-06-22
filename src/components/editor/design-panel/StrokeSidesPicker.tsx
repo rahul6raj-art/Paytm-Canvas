@@ -8,7 +8,7 @@ import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyb
 import { useInspectorValueScrub } from "@/lib/useInspectorValueScrub";
 import { appFieldRadius, appFieldShellClass, inspectorControlHeightClass } from "@/lib/appFieldStyles";
 import { cn } from "@/lib/utils";
-import { inspectorIconClass, inspectorIconStroke } from "@/lib/inspectorIconStyles";
+import { inspectorFieldIconButtonClass, inspectorHeaderActionBtnClass, inspectorIconClass, inspectorIconStroke } from "@/lib/inspectorIconStyles";
 import type {
   StrokeSideKey,
   StrokeSidesCustom,
@@ -471,7 +471,7 @@ export function StrokeSidesPicker({
           <button
             type="button"
             onClick={() => setOpen(false)}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
+            className={cn(inspectorHeaderActionBtnClass, "rounded-lg")}
             aria-label="Close stroke sides"
           >
             <X className="h-3.5 w-3.5" strokeWidth={2} />
@@ -509,7 +509,7 @@ export function StrokeSidesPicker({
                 onClick={() => {
                   resetCustomSides();
                 }}
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-muted hover:bg-app-hover hover:text-app-fg disabled:cursor-not-allowed disabled:opacity-40"
+                className={inspectorHeaderActionBtnClass}
               >
                 <RotateCcw className="h-3.5 w-3.5" strokeWidth={2} />
               </InspectorHintIconButton>
@@ -553,11 +553,9 @@ export function StrokeSidesPicker({
             });
           }}
           className={cn(
-            "flex w-7 shrink-0 items-center justify-center border border-app-border bg-app-panel text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg disabled:opacity-40",
-            inspectorControlHeightClass,
-            appFieldRadius,
-          open && "border-app-panel-edge bg-app-inset text-app-fg",
-        )}
+            inspectorFieldIconButtonClass,
+            open && "border-app-panel-edge bg-app-inset text-app-fg",
+          )}
         >
           <SideIcon mode={strokeSides === "custom" ? "custom" : strokeSides} />
         </button>

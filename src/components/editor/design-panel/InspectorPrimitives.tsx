@@ -2,8 +2,9 @@
 
 import { ChevronDown, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { appFieldClass, appFieldClassCompact, inspectorControlHeightClass } from "@/lib/appFieldStyles";
+import { appFieldClass, appFieldClassCompact, inspectorSegmentedHeightClass } from "@/lib/appFieldStyles";
 import {
+  inspectorFieldIconButtonClass,
   inspectorHeaderActionBtnClass,
   inspectorIconClass,
   inspectorIconStroke,
@@ -30,7 +31,7 @@ export function InspectorSegmented<T extends string>({
     <div
       className={cn(
         "flex items-center rounded-md border border-app-border bg-app-inset p-0.5",
-        inspectorControlHeightClass,
+        inspectorSegmentedHeightClass,
         scrollable && "thin-scroll gap-0.5 overflow-x-auto",
       )}
     >
@@ -41,7 +42,7 @@ export function InspectorSegmented<T extends string>({
           disabled={disabled}
           onClick={() => onChange(opt.value)}
           className={cn(
-            "h-6 shrink-0 rounded-[5px] text-ui font-medium transition-colors disabled:opacity-40",
+            "h-full min-h-0 shrink-0 rounded-[5px] text-ui font-medium transition-colors disabled:opacity-40",
             scrollable ? "min-w-[3.5rem] px-2" : "flex-1",
             value === opt.value
               ? "bg-app-panel text-app-fg shadow-sm"
@@ -206,7 +207,7 @@ export function InspectorAddRow({
           type="button"
           disabled={disabled}
           onClick={onAdd}
-          className="flex h-7 w-7 items-center justify-center rounded border border-app-border bg-app-panel text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg disabled:opacity-40"
+          className={inspectorFieldIconButtonClass}
           aria-label={`Add ${label}`}
         >
           <Plus className={inspectorIconClass} strokeWidth={inspectorIconStroke} />

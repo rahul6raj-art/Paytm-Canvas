@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown } from "lucide-react";
+import { Check } from "lucide-react";
 import { useEditorStore } from "@/stores/useEditorStore";
 import {
   BOOLEAN_OPERATION_LABELS,
@@ -16,12 +16,12 @@ import {
   inspectorIconStroke,
 } from "@/lib/inspectorIconStyles";
 import {
+  anchoredMenuStyle,
   useAnchoredDropdownPosition,
   useDismissAnchoredDropdown,
 } from "./useAnchoredDropdown";
 import {
   BooleanMenuIcon,
-  BooleanMenuIconSlot,
   BooleanOperationIconSlot,
   BooleanFlattenIcon,
   EditObjectIcon,
@@ -29,15 +29,16 @@ import {
 } from "./design-panel/BooleanOperationIcons";
 import { EditorHintWrap } from "./EditorHoverHint";
 
-const row =
-  "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-ui text-app-fg hover:bg-app-hover disabled:cursor-not-allowed disabled:opacity-35";
-
 const OPS: { op: BooleanOperation; keys: string }[] = [
   { op: "union", keys: "⌘⌥U" },
   { op: "subtract", keys: "⌘⌥S" },
   { op: "intersect", keys: "⌘⌥I" },
   { op: "exclude", keys: "⌘⌥E" },
 ];
+
+function BooleanMenuSeparator() {
+  return <div className="my-1 border-t border-app-border-subtle" role="separator" />;
+}
 
 export function BooleanOperationsDropdown({
   variant = "toolbar",
@@ -84,10 +85,14 @@ export function BooleanOperationsDropdown({
       <div
         ref={menuRef}
         role="menu"
-        className="fixed z-[120] min-w-[220px] overflow-hidden editor-floating-menu border border-app-border bg-app-panel py-1 shadow-xl"
-        style={{ left: position.left, top: position.top }}
+        aria-label="Boolean operations"
+        data-editor-shell
+        className={cn(
+          "editor-floating-menu editor-menu-dropdown fixed min-w-[220px] overflow-hidden",
+          "z-[120]",
+        )}
+        style={anchoredMenuStyle(position)}
       >
-        <div className="section-heading px-2.5 py-1">Boolean</div>
         {OPS.map(({ op, keys }) => {
           const selected = isBoolGroup && activeOp === op;
           return (
@@ -96,67 +101,78 @@ export function BooleanOperationsDropdown({
               type="button"
               role="menuitem"
               disabled={!canBoolean && !isBoolGroup}
-              className={row}
+              className={cn(
+                "editor-menu-dropdown-item !justify-start gap-2.5",
+                selected && "bg-app-inset font-medium text-app-fg",
+              )}
               onClick={() => runOp(op)}
             >
               <BooleanOperationIconSlot op={op} />
-              <span className="min-w-0 flex-1">{BOOLEAN_OPERATION_LABELS[op]}</span>
+              <span className="min-w-0 flex-1 truncate">{BOOLEAN_OPERATION_LABELS[op]}</span>
               {selected ? (
-                <Check className={cn(inspectorIconClass, "text-accent")} strokeWidth={inspectorIconStroke} />
+                <Check
+                  className={cn(inspectorIconClass, "shrink-0 text-app-fg")}
+                  strokeWidth={inspectorIconStroke}
+                />
               ) : (
-                <span className="font-mono text-ui text-app-subtle">{keys}</span>
+                <span className="editor-menu-dropdown-shortcut">{keys}</span>
               )}
             </button>
           );
         })}
-        <div className="my-1 h-px bg-app-hover" />
+
+        <BooleanMenuSeparator />
+
         <button
           type="button"
           role="menuitem"
           disabled={!isBoolGroup}
-          className={row}
+          className="editor-menu-dropdown-item !justify-start gap-2.5"
           onClick={() => {
             flattenSelection();
             setOpen(false);
           }}
         >
-          <BooleanMenuIconSlot>
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center text-app-fg">
             <BooleanFlattenIcon />
-          </BooleanMenuIconSlot>
-          <span className="min-w-0 flex-1">Flatten</span>
-          <span className="font-mono text-ui text-app-subtle">⌘⌥F</span>
+          </span>
+          <span className="min-w-0 flex-1 truncate">Flatten</span>
+          <span className="editor-menu-dropdown-shortcut">⌘⌥F</span>
         </button>
+
         <button
           type="button"
           role="menuitem"
           disabled={!isBoolGroup}
-          className={row}
+          className="editor-menu-dropdown-item !justify-start gap-2.5"
           onClick={() => {
             if (single) enterObjectEditMode(single.id);
             setOpen(false);
           }}
         >
-          <BooleanMenuIconSlot>
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center text-app-fg">
             <EditObjectIcon />
-          </BooleanMenuIconSlot>
-          <span className="min-w-0 flex-1">Edit object</span>
+          </span>
+          <span className="min-w-0 flex-1 truncate">Edit object</span>
         </button>
-        <div className="my-1 h-px bg-app-hover" />
+
+        <BooleanMenuSeparator />
+
         <button
           type="button"
           role="menuitem"
           disabled={!canBoolean}
-          className={row}
+          className="editor-menu-dropdown-item !justify-start gap-2.5"
           onClick={() => {
             useSelectionAsMask();
             setOpen(false);
           }}
         >
-          <BooleanMenuIconSlot>
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center text-app-fg">
             <UseAsMaskIcon />
-          </BooleanMenuIconSlot>
-          <span className="min-w-0 flex-1">Use as mask</span>
-          <span className="font-mono text-ui text-app-subtle">⌘⌥M</span>
+          </span>
+          <span className="min-w-0 flex-1 truncate">Use as mask</span>
+          <span className="editor-menu-dropdown-shortcut">⌘⌥M</span>
         </button>
       </div>
     ) : null;
@@ -177,16 +193,11 @@ export function BooleanOperationsDropdown({
               disabled={!enabled}
               className={cn(
                 inspectorHeaderActionBtnClass,
-                "gap-0.5",
-                open && "bg-app-hover text-app-fg",
-                enabled && "text-app-muted",
+                "h-8 min-h-8 w-8 min-w-8 max-w-8",
+                open ? "bg-app-hover text-app-fg" : enabled ? "text-app-muted" : undefined,
               )}
             >
-              <BooleanMenuIcon />
-              <ChevronDown
-                className={cn(inspectorIconClass, "h-3 w-3 opacity-70")}
-                strokeWidth={inspectorIconStroke}
-              />
+              <BooleanMenuIcon className="h-[18px] w-[18px]" />
             </button>
           </EditorHintWrap>
         </div>
@@ -206,7 +217,7 @@ export function BooleanOperationsDropdown({
             onClick={() => setOpen((v) => !v)}
             className={cn(
               "flex h-8 items-center gap-1 rounded-md border border-transparent px-2 text-app-muted transition-colors hover:border-app-border hover:bg-app-hover hover:text-app-fg",
-              open && "border-app-border bg-app-hover text-white",
+              open && "border-app-border bg-app-hover text-app-fg",
               enabled && "text-app-muted",
             )}
           >

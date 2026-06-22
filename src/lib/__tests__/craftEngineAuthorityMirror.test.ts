@@ -48,7 +48,7 @@ describe("craftEngineAuthorityMirror", () => {
     assert.equal(isWasmDocumentMutationIdle(), false);
   });
 
-  it("flushes deferred reconcile only when queued", () => {
+  it("clears deferred reconcile without applying WASM snapshot to store", () => {
     assert.equal(flushDeferredWasmReconcile(), false);
     requestDeferredWasmReconcile();
     assert.equal(flushDeferredWasmReconcile(), false);

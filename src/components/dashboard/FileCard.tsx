@@ -58,7 +58,7 @@ export function FileCard({
         onClick={onOpen}
         role="presentation"
       >
-        <div className="absolute left-2 top-2 flex flex-wrap gap-1">
+        <div className="absolute left-2 top-2 z-10 flex flex-wrap gap-1">
           <FileBadge kind={fileBadge} />
         </div>
         {onDelete ? (
@@ -70,13 +70,13 @@ export function FileCard({
                 e.stopPropagation();
                 onDelete();
               }}
-              className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-md border border-black/10 bg-black/30 text-white/90 backdrop-blur-sm transition-colors hover:bg-red-600/90"
+              className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-md border border-black/10 bg-black/30 text-white/90 backdrop-blur-sm transition-colors hover:bg-red-600/90"
             >
               <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
             </button>
           </EditorHintWrap>
         ) : null}
-        <div className="absolute inset-0 flex items-center justify-center bg-black/[0.08] dark:bg-black/20">
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/[0.08] dark:bg-black/20">
           <LayoutTemplate className="h-10 w-10 text-white/90 drop-shadow-sm" strokeWidth={1.25} />
         </div>
       </div>

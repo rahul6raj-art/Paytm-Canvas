@@ -11,20 +11,25 @@ import {
   subscribeAutoLayoutDragPreview,
   getAutoLayoutDragPreview,
   autoLayoutPaddingGuideSize,
-  autoLayoutPointInsideGuide,
 } from "@/lib/autoLayout";
 import { shouldClipChildren } from "@/lib/clipChildren";
+import {
+  worldPointToOverlay,
+  worldRectToOverlay,
+  screenPxToOverlay,
+  type OverlaySpace,
+} from "@/lib/canvasOverlaySpace";
 import {
   AUTO_LAYOUT_SPACING_LINE_SCREEN_PX,
   AUTO_LAYOUT_SPACING_TICK_SCREEN_PX,
   CANVAS_HANDLE_SCREEN_PX,
   CANVAS_VISUAL,
-  screenPxToWorld,
 } from "@/lib/canvasVisual";
 import { clientToWorldFromDocument } from "@/lib/canvasCoordinates";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { useCanvasToWorld } from "./CanvasToWorldContext";
 import { useAutoLayoutHandlesGate } from "./useAutoLayoutHandlesGate";
+import { useCanvasOverlaySpace } from "./useCanvasOverlaySpace";
 import { CanvasEditValueBadge } from "./CanvasEditValueBadge";
 
 function localToWorld(
@@ -39,8 +44,20 @@ function localToWorld(
   return { x: (parent?.x ?? 0) + local.x, y: (parent?.y ?? 0) + local.y };
 }
 
+function parentLocalToOverlay(
+  parentId: string,
+  local: { x: number; y: number },
+  nodes: ReturnType<typeof useEditorStore.getState>["nodes"],
+  childOrder: ReturnType<typeof useEditorStore.getState>["childOrder"],
+  overlay: OverlaySpace,
+): { x: number; y: number } {
+  const world = localToWorld(parentId, local, nodes, childOrder);
+  return worldPointToOverlay(world.x, world.y, overlay);
+}
+
 const GAP_COLOR = "#ff24ff";
 const PAD_COLOR = "#0d99ff";
+const HIT_SCREEN_PX = 28;
 
 /** Figma-style spacing, padding, and fill divider handles on auto-layout frames. */
 export function AutoLayoutHandlesOverlay() {
@@ -49,6 +66,7 @@ export function AutoLayoutHandlesOverlay() {
   const childOrder = useEditorStore((s) => s.childOrder);
   const zoom = useEditorStore((s) => s.zoom);
   const pan = useEditorStore((s) => s.pan);
+  const overlay = useCanvasOverlaySpace();
   const clientToWorld = useCanvasToWorld();
 
   const preview = useSyncExternalStore(
@@ -62,17 +80,18 @@ export function AutoLayoutHandlesOverlay() {
     return getAutoLayoutInteractionHandles(id, nodes, childOrder);
   }, [show, id, nodes, childOrder]);
 
-  const handlePx = screenPxToWorld(CANVAS_HANDLE_SCREEN_PX, zoom);
-  const hitPx = screenPxToWorld(14, zoom);
-  const lineW = screenPxToWorld(AUTO_LAYOUT_SPACING_LINE_SCREEN_PX, zoom);
-  const spacingTickHalf = screenPxToWorld(AUTO_LAYOUT_SPACING_TICK_SCREEN_PX, zoom);
+  const handlePx = screenPxToOverlay(CANVAS_HANDLE_SCREEN_PX, overlay);
+  const hitPx = screenPxToOverlay(14, overlay);
+  const hitSize = screenPxToOverlay(HIT_SCREEN_PX, overlay);
+  const lineW = AUTO_LAYOUT_SPACING_LINE_SCREEN_PX;
+  const spacingTickHalf = AUTO_LAYOUT_SPACING_TICK_SCREEN_PX;
 
-  const toWorld = useCallback(
+  const toOverlay = useCallback(
     (local: { x: number; y: number }) => {
       if (!id) return local;
-      return localToWorld(id, local, nodes, childOrder);
+      return parentLocalToOverlay(id, local, nodes, childOrder, overlay);
     },
-    [id, nodes, childOrder],
+    [id, nodes, childOrder, overlay],
   );
 
   const resolveClientToWorld = useCallback(
@@ -141,16 +160,16 @@ export function AutoLayoutHandlesOverlay() {
     const gapIndex = preview.gapIndex ?? 0;
     const handle = handles.spacing.find((h) => h.index === gapIndex) ?? handles.spacing[0];
     if (!handle) return null;
-    const world = toWorld({ x: handle.localX, y: handle.localY });
-    return { x: world.x, y: world.y, label: preview.label };
-  }, [preview, id, handles, toWorld]);
+    const screen = toOverlay({ x: handle.localX, y: handle.localY });
+    return { x: screen.x, y: screen.y, label: preview.label };
+  }, [preview, id, handles, toOverlay]);
 
   const otherBadge = useMemo(() => {
     if (!preview || preview.nodeId !== id || preview.kind === "spacing") return null;
     if (preview.badgeX == null || preview.badgeY == null) return null;
-    const world = toWorld({ x: preview.badgeX, y: preview.badgeY });
-    return { x: world.x, y: world.y, label: preview.label };
-  }, [preview, id, toWorld]);
+    const screen = toOverlay({ x: preview.badgeX, y: preview.badgeY });
+    return { x: screen.x, y: screen.y, label: preview.label };
+  }, [preview, id, toOverlay]);
 
   if (!show || !id || !handles) return null;
 
@@ -165,33 +184,28 @@ export function AutoLayoutHandlesOverlay() {
   };
 
   const guideSize = autoLayoutPaddingGuideSize(id, nodes, childOrder);
-  const clipGuides = shouldClipChildren(parent);
   const innerW = Math.max(0, guideSize.width - pad.left - pad.right);
   const innerH = Math.max(0, guideSize.height - pad.top - pad.bottom);
 
-  const spacingHandles = handles.spacing.filter((h) =>
-    clipGuides
-      ? autoLayoutPointInsideGuide(h.localX, h.localY, guideSize, parent)
-      : true,
-  );
-  const fillDividers = handles.fillDividers.filter((h) =>
-    clipGuides
-      ? autoLayoutPointInsideGuide(h.localX, h.localY, guideSize, parent)
-      : true,
-  );
+  const spacingHandles = handles.spacing;
+  const fillDividers = handles.fillDividers;
 
-  const frameClipId = clipGuides ? `al-frame-clip-${id}` : null;
-  const frameClipRect = clipGuides
-    ? (() => {
-        const nw = toWorld({ x: 0, y: 0 });
-        const se = toWorld({ x: parent.width, y: parent.height });
-        return {
-          x: Math.min(nw.x, se.x),
-          y: Math.min(nw.y, se.y),
-          width: Math.abs(se.x - nw.x),
-          height: Math.abs(se.y - nw.y),
-        };
-      })()
+  const clipFrame = shouldClipChildren(parent);
+  const frameClipId = clipFrame ? `al-frame-clip-${id}` : null;
+  const frameClipRect = clipFrame
+    ? worldRectToOverlay(
+        (() => {
+          const nw = localToWorld(id, { x: 0, y: 0 }, nodes, childOrder);
+          const se = localToWorld(id, { x: parent.width, y: parent.height }, nodes, childOrder);
+          return {
+            x: Math.min(nw.x, se.x),
+            y: Math.min(nw.y, se.y),
+            width: Math.abs(se.x - nw.x),
+            height: Math.abs(se.y - nw.y),
+          };
+        })(),
+        overlay,
+      )
     : null;
 
   const padGuides = [
@@ -200,14 +214,14 @@ export function AutoLayoutHandlesOverlay() {
     { x1: pad.left, y1: pad.top + innerH, x2: pad.left + innerW, y2: pad.top + innerH, color: PAD_COLOR },
     { x1: pad.left, y1: pad.top, x2: pad.left, y2: pad.top + innerH, color: PAD_COLOR },
   ].map((g) => {
-    const a = toWorld({ x: g.x1, y: g.y1 });
-    const b = toWorld({ x: g.x2, y: g.y2 });
+    const a = toOverlay({ x: g.x1, y: g.y1 });
+    const b = toOverlay({ x: g.x2, y: g.y2 });
     return { ...g, x1: a.x, y1: a.y, x2: b.x, y2: b.y };
   });
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-[46] overflow-visible" aria-hidden>
-      <svg className="absolute inset-0 h-full w-full overflow-visible">
+    <div className="pointer-events-none absolute inset-0 z-[38] overflow-visible" aria-hidden>
+      <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
         {frameClipId && frameClipRect ? (
           <defs>
             <clipPath id={frameClipId}>
@@ -221,59 +235,48 @@ export function AutoLayoutHandlesOverlay() {
           </defs>
         ) : null}
         <g clipPath={frameClipId ? `url(#${frameClipId})` : undefined}>
-        {padGuides.map((g, i) => (
-          <line
-            key={`pad-${i}`}
-            x1={g.x1}
-            y1={g.y1}
-            x2={g.x2}
-            y2={g.y2}
-            stroke={g.color}
-            strokeWidth={lineW}
-            strokeDasharray={`${lineW * 3} ${lineW * 2}`}
-            opacity={0.85}
-          />
-        ))}
-        {spacingHandles.map((h) => {
-          const a =
-            handles.mode === "horizontal"
-              ? toWorld({ x: h.localX, y: h.localY - spacingTickHalf })
-              : toWorld({ x: h.localX - spacingTickHalf, y: h.localY });
-          const b =
-            handles.mode === "horizontal"
-              ? toWorld({ x: h.localX, y: h.localY + spacingTickHalf })
-              : toWorld({ x: h.localX + spacingTickHalf, y: h.localY });
-          return (
+          {padGuides.map((g, i) => (
             <line
-              key={`gap-${h.index}`}
-              x1={a.x}
-              y1={a.y}
-              x2={b.x}
-              y2={b.y}
-              stroke={GAP_COLOR}
+              key={`pad-${i}`}
+              x1={g.x1}
+              y1={g.y1}
+              x2={g.x2}
+              y2={g.y2}
+              stroke={g.color}
               strokeWidth={lineW}
+              strokeDasharray={`${lineW * 3} ${lineW * 2}`}
+              opacity={0.85}
             />
-          );
-        })}
+          ))}
+          {spacingHandles.map((h) => {
+            const center = toOverlay({ x: h.localX, y: h.localY });
+            const a =
+              handles.mode === "horizontal"
+                ? { x: center.x, y: center.y - spacingTickHalf }
+                : { x: center.x - spacingTickHalf, y: center.y };
+            const b =
+              handles.mode === "horizontal"
+                ? { x: center.x, y: center.y + spacingTickHalf }
+                : { x: center.x + spacingTickHalf, y: center.y };
+            return (
+              <line
+                key={`gap-${h.index}`}
+                x1={a.x}
+                y1={a.y}
+                x2={b.x}
+                y2={b.y}
+                stroke={GAP_COLOR}
+                strokeWidth={lineW}
+              />
+            );
+          })}
         </g>
       </svg>
 
       {spacingHandles.map((h) => {
         const isHorizontal = handles.mode === "horizontal";
-        const lineA = isHorizontal
-          ? toWorld({ x: h.localX, y: h.localY - spacingTickHalf })
-          : toWorld({ x: h.localX - spacingTickHalf, y: h.localY });
-        const lineB = isHorizontal
-          ? toWorld({ x: h.localX, y: h.localY + spacingTickHalf })
-          : toWorld({ x: h.localX + spacingTickHalf, y: h.localY });
-        const minHit = screenPxToWorld(24, zoom);
-        const x0 = Math.min(lineA.x, lineB.x);
-        const x1 = Math.max(lineA.x, lineB.x);
-        const y0 = Math.min(lineA.y, lineB.y);
-        const y1 = Math.max(lineA.y, lineB.y);
-        const hitW = Math.max(x1 - x0, minHit);
-        const hitH = Math.max(y1 - y0, minHit);
-        const arrowPx = screenPxToWorld(12, zoom);
+        const center = toOverlay({ x: h.localX, y: h.localY });
+        const arrowPx = screenPxToOverlay(12, overlay);
         return (
           <button
             key={`gap-hit-${h.index}`}
@@ -282,10 +285,11 @@ export function AutoLayoutHandlesOverlay() {
             aria-label="Adjust item spacing"
             className="pointer-events-auto absolute touch-none flex items-center justify-center border-0 bg-[rgba(255,36,255,0.14)] p-0"
             style={{
-              left: (x0 + x1) / 2 - hitW / 2,
-              top: (y0 + y1) / 2 - hitH / 2,
-              width: hitW,
-              height: hitH,
+              left: center.x,
+              top: center.y,
+              width: hitSize,
+              height: hitSize,
+              transform: "translate(-50%, -50%)",
               cursor: isHorizontal ? "ew-resize" : "ns-resize",
             }}
             onPointerDown={onSpacingDown(h.index)}
@@ -302,7 +306,7 @@ export function AutoLayoutHandlesOverlay() {
       })}
 
       {handles.padding.map((h) => {
-        const w = toWorld({ x: h.localX, y: h.localY });
+        const screen = toOverlay({ x: h.localX, y: h.localY });
         const cursor =
           h.side === "top" || h.side === "bottom" ? "ns-resize" : "ew-resize";
         return (
@@ -313,10 +317,11 @@ export function AutoLayoutHandlesOverlay() {
             aria-label={`Adjust ${h.side} padding`}
             className="pointer-events-auto absolute rounded-sm border border-white shadow-sm"
             style={{
-              left: w.x - handlePx / 2,
-              top: w.y - handlePx / 2,
+              left: screen.x,
+              top: screen.y,
               width: handlePx,
               height: handlePx,
+              transform: "translate(-50%, -50%)",
               background: PAD_COLOR,
               cursor,
             }}
@@ -326,7 +331,7 @@ export function AutoLayoutHandlesOverlay() {
       })}
 
       {fillDividers.map((h) => {
-        const w = toWorld({ x: h.localX, y: h.localY });
+        const screen = toOverlay({ x: h.localX, y: h.localY });
         return (
           <button
             key={`fill-${h.index}`}
@@ -334,10 +339,11 @@ export function AutoLayoutHandlesOverlay() {
             aria-label="Adjust fill distribution"
             className="pointer-events-auto absolute rounded-full border-2 border-white"
             style={{
-              left: w.x - hitPx / 2,
-              top: w.y - hitPx / 2,
+              left: screen.x,
+              top: screen.y,
               width: hitPx,
               height: hitPx,
+              transform: "translate(-50%, -50%)",
               background: CANVAS_VISUAL.selection,
               cursor: handles.mode === "horizontal" ? "ew-resize" : "ns-resize",
             }}
@@ -353,12 +359,14 @@ export function AutoLayoutHandlesOverlay() {
           zoom={zoom}
           placement="center"
           background={GAP_COLOR}
+          screenSpace
+          stableWidth
         >
           {spacingBadge.label}
         </CanvasEditValueBadge>
       ) : null}
       {otherBadge ? (
-        <CanvasEditValueBadge x={otherBadge.x} y={otherBadge.y} zoom={zoom}>
+        <CanvasEditValueBadge x={otherBadge.x} y={otherBadge.y} zoom={zoom} screenSpace>
           {otherBadge.label}
         </CanvasEditValueBadge>
       ) : null}

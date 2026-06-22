@@ -172,4 +172,31 @@ describe("applyAutoLayoutToSelection — children inside frame", () => {
     assert.deepEqual(result!.childOrder.f, [alFrameId]);
     assert.deepEqual(result!.childOrder[alFrameId], ["a", "b"]);
   });
+
+  it("preserves visual gap when selection order differs from spatial order", () => {
+    const nodes: Record<string, EditorNode> = {
+      a: rect("a", 0, 0, 40, 20),
+      b: rect("b", 50, 0, 40, 20),
+    };
+    const childOrder = { [EDITOR_ROOT_KEY]: ["a", "b"] };
+
+    const result = applyAutoLayoutToSelection(nodes, childOrder, ["b", "a"]);
+    assert.ok(result);
+    const frame = result!.nodes[result!.selectedIds[0]!]!;
+    assert.equal(frame.layoutGap, 10);
+    assert.equal(result!.nodes.b.x, 50);
+  });
+
+  it("preserves gap when enabling auto layout on an existing frame", () => {
+    const nodes: Record<string, EditorNode> = {
+      f: frame("f"),
+      a: rect("a", 10, 10, 40, 20, { parentId: "f" }),
+      b: rect("b", 60, 10, 40, 20, { parentId: "f" }),
+    };
+    const childOrder = { f: ["b", "a"] };
+
+    const result = applyAutoLayoutToContainer(nodes, childOrder, "f");
+    assert.ok(result);
+    assert.equal(result!.nodes.f.layoutGap, 10);
+  });
 });

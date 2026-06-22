@@ -69,17 +69,22 @@ function RotationAngleInput({
   onCommit,
   disabled,
   instanceKey = "",
+  mixed = false,
 }: {
   value: number;
   onCommit: (deg: number) => void;
   disabled?: boolean;
   instanceKey?: string;
+  mixed?: boolean;
 }) {
   const [text, setText] = useState(() => formatRotation(value));
+  const [focused, setFocused] = useState(false);
 
   useEffect(() => {
-    setText(formatRotation(value));
-  }, [value, instanceKey]);
+    if (!focused && !mixed) setText(formatRotation(value));
+  }, [value, instanceKey, focused, mixed]);
+
+  const showMixed = mixed && !focused;
 
   const commitValue = (deg: number) => {
     const next = normalizeRotation(deg);
@@ -113,10 +118,19 @@ function RotationAngleInput({
         inputMode="decimal"
         disabled={disabled}
         aria-label="Rotation"
-        className={cn(appFieldInnerClass, "font-mono tabular-nums")}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
+        className={cn(appFieldInnerClass, "font-mono tabular-nums", showMixed && "text-app-muted")}
+        value={showMixed ? "Mixed" : text}
+        onFocus={() => {
+          setFocused(true);
+          if (mixed) setText(formatRotation(value));
+        }}
+        onChange={(e) => {
+          if (showMixed) return;
+          setText(e.target.value);
+        }}
         onBlur={() => {
+          setFocused(false);
+          if (showMixed) return;
           if (!apply(text)) setText(formatRotation(value));
         }}
         onKeyDown={(e) => {
@@ -190,6 +204,7 @@ export function RotationTransformRow({
   flipVertical,
   disabled,
   instanceKey,
+  mixedRotation,
   onRotationCommit,
   onRotate90,
   onFlipHorizontal,
@@ -200,6 +215,7 @@ export function RotationTransformRow({
   flipVertical?: boolean;
   disabled?: boolean;
   instanceKey?: string;
+  mixedRotation?: boolean;
   onRotationCommit: (deg: number) => void;
   onRotate90: () => void;
   onFlipHorizontal: () => void;
@@ -213,6 +229,7 @@ export function RotationTransformRow({
           value={rotation}
           disabled={disabled}
           instanceKey={instanceKey}
+          mixed={mixedRotation}
           onCommit={onRotationCommit}
         />
         <TransformActions

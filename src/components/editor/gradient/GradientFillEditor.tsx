@@ -27,6 +27,7 @@ import { InspectorColorPickerAside } from "../InspectorColorPickerAside";
 import { InspectorHintIconButton } from "../design-panel/InspectorPrimitives";
 import { GradientRampBar, GradientStopRow } from "./GradientRampBar";
 import { appFieldInnerClass, appFieldShellClass, inspectorRowGapClass } from "@/lib/appFieldStyles";
+import { inspectorFieldIconButtonClass, inspectorLucideProps } from "@/lib/inspectorIconStyles";
 import { cn } from "@/lib/utils";
 
 const KIND_OPTIONS: { value: GradientKind; label: string }[] = [
@@ -393,12 +394,9 @@ export function GradientFillEditor({
               title="Reverse gradient"
               disabled={disabled}
               onClick={() => commit((prev) => reverseGradientStops(prev))}
-              className={cn(
-                appFieldShellClass,
-                "h-7 w-7 shrink-0 justify-center text-app-muted hover:bg-app-hover hover:text-app-fg disabled:opacity-40",
-              )}
+              className={inspectorFieldIconButtonClass}
             >
-              <FlipHorizontal2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+              <FlipHorizontal2 {...inspectorLucideProps()} />
             </InspectorHintIconButton>
             <GradientAngleInput
               value={gradientAngleDeg(gradient)}

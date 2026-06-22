@@ -86,11 +86,14 @@ export function clearDeferredWasmReconcile(): void {
   deferredWasmReconcile = false;
 }
 
-/** Run a queued reconcile after pointer-up / transform end. */
+/**
+ * Drop queued WASM→store reconcile. Geometry is store-owned during editing;
+ * pulling WASM snapshots after transforms corrupts x/y/width/height.
+ */
 export function flushDeferredWasmReconcile(): boolean {
   if (!deferredWasmReconcile) return false;
   deferredWasmReconcile = false;
-  return reconcileStoreFromWasmSnapshot();
+  return false;
 }
 
 /**
@@ -103,7 +106,7 @@ export function reconcileStoreFromWasmWhenIdle(): boolean {
     return false;
   }
   deferredWasmReconcile = false;
-  return reconcileStoreFromWasmSnapshot();
+  return false;
 }
 
 /** Apply WASM `snapshotDocument()` to Zustand when it differs from the current store slice. */
@@ -122,7 +125,9 @@ export function reconcileStoreFromWasmSnapshot(): boolean {
     if (!patch) return false;
 
     const st = useEditorStore.getState();
-    const merged = mergeWasmSnapshotWithStore(st.nodes, patch);
+    const merged = mergeWasmSnapshotWithStore(st.nodes, patch, {
+      preserveStoreGeometry: true,
+    });
     if (storePatchMatchesDocument(merged, st.nodes, st.childOrder)) {
       advanceSyncBaselineFromPatch(merged);
       return false;

@@ -12,7 +12,7 @@ import {
   inspectorRowActionBtnClass,
 } from "@/lib/inspectorIconStyles";
 import { cn } from "@/lib/utils";
-import { appFieldShellClass, inspectorRowGapClass } from "@/lib/appFieldStyles";
+import { appFieldShellClass, inspectorOpacityInputClass, inspectorOpacitySegmentClass, inspectorOpacitySuffixClass, inspectorRowGapClass } from "@/lib/appFieldStyles";
 import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
 import { useInspectorValueScrub } from "@/lib/useInspectorValueScrub";
 import { isColorValue, type ColorTokenValue, type DesignToken } from "@/lib/designTokens";
@@ -128,75 +128,81 @@ export function GradientFillInspectorRow({
 
   return (
     <div className={cn("flex items-center", inspectorRowGapClass)}>
-      <div
-        className={cn(
-          appFieldShellClass,
-          "min-w-0 flex-1",
-          rowDisabled && "opacity-45",
-          (editorOpen || opacityFocused) && "border-app-panel-edge ring-1 ring-app-panel-edge",
-        )}
-      >
-        <button
-          ref={anchorRef}
-          type="button"
-          disabled={rowDisabled}
-          onClick={onOpenEditor}
+      <div className="flex min-w-0 flex-1 basis-0 items-stretch overflow-visible">
+        <div
           className={cn(
-            "flex h-7 min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-1.5 text-left disabled:cursor-not-allowed",
-            editorOpen && "bg-app-inset",
+            appFieldShellClass,
+            "min-w-0 flex-1 basis-0 rounded-r-none border-r-0",
+            rowDisabled && "opacity-45",
+            (editorOpen || opacityFocused) && "border-app-panel-edge ring-1 ring-app-panel-edge",
           )}
-          aria-expanded={editorOpen}
-          aria-haspopup="dialog"
-          aria-label="Edit gradient fill"
         >
-          <div
-            className="h-4 w-4 shrink-0 rounded-sm border border-app-border shadow-inner"
-            style={{ background: gradientInspectorBarPaintCss(gradient, fillOpacity) }}
-            aria-hidden
-          />
-          <span className="truncate text-ui text-app-field-fg">{kindLabel}</span>
-        </button>
-        <div className="h-5 w-px shrink-0 bg-app-border" aria-hidden />
-        <input
-          type="text"
-          inputMode="numeric"
-          disabled={rowDisabled}
-          aria-label="Opacity percent"
-          {...bindOpacityScrub(
-            "h-full w-9 shrink-0 border-0 bg-transparent px-1 py-0 text-right font-mono text-ui tabular-nums text-app-field-fg focus-visible:outline-none disabled:cursor-not-allowed",
-            opacityFocused,
+          <button
+            ref={anchorRef}
+            type="button"
+            disabled={rowDisabled}
+            onClick={onOpenEditor}
+            className={cn(
+              "flex h-7 min-w-0 w-full items-center gap-1.5 border-0 bg-transparent px-1.5 text-left disabled:cursor-not-allowed",
+              editorOpen && "bg-app-inset",
+            )}
+            aria-expanded={editorOpen}
+            aria-haspopup="dialog"
+            aria-label="Edit gradient fill"
+          >
+            <div
+              className="h-4 w-4 shrink-0 rounded-sm border border-app-border shadow-inner"
+              style={{ background: gradientInspectorBarPaintCss(gradient, fillOpacity) }}
+              aria-hidden
+            />
+            <span className="truncate text-ui text-app-field-fg">{kindLabel}</span>
+          </button>
+        </div>
+        <div
+          className={cn(
+            inspectorOpacitySegmentClass,
+            rowDisabled && "opacity-45",
+            (editorOpen || opacityFocused) && "border-app-panel-edge ring-1 ring-app-panel-edge",
           )}
-          value={opacityText}
-          onFocus={() => setOpacityFocused(true)}
-          onChange={(e) => {
-            const digits = e.target.value.replace(/[^\d]/g, "").slice(0, 3);
-            setOpacityText(digits);
-            if (digits !== "") {
-              const n = parseInt(digits, 10);
-              if (Number.isFinite(n)) commitPercent(n);
-            }
-          }}
-          onBlur={() => {
-            if (opacityScrubActiveRef.current) return;
-            setOpacityFocused(false);
-            if (!applyDraft(opacityText)) setOpacityText(String(percent));
-          }}
-          onKeyDown={(e) => {
-            handlePanelFieldKeyDown(e, {
-              onEnter: () => {
-                if (!applyDraft(opacityText)) setOpacityText(String(percent));
-                e.currentTarget.blur();
-              },
-              onArrowNudge: (dir, shift, alt) => {
-                const step = keyboardNudgeStep(1, 0, shift, alt) * dir;
-                const current = parseInt(opacityText, 10);
-                const base = Number.isFinite(current) ? current : percent;
-                commitPercent(base + step);
-              },
-            });
-          }}
-        />
-        <span className="shrink-0 pr-2 text-ui text-app-subtle">%</span>
+        >
+          <input
+            type="text"
+            inputMode="numeric"
+            disabled={rowDisabled}
+            aria-label="Opacity percent"
+            {...bindOpacityScrub(inspectorOpacityInputClass, opacityFocused)}
+            value={opacityText}
+            onFocus={() => setOpacityFocused(true)}
+            onChange={(e) => {
+              const digits = e.target.value.replace(/[^\d]/g, "").slice(0, 3);
+              setOpacityText(digits);
+              if (digits !== "") {
+                const n = parseInt(digits, 10);
+                if (Number.isFinite(n)) commitPercent(n);
+              }
+            }}
+            onBlur={() => {
+              if (opacityScrubActiveRef.current) return;
+              setOpacityFocused(false);
+              if (!applyDraft(opacityText)) setOpacityText(String(percent));
+            }}
+            onKeyDown={(e) => {
+              handlePanelFieldKeyDown(e, {
+                onEnter: () => {
+                  if (!applyDraft(opacityText)) setOpacityText(String(percent));
+                  e.currentTarget.blur();
+                },
+                onArrowNudge: (dir, shift, alt) => {
+                  const step = keyboardNudgeStep(1, 0, shift, alt) * dir;
+                  const current = parseInt(opacityText, 10);
+                  const base = Number.isFinite(current) ? current : percent;
+                  commitPercent(base + step);
+                },
+              });
+            }}
+          />
+          <span className={inspectorOpacitySuffixClass}>%</span>
+        </div>
       </div>
       <InspectorHintIconButton
         title={visible ? "Hide fill" : "Show fill"}
@@ -329,81 +335,87 @@ export function MediaFillInspectorRow({
   return (
     <>
       <div className={cn("flex items-center", inspectorRowGapClass)}>
-        <div
-          className={cn(
-            appFieldShellClass,
-            "min-w-0 flex-1",
-            rowDisabled && "opacity-45",
-            (pickerOpen || opacityFocused) && "border-app-panel-edge ring-1 ring-app-panel-edge",
-          )}
-        >
-          <button
-            ref={anchorRef}
-            type="button"
-            disabled={rowDisabled}
-            onClick={onTogglePicker}
+        <div className="flex min-w-0 flex-1 basis-0 items-stretch overflow-visible">
+          <div
             className={cn(
-              "flex h-7 min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-1.5 text-left disabled:cursor-not-allowed",
-              pickerOpen && "bg-app-inset",
+              appFieldShellClass,
+              "min-w-0 flex-1 basis-0 rounded-r-none border-r-0",
+              rowDisabled && "opacity-45",
+              (pickerOpen || opacityFocused) && "border-app-panel-edge ring-1 ring-app-panel-edge",
             )}
-            aria-expanded={pickerOpen}
-            aria-haspopup="dialog"
-            aria-label={`Choose ${kindLabel.toLowerCase()} fill`}
           >
-            <div
-              className="h-4 w-4 shrink-0 rounded-sm border border-app-border shadow-inner"
-              style={
-                previewCss
-                  ? { background: previewCss, backgroundColor: "#334155" }
-                  : { background: "#334155" }
-              }
-              aria-hidden
-            />
-            <span className="truncate text-ui text-app-field-fg">
-              {asset?.name ?? `Choose ${kindLabel.toLowerCase()}`}
-            </span>
-          </button>
-          <div className="h-5 w-px shrink-0 bg-app-border" aria-hidden />
-          <input
-            type="text"
-            inputMode="numeric"
-            disabled={rowDisabled}
-            aria-label="Opacity percent"
-            {...bindOpacityScrub(
-              "h-full w-9 shrink-0 border-0 bg-transparent px-1 py-0 text-right font-mono text-ui tabular-nums text-app-field-fg focus-visible:outline-none disabled:cursor-not-allowed",
-              opacityFocused,
+            <button
+              ref={anchorRef}
+              type="button"
+              disabled={rowDisabled}
+              onClick={onTogglePicker}
+              className={cn(
+                "flex h-7 min-w-0 w-full items-center gap-1.5 border-0 bg-transparent px-1.5 text-left disabled:cursor-not-allowed",
+                pickerOpen && "bg-app-inset",
+              )}
+              aria-expanded={pickerOpen}
+              aria-haspopup="dialog"
+              aria-label={`Choose ${kindLabel.toLowerCase()} fill`}
+            >
+              <div
+                className="h-4 w-4 shrink-0 rounded-sm border border-app-border shadow-inner"
+                style={
+                  previewCss
+                    ? { background: previewCss, backgroundColor: "#334155" }
+                    : { background: "#334155" }
+                }
+                aria-hidden
+              />
+              <span className="truncate text-ui text-app-field-fg">
+                {asset?.name ?? `Choose ${kindLabel.toLowerCase()}`}
+              </span>
+            </button>
+          </div>
+          <div
+            className={cn(
+              inspectorOpacitySegmentClass,
+              rowDisabled && "opacity-45",
+              (pickerOpen || opacityFocused) && "border-app-panel-edge ring-1 ring-app-panel-edge",
             )}
-            value={opacityText}
-            onFocus={() => setOpacityFocused(true)}
-            onChange={(e) => {
-              const digits = e.target.value.replace(/[^\d]/g, "").slice(0, 3);
-              setOpacityText(digits);
-              if (digits !== "") {
-                const n = parseInt(digits, 10);
-                if (Number.isFinite(n)) commitPercent(n);
-              }
-            }}
-            onBlur={() => {
-              if (opacityScrubActiveRef.current) return;
-              setOpacityFocused(false);
-              if (!applyDraft(opacityText)) setOpacityText(String(percent));
-            }}
-            onKeyDown={(e) => {
-              handlePanelFieldKeyDown(e, {
-                onEnter: () => {
-                  if (!applyDraft(opacityText)) setOpacityText(String(percent));
-                  e.currentTarget.blur();
-                },
-                onArrowNudge: (dir, shift, alt) => {
-                  const step = keyboardNudgeStep(1, 0, shift, alt) * dir;
-                  const current = parseInt(opacityText, 10);
-                  const base = Number.isFinite(current) ? current : percent;
-                  commitPercent(base + step);
-                },
-              });
-            }}
-          />
-          <span className="shrink-0 pr-2 text-ui text-app-subtle">%</span>
+          >
+            <input
+              type="text"
+              inputMode="numeric"
+              disabled={rowDisabled}
+              aria-label="Opacity percent"
+              {...bindOpacityScrub(inspectorOpacityInputClass, opacityFocused)}
+              value={opacityText}
+              onFocus={() => setOpacityFocused(true)}
+              onChange={(e) => {
+                const digits = e.target.value.replace(/[^\d]/g, "").slice(0, 3);
+                setOpacityText(digits);
+                if (digits !== "") {
+                  const n = parseInt(digits, 10);
+                  if (Number.isFinite(n)) commitPercent(n);
+                }
+              }}
+              onBlur={() => {
+                if (opacityScrubActiveRef.current) return;
+                setOpacityFocused(false);
+                if (!applyDraft(opacityText)) setOpacityText(String(percent));
+              }}
+              onKeyDown={(e) => {
+                handlePanelFieldKeyDown(e, {
+                  onEnter: () => {
+                    if (!applyDraft(opacityText)) setOpacityText(String(percent));
+                    e.currentTarget.blur();
+                  },
+                  onArrowNudge: (dir, shift, alt) => {
+                    const step = keyboardNudgeStep(1, 0, shift, alt) * dir;
+                    const current = parseInt(opacityText, 10);
+                    const base = Number.isFinite(current) ? current : percent;
+                    commitPercent(base + step);
+                  },
+                });
+              }}
+            />
+            <span className={inspectorOpacitySuffixClass}>%</span>
+          </div>
         </div>
         <InspectorHintIconButton
           title={visible ? "Hide fill" : "Show fill"}
@@ -448,6 +460,8 @@ export function FillSection({
   onStyle,
   onDetachToken,
   onUpdateDesignToken,
+  hexMixed,
+  onCommitFillHex,
 }: {
   node: EditorNode;
   display: EditorNode;
@@ -460,6 +474,8 @@ export function FillSection({
   onStyle: (p: NodeStylePatch, opts?: { skipHistory?: boolean }) => void;
   onDetachToken: (kind: "color" | "gradient") => void;
   onUpdateDesignToken: (tokenId: string, patch: Partial<DesignToken>) => void;
+  hexMixed?: boolean;
+  onCommitFillHex?: (hex: string, opts?: { skipHistory?: boolean }) => void;
 }) {
   const fillType = effectiveFillType(display);
   /** Pattern fills (SVG import) map to Image in the picker. */
@@ -628,9 +644,14 @@ export function FillSection({
             onRemove={removeFill}
             removeLabel="Remove fill"
             onCommitHex={(hex, opts) => {
+              if (onCommitFillHex) {
+                onCommitFillHex(hex, opts);
+                return;
+              }
               useEditorStore.getState().setNodeFillHex(node.id, hex, opts);
             }}
             onCommitOpacity={handleCommitFillOpacity}
+            hexMixed={hexMixed}
           />
         ) : fillType === "gradient" ? (
           <>

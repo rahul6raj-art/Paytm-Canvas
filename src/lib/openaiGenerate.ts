@@ -19,6 +19,8 @@ export type OpenAIGenerateInput = {
   contextImages?: AIContextImagePayload[];
   /** When set, used instead of buildAIDesignUserPrompt (e.g. JSON repair retry). */
   userPromptOverride?: string;
+  /** Browser-provided key; falls back to OPENAI_API_KEY env. */
+  apiKey?: string;
 };
 
 export type OpenAIGenerateResult = {
@@ -64,9 +66,12 @@ function formatOpenAIApiError(status: number, body: { error?: { message?: string
 
 /** Call OpenAI chat completions for structured UI JSON. */
 export async function generateWithOpenAI(input: OpenAIGenerateInput): Promise<OpenAIGenerateResult> {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  const apiKey = input.apiKey?.trim() || process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) {
-    return { content: null, error: "OPENAI_API_KEY is not set. Add it to .env.local and restart `npm run dev`." };
+    return {
+      content: null,
+      error: "Add your OpenAI key in the model menu, or set OPENAI_API_KEY in .env.local.",
+    };
   }
 
   const images = input.contextImages ?? [];

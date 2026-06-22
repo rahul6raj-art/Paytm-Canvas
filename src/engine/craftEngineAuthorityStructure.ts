@@ -1,6 +1,5 @@
 import { craftEngineDocumentFromStore } from "@/engine/craftEngineDocument";
 import { isWasmDocumentAuthority } from "@/engine/craftEngineAuthority";
-import { reconcileStoreFromWasmWhenIdle } from "@/engine/craftEngineAuthorityMirror";
 import {
   planIncrementalDocumentOps,
   type CraftEngineOp,
@@ -50,7 +49,6 @@ export function mirrorDocumentDeltaToWasm(
       }
     });
     state.lastDocument = next;
-    reconcileStoreFromWasmWhenIdle();
     return true;
   } catch {
     return false;

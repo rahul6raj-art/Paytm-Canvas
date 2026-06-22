@@ -1,6 +1,14 @@
 /**
  * Figma-like auto layout — public API for the editor.
  * Core engine lives in `@/lib/layoutEngine` (rendering-independent).
+ *
+ * Sizing pipeline (Figma-aligned):
+ * 1. Measure content (text, hug children)
+ * 2. Resolve HUG bottom-up (nested auto layout first)
+ * 3. Resolve FIXED axes
+ * 4. Calculate remaining main-axis space
+ * 5. Assign FILL by layoutGrow
+ * 6. Apply alignment / positioning
  */
 
 export type {
@@ -10,6 +18,8 @@ export type {
   LayoutSizingMode,
   LayoutPositioning,
 } from "@/lib/layoutEngine/types";
+
+export { SIZING_MODE } from "@/lib/layoutEngine/types";
 
 import type {
   LayoutMode,
@@ -30,7 +40,6 @@ import {
   parentPrimaryAxisHug,
   type LayoutEngineNode,
 } from "@/lib/layoutEngine/types";
-import { shouldClipChildren } from "@/lib/clipChildren";
 import { expandLayoutModePatch } from "@/lib/autoLayout/layoutModeChange";
 
 export interface LayoutFields {
@@ -243,7 +252,7 @@ function patchTouchesGap(patch: LayoutPatch): boolean {
 
 /**
  * After gap changes on a fixed-size auto-layout frame, resize the primary axis to fit
- * children + gap + padding — unless clip content is on (frame size stays fixed).
+ * children + gap + padding. Clip content does not affect layout measurement.
  */
 export function applyGapResponsivePrimarySize(
   nodes: Record<string, LayoutNode>,
@@ -255,10 +264,6 @@ export function applyGapResponsivePrimarySize(
 
   const mode = parent.layoutMode as Exclude<LayoutMode, "none">;
   if (parentPrimaryAxisHug(parent)) {
-    return applyDeepAutoLayout(nodes, childOrder, containerId);
-  }
-
-  if (shouldClipChildren(parent)) {
     return applyDeepAutoLayout(nodes, childOrder, containerId);
   }
 
@@ -358,8 +363,8 @@ export function defaultFixedSizingForContainer(): Pick<
 }
 
 /**
- * Figma: dragging a resize handle on an auto-layout frame pins both axes to Fixed
- * so the frame keeps the new size and children reflow inside (clip / fill shrink).
+ * Figma: dragging a resize handle on an auto-layout frame pins the edited axis to Fixed
+ * so the frame keeps the new size on that axis and children reflow inside.
  */
 export function layoutSizingPatchesForManualResize(
   node: Pick<LayoutNode, "layoutMode" | "layoutSizingHorizontal" | "layoutSizingVertical">,
@@ -367,8 +372,12 @@ export function layoutSizingPatchesForManualResize(
   heightChanged: boolean,
 ): Partial<Pick<LayoutNode, "layoutSizingHorizontal" | "layoutSizingVertical">> {
   if ((node.layoutMode ?? "none") === "none") return {};
-  if (!widthChanged && !heightChanged) return {};
-  return { layoutSizingHorizontal: "fixed", layoutSizingVertical: "fixed" };
+  const patch: Partial<
+    Pick<LayoutNode, "layoutSizingHorizontal" | "layoutSizingVertical">
+  > = {};
+  if (widthChanged) patch.layoutSizingHorizontal = "fixed";
+  if (heightChanged) patch.layoutSizingVertical = "fixed";
+  return patch;
 }
 
 // ——— Spec-aligned aliases (recursive layout engine public API) ———

@@ -1,4 +1,6 @@
 import { isCanvasBgCreationTool } from "@/lib/canvasInteractionGuards";
+import { isPolygonNode } from "@/lib/shapes/polygonGeometry";
+import { isStarNode } from "@/lib/shapes/starGeometry";
 import type { EditorMode, EditorNode, Tool } from "@/stores/useEditorStore";
 
 /** Top-left, top-right, bottom-right, bottom-left (Figma / CSS 4-value order). */
@@ -72,6 +74,14 @@ export function supportsCornerRadiusHandles(
   return node.type === "rectangle" || node.type === "frame";
 }
 
+/** Polygon / star layers with draggable corner-radius handles on canvas selection. */
+export function supportsParametricShapeCornerRadiusHandles(
+  node: Pick<EditorNode, "type" | "visible" | "locked" | "polygonSides" | "starPoints">,
+): boolean {
+  if (!node.visible || node.locked) return false;
+  return isPolygonNode(node) || isStarNode(node);
+}
+
 export type CornerRadiusCanvasGateState = {
   editorMode: EditorMode;
   tool: Tool;
@@ -82,14 +92,13 @@ export type CornerRadiusCanvasGateState = {
   transformInteractionMode: "none" | "resize" | "rotate";
   /** True while selected layer(s) are being moved on canvas. */
   dragActive: boolean;
+  /** When set, parametric edit handles replace selection corner handles. */
+  shapeEditModeNodeId?: string | null;
 };
 
-/** Figma-style corner radius dots on single-selected rectangle / frame (no edit mode required). */
-export function shouldShowCornerRadiusHandlesOnCanvas(
+function passesCornerRadiusCanvasGate(
   state: CornerRadiusCanvasGateState,
-  node: Pick<EditorNode, "type" | "visible" | "locked"> | null | undefined,
 ): boolean {
-  if (!node || !supportsCornerRadiusHandles(node)) return false;
   if (state.editorMode !== "design" || state.tool !== "move") return false;
   if (state.penDrawingNodeId || state.pencilDrawingNodeId || state.isPlacingComment) {
     return false;
@@ -102,6 +111,27 @@ export function shouldShowCornerRadiusHandlesOnCanvas(
     return false;
   }
   if (state.dragActive) return false;
+  return true;
+}
+
+/** Figma-style corner radius dots on single-selected rectangle / frame (no edit mode required). */
+export function shouldShowCornerRadiusHandlesOnCanvas(
+  state: CornerRadiusCanvasGateState,
+  node: Pick<EditorNode, "type" | "visible" | "locked"> | null | undefined,
+): boolean {
+  if (!node || !supportsCornerRadiusHandles(node)) return false;
+  return passesCornerRadiusCanvasGate(state);
+}
+
+/** Corner radius dots on polygon / star during normal selection (not parametric edit mode). */
+export function shouldShowParametricShapeCornerRadiusHandlesOnCanvas(
+  state: CornerRadiusCanvasGateState,
+  node: Pick<EditorNode, "type" | "visible" | "locked" | "polygonSides" | "starPoints"> | null | undefined,
+): boolean {
+  if (!node || !supportsParametricShapeCornerRadiusHandles(node)) return false;
+  if (!passesCornerRadiusCanvasGate(state)) return false;
+  const id = state.selectedIds[0];
+  if (id && state.shapeEditModeNodeId === id) return false;
   return true;
 }
 

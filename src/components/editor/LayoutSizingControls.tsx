@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useEditorStore, type EditorNode, type LayoutSizingMode } from "@/stores/useEditorStore";
 import type { LayoutMode } from "@/lib/autoLayout";
+import { canFillOnAxis } from "@/lib/layoutEngine/layoutConstraints";
 import { cn } from "@/lib/utils";
 import { inspectorIconClass, inspectorIconStroke } from "@/lib/inspectorIconStyles";
 import {
@@ -74,12 +75,16 @@ function currentMode(node: EditorNode, axis: "horizontal" | "vertical"): LayoutS
   return v ?? "fixed";
 }
 
-function canUseFill(node: EditorNode, nodes: Record<string, EditorNode>): boolean {
+function canUseFillOnAxis(
+  node: EditorNode,
+  nodes: Record<string, EditorNode>,
+  axis: "horizontal" | "vertical",
+): boolean {
   const pid = node.parentId;
   if (!pid) return false;
   const parent = nodes[pid];
-  if (!parent) return false;
-  return (parent.layoutMode ?? "none") !== "none";
+  if (!parent || (parent.layoutMode ?? "none") === "none") return false;
+  return canFillOnAxis(parent, axis);
 }
 
 export function LayoutSizingControls({
@@ -96,7 +101,6 @@ export function LayoutSizingControls({
   const parentMode = parent?.layoutMode;
   const isContainer =
     (node.type === "frame" || node.type === "group") && (node.layoutMode ?? "none") !== "none";
-  const fillAllowed = canUseFill(node, nodes);
 
   return (
     <div className="space-y-2">
@@ -106,7 +110,7 @@ export function LayoutSizingControls({
           label={axisLabel(node, axis, parentMode, isContainer)}
           value={currentMode(node, axis)}
           disabled={locked}
-          allowFill={fillAllowed}
+          allowFill={canUseFillOnAxis(node, nodes, axis)}
           onSelect={(mode) => updateLayoutSizing(node.id, axis, mode)}
         />
       ))}

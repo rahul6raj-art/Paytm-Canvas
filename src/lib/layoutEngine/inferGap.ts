@@ -1,4 +1,4 @@
-import { flowChildIds } from "./layoutAutoNode";
+import { flowChildIds } from "./layoutGraph";
 import { isAutoLayoutContainer, type LayoutEngineNode, type LayoutMode } from "./types";
 
 export type FrozenLayoutGap = Pick<LayoutEngineNode, "layoutGap" | "layoutGapAuto">;

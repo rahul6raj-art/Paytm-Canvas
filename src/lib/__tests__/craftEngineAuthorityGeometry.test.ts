@@ -37,10 +37,15 @@ describe("craftEngineAuthorityGeometry", () => {
     assert.equal(op?.fields.y, 50);
   });
 
-  it("builds updateNode for resize patches", () => {
-    const node = rectNode({ width: 200 });
-    const op = buildGeometryDocumentOp("r1", { width: 200 }, node);
+  it("builds updateNode with explicit geometry fields (not full node replace)", () => {
+    const node = rectNode({ x: 18548, y: 12032, width: 580, height: 598, rotation: 14 });
+    const op = buildGeometryDocumentOp("r1", { rotation: 14 }, node);
     assert.equal(op?.op, "updateNode");
-    assert.equal((op?.fields.node as EditorNode).width, 200);
+    assert.equal(op?.fields.node, undefined);
+    assert.equal(op?.fields.x, 18548);
+    assert.equal(op?.fields.y, 12032);
+    assert.equal(op?.fields.width, 580);
+    assert.equal(op?.fields.height, 598);
+    assert.equal(op?.fields.rotation, 14);
   });
 });

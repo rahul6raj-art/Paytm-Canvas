@@ -24,7 +24,7 @@ describe("canvasZoom viewport fit", () => {
       fit: "primary",
     });
     assert.ok(vp && vp.zoom >= 0.15);
-    assert.ok(vp.zoom <= 0.2);
+    assert.ok(vp.zoom <= 1.25);
   });
 
   it("skips oversized pasteboard roots when picking primary", () => {

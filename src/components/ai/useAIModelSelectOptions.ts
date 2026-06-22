@@ -4,14 +4,15 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CURSOR_MODEL_OPTIONS,
   DEFAULT_AI_MODEL_ID,
-  isCursorModelId,
-  isOpenAIModelId,
   isValidAIModelId,
   OPENAI_FAST_MODEL_OPTIONS,
   getStoredAIModelId,
   setStoredAIModelId,
 } from "@/lib/aiModels";
 import type { PillSelectGroup } from "@/components/ai/FloatingPillSelect";
+import { useAIKeys } from "@/components/ai/useAIKeys";
+import { providerForModelId } from "@/lib/aiKeys/modelProvider";
+import type { AIKeyProviderId } from "@/lib/aiKeys/types";
 
 type ModelsApiResponse = {
   defaultModelId?: string;
@@ -21,6 +22,7 @@ type ModelsApiResponse = {
 };
 
 export function useAIModelSelectOptions() {
+  const { version, isProviderConfigured } = useAIKeys();
   const [modelId, setModelIdState] = useState(() => getStoredAIModelId());
   const [modelsMeta, setModelsMeta] = useState<ModelsApiResponse | null>(null);
 
@@ -41,9 +43,23 @@ export function useAIModelSelectOptions() {
     };
   }, []);
 
+  const serverConfigured = useMemo(
+    () => ({
+      openai: modelsMeta?.openai?.configured ?? false,
+      cursor: modelsMeta?.cursor?.configured ?? false,
+      anthropic: false,
+    }),
+    [modelsMeta],
+  );
+
+  const providerReady = useCallback(
+    (provider: AIKeyProviderId) =>
+      isProviderConfigured(provider, serverConfigured[provider]),
+    [isProviderConfigured, serverConfigured, version],
+  );
+
   const optionGroups = useMemo((): PillSelectGroup[] => {
-    const openaiConfigured = modelsMeta?.openai?.configured ?? false;
-    const cursorConfigured = modelsMeta?.cursor?.configured ?? false;
+    void version;
     const groups = modelsMeta?.groups ?? [
       { label: "Fast (recommended)", models: OPENAI_FAST_MODEL_OPTIONS },
       { label: "Cursor (slower)", models: CURSOR_MODEL_OPTIONS },
@@ -52,11 +68,10 @@ export function useAIModelSelectOptions() {
     return groups.map((group) => ({
       label: group.label,
       options: group.models.map((model) => {
+        const provider = providerForModelId(model.id);
         let hint: string | undefined;
-        if (isOpenAIModelId(model.id) && !openaiConfigured) {
-          hint = "Set OPENAI_API_KEY in .env.local";
-        } else if (isCursorModelId(model.id) && !cursorConfigured) {
-          hint = "Set CURSOR_API_KEY in .env.local";
+        if (provider && !providerReady(provider)) {
+          hint = "Add key to use this model";
         }
         return {
           value: model.id,
@@ -65,7 +80,7 @@ export function useAIModelSelectOptions() {
         };
       }),
     }));
-  }, [modelsMeta]);
+  }, [modelsMeta, providerReady, version]);
 
   useEffect(() => {
     if (!modelsMeta) return;
@@ -81,5 +96,5 @@ export function useAIModelSelectOptions() {
     setStoredAIModelId(id);
   }, []);
 
-  return { modelId, setModelId, optionGroups };
+  return { modelId, setModelId, optionGroups, serverConfigured, modelsMeta };
 }

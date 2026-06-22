@@ -2,7 +2,7 @@
   "name": "craft-bridge",
   "displayName": "Craft Bridge",
   "description": "Push React/HTML page folders (.tsx or .html + .css) to Paytm Craft canvas; Send to code round-trip",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "publisher": "paytm-craft",
   "license": "MIT",
   "repository": {

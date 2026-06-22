@@ -4,9 +4,13 @@ import { resizeCornerRadiiForCount } from "@/lib/cornerRadius";
 import {
   createRoundedPathSvgD,
   createRoundedPathWithRadiiSvgD,
-  maxQuadraticCornerRadiusAtVertex,
   type Point2,
 } from "@/lib/geometry";
+import {
+  maxFilletRadiusAtVertex,
+  maxUniformFilletRadius,
+  scaleRadiiToEdgeConstraints,
+} from "@/lib/geometry/roundedPolygon";
 
 export type { Point2 };
 
@@ -99,9 +103,14 @@ export function starRatioFromLocalPoint(
   return clampStarRatio(t);
 }
 
-/** Max fillet radius before adjacent corners overlap (quadratic fillets). */
-export function maxCornerRadiusAtVertex(prev: Point2, curr: Point2, next: Point2): number {
-  return maxQuadraticCornerRadiusAtVertex(prev, curr, next);
+/** Max geometric fillet radius at a vertex (local, before edge coupling). */
+export function maxCornerRadiusAtVertex(
+  prev: Point2,
+  curr: Point2,
+  next: Point2,
+  cornerSmoothing = 0,
+): number {
+  return maxFilletRadiusAtVertex(prev, curr, next, cornerSmoothing);
 }
 
 export function maxStarCornerRadius(
@@ -109,17 +118,12 @@ export function maxStarCornerRadius(
   ratio: number,
   width: number,
   height: number,
+  cornerSmoothing = 0,
 ): number {
-  const verts = starVertices(pointCount, ratio, width, height);
-  const n = verts.length;
-  let max = Infinity;
-  for (let i = 0; i < n; i++) {
-    const prev = verts[(i - 1 + n) % n]!;
-    const curr = verts[i]!;
-    const next = verts[(i + 1) % n]!;
-    max = Math.min(max, maxCornerRadiusAtVertex(prev, curr, next));
-  }
-  return Number.isFinite(max) ? max : 0;
+  return maxUniformFilletRadius(
+    starVertices(pointCount, ratio, width, height),
+    cornerSmoothing,
+  );
 }
 
 export function clampStarCornerRadius(
@@ -181,18 +185,17 @@ export function clampStarVertexCornerRadii(
   width: number,
   height: number,
   radii: readonly number[],
+  cornerSmoothing = 0,
 ): number[] {
   const spikes = clampStarPointCount(pointCount);
   const r = clampStarRatio(ratio);
   const verts = starVertices(spikes, r, width, height);
   const n = verts.length;
-  return Array.from({ length: n }, (_, i) => {
-    const val = Math.max(0, radii[i] ?? 0);
-    const prev = verts[(i - 1 + n) % n]!;
-    const curr = verts[i]!;
-    const next = verts[(i + 1) % n]!;
-    return Math.max(0, Math.min(val, maxCornerRadiusAtVertex(prev, curr, next)));
-  });
+  const maxR = maxUniformFilletRadius(verts, cornerSmoothing);
+  const clamped = Array.from({ length: n }, (_, i) =>
+    Math.max(0, Math.min(maxR, radii[i] ?? radii[0] ?? 0)),
+  );
+  return scaleRadiiToEdgeConstraints(verts, clamped, cornerSmoothing);
 }
 
 export function getStarVertexCornerRadii(
@@ -206,10 +209,12 @@ export function getStarVertexCornerRadii(
     | "starInnerCornerRadius"
     | "width"
     | "height"
+    | "cornerSmoothing"
   >,
 ): number[] {
   const points = clampStarPointCount(node.starPoints ?? DEFAULT_STAR_POINTS);
   const total = points * 2;
+  const smoothing = node.cornerSmoothing ?? 0;
   const params = effectiveStarParams(node);
   const defaults = Array.from({ length: total }, (_, i) =>
     i % 2 === 0 ? params.outerCornerRadius : params.innerCornerRadius,
@@ -222,6 +227,7 @@ export function getStarVertexCornerRadii(
     node.width,
     node.height,
     merged,
+    smoothing,
   );
 }
 
@@ -287,15 +293,27 @@ export function starCornerRadiusFromLocalPoint(
   return clampStarCornerRadius(pointCount, ratio, width, height, Math.max(0, metric));
 }
 
-/** Closed SVG path with quadratic fillets at every vertex (per-vertex radii). */
-export function roundedPolygonPathDWithRadii(vertices: Point2[], radii: readonly number[]): string {
-  return createRoundedPathWithRadiiSvgD(vertices, radii, true);
+/** Closed SVG path with tangent-arc / squircle polygon rounding. */
+export function roundedPolygonPathDWithRadii(
+  vertices: Point2[],
+  radii: readonly number[],
+  cornerSmoothing = 0,
+): string {
+  return createRoundedPathWithRadiiSvgD(vertices, radii, true, { cornerSmoothing });
 }
 
-/** Closed SVG path with quadratic fillets at every vertex. */
-export function roundedPolygonPathD(vertices: Point2[], radius: number): string {
+/** Closed SVG path with uniform tangent-arc / squircle rounding. */
+export function roundedPolygonPathD(
+  vertices: Point2[],
+  radius: number,
+  cornerSmoothing = 0,
+): string {
   const n = vertices.length;
-  return roundedPolygonPathDWithRadii(vertices, Array.from({ length: n }, () => radius));
+  return roundedPolygonPathDWithRadii(
+    vertices,
+    Array.from({ length: n }, () => radius),
+    cornerSmoothing,
+  );
 }
 
 export function starPathD(
@@ -331,6 +349,7 @@ export function starPathD(
     verts,
     (_point, index) => (index % 2 === 0 ? outer : inner),
     true,
+    { cornerSmoothing: 0 },
   );
 }
 
@@ -421,7 +440,7 @@ export function starPathDForNode(
   }
 
   const radii = getStarVertexCornerRadii({ ...node, starPoints: pointCount, starInnerRadius: ratio });
-  return roundedPolygonPathDWithRadii(verts, radii);
+  return roundedPolygonPathDWithRadii(verts, radii, node.cornerSmoothing ?? 0);
 }
 
 /** Path anchors for bounds / legacy hit tests (sharp vertices). */

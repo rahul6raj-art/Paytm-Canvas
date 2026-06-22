@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   shouldShowCornerRadiusHandlesOnCanvas,
   supportsCornerRadiusHandles,
+  supportsParametricShapeCornerRadiusHandles,
 } from "@/lib/cornerRadius";
 import { cornerRadiusHandlePosition } from "@/lib/shapes/shapeToPath";
 
@@ -67,5 +68,36 @@ describe("corner radius handles", () => {
     const p = cornerRadiusHandlePosition(100, 100, [0, 0, 0, 0], 0, 12);
     assert.equal(p.x, 12);
     assert.equal(p.y, 12);
+  });
+
+  it("handle position stays finite when dimensions are NaN", () => {
+    const p = cornerRadiusHandlePosition(Number.NaN, 100, [0, 0, 0, 0], 0, 12);
+    assert.ok(Number.isFinite(p.x));
+    assert.ok(Number.isFinite(p.y));
+  });
+});
+
+describe("parametric shape corner radius handles", () => {
+  it("supports polygon and star nodes", () => {
+    assert.equal(
+      supportsParametricShapeCornerRadiusHandles({
+        type: "path",
+        visible: true,
+        locked: false,
+        polygonSides: 3,
+        starPoints: undefined,
+      }),
+      true,
+    );
+    assert.equal(
+      supportsParametricShapeCornerRadiusHandles({
+        type: "path",
+        visible: true,
+        locked: false,
+        polygonSides: undefined,
+        starPoints: 5,
+      }),
+      true,
+    );
   });
 });

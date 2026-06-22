@@ -8,6 +8,11 @@ export type WasmSnapshotStorePatch = {
   childOrder: Record<string, string[]>;
 };
 
+export type MergeWasmSnapshotOptions = {
+  /** Keep store x/y/width/height/rotation during WASM UI mirror reconcile (not undo/redo). */
+  preserveStoreGeometry?: boolean;
+};
+
 function resolveLayerName(
   incoming: EditorNode,
   previous: EditorNode | undefined,
@@ -87,6 +92,35 @@ function isAutoLayoutContainer(node: EditorNode): boolean {
   return (node.type === "frame" || node.type === "group") && (node.layoutMode ?? "none") !== "none";
 }
 
+/** Store-owned layout box — WASM NodeInput round-trip must not rewrite these during mirror sync. */
+const WASM_MIRROR_GEOMETRY_KEYS = [
+  "x",
+  "y",
+  "width",
+  "height",
+  "rotation",
+  "lineX1",
+  "lineY1",
+  "lineX2",
+  "lineY2",
+  "flipHorizontal",
+  "flipVertical",
+] as const satisfies readonly (keyof EditorNode)[];
+
+function preserveStoreGeometryOverWasmMirror(
+  previous: EditorNode,
+  merged: EditorNode,
+): EditorNode {
+  const out: EditorNode = { ...merged };
+  for (const key of WASM_MIRROR_GEOMETRY_KEYS) {
+    const prev = previous[key];
+    if (prev !== undefined) {
+      (out as Record<string, unknown>)[key] = prev;
+    }
+  }
+  return out;
+}
+
 function preserveAutoLayoutGeometry(
   previous: EditorNode,
   merged: EditorNode,
@@ -129,7 +163,9 @@ function mergeNestedStroke(
 export function mergeWasmSnapshotWithStore(
   previousNodes: Record<string, EditorNode>,
   patch: WasmSnapshotStorePatch,
+  options?: MergeWasmSnapshotOptions,
 ): WasmSnapshotStorePatch {
+  const preserveStoreGeometry = options?.preserveStoreGeometry === true;
   const mergedNodes: Record<string, EditorNode> = {};
   const namingContext: Record<string, EditorNode> = { ...previousNodes };
 
@@ -151,7 +187,10 @@ export function mergeWasmSnapshotWithStore(
         name: resolveLayerName(incoming, previous, namingContext),
         expanded: previous.expanded ?? incoming.expanded ?? true,
       };
-      mergedNodes[id] = preserveAutoLayoutGeometry(previous, merged, previousNodes);
+      const afterAutoLayout = preserveAutoLayoutGeometry(previous, merged, previousNodes);
+      mergedNodes[id] = preserveStoreGeometry
+        ? preserveStoreGeometryOverWasmMirror(previous, afterAutoLayout)
+        : afterAutoLayout;
     } else {
       mergedNodes[id] = {
         ...incoming,

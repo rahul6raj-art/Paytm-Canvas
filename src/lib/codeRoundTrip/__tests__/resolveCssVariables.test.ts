@@ -23,10 +23,10 @@ describe("resolveCssVariables", () => {
 
 describe("parseCssCustomProperties", () => {
   it("collects light and dark scopes", () => {
-    const scopes = parseCssCustomProperties(`
+    const scopes = parseCssCustomProperties([`
 :root { --a: 1; }
 [data-theme='dark'] { --a: 2; }
-`);
+`]);
     assert.equal(scopes.light["--a"], "1");
     assert.equal(scopes.dark["--a"], "2");
   });

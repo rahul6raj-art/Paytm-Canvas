@@ -17,6 +17,7 @@ import {
   reconcileHierarchyLight,
   repairNodeHierarchyIfNeeded,
 } from "@/lib/editorGraph";
+import { isRotateGeometryLockActive } from "@/lib/rotation/rotateGeometryLock";
 import { editorPatchFromPage } from "@/lib/editorPages";
 import { preferLayoutGridOffWhenEmpty } from "@/lib/editorBootstrap";
 import { getRouteApiFileId, hydrateEditorFromApiFile } from "@/lib/apiFileHydration";
@@ -139,6 +140,9 @@ export function EditorDocumentPersistence() {
       unsubRepair = useEditorStore.subscribe((state, prev) => {
         if (!prev) return;
         if (state.figImportInProgress || prev.figImportInProgress) return;
+        if (state.transformInteractionMode !== "none") return;
+        if (state.isMovingSelection) return;
+        if (isRotateGeometryLockActive(state)) return;
         if (state.nodes === prev.nodes && state.childOrder === prev.childOrder) return;
         if (!needsNodeHierarchyRepair(state.nodes, state.childOrder)) return;
 

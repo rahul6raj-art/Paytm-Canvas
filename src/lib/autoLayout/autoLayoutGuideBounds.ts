@@ -1,4 +1,3 @@
-import { shouldClipChildren } from "@/lib/clipChildren";
 import { flowChildIds } from "@/lib/layoutEngine/layoutAutoNode";
 import {
   isAutoLayoutContainer,
@@ -41,7 +40,7 @@ export function flowContentExtentLocal(
 
 /**
  * Size used for auto-layout padding guides (dashed blue inset).
- * Clipped frames always use the frame box; hug axes expand to content when not clipped.
+ * Clip content does not affect layout measurement — hug axes expand to full content.
  */
 export function autoLayoutPaddingGuideSize(
   parentId: string,
@@ -52,9 +51,6 @@ export function autoLayoutPaddingGuideSize(
   if (!parent || !isAutoLayoutContainer(asEngineNode(parent))) {
     return { width: parent?.width ?? 0, height: parent?.height ?? 0 };
   }
-  if (shouldClipChildren(parent)) {
-    return { width: parent.width, height: parent.height };
-  }
 
   const extent = flowContentExtentLocal(parentId, nodes, childOrder);
   const mode = parent.layoutMode as Exclude<LayoutMode, "none">;
@@ -63,15 +59,19 @@ export function autoLayoutPaddingGuideSize(
   let height = parent.height;
   if (mode === "horizontal") {
     if (parentPrimaryAxisHug(pn)) width = extent.width;
+    else width = Math.max(width, extent.width);
     if (parentCounterAxisHug(pn)) height = extent.height;
+    else height = Math.max(height, extent.height);
   } else {
     if (parentPrimaryAxisHug(pn)) height = extent.height;
+    else height = Math.max(height, extent.height);
     if (parentCounterAxisHug(pn)) width = extent.width;
+    else width = Math.max(width, extent.width);
   }
   return { width, height };
 }
 
-/** True when a parent-local point lies inside the clip/frame guide box. */
+/** True when a parent-local point lies inside the layout guide box (full content, not clip). */
 export function autoLayoutPointInsideGuide(
   localX: number,
   localY: number,

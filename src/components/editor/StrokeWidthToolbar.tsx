@@ -13,6 +13,7 @@ import {
 import { handlePanelFieldKeyDown, keyboardNudgeStep } from "@/lib/panelFieldKeyboard";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { cn } from "@/lib/utils";
+import { inspectorLucideProps, inspectorRowActionBtnClass } from "@/lib/inspectorIconStyles";
 import { EditorHintWrap } from "./EditorHoverHint";
 
 export function StrokeWidthToolbar() {
@@ -77,11 +78,11 @@ export function StrokeWidthToolbar() {
       >
       <button
         type="button"
-        className="flex h-7 w-7 items-center justify-center rounded text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
+        className={inspectorRowActionBtnClass}
         aria-label="Decrease stroke weight"
         onClick={() => nudgeSelectionStrokeWidth(-1)}
       >
-        <Minus className="h-3.5 w-3.5" strokeWidth={2} />
+        <Minus {...inspectorLucideProps()} />
       </button>
       <input
         type="text"
@@ -116,11 +117,11 @@ export function StrokeWidthToolbar() {
       />
       <button
         type="button"
-        className="flex h-7 w-7 items-center justify-center rounded text-app-muted transition-colors hover:bg-app-hover hover:text-app-fg"
+        className={inspectorRowActionBtnClass}
         aria-label="Increase stroke weight"
         onClick={() => nudgeSelectionStrokeWidth(1)}
       >
-        <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+        <Plus {...inspectorLucideProps()} />
       </button>
       <span className="sr-only">
         Stroke weight between {STROKE_WIDTH_MIN} and {STROKE_WIDTH_MAX}

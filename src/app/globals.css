@@ -20,10 +20,12 @@
   --ui-leading-2xs: var(--ui-leading-ui);
   --ui-font-ui-sm: var(--ui-font-ui);
   --ui-leading-ui-sm: var(--ui-leading-ui);
-  --ui-icon-toolbar: calc(15px * var(--ui-scale));
-  --ui-icon-canvas-rail: calc(18px * var(--ui-scale));
-  --inspector-control-height: 1.5rem;
-  --inspector-control-height-compact: 1.25rem;
+  --ui-icon-toolbar: calc(16px * var(--ui-scale));
+  --ui-icon-canvas-rail: calc(19px * var(--ui-scale));
+  --inspector-control-height: 1.75rem;
+  --inspector-control-height-compact: 1.4375rem;
+  --inspector-segmented-height: 2rem;
+  --pill-control-min-height: 2rem;
 
   --app-bg: 0 0% 96%;
   --app-fg: 0 0% 9%;
@@ -114,10 +116,12 @@
   --editor-sidebar-radius: var(--editor-chrome-radius);
   --ui-font-ui: calc(12px * var(--ui-scale));
   --ui-leading-ui: calc(16px * var(--ui-scale));
-  --ui-icon-toolbar: calc(14px * var(--ui-scale));
-  --ui-icon-canvas-rail: calc(17px * var(--ui-scale));
-  --inspector-control-height: 1.625rem;
-  --inspector-control-height-compact: 1.375rem;
+  --ui-icon-toolbar: calc(15px * var(--ui-scale));
+  --ui-icon-canvas-rail: calc(18px * var(--ui-scale));
+  --inspector-control-height: 1.875rem;
+  --inspector-control-height-compact: 1.5625rem;
+  --inspector-segmented-height: 2.25rem;
+  --pill-control-min-height: 2.125rem;
   font-size: var(--ui-font-ui);
   line-height: var(--ui-leading-ui);
 }
@@ -143,6 +147,14 @@ html:not(.dark) [data-editor-shell] {
 html:not(.dark) [data-dashboard-shell] {
   /* Dashboard — soft grey workspace so white cards read clearly. */
   --pc-canvas-workspace: 0 0% 94%;
+}
+
+[data-dashboard-shell] {
+  --inspector-control-height: 1.875rem;
+  --inspector-control-height-compact: 1.5625rem;
+  --inspector-segmented-height: 2.25rem;
+  --pill-control-min-height: 2.125rem;
+  --ui-icon-toolbar: calc(15px * var(--ui-scale));
 }
 
 html {
@@ -247,12 +259,12 @@ body {
   }
 
   .editor-menu-dropdown {
-    @apply min-w-[260px] py-1.5 text-ui;
+    @apply min-w-[260px] py-2 text-ui;
     border-radius: var(--editor-chrome-radius, 1rem);
   }
 
   .editor-menu-dropdown-item {
-    @apply flex w-full min-h-9 items-center justify-between gap-3 px-3.5 py-2 text-left text-ui;
+    @apply flex w-full min-h-10 items-center justify-between gap-3 px-3.5 py-2.5 text-left text-ui;
   }
 
   .editor-menu-dropdown-item > button.min-w-0 {
@@ -340,6 +352,7 @@ body {
 
   [data-right-properties-panel] .inspector-icon-btn {
     -webkit-font-smoothing: auto;
+    line-height: 0;
   }
 
   [data-canvas-tool-rail] button {

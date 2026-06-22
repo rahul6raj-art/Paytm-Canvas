@@ -81,6 +81,17 @@ describe("containerSelection", () => {
     assert.equal(shouldCollapseContainerHits("g", nodes, childOrder, null), true);
   });
 
+  it("maps child click to boolean group", () => {
+    const nodes = {
+      g: frame("g", { type: "group", isBooleanGroup: true, booleanOperation: "union" }),
+      r: rect("r", "g"),
+    };
+    const childOrder = { g: ["r"] };
+    assert.equal(selectionTargetForClick("r", nodes, childOrder, null), "g");
+    assert.equal(shouldCollapseContainerHits("g", nodes, childOrder, null), true);
+    assert.equal(selectionTargetForClick("r", nodes, childOrder, "g"), "r");
+  });
+
   it("selects auto-layout parent on child click; cmd drills to child", () => {
     const nodes = {
       f: frame("f", { layoutMode: "horizontal" }),

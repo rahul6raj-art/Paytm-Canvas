@@ -51,3 +51,11 @@ export function collectSelectionFillColors(
 
   return [...byKey.values()];
 }
+
+/** Show selection colors only when the multi-selection has 2+ distinct fills. */
+export function shouldShowSelectionColorsSection(
+  selectedIds: string[],
+  nodes: Record<string, EditorNode>,
+): boolean {
+  return collectSelectionFillColors(selectedIds, nodes).length > 1;
+}

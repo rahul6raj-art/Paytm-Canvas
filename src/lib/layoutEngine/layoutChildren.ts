@@ -1,4 +1,4 @@
-import { resolveFillSizesByGrow } from "./sizing";
+import { assignFillMainSizes } from "./sizing";
 import {
   childCrossSizing,
   childMainSizing,
@@ -11,6 +11,7 @@ import {
   flowGapSpan,
 } from "./types";
 import type { MeasuredChild as MC } from "./measure";
+import { canFillOnMainAxis, clampLayoutSize } from "./layoutConstraints";
 
 export type FlowLine = {
   childIds: string[];
@@ -156,21 +157,9 @@ export function layoutChildren(input: LayoutChildrenInput): Record<string, Layou
 
   const lines = buildFlowLines(mode, childIds, measures, innerMain, gap, wrap);
 
-  const fillEntries = childIds
-    .filter((id) => childMainSizing(nodes[id]!, mode) === "fill")
-    .map((id) => ({ id, grow: nodes[id]!.layoutGrow ?? 1 }));
-  const fixedMain = childIds.reduce((sum, id, i) => {
-    return childMainSizing(nodes[id]!, mode) === "fill" ? sum : sum + measures[i]!.main;
-  }, 0);
-  const fillSizesById =
-    fillEntries.length > 0
-      ? resolveFillSizesByGrow(
-          innerMain,
-          fixedMain,
-          flowGapForSizing(gap, childIds.length),
-          fillEntries,
-        )
-      : {};
+  const fillSizesById = canFillOnMainAxis(parent, mode)
+    ? assignFillMainSizes(innerMain, childIds, measures, nodes, mode, gap)
+    : {};
 
   // Cross-axis: stack lines (wrap) with gap between lines
   const lineCrossSizes = lines.map((l) => l.crossMax);
@@ -197,25 +186,36 @@ export function layoutChildren(input: LayoutChildrenInput): Record<string, Layou
       const mainMode = childMainSizing(child, mode);
       const crossMode = childCrossSizing(child, mode);
 
-      const mainSize = mainMode === "fill" ? (fillSizesById[id] ?? m0.main) : m0.main;
+      const mainSize =
+        mainMode === "fill" && canFillOnMainAxis(parent, mode)
+          ? (fillSizesById[id] ?? m0.main)
+          : m0.main;
       let crossSize = m0.cross;
-      const effectiveStretch = crossMode === "fill" || cross === "stretch";
+      const crossFill = crossMode === "fill";
+      const effectiveStretch = crossFill || cross === "stretch";
+      const crossBounds = crossFill ? innerCross : line.crossMax;
       const { pos: crossOff, size: crossSz } = crossPosition(
         cross,
-        line.crossMax,
+        crossBounds,
         crossSize,
         effectiveStretch,
       );
       crossSize = crossSz;
 
+      const sized = clampLayoutSize(
+        child,
+        mode === "horizontal" ? mainSize : crossSize,
+        mode === "horizontal" ? crossSize : mainSize,
+      );
+
       if (mode === "horizontal") {
         out[id] = {
           x: padLeft + mainCursor,
           y: padTop + lineCrossCursor + crossOff,
-          width: mainSize,
-          height: crossSize,
-          computedWidth: mainSize,
-          computedHeight: crossSize,
+          width: sized.width,
+          height: sized.height,
+          computedWidth: sized.width,
+          computedHeight: sized.height,
           layoutDirty: false,
         };
         mainCursor += mainSize + gap + between;
@@ -223,10 +223,10 @@ export function layoutChildren(input: LayoutChildrenInput): Record<string, Layou
         out[id] = {
           x: padLeft + lineCrossCursor + crossOff,
           y: padTop + mainCursor,
-          width: crossSize,
-          height: mainSize,
-          computedWidth: crossSize,
-          computedHeight: mainSize,
+          width: sized.width,
+          height: sized.height,
+          computedWidth: sized.width,
+          computedHeight: sized.height,
           layoutDirty: false,
         };
         mainCursor += mainSize + gap + between;

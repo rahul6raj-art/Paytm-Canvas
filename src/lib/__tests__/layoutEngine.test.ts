@@ -487,3 +487,73 @@ describe("layoutEngine — dirty relayout", () => {
     assert.equal(next.b!.x, 100 + 8);
   });
 });
+
+describe("layoutEngine — sizing pipeline", () => {
+  it("pass 4–5: fill children consume remaining space after fixed siblings", () => {
+    const nodes: Record<string, LayoutEngineNode> = {
+      parent: rootFrame("parent", {
+        layoutMode: "horizontal",
+        width: 300,
+        height: 80,
+        layoutGap: 10,
+        paddingLeft: 0,
+        paddingRight: 0,
+        layoutSizingHorizontal: "fixed",
+        layoutSizingVertical: "fixed",
+      }),
+      fixed: frame("fixed", 0, 0, 60, 40, { parentId: "parent" }),
+      fill: frame("fill", 0, 0, 10, 40, {
+        parentId: "parent",
+        layoutSizingHorizontal: "fill",
+      }),
+    };
+    const childOrder = { parent: ["fixed", "fill"] };
+    const out = layoutAutoNode("parent", nodes, childOrder);
+    assert.equal(out.children.fixed?.width, 60);
+    assert.equal(out.children.fill?.width, 300 - 60 - 10);
+  });
+
+  it("pass 2: hug width follows padding + children + gaps", () => {
+    const nodes: Record<string, LayoutEngineNode> = {
+      row: rootFrame("row", {
+        layoutMode: "horizontal",
+        layoutGap: 8,
+        paddingLeft: 12,
+        paddingRight: 12,
+        paddingTop: 4,
+        paddingBottom: 4,
+        layoutSizingHorizontal: "hug",
+        layoutSizingVertical: "hug",
+      }),
+      a: frame("a", 0, 0, 30, 20, { parentId: "row" }),
+      b: frame("b", 0, 0, 50, 20, { parentId: "row" }),
+    };
+    const childOrder = { row: ["a", "b"] };
+    const out = layoutAutoNode("row", nodes, childOrder);
+    assert.equal(out.parent?.width, 12 + 30 + 8 + 50 + 12);
+  });
+
+  it("pass 6: fill cross axis stretches to parent inner height", () => {
+    const nodes: Record<string, LayoutEngineNode> = {
+      parent: rootFrame("parent", {
+        layoutMode: "horizontal",
+        width: 200,
+        height: 100,
+        layoutGap: 0,
+        paddingTop: 10,
+        paddingBottom: 10,
+        layoutSizingHorizontal: "fixed",
+        layoutSizingVertical: "fixed",
+      }),
+      child: frame("child", 0, 0, 80, 20, {
+        parentId: "parent",
+        layoutSizingHorizontal: "fixed",
+        layoutSizingVertical: "fill",
+      }),
+    };
+    const childOrder = { parent: ["child"] };
+    const out = layoutAutoNode("parent", nodes, childOrder);
+    assert.equal(out.children.child?.height, 80);
+    assert.equal(out.children.child?.y, 10);
+  });
+});

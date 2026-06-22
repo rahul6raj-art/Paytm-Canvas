@@ -1,3 +1,4 @@
+use crate::clip::{push_clip, should_clip_children};
 use crate::document::{DocumentInput, NodeInput, ROOT_KEY};
 use crate::scene::{node_world_bounds, WorldTransform};
 use crate::viewport::WorldRect;
@@ -13,14 +14,6 @@ fn is_hittable(kind: &str) -> bool {
         kind,
         "frame" | "group" | "rectangle" | "ellipse" | "polygon" | "path" | "line" | "arrow" | "text" | "image"
     )
-}
-
-fn should_clip_children(node: &NodeInput) -> bool {
-    match node.kind.as_str() {
-        "frame" => node.clip_children != Some(false),
-        "group" => node.clip_children == Some(true),
-        _ => false,
-    }
 }
 
 fn point_in_bounds(px: f32, py: f32, bounds: &WorldRect) -> bool {
@@ -81,7 +74,7 @@ fn walk_hit(
     let world = parent_world.multiply(node_local_transform(node));
     let bounds = node_world_bounds(node, world);
     let child_clip = if should_clip_children(node) {
-        Some(bounds)
+        push_clip(clip, bounds)
     } else {
         clip
     };
@@ -218,6 +211,35 @@ mod tests {
             assets: HashMap::new(),
         };
         assert_eq!(hit_test_deepest(&doc, 50.0, 50.0).as_deref(), Some("child"));
+    }
+
+    #[test]
+    fn rejects_hit_outside_clipping_frame() {
+        let mut nodes = HashMap::new();
+        let mut frame = base_node("frame", "frame");
+        frame.width = 100.0;
+        frame.height = 80.0;
+        frame.clip_children = Some(true);
+        nodes.insert("frame".into(), frame);
+        let mut child = base_node("child", "rectangle");
+        child.parent_id = Some("frame".into());
+        child.x = 90.0;
+        child.y = 10.0;
+        child.width = 40.0;
+        child.height = 40.0;
+        child.fill = Some("#f00".into());
+        nodes.insert("child".into(), child);
+        let mut child_order = HashMap::new();
+        child_order.insert("__root__".into(), vec!["frame".into()]);
+        child_order.insert("frame".into(), vec!["child".into()]);
+        let doc = DocumentInput {
+            root_ids: vec!["frame".into()],
+            nodes,
+            child_order,
+            assets: HashMap::new(),
+        };
+        assert_eq!(hit_test_deepest(&doc, 110.0, 30.0), None);
+        assert_eq!(hit_test_deepest(&doc, 95.0, 30.0).as_deref(), Some("child"));
     }
 
     #[test]

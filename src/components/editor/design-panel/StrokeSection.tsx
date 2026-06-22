@@ -8,6 +8,7 @@ import { ColorInput } from "../ColorInput";
 import {
   inspectorIconClass,
   inspectorIconStroke,
+  inspectorFieldIconSlotClass,
 } from "@/lib/inspectorIconStyles";
 import { cn } from "@/lib/utils";
 import { InspectorSectionAddButton, InspectorSegmented } from "./InspectorPrimitives";
@@ -553,7 +554,7 @@ export function StrokeSection({
                   "focus-within:border-accent focus-within:ring-1 focus-within:ring-accent",
                 )}
               >
-                <span className="flex h-full w-8 shrink-0 items-center justify-center border-r border-app-border text-app-muted">
+                <span className={inspectorFieldIconSlotClass}>
                   <svg width="14" height="10" viewBox="0 0 12 8" aria-hidden className="inspector-icon" shapeRendering="geometricPrecision">
                     <line x1={1} y1={4} x2={11} y2={4} stroke="currentColor" strokeWidth={2} />
                   </svg>

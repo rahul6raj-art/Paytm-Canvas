@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComponentType } from "react";
-import { useEffect, useState } from "react";
+import type { AlignDirection } from "@/stores/useEditorStore";
 import { inspectorControlHeightClass } from "@/lib/appFieldStyles";
 import { cn } from "@/lib/utils";
 import {
@@ -10,83 +10,102 @@ import {
   LayerAlignLeftIcon,
   LayerAlignRightIcon,
   LayerAlignTopIcon,
-  SelectionAlignBottomLeftIcon,
-  SelectionAlignBottomRightIcon,
-  SelectionAlignTopLeftIcon,
-  SelectionAlignTopRightIcon,
+  LayerAlignVerticalCenterIcon,
 } from "./design-panel/InspectorSettingIcons";
 import { EditorHintWrap } from "./EditorHoverHint";
 
-const GRID_LABELS = [
-  ["Align top left", "Align top", "Align top right"],
-  ["Align left", "Align center", "Align right"],
-  ["Align bottom left", "Align bottom", "Align bottom right"],
-] as const;
+type AlignItem = {
+  direction: AlignDirection;
+  label: string;
+  Icon: ComponentType<{ className?: string }>;
+};
 
-const GRID_ICONS: readonly (readonly ComponentType<{ className?: string }>[])[] = [
-  [SelectionAlignTopLeftIcon, LayerAlignTopIcon, SelectionAlignTopRightIcon],
-  [LayerAlignLeftIcon, LayerAlignHorizontalCenterIcon, LayerAlignRightIcon],
-  [SelectionAlignBottomLeftIcon, LayerAlignBottomIcon, SelectionAlignBottomRightIcon],
+const HORIZONTAL_ALIGN: AlignItem[] = [
+  { direction: "left", label: "Align left edges", Icon: LayerAlignLeftIcon },
+  { direction: "center-h", label: "Align horizontal centers", Icon: LayerAlignHorizontalCenterIcon },
+  { direction: "right", label: "Align right edges", Icon: LayerAlignRightIcon },
 ];
 
+const VERTICAL_ALIGN: AlignItem[] = [
+  { direction: "top", label: "Align top edges", Icon: LayerAlignTopIcon },
+  { direction: "center-v", label: "Align vertical centers", Icon: LayerAlignVerticalCenterIcon },
+  { direction: "bottom", label: "Align bottom edges", Icon: LayerAlignBottomIcon },
+];
+
+function AlignSegmentGroup({
+  items,
+  disabled,
+  onAlign,
+  "aria-label": ariaLabel,
+}: {
+  items: AlignItem[];
+  disabled?: boolean;
+  onAlign: (direction: AlignDirection) => void;
+  "aria-label": string;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex min-w-0 flex-1 items-stretch overflow-hidden rounded-md border border-app-border bg-app-inset",
+        inspectorControlHeightClass,
+      )}
+      role="group"
+      aria-label={ariaLabel}
+    >
+      {items.map(({ direction, label, Icon }, index) => (
+        <EditorHintWrap key={direction} title={label} disabled={disabled}>
+          <button
+            type="button"
+            disabled={disabled}
+            aria-label={label}
+            onClick={() => onAlign(direction)}
+            className={cn(
+              "flex min-w-0 flex-1 items-center justify-center transition-colors",
+              "text-app-muted hover:bg-app-hover hover:text-app-fg",
+              "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-app-muted",
+              index > 0 && "border-l border-app-border",
+            )}
+          >
+            <Icon />
+          </button>
+        </EditorHintWrap>
+      ))}
+    </div>
+  );
+}
+
+/** Figma-style paired horizontal / vertical alignment segmented controls. */
 export function SelectionAlignmentGrid({
   disabled,
-  selectionKey,
   fullWidth = false,
   onAlign,
 }: {
   disabled?: boolean;
-  /** Changes when selection changes — clears active cell highlight. */
+  /** @deprecated Grid layout removed; bar always stretches in panel. */
   selectionKey?: string;
-  /** Stretch grid to container width (inspector panel). */
   fullWidth?: boolean;
-  onAlign: (row: number, col: number) => void;
+  /** @deprecated Use embedded on parent wrapper instead. */
+  embedded?: boolean;
+  onAlign: (direction: AlignDirection) => void;
 }) {
-  const [active, setActive] = useState<{ row: number; col: number } | null>(null);
-
-  useEffect(() => {
-    setActive(null);
-  }, [selectionKey]);
-
   return (
     <div
-      className={cn(
-        "grid grid-cols-3 gap-1 rounded-md border border-app-border bg-app-inset p-0.5",
-        fullWidth ? "w-full" : "w-fit shrink-0",
-      )}
+      className={cn("flex gap-2", fullWidth ? "w-full" : "w-fit shrink-0")}
       role="group"
       aria-label="Align selection"
     >
-      {GRID_LABELS.map((rowLabels, row) =>
-        rowLabels.map((label, col) => {
-          const isActive = active?.row === row && active?.col === col;
-          const Icon = GRID_ICONS[row]![col]!;
-          return (
-            <EditorHintWrap key={`${row}-${col}`} title={label} disabled={disabled}>
-              <button
-                type="button"
-                disabled={disabled}
-                aria-label={label}
-                aria-pressed={isActive}
-                onClick={() => {
-                  setActive({ row, col });
-                  onAlign(row, col);
-                }}
-                className={cn(
-                  "flex min-w-0 items-center justify-center rounded-[5px] transition-colors disabled:opacity-40",
-                  inspectorControlHeightClass,
-                  fullWidth ? "w-full" : "w-7",
-                  isActive
-                    ? "bg-app-panel text-app-fg shadow-sm"
-                    : "text-app-muted hover:bg-app-hover hover:text-app-fg",
-                )}
-              >
-                <Icon />
-              </button>
-            </EditorHintWrap>
-          );
-        }),
-      )}
+      <AlignSegmentGroup
+        items={HORIZONTAL_ALIGN}
+        disabled={disabled}
+        onAlign={onAlign}
+        aria-label="Align horizontally"
+      />
+      <AlignSegmentGroup
+        items={VERTICAL_ALIGN}
+        disabled={disabled}
+        onAlign={onAlign}
+        aria-label="Align vertically"
+      />
     </div>
   );
 }

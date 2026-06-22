@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { useEditorStore } from "@/stores/useEditorStore";
+import { CANVAS_MIN_ZOOM } from "@/lib/canvasZoom";
 import {
   CANVAS_CORNER_RADIUS_HANDLE_INSET_SCREEN_PX,
   CANVAS_CORNER_RADIUS_HANDLE_SCREEN_PX,
@@ -144,7 +145,9 @@ export function CornerRadiusHandles() {
     node,
   );
 
-  const minInset = CANVAS_CORNER_RADIUS_HANDLE_INSET_SCREEN_PX / overlay.zoom;
+  const minInset =
+    CANVAS_CORNER_RADIUS_HANDLE_INSET_SCREEN_PX /
+    Math.max(Number.isFinite(overlay.zoom) ? overlay.zoom : CANVAS_MIN_ZOOM, CANVAS_MIN_ZOOM);
   const dotPx = CANVAS_CORNER_RADIUS_HANDLE_SCREEN_PX;
   const dotOff = dotPx / 2;
   const dotStyle = canvasCornerRadiusHandleStyle();
@@ -157,6 +160,7 @@ export function CornerRadiusHandles() {
 
   const handleWorldPositions = useMemo(() => {
     if (!show || !id || !node) return null;
+    if (!Number.isFinite(node.width) || !Number.isFinite(node.height)) return null;
     return CORNERS.map((cornerIndex) => ({
       cornerIndex,
       local: cornerRadiusHandlePosition(
@@ -215,6 +219,7 @@ export function CornerRadiusHandles() {
       {handleWorldPositions.map(({ cornerIndex, local }) => {
         const world = localToWorld(id!, local, nodes, childOrder);
         const screen = worldPointToOverlay(world.x, world.y, overlay);
+        if (!Number.isFinite(screen.x) || !Number.isFinite(screen.y)) return null;
         return (
           <EditorHintWrap key={cornerIndex} title="Drag to adjust corner radius" anchorClassName="contents">
             <button

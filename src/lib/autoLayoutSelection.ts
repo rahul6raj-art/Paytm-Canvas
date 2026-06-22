@@ -122,14 +122,15 @@ function layoutFieldsForChildren(
   frameH: number,
   sizing: "hug" | "fixed" = "hug",
 ): LayoutFields & Pick<EditorNode, "layoutSizingHorizontal" | "layoutSizingVertical"> {
-  const mode = inferAutoLayoutFlow(nodes as Record<string, LayoutNode>, childIds);
-  const gap = inferAutoLayoutGap(nodes as Record<string, LayoutNode>, childIds, mode);
-  const padding = inferAutoLayoutPadding(
-    nodes as Record<string, LayoutNode>,
-    childIds,
-    frameW,
-    frameH,
-  );
+  const layoutNodes = nodes as Record<string, LayoutNode>;
+  const visibleKids = childIds.filter((id) => {
+    const c = nodes[id];
+    return c && c.visible && !c.locked;
+  });
+  const mode = inferAutoLayoutFlow(layoutNodes, visibleKids);
+  const flowKids = sortIdsForAutoLayoutFlow(visibleKids, layoutNodes, mode);
+  const gap = inferAutoLayoutGap(layoutNodes, flowKids, mode);
+  const padding = inferAutoLayoutPadding(layoutNodes, visibleKids, frameW, frameH);
   return {
     ...DEFAULT_AUTO_LAYOUT_FIELDS,
     layoutMode: mode,

@@ -143,6 +143,45 @@ pub fn tessellate_ellipse<F: Fn(f32, f32) -> [f32; 4]>(
     }
 }
 
+fn fit_polygon_to_box(raw: &[(f32, f32)], w: f32, h: f32) -> Vec<(f32, f32)> {
+    if raw.is_empty() {
+        return Vec::new();
+    }
+    let mut min_x = f32::INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+    for &(x, y) in raw {
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+    }
+    let span_x = max_x - min_x;
+    let span_y = max_y - min_y;
+    if span_x < 1e-6 || span_y < 1e-6 {
+        return raw.to_vec();
+    }
+    raw.iter()
+        .map(|&(x, y)| (((x - min_x) / span_x) * w, ((y - min_y) / span_y) * h))
+        .collect()
+}
+
+pub fn regular_polygon_local(w: f32, h: f32, sides: u32) -> Vec<(f32, f32)> {
+    let n = sides.clamp(3, 12) as usize;
+    let cx = w * 0.5;
+    let cy = h * 0.5;
+    let rx = w * 0.5;
+    let ry = h * 0.5;
+    let raw: Vec<(f32, f32)> = (0..n)
+        .map(|i| {
+            let t = i as f32 / n as f32 * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2;
+            (cx + rx * t.cos(), cy + ry * t.sin())
+        })
+        .collect();
+    fit_polygon_to_box(&raw, w, h)
+}
+
 pub fn tessellate_polygon<F: Fn(f32, f32) -> [f32; 4]>(
     world: WorldTransform,
     w: f32,
@@ -152,20 +191,17 @@ pub fn tessellate_polygon<F: Fn(f32, f32) -> [f32; 4]>(
     out: &mut Vec<GpuVertex>,
 ) {
     let n = sides.clamp(3, 12) as usize;
-    let cx = w * 0.5;
-    let cy = h * 0.5;
-    let rx = w * 0.5;
-    let ry = h * 0.5;
-    let center = world_local(world, cx, cy, w, h);
+    let verts = regular_polygon_local(w, h, sides);
+    if verts.len() < 3 {
+        return;
+    }
+    let center = world_local(world, w * 0.5, h * 0.5, w, h);
     let center_c = color_at(0.5, 0.5);
-    let mut prev_lx = cx;
-    let mut prev_ly = cy - ry;
-    let mut prev = world_local(world, prev_lx, prev_ly, w, h);
-    let mut prev_c = color_at(prev_lx / w.max(1.0), prev_ly / h.max(1.0));
-    for i in 1..=n {
-        let t = (i as f32 / n as f32) * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2;
-        let lx = cx + rx * t.cos();
-        let ly = cy + ry * t.sin();
+    let (first_x, first_y) = verts[0];
+    let mut prev = world_local(world, first_x, first_y, w, h);
+    let mut prev_c = color_at(first_x / w.max(1.0), first_y / h.max(1.0));
+    for i in 1..n {
+        let (lx, ly) = verts[i];
         let next = world_local(world, lx, ly, w, h);
         let next_c = color_at(lx / w.max(1.0), ly / h.max(1.0));
         push_tri(out, center, prev, next, center_c, prev_c, next_c);

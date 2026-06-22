@@ -12,6 +12,7 @@ export function isCanvasChromeTarget(target: EventTarget | null): boolean {
       el.closest("[data-canvas-floating-page-name]") ||
       el.closest("[data-canvas-floating-zoom]") ||
       el.closest("[data-autolayout-spacing-handle]") ||
+      el.closest("[data-selection-spacing-handle]") ||
       el.closest("[data-autolayout-padding-handle]") ||
       el.closest("[data-grid-toggle]") ||
       el.closest("[data-rulers-toggle]") ||
@@ -25,6 +26,8 @@ export function isCanvasChromeTarget(target: EventTarget | null): boolean {
       el.closest("[data-rotate-edge]") ||
       el.closest("[data-star-ratio-handle]") ||
       el.closest("[data-star-corner-handle]") ||
+      el.closest("[data-parametric-corner-radius-handle]") ||
+      el.closest("[data-corner-radius-handle]") ||
       el.closest("[data-line-handle]") ||
       el.closest("[data-polygon-corner-handle]") ||
       el.closest('[role="menu"]') ||

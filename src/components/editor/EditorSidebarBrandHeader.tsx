@@ -25,11 +25,11 @@ export function EditorSidebarBrandHeader({
           type="button"
           aria-expanded={logoMenuOpen}
           aria-haspopup="menu"
-          className="flex h-9 min-w-0 w-full items-center gap-3 rounded-lg text-ui font-semibold text-app-fg transition-colors hover:bg-app-hover"
+          className="flex h-9 min-w-0 w-full items-center gap-3 rounded-lg text-app-fg transition-colors hover:bg-app-hover"
           onClick={() => setLogoMenuOpen((o) => !o)}
         >
           <PaytmCraftLogo className="size-icon-ui shrink-0" />
-          <span className="truncate">Paytm Craft</span>
+          <span className="truncate text-sm font-bold leading-tight">Paytm Craft</span>
           <ChevronDown className="size-icon-ui shrink-0 text-app-subtle" strokeWidth={2} />
         </button>
         <EditorNestedMenuDropdown

@@ -21,6 +21,8 @@ export function DimensionFieldsRow({
   min = 1,
   trailingAction,
   showAspectLock = true,
+  mixedWidth,
+  mixedHeight,
   onCommitDimensions,
 }: {
   width: number;
@@ -34,6 +36,8 @@ export function DimensionFieldsRow({
   trailingAction?: ReactNode;
   /** When false, omit the aspect-ratio lock (e.g. text uses resize modes instead). */
   showAspectLock?: boolean;
+  mixedWidth?: boolean;
+  mixedHeight?: boolean;
   onCommitDimensions: (next: { width: number; height: number }) => void;
 }) {
   const aspectRatioLocked = useEditorStore((s) => s.inspectorAspectRatioLocked);
@@ -103,6 +107,7 @@ export function DimensionFieldsRow({
         commitOnInput={false}
         label="W"
         value={width}
+        mixed={mixedWidth}
         instanceKey={`${instanceKey}-w`}
         disabled={locked || widthDisabled}
         min={min}
@@ -113,6 +118,7 @@ export function DimensionFieldsRow({
         commitOnInput={false}
         label="H"
         value={height}
+        mixed={mixedHeight}
         instanceKey={`${instanceKey}-h`}
         disabled={locked || heightDisabled}
         min={min}

@@ -183,6 +183,25 @@ export function EditorKeyboardShortcuts() {
         return;
       }
 
+      if (mod && e.code === "KeyZ" && e.shiftKey) {
+        e.preventDefault();
+        activateCanvasForShortcuts();
+        useEditorStore.getState().redo();
+        return;
+      }
+      if (mod && e.code === "KeyZ") {
+        e.preventDefault();
+        activateCanvasForShortcuts();
+        useEditorStore.getState().undo();
+        return;
+      }
+      if (mod && e.code === "KeyY") {
+        e.preventDefault();
+        activateCanvasForShortcuts();
+        useEditorStore.getState().redo();
+        return;
+      }
+
       if (!mod && !e.altKey) {
         const nextTool = resolveToolFromKeyboardEvent(e);
         if (shouldYieldShortcutsToTyping(e, e.target) && nextTool != null) {
@@ -425,22 +444,6 @@ export function EditorKeyboardShortcuts() {
       if (mod && e.shiftKey && e.code === "KeyN") {
         e.preventDefault();
         useEditorStore.getState().addPage();
-        return;
-      }
-
-      if (mod && e.code === "KeyZ" && e.shiftKey) {
-        e.preventDefault();
-        useEditorStore.getState().redo();
-        return;
-      }
-      if (mod && e.code === "KeyZ") {
-        e.preventDefault();
-        useEditorStore.getState().undo();
-        return;
-      }
-      if (mod && e.code === "KeyY") {
-        e.preventDefault();
-        useEditorStore.getState().redo();
         return;
       }
 

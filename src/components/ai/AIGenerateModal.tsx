@@ -13,6 +13,7 @@ import {
   type StyleGuideTheme,
 } from "@/components/ai/AIStyleGuideSelect";
 import { AIModalFrame } from "@/components/ai/AIModalFrame";
+import { AIModelPillSelect } from "@/components/ai/AIModelPillSelect";
 import { FloatingPillSelect } from "@/components/ai/FloatingPillSelect";
 import { canUseRichFastPath } from "@/lib/aiGenerateFastPath";
 import {
@@ -515,17 +516,15 @@ export function AIGenerateModal() {
                 theme={styleGuideTheme}
                 onThemeChange={setStyleGuideTheme}
               />
-              <FloatingPillSelect
+              <AIModelPillSelect
                 icon={LayoutGrid}
-                label="Model"
                 value={modelId}
-                disabled={submitting}
-                menuZClass={AI_FLOATING_MENU_Z}
                 onChange={(v) => {
                   setModelId(v);
                   setStoredAIModelId(v);
                 }}
-                options={modelOptions}
+                disabled={submitting}
+                menuZClass={AI_FLOATING_MENU_Z}
               />
             </div>
 

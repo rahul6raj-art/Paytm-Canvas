@@ -58,7 +58,31 @@ describe("editorKeyboardFocus shortcuts", () => {
     );
   });
 
-  it("does not yield modifier shortcuts", () => {
+  it("does not yield undo/redo in inspector inputs", () => {
+    const undo = {
+      key: "z",
+      code: "KeyZ",
+      metaKey: true,
+      ctrlKey: false,
+      altKey: false,
+      shiftKey: false,
+    } as KeyboardEvent;
+    assert.equal(shouldAllowNativeFieldClipboard(undo, fakeInput()), false);
+    assert.equal(shouldYieldShortcutsToTyping(undo, fakeInput()), false);
+
+    const redo = {
+      key: "z",
+      code: "KeyZ",
+      metaKey: true,
+      ctrlKey: false,
+      altKey: false,
+      shiftKey: true,
+    } as KeyboardEvent;
+    assert.equal(shouldAllowNativeFieldClipboard(redo, fakeInput()), false);
+    assert.equal(shouldYieldShortcutsToTyping(redo, fakeInput()), false);
+  });
+
+  it("does not yield modifier shortcuts without a field target", () => {
     const e = { key: "z", metaKey: true, ctrlKey: false, altKey: false } as KeyboardEvent;
     assert.equal(shouldYieldShortcutsToTyping(e, null), false);
   });
@@ -223,7 +247,7 @@ describe("editorKeyboardFocus shortcuts", () => {
     assert.equal(shouldBlockToolShortcutsForTyping(fakeTextarea()), true);
   });
 
-  it("applies tool shortcut letters even when an inspector input retains focus", () => {
+  it("yields tool shortcut letters in inspector inputs", () => {
     const e = {
       key: "f",
       code: "KeyF",
@@ -233,7 +257,8 @@ describe("editorKeyboardFocus shortcuts", () => {
       shiftKey: false,
     } as KeyboardEvent;
     assert.equal(isToolShortcutEvent(e), true);
-    assert.equal(shouldYieldShortcutsToTyping(e, fakeInput()), false);
+    assert.equal(shouldBlockToolShortcutsForTyping(fakeInput()), true);
+    assert.equal(shouldYieldShortcutsToTyping(e, fakeInput()), true);
   });
 
   it("allows native paste in code import textarea", () => {
@@ -249,7 +274,7 @@ describe("editorKeyboardFocus shortcuts", () => {
     assert.equal(shouldAllowNativeFieldClipboard(e, null), false);
   });
 
-  it("allows arrow nudge when a single-line inspector input is empty", () => {
+  it("yields arrow keys while a single-line inspector input is focused", () => {
     const e = {
       key: "ArrowDown",
       code: "ArrowDown",
@@ -259,7 +284,8 @@ describe("editorKeyboardFocus shortcuts", () => {
       shiftKey: false,
     } as KeyboardEvent;
     const input = { tagName: "INPUT", value: "", isContentEditable: false };
-    assert.equal(shouldYieldShortcutsToTyping(e, input), false);
+    assert.equal(shouldBlockToolShortcutsForTyping(input), true);
+    assert.equal(shouldYieldShortcutsToTyping(e, input), true);
   });
 
   it("yields Enter in single-line inspector inputs", () => {

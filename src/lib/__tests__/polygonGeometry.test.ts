@@ -19,33 +19,46 @@ describe("polygonGeometry", () => {
     assert.equal(clampPolygonSides(5.4), 5);
   });
 
-  it("triangle has 3 vertices with top vertex", () => {
+  it("triangle has 3 vertices with top vertex and base on box bottom", () => {
     const v = polygonVertices(3, 100, 100);
     assert.equal(v.length, 3);
     assert.ok(Math.abs(v[0]!.x - 50) < 1e-6);
-    assert.ok(v[0]!.y < v[1]!.y);
+    assert.ok(Math.abs(v[0]!.y) < 1e-6);
+    assert.ok(Math.abs(v[1]!.x - 100) < 1e-6);
+    assert.ok(Math.abs(v[1]!.y - 100) < 1e-6);
+    assert.ok(Math.abs(v[2]!.x) < 1e-6);
+    assert.ok(Math.abs(v[2]!.y - 100) < 1e-6);
+  });
+
+  it("triangle fills non-square bounding box like Figma", () => {
+    const v = polygonVertices(3, 669, 598);
+    assert.ok(Math.abs(v[0]!.y) < 1e-6);
+    assert.ok(Math.abs(v[1]!.y - 598) < 1e-6);
+    assert.ok(Math.abs(v[2]!.y - 598) < 1e-6);
+    assert.ok(Math.abs(v[1]!.x - 669) < 1e-6);
+    assert.ok(Math.abs(v[2]!.x) < 1e-6);
   });
 
   it("hexagon has 6 vertices", () => {
     assert.equal(polygonVertices(6, 80, 60).length, 6);
   });
 
-  it("polygonPathD uses quadratic fillets when corner radius > 0", () => {
+  it("polygonPathD uses circular fillets when corner radius > 0", () => {
     const sharp = polygonPathD(100, 100, 6, 0);
     const round = polygonPathD(100, 100, 6, 12);
     assert.ok(sharp.includes("L "));
-    assert.ok(!sharp.includes(" Q "));
-    assert.ok(round.includes(" Q "));
+    assert.ok(!sharp.includes(" A "));
+    assert.ok(round.includes(" A "));
     assert.ok(round.endsWith(" Z"));
   });
 
   it("triangle corner radius rounds inward toward center", () => {
     const d = polygonPathD(100, 100, 3, 10);
     const top = polygonVertices(3, 100, 100)[0]!;
-    const quadMatch = /Q\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/.exec(d);
-    assert.ok(quadMatch, "expected inward quadratic fillet on triangle");
-    const endX = Number(quadMatch[3]);
-    const endY = Number(quadMatch[4]);
+    const arcMatch = /A\s+([\d.]+)\s+([\d.]+)\s+0\s+0\s+[01]\s+([\d.]+)\s+([\d.]+)/.exec(d);
+    assert.ok(arcMatch, "expected inward circular fillet on triangle");
+    const endX = Number(arcMatch[3]);
+    const endY = Number(arcMatch[4]);
     assert.ok(endX > top.x, "first curve should move down-right from the top spike");
     assert.ok(endY > top.y, "fillet should stay inside the shape, not above the tip");
   });
@@ -70,8 +83,8 @@ describe("polygonGeometry", () => {
       cornerRadius: 0,
       cornerRadii: [12, 4, 0],
     });
-    assert.ok(uniform.includes(" Q "));
-    assert.ok(mixed.includes(" Q "));
+    assert.ok(uniform.includes(" A "));
+    assert.ok(mixed.includes(" A "));
     assert.notEqual(uniform, mixed);
   });
 

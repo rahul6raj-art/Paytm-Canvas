@@ -1,4 +1,4 @@
-import { flowChildIds } from "./layoutAutoNode";
+import { flowChildIds } from "./layoutGraph";
 import { measureNode, type MeasureContext } from "./measure";
 import type { LayoutEngineNode } from "./types";
 

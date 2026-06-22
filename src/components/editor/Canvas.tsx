@@ -22,6 +22,7 @@ import { ShapeDrawPreview } from "./ShapeDrawPreview";
 import { MultiSelectSwapHandlesOverlay } from "./MultiSelectSwapHandlesOverlay";
 import { AutoLayoutReorderOverlay } from "./AutoLayoutReorderOverlay";
 import { AutoLayoutHandlesOverlay } from "./AutoLayoutHandlesOverlay";
+import { SelectionSpacingHandlesOverlay } from "./SelectionSpacingHandlesOverlay";
 import { AutoLayoutHoverOverlay } from "./AutoLayoutHoverOverlay";
 import { pickLayoutGuideAt } from "@/lib/layoutGuidePick";
 import { LayoutGuidesOverlay } from "./LayoutGuidesOverlay";
@@ -1408,7 +1409,6 @@ export function Canvas() {
               }}
             />
           ) : null}
-          <AutoLayoutHandlesOverlay />
           <ComponentPlacementPreview />
           <PresenceLayer />
         </div>
@@ -1428,6 +1428,8 @@ export function Canvas() {
         <ShapeDrawPreview />
         <TextBaselineGuide />
         <SelectionBox />
+        <AutoLayoutHandlesOverlay />
+        <SelectionSpacingHandlesOverlay />
         <TextEditOverlay />
         <MultiSelectSwapHandlesOverlay />
         <SwapDragOverlay />

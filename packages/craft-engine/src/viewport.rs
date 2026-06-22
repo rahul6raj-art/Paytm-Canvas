@@ -15,6 +15,22 @@ impl WorldRect {
         self.y + self.height
     }
 
+    pub fn intersect(&self, other: &WorldRect) -> Option<WorldRect> {
+        let x = self.x.max(other.x);
+        let y = self.y.max(other.y);
+        let right = self.right().min(other.right());
+        let bottom = self.bottom().min(other.bottom());
+        if right <= x || bottom <= y {
+            return None;
+        }
+        Some(WorldRect {
+            x,
+            y,
+            width: right - x,
+            height: bottom - y,
+        })
+    }
+
     pub fn intersects(&self, other: &WorldRect) -> bool {
         self.x < other.right()
             && self.right() > other.x

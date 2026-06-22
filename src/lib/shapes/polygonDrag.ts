@@ -1,9 +1,12 @@
 import { useEditorStore, type EditorNode } from "@/stores/useEditorStore";
+import { hasIndependentVertexCornerRadii } from "@/lib/cornerRadius";
 import {
   clampPolygonSides,
   effectivePolygonParams,
+  getPolygonVertexCornerRadii,
   isPolygonNode,
   polygonCornerRadiusFromLocalPoint,
+  polygonCornerRadiiPatch,
   polygonGeometryPatch,
   type PolygonParams,
 } from "@/lib/shapes/polygonGeometry";
@@ -16,11 +19,14 @@ export type PolygonPreview = {
   nodeId: string;
   sides: number;
   cornerRadius: number;
+  cornerRadii: number[];
+  vertexIndex: number;
 } | null;
 
 let livePreview: PolygonPreview = null;
 let previewListeners = new Set<() => void>();
-let activeDrag: { pointerId: number; nodeId: string } | null = null;
+let activeDrag: { pointerId: number; nodeId: string; vertexIndex: number; linkCorners: boolean } | null =
+  null;
 let pendingPatch: Partial<EditorNode> | null = null;
 let rafId = 0;
 
@@ -37,8 +43,19 @@ export function getPolygonPreview(): PolygonPreview {
   return livePreview;
 }
 
-function setPreview(nodeId: string, params: PolygonParams): void {
-  livePreview = { nodeId, sides: params.sides, cornerRadius: params.cornerRadius };
+function setPreview(
+  nodeId: string,
+  params: PolygonParams,
+  cornerRadii: number[],
+  vertexIndex: number,
+): void {
+  livePreview = {
+    nodeId,
+    sides: params.sides,
+    cornerRadius: params.cornerRadius,
+    cornerRadii,
+    vertexIndex,
+  };
   notifyPreview();
 }
 
@@ -68,16 +85,22 @@ export function beginPolygonCornerRadiusDrag(opts: {
   clientY: number;
   clientToWorld: ClientToWorldFn;
   captureTarget: Element;
+  vertexIndex?: number;
 }): boolean {
   const state = useEditorStore.getState();
   const n = state.nodes[opts.nodeId];
   if (!n || !isPolygonNode(n) || n.locked) return false;
 
-  state.pushHistory();
+  const vertexIndex = opts.vertexIndex ?? 0;
   const params = effectivePolygonParams(n);
-  setPreview(opts.nodeId, params);
+  const startRadii = getPolygonVertexCornerRadii(n);
+  const linkCorners =
+    !n.cornerRadii?.length || !hasIndependentVertexCornerRadii(startRadii);
 
-  activeDrag = { pointerId: opts.pointerId, nodeId: opts.nodeId };
+  state.pushHistory();
+  setPreview(opts.nodeId, params, startRadii, vertexIndex);
+
+  activeDrag = { pointerId: opts.pointerId, nodeId: opts.nodeId, vertexIndex, linkCorners };
   try {
     opts.captureTarget.setPointerCapture(opts.pointerId);
   } catch {
@@ -94,15 +117,27 @@ export function beginPolygonCornerRadiusDrag(opts: {
       if (!node) continue;
       const loc = worldToLocalForNode(w.x, w.y, d.nodeId, st.nodes, st.childOrder);
       const sides = clampPolygonSides(node.polygonSides ?? params.sides);
-      const nextCr = polygonCornerRadiusFromLocalPoint(
+      const nextAtVertex = polygonCornerRadiusFromLocalPoint(
         loc.x,
         loc.y,
         sides,
         node.width,
         node.height,
+        d.vertexIndex,
       );
-      setPreview(d.nodeId, { sides, cornerRadius: nextCr });
-      scheduleStoreUpdate(polygonGeometryPatch(node, { cornerRadius: nextCr }));
+      let nextRadii = [...getPolygonVertexCornerRadii(node)];
+      if (d.linkCorners) {
+        nextRadii = Array.from({ length: nextRadii.length }, () => nextAtVertex);
+      } else {
+        nextRadii[d.vertexIndex] = nextAtVertex;
+      }
+      const radiiPatch = polygonCornerRadiiPatch(node, nextRadii);
+      const nextParams = effectivePolygonParams({ ...node, ...radiiPatch, polygonSides: sides });
+      setPreview(d.nodeId, nextParams, nextRadii, d.vertexIndex);
+      scheduleStoreUpdate({
+        ...polygonGeometryPatch(node, { polygonSides: sides }),
+        ...radiiPatch,
+      });
     }
   };
 

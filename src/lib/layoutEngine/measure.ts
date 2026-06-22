@@ -64,6 +64,10 @@ function intrinsicAxis(
   }
 
   if (isAutoLayoutContainer(node)) {
+    const nested = ctx.nestedSizes?.get(node.id);
+    if (nested) {
+      return axis === "width" ? nested.width : nested.height;
+    }
     const mode = node.layoutMode!;
     const mainIsWidth = mode === "horizontal";
     const hugMain =
@@ -110,7 +114,7 @@ function measureHugMainAxis(parentId: string, ctx: MeasureContext): number {
   let sumMain = 0;
   let maxCross = 0;
   for (const id of kids) {
-    const m = measureNode(id, ctx, mode);
+    const m = measureNode(id, ctx, mode, parent);
     sumMain += m.main;
     maxCross = Math.max(maxCross, m.cross);
   }
@@ -135,7 +139,7 @@ function measureHugCrossAxis(parentId: string, ctx: MeasureContext): number {
   const kids = layoutableFlowChildIds(parentId, ctx);
   let maxCross = 0;
   for (const id of kids) {
-    const m = measureNode(id, ctx, mode);
+    const m = measureNode(id, ctx, mode, parent);
     maxCross = Math.max(maxCross, m.cross);
   }
   if (mode === "horizontal") {
@@ -154,6 +158,7 @@ export function measureNode(
   nodeId: string,
   ctx: MeasureContext,
   parentMode: Exclude<LayoutMode, "none">,
+  parent?: LayoutEngineNode,
 ): MeasuredChild {
   const child = ctx.nodes[nodeId]!;
   const mainMode = childMainSizing(child, parentMode);
@@ -167,6 +172,17 @@ export function measureNode(
       parentMode === "horizontal"
         ? intrinsicAxis(child, "width", ctx)
         : intrinsicAxis(child, "height", ctx);
+  } else if (mainMode === "fill") {
+    if (parent && parentPrimaryAxisHug(parent)) {
+      // Case 3: hug parent + fill child → intrinsic/fixed minimum on main axis.
+      main =
+        parentMode === "horizontal"
+          ? clampDimension(child.width, child.minWidth, child.maxWidth)
+          : clampDimension(child.height, child.minHeight, child.maxHeight);
+    } else {
+      // Pass 5 assigns fill main size; minimal placeholder for wrap estimation.
+      main = 1;
+    }
   } else {
     main =
       parentMode === "horizontal"
@@ -179,6 +195,9 @@ export function measureNode(
       parentMode === "horizontal"
         ? intrinsicAxis(child, "height", ctx)
         : intrinsicAxis(child, "width", ctx);
+  } else if (crossMode === "fill") {
+    // Pass 6 stretches fill cross axis to parent inner cross bounds.
+    cross = 1;
   } else {
     cross =
       parentMode === "horizontal"

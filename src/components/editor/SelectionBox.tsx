@@ -435,14 +435,14 @@ export function SelectionBox() {
         if (!d) return;
         const cur = useEditorStore.getState();
         if (d.session.kind === "single") {
-          const { rotation } = applySingleRotate(
+          const { rotation, x, y } = applySingleRotate(
             d.session,
             world,
             shiftKey,
             cur.nodes,
             cur.childOrder,
           );
-          updateNode(d.session.id, { rotation }, { skipHistory: true });
+          updateNode(d.session.id, { rotation, x, y }, { skipHistory: true });
           setRotateLabel({
             x: world.x,
             y: world.y - labelOffset,
@@ -514,7 +514,7 @@ export function SelectionBox() {
             stEnd.nodes[session.id]?.rotation ?? session.startRotation;
           stEnd.endRotateInteraction(session.id, finalRotation);
         } else {
-          stEnd.setTransformInteractionMode("none");
+          stEnd.endMultiRotateInteraction();
         }
         rotateDragRef.current = null;
         rotateFrozenUnionRef.current = null;

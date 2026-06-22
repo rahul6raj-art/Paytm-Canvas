@@ -25,10 +25,10 @@ import {
 import type { DesignToken } from "@/lib/designTokens";
 import { inspectorTwoColGridClass } from "@/lib/appFieldStyles";
 import {
+  inspectorFieldIconButtonCompactClass,
   inspectorIconClass,
   inspectorIconStroke,
   inspectorLucideProps,
-  inspectorRowActionBtnClass,
 } from "@/lib/inspectorIconStyles";
 import { cn } from "@/lib/utils";
 import {
@@ -192,7 +192,7 @@ function EffectRow({
           title={e.visible ? "Hide effect" : "Show effect"}
           disabled={locked}
           onClick={onToggle}
-          className={cn(inspectorRowActionBtnClass, "inspector-icon-btn h-6 w-6")}
+          className={inspectorFieldIconButtonCompactClass}
         >
           {e.visible ? <Eye {...inspectorLucideProps()} /> : <EyeOff {...inspectorLucideProps()} />}
         </InspectorHintIconButton>
@@ -200,7 +200,7 @@ function EffectRow({
           type="button"
           disabled={locked}
           onClick={onDelete}
-          className={cn(inspectorRowActionBtnClass, "inspector-icon-btn h-6 w-6 hover:text-rose-300")}
+          className={cn(inspectorFieldIconButtonCompactClass, "hover:text-rose-300")}
           aria-label={`Remove ${effectTypeLabel(e.type)}`}
         >
           <Minus className={inspectorIconClass} strokeWidth={inspectorIconStroke} />
