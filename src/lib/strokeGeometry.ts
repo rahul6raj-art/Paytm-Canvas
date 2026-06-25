@@ -13,6 +13,7 @@ export type ShapeContour = {
   width: number;
   height: number;
   radii?: ReturnType<typeof clampCornerRadii>;
+  cornerSmoothing?: number;
   points?: { x: number; y: number }[];
 };
 
@@ -24,6 +25,7 @@ export function shapeContourForNode(
     | "height"
     | "cornerRadius"
     | "cornerRadii"
+    | "cornerSmoothing"
     | "polygonSides"
     | "starPoints"
     | "starInnerRadius"
@@ -34,7 +36,13 @@ export function shapeContourForNode(
   if (node.type === "rectangle" || node.type === "frame") {
     const radii = clampCornerRadii(getNodeCornerRadii(node), w, h);
     const sharp = radii.every((r) => r === 0);
-    return { kind: sharp ? "sharpRect" : "roundedRect", width: w, height: h, radii };
+    return {
+      kind: sharp ? "sharpRect" : "roundedRect",
+      width: w,
+      height: h,
+      radii,
+      cornerSmoothing: node.cornerSmoothing ?? 0,
+    };
   }
   if (node.type === "ellipse") {
     return { kind: "ellipse", width: w, height: h };
@@ -72,6 +80,7 @@ export function strokeCenterlinePathD(
       width: contour.width,
       height: contour.height,
       radii: contour.radii,
+      cornerSmoothing: contour.cornerSmoothing,
       points: contour.points,
       join,
     },

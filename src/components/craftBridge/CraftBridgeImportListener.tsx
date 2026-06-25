@@ -138,10 +138,12 @@ export function CraftBridgeImportListener() {
           router.replace(qs ? `/editor?${qs}` : "/editor");
         }
       } catch (e) {
-        setCraftBridgeSyncStatus(
-          "error",
-          e instanceof Error ? e.message : "Bridge import failed.",
-        );
+        if (source === "route") {
+          setCraftBridgeSyncStatus(
+            "error",
+            e instanceof Error ? e.message : "Bridge import failed.",
+          );
+        }
       } finally {
         consumingRef.current = false;
         window.setTimeout(() => setCraftBridgeInboundActive(false), 2500);

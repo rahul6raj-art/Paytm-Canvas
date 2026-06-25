@@ -139,7 +139,7 @@ describe("svgPerSideStroke", () => {
     assert.match(markup!, /fill="rgba\(0,0,255,1\)"/);
   });
 
-  it("center all-sides gradient stroke uses outline fill with gradient url", () => {
+  it("center all-sides gradient stroke uses native SVG stroke with gradient url", () => {
     const defs: string[] = [];
     const node = rectNode({
       strokeType: "gradient",
@@ -162,9 +162,9 @@ describe("svgPerSideStroke", () => {
       nodeId: node.id,
       registerGradient: (id, m) => defs.push(m),
     });
-    assert.match(markup, /fill="url\(#pc-grad-pc-sg-r1\)"/);
-    assert.doesNotMatch(markup, /stroke="#111111"/);
-    assert.doesNotMatch(markup, /stroke-width="4"/);
+    assert.match(markup, /stroke="url\(#pc-grad-pc-sg-r1\)"/);
+    assert.match(markup, /stroke-width="4"/);
+    assert.doesNotMatch(markup, /fill="url\(#pc-grad-pc-sg-r1\)"/);
     assert.ok(defs.some((d) => d.includes('id="pc-grad-pc-sg-r1"')));
   });
 

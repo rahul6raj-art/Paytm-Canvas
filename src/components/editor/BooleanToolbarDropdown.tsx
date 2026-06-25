@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { useEditorStore } from "@/stores/useEditorStore";
 import {
   BOOLEAN_OPERATION_LABELS,
@@ -11,7 +11,8 @@ import {
 } from "@/lib/booleanGeometry";
 import { cn } from "@/lib/utils";
 import {
-  inspectorHeaderActionBtnClass,
+  inspectorHeaderDropdownAnchorClass,
+  inspectorHeaderDropdownBtnClass,
   inspectorIconClass,
   inspectorIconStroke,
 } from "@/lib/inspectorIconStyles";
@@ -182,7 +183,7 @@ export function BooleanOperationsDropdown({
   if (variant === "inspector") {
     return (
       <>
-        <div ref={anchorRef} className="inline-flex">
+        <div ref={anchorRef} className={inspectorHeaderDropdownAnchorClass}>
           <EditorHintWrap title="Boolean operations" disabled={!enabled}>
             <button
               type="button"
@@ -192,12 +193,15 @@ export function BooleanOperationsDropdown({
               onClick={() => setOpen((v) => !v)}
               disabled={!enabled}
               className={cn(
-                inspectorHeaderActionBtnClass,
-                "h-8 min-h-8 w-8 min-w-8 max-w-8",
+                inspectorHeaderDropdownBtnClass,
                 open ? "bg-app-hover text-app-fg" : enabled ? "text-app-muted" : undefined,
               )}
             >
               <BooleanMenuIcon className="h-[18px] w-[18px]" />
+              <ChevronDown
+                className={cn(inspectorIconClass, "h-3 w-3 opacity-70")}
+                strokeWidth={inspectorIconStroke}
+              />
             </button>
           </EditorHintWrap>
         </div>

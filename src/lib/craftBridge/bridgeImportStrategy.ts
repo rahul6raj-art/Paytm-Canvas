@@ -1,6 +1,7 @@
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import type { EditorNode } from "@/stores/useEditorStore";
 import type { CodeRoundTripLink } from "@/lib/craftBridge/types";
+import { canvasScreenLabelFromSource } from "@/lib/craftBridge/canvasScreenLabels";
 
 export type BridgeImportStrategy =
   | { mode: "replace" }
@@ -8,8 +9,7 @@ export type BridgeImportStrategy =
   | { mode: "replace-root"; rootId: string; x: number; y: number };
 
 export function screenLabelFromSourcePath(sourcePath: string): string {
-  const base = sourcePath.replace(/\\/g, "/").split("/").pop() ?? sourcePath;
-  return base.replace(/\.(tsx|jsx|html|htm)$/i, "");
+  return canvasScreenLabelFromSource(sourcePath);
 }
 
 function normalizeSourcePath(sourcePath: string): string {

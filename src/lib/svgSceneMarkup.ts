@@ -31,6 +31,7 @@ import { booleanGroupSceneInnerMarkup } from "@/lib/codeExport/booleanRenderSvg"
 import { effectiveFillType, fillPaintCss } from "@/lib/fillGradient";
 import { gradientRenderScale } from "@/lib/gradient/svgSceneFill";
 import { svgLayerBlendStyleAttr } from "@/lib/layerBlendMode";
+import { maxEffectBleedPad } from "@/lib/nodeEffects";
 
 const SUPPORTED_TYPES = new Set([
   "frame",
@@ -123,6 +124,29 @@ type BuildCtx = {
   selectedIds?: readonly string[];
 };
 
+function maxEffectBleedInSubtree(nodeId: string, ctx: BuildCtx): number {
+  const node = ctx.nodes[nodeId];
+  if (!node) return 0;
+  const resolved = resolveSceneRenderNode(node, ctx.nodes, ctx.designTokens);
+  let pad = maxEffectBleedPad(resolved.effects);
+  for (const cid of ctx.childOrder[nodeId] ?? []) {
+    pad = Math.max(pad, maxEffectBleedInSubtree(cid, ctx));
+  }
+  return pad;
+}
+
+function registerClipRectWithEffectBleed(
+  ctx: BuildCtx,
+  clipId: string,
+  nodeId: string,
+  w: number,
+  h: number,
+  node: EditorNode,
+): void {
+  const bleed = maxEffectBleedInSubtree(nodeId, ctx);
+  registerClipRect(ctx.defs, clipId, w, h, node, bleed);
+}
+
 function renderChildren(parentId: string, ctx: BuildCtx): string {
   const kids = layerPanelChildIds(parentId, ctx.nodes, ctx.childOrder);
   let out = "";
@@ -178,7 +202,7 @@ function renderNode(nodeId: string, ctx: BuildCtx): string {
   }
 
   if (node.type === "line" || node.type === "arrow") {
-    return wrapOpacity(svgLine(node));
+    return wrapOpacity(svgLine(node, nodeId));
   }
 
   if (node.type === "path" || node.type === "polygon") {
@@ -263,7 +287,7 @@ function renderNode(nodeId: string, ctx: BuildCtx): string {
     const hasOwnFill = node.fillEnabled && node.fill != null;
     const hasOwnStroke = Boolean(node.strokeWidth && node.strokeColor);
     if (!clip && !hasOwnFill && !hasOwnStroke) {
-      return wrapOpacity(children);
+      return wrapOpacity(wrapSvgNodeFilter(children, filterRef));
     }
 
     const stroke = hasOwnStroke ? resolved.strokeColor! : "rgba(15,23,42,0.12)";
@@ -282,7 +306,7 @@ function renderNode(nodeId: string, ctx: BuildCtx): string {
     );
     if (!clip) return wrapOpacity(`${shell}${children}`);
     const clipId = `pc-clip-${svgSafeId(nodeId)}`;
-    registerClipRect(ctx.defs, clipId, w, h, node);
+    registerClipRectWithEffectBleed(ctx, clipId, nodeId, w, h, node);
     return wrapOpacity(`${shell}<g clip-path="url(#${clipId})">${children}</g>`);
   }
 
@@ -294,7 +318,7 @@ function renderNode(nodeId: string, ctx: BuildCtx): string {
 
     const clip = shouldClipChildren(node);
     const clipId = `pc-clip-${svgSafeId(nodeId)}`;
-    if (clip) registerClipRect(ctx.defs, clipId, w, h, node);
+    if (clip) registerClipRectWithEffectBleed(ctx, clipId, nodeId, w, h, node);
 
     const shellFilter = filterRef;
 

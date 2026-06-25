@@ -17,9 +17,13 @@ import {
 } from "@/lib/strokeAlign";
 import { lineEndpointsFromNode } from "@/lib/shapes/lineGeometry";
 import { generatePolygonPoints } from "@/lib/shapes/pathGenerators";
-import { isPolygonNode, polygonPathDForNode } from "@/lib/shapes/polygonGeometry";
+import { shapeHasRoundedCornerStroke, roundedVectorStrokeRingForNode, useAnalyticRoundedStrokeRing } from "@/lib/geometry/roundedVectorStrokeRing";
+import {
+  buildTaperedOpenStrokeFromNode,
+  resolveStrokeTaperActive,
+} from "@/lib/taperedStrokePath";
+import { resolvePathOutlineD } from "@/lib/shapes/shapeToPath";
 import { roundedRectBorderFills, type BorderSideFill } from "@/lib/borderGeometry";
-import { isStarNode, starPathDForNode } from "@/lib/shapes/starGeometry";
 import { prepareTextForDisplay, textAdvancedStyleFromNode } from "@/lib/text/textAdvancedStyle";
 import { layoutText, lineTopY } from "@/lib/text/textMeasure";
 import { TEXT_BOX_PAD_X, TEXT_BOX_PAD_Y, textInnerWidth } from "@/lib/text/textNodeModel";
@@ -181,7 +185,7 @@ export function tessellatePathPoints(points: PathPoint[], closed: boolean): Poin
 }
 
 /** Tessellate SVG path d (M/L/A/C/Z) to a polyline. */
-export function tessellateSvgPathD(pathD: string): Point2[] {
+export function tessellateSvgPathD(pathD: string, density = 1): Point2[] {
   const tokens = pathD.match(/[a-zA-Z]|-?\d*\.?\d+(?:e[-+]?\d+)?/g);
   if (!tokens?.length) return [];
   const out: Point2[] = [];
@@ -239,7 +243,7 @@ export function tessellateSvgPathD(pathD: string): Point2[] {
       const sweep = readNum() >= 1;
       const x = readNum() + (rel ? cx : 0);
       const y = readNum() + (rel ? cy : 0);
-      const arcPts = sampleSvgArc(cx, cy, rx, ry, largeArc, sweep, x, y);
+      const arcPts = sampleSvgArc(cx, cy, rx, ry, largeArc, sweep, x, y, density);
       for (let j = 1; j < arcPts.length; j++) push(arcPts[j]!.x, arcPts[j]!.y);
     } else if (c === "Z") {
       if (!pointsEqual({ x: cx, y: cy }, { x: startX, y: startY })) {
@@ -252,6 +256,24 @@ export function tessellateSvgPathD(pathD: string): Point2[] {
   return out;
 }
 
+function sampleCircularArcPoints(
+  cx: number,
+  cy: number,
+  r: number,
+  a0: number,
+  delta: number,
+  density = 1,
+): Point2[] {
+  const steps = Math.max(2, Math.ceil(arcSegmentsForRadius(r) * Math.max(1, density)));
+  const pts: Point2[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const a = a0 + delta * t;
+    pts.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+  }
+  return pts;
+}
+
 function sampleSvgArc(
   x0: number,
   y0: number,
@@ -261,6 +283,7 @@ function sampleSvgArc(
   sweep: boolean,
   x1: number,
   y1: number,
+  density = 1,
 ): Point2[] {
   if (Math.abs(rx) < 1e-9 || Math.abs(ry) < 1e-9) return [{ x: x0, y: y0 }, { x: x1, y: y1 }];
   const r = (Math.abs(rx) + Math.abs(ry)) / 2;
@@ -281,14 +304,7 @@ function sampleSvgArc(
   let delta = a1 - a0;
   if (sweep && delta < 0) delta += Math.PI * 2;
   if (!sweep && delta > 0) delta -= Math.PI * 2;
-  const steps = Math.max(2, arcSegmentsForRadius(r));
-  const pts: Point2[] = [];
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const a = a0 + delta * t;
-    pts.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
-  }
-  return pts;
+  return sampleCircularArcPoints(cx, cy, r, a0, delta, density);
 }
 
 /** Offset joint between two segments on an open/closed chain. */
@@ -831,7 +847,7 @@ export function generateStrokeGeometry(
   points: Point2[],
   closed: boolean,
   params: StrokeGeometryParams,
-  shape?: Pick<EditorNode, "type" | "width" | "height" | "cornerRadius" | "cornerRadii">,
+  shape?: Pick<EditorNode, "type" | "width" | "height" | "cornerRadius" | "cornerRadii" | "cornerSmoothing">,
 ): OutlineStrokeResult | null {
   if (points.length < 2 || params.width < 1e-9) return null;
 
@@ -840,7 +856,14 @@ export function generateStrokeGeometry(
     const h = Math.max(1, shape.height);
     const radii = clampCornerRadii(getNodeCornerRadii(shape), w, h);
     if (radii.some((r) => r > 0)) {
-      const ring = outlineRoundedRectRingPathD(w, h, radii, params.width, params.align);
+      const ring = outlineRoundedRectRingPathD(
+        w,
+        h,
+        radii,
+        params.width,
+        params.align,
+        shape.cornerSmoothing ?? 0,
+      );
       if (ring?.pathD) {
         const outlinePts = tessellateSvgPathD(ring.pathD);
         return {
@@ -938,27 +961,13 @@ export function centerlineContourForNode(
     return { points: generatePolygonPoints(ELLIPSE_SEGMENTS, w, h), closed: true };
   }
 
-  if (isPolygonNode(node)) {
-    const d = polygonPathDForNode(node);
-    return { points: tessellateSvgPathD(d), closed: true };
-  }
-
-  if (node.type === "path" && isStarNode(node)) {
-    const d = starPathDForNode(node);
-    return { points: tessellateSvgPathD(d), closed: true };
-  }
-
-  if (node.type === "path") {
-    if (node.flattenedPathData) {
-      return { points: tessellateSvgPathD(node.flattenedPathData), closed: true };
-    }
-    if (node.pathPoints?.length) {
-      return {
-        points: tessellatePathPoints(node.pathPoints, node.pathClosed ?? false),
-        closed: node.pathClosed ?? false,
-      };
-    }
-    return null;
+  if (node.type === "path" || node.type === "polygon") {
+    const d = resolvePathOutlineD(node, node.id).trim();
+    if (!d) return null;
+    const closed = node.type === "polygon" ? true : (node.pathClosed ?? false);
+    const points = tessellateSvgPathD(d);
+    if (points.length < 2) return null;
+    return { points, closed };
   }
 
   if (node.type === "line" || node.type === "arrow") {
@@ -977,6 +986,10 @@ export function centerlineContourForNode(
 
 export function canOutlineStroke(node: EditorNode | null | undefined): boolean {
   if (!node || node.locked || node.visible === false) return false;
+  if (node.type === "text") {
+    if (strokeSpecIsVisible(resolveStrokeSpec(node))) return true;
+    return node.fillEnabled !== false && Boolean(node.content?.trim());
+  }
   return strokeSpecIsVisible(resolveStrokeSpec(node));
 }
 
@@ -996,6 +1009,7 @@ function outlineDashedStroke(
   const fillProps = fillPropsFromNode(node);
   return resultFromPathParts(parts, spec.color, spec.opacity, fillProps.fillType, fillProps.fillGradient);
 }
+
 
 function outlineTextGlyphLines(
   node: EditorNode,
@@ -1024,6 +1038,38 @@ function outlineTextGlyphLines(
   return resultFromPathParts(parts, spec.color, spec.opacity, fillProps.fillType, fillProps.fillGradient);
 }
 
+/**
+ * Build a filled stroke ring from the same SVG path used for shape fill.
+ * Offsets the tessellated fill boundary for inside/center/outside alignment.
+ */
+export function filledStrokeOutlineFromPathD(
+  node: EditorNode,
+  pathD: string,
+  closed = true,
+): Pick<OutlineStrokeResult, "pathD" | "fillRule"> | null {
+  const spec = resolveStrokeSpec(node);
+  if (!strokeSpecIsVisible(spec)) return null;
+
+  if (closed && shapeHasRoundedCornerStroke(node)) {
+    const ring = roundedVectorStrokeRingForNode(node, spec.width, spec.align);
+    if (ring?.pathD) return ring;
+  }
+
+  const d = pathD.trim();
+  if (!d) return null;
+  const boundary = tessellateSvgPathD(d);
+  if (boundary.length < 3) return null;
+  const params: StrokeGeometryParams = {
+    width: spec.width,
+    align: spec.align,
+    join: spec.join,
+    cap: spec.cap,
+  };
+  const result = generateStrokeGeometry(boundary, closed, params, node);
+  if (!result?.pathD) return null;
+  return { pathD: result.pathD, fillRule: result.fillRule };
+}
+
 /** Convert stroked shape into filled vector path geometry (Figma Outline Stroke). */
 export function outlineStroke(
   node: EditorNode,
@@ -1037,7 +1083,41 @@ export function outlineStroke(
   if (perSide) return perSide;
 
   if (node.type === "text") {
-    return outlineTextGlyphLines(node, spec);
+    if (strokeSpecIsVisible(spec)) return outlineTextGlyphLines(node, spec);
+    return null;
+  }
+
+  if (shapeHasRoundedCornerStroke(node) && useAnalyticRoundedStrokeRing(node)) {
+    const ring = roundedVectorStrokeRingForNode(node, spec.width, spec.align);
+    if (ring?.pathD) {
+      const outlinePts = tessellateSvgPathD(ring.pathD);
+      return {
+        pathD: ring.pathD,
+        fillRule: ring.fillRule,
+        pathPoints: pointsToPathPoints(outlinePts),
+        pathClosed: true,
+        fill: spec.color,
+        fillOpacity: spec.opacity,
+        ...fillProps,
+      };
+    }
+  }
+
+  const fillPathD = resolvePathOutlineD(node, node.id);
+  const fillOutline = fillPathD
+    ? filledStrokeOutlineFromPathD(node, fillPathD, node.type === "polygon" ? true : (node.pathClosed ?? false))
+    : null;
+  if (fillOutline?.pathD) {
+    const outlinePts = tessellateSvgPathD(fillOutline.pathD);
+    return {
+      pathD: fillOutline.pathD,
+      fillRule: fillOutline.fillRule,
+      pathPoints: pointsToPathPoints(outlinePts),
+      pathClosed: true,
+      fill: spec.color,
+      fillOpacity: spec.opacity,
+      ...fillProps,
+    };
   }
 
   const params: StrokeGeometryParams = {
@@ -1052,6 +1132,23 @@ export function outlineStroke(
 
   const points = contour.points;
   const closed = contour.closed;
+
+  if (!closed && resolveStrokeTaperActive(node)) {
+    const pathD = resolvePathOutlineD(node, node.id);
+    const taperedPathD = buildTaperedOpenStrokeFromNode(node, pathD, false);
+    if (taperedPathD) {
+      const outlinePts = tessellateSvgPathD(taperedPathD);
+      return {
+        pathD: taperedPathD,
+        fillRule: "nonzero",
+        pathPoints: pointsToPathPoints(outlinePts),
+        pathClosed: true,
+        fill: spec.color,
+        fillOpacity: spec.opacity,
+        ...fillProps,
+      };
+    }
+  }
 
   if (spec.dashPattern.length > 0) {
     const dashed = outlineDashedStroke(node, points, closed, params, spec);

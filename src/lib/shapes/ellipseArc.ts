@@ -1,6 +1,10 @@
 /** Ellipse arc / sweep / inner ratio (Figma-style pie, arc, and ring shapes). */
 
+import { newPathPointId, type PathPoint } from "@/lib/pathGeometry";
 import { generatePolygonPoints } from "@/lib/shapes/pathGenerators";
+
+/** Cubic Bézier κ for a quarter circle (4/3 · (√2 − 1)). */
+export const ELLIPSE_BEZIER_KAPPA = 0.5522847498;
 
 export const DEFAULT_ELLIPSE_ARC_START_DEG = 0;
 export const DEFAULT_ELLIPSE_ARC_SWEEP_DEG = 360;
@@ -169,6 +173,35 @@ export function isFullEllipseArc(sweepDeg: number): boolean {
 
 export function hasEllipseArcInnerHole(innerRadiusRatio: number): boolean {
   return innerRadiusRatio > 0.001;
+}
+
+/** Four smooth Bézier anchors for a full ellipse in a w×h box (Figma-style). */
+export function fullEllipseBezierPathPoints(width: number, height: number): PathPoint[] {
+  const w = Math.max(1, width);
+  const h = Math.max(1, height);
+  const cx = w / 2;
+  const cy = h / 2;
+  const ox = ELLIPSE_BEZIER_KAPPA * (w / 2);
+  const oy = ELLIPSE_BEZIER_KAPPA * (h / 2);
+  const anchors: {
+    x: number;
+    y: number;
+    handleIn: { x: number; y: number };
+    handleOut: { x: number; y: number };
+  }[] = [
+    { x: cx, y: 0, handleIn: { x: -ox, y: 0 }, handleOut: { x: ox, y: 0 } },
+    { x: w, y: cy, handleIn: { x: 0, y: -oy }, handleOut: { x: 0, y: oy } },
+    { x: cx, y: h, handleIn: { x: ox, y: 0 }, handleOut: { x: -ox, y: 0 } },
+    { x: 0, y: cy, handleIn: { x: 0, y: oy }, handleOut: { x: 0, y: -oy } },
+  ];
+  return anchors.map((anchor) => ({
+    id: newPathPointId(),
+    x: anchor.x,
+    y: anchor.y,
+    handleIn: anchor.handleIn,
+    handleOut: anchor.handleOut,
+    pointType: "smooth" as const,
+  }));
 }
 
 export function formatArcRatioPercent(ratio: number): string {

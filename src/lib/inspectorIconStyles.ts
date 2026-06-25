@@ -19,6 +19,14 @@ export const inspectorHeaderActionBtnClass = cn(
   inspectorIconBtnInteractive,
 );
 
+/** Icon + chevron header controls (create component, boolean, etc.). */
+export const inspectorHeaderDropdownBtnClass = cn(
+  inspectorHeaderActionBtnClass,
+  "max-w-none h-8 min-h-8 w-auto min-w-9 shrink-0 gap-0.5 px-1.5",
+);
+
+export const inspectorHeaderDropdownAnchorClass = "inline-flex shrink-0";
+
 export const inspectorRowActionBtnClass = cn(
   inspectorIconButtonBaseClass,
   "inspector-icon-btn rounded",

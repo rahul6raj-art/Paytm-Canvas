@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import type { StrokeLinecap, StrokeLinejoin } from "@/lib/stroke";
+import { svgNativeLinecap } from "@/lib/stroke";
 import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
 
 function IconBtn({
@@ -63,7 +64,7 @@ export function StrokeLinecapControl({
               y2="5"
               stroke="currentColor"
               strokeWidth="2"
-              strokeLinecap={v}
+              strokeLinecap={svgNativeLinecap(v)}
             />
           </svg>
         </IconBtn>
@@ -120,7 +121,7 @@ export function StrokeLinejoinControl({
 
 export function StrokeWidthProfilePreview({
   flipped,
-  profile = "taper",
+  profile = "uniform",
 }: {
   flipped?: boolean;
   profile?: "uniform" | "taper";

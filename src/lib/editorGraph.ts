@@ -29,6 +29,17 @@ export function parentListKeyForNode(parentId: string | null): string {
   return parentId ?? EDITOR_ROOT_KEY;
 }
 
+/** Child ids for a node, falling back to parentId links when childOrder is missing. */
+export function childIdsForNode(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  nodeId: string,
+): string[] {
+  const fromOrder = childOrder[nodeId];
+  if (fromOrder && fromOrder.length > 0) return [...fromOrder];
+  return Object.keys(nodes).filter((id) => nodes[id]?.parentId === nodeId);
+}
+
 function isValidParentContainer(nodes: Record<string, EditorNode>, parentKey: string): boolean {
   if (parentKey === EDITOR_ROOT_KEY) return true;
   const p = nodes[parentKey];
@@ -93,6 +104,18 @@ export function reconcileChildOrderWithParents(
   return out;
 }
 
+/** Preserve first occurrence order; drop duplicate ids (bad childOrder / merge artifacts). */
+export function dedupeOrderedIds(ids: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
 /** Layer panel child ids — honors childOrder z-order but only under the correct parent. */
 export function layerPanelChildIds(
   parentId: string,
@@ -105,7 +128,7 @@ export function layerPanelChildIds(
     const n = nodes[id];
     return n && (n.parentId ?? null) === expectedParent;
   });
-  if (fromOrder.length > 0) return fromOrder;
+  if (fromOrder.length > 0) return dedupeOrderedIds(fromOrder);
 
   const orderIndex = new Map<string, number>();
   let idx = 0;
@@ -115,13 +138,45 @@ export function layerPanelChildIds(
     }
   }
 
-  return Object.keys(nodes)
-    .filter((id) => {
-      if (id === EDITOR_ROOT_KEY || id === parentId) return false;
-      const n = nodes[id];
-      return n && (n.parentId ?? null) === expectedParent;
-    })
-    .sort((a, b) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0));
+  return dedupeOrderedIds(
+    Object.keys(nodes)
+      .filter((id) => {
+        if (id === EDITOR_ROOT_KEY || id === parentId) return false;
+        const n = nodes[id];
+        return n && (n.parentId ?? null) === expectedParent;
+      })
+      .sort((a, b) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0)),
+  );
+}
+
+/** Text nodes in back-to-front paint order (matches SVG scene traversal). */
+export function collectSceneTextNodeIds(
+  rootIds: readonly string[],
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): string[] {
+  const out: string[] = [];
+  const visit = (nodeId: string) => {
+    const node = nodes[nodeId];
+    if (!node || node.visible === false) return;
+    if (node.type === "text") {
+      out.push(nodeId);
+      return;
+    }
+    if (
+      node.type === "frame" ||
+      node.type === "group" ||
+      node.type === "rectangle" ||
+      node.type === "ellipse" ||
+      node.type === "image"
+    ) {
+      for (const cid of layerPanelChildIds(nodeId, nodes, childOrder)) {
+        visit(cid);
+      }
+    }
+  };
+  for (const rid of rootIds) visit(rid);
+  return out;
 }
 
 /** Figma-style layer list — front-most layer first (top of the panel). */

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { textBaselineLocalY } from "@/lib/text/textBaseline";
+import { svgTextTspanY, textBaselineLocalY } from "@/lib/text/textBaseline";
 import type { EditorNode } from "@/stores/useEditorStore";
 
 function installTextMeasureDomStub(): void {
@@ -31,6 +31,19 @@ function installTextMeasureDomStub(): void {
 }
 
 describe("textBaseline", () => {
+  it("maps canvas line-top y to svg alphabetic y", () => {
+    installTextMeasureDomStub();
+    const typo = {
+      fontFamily: "Inter",
+      fontSize: 14,
+      fontWeight: 500,
+      lineHeight: 1.25,
+      letterSpacing: 0,
+      color: "#000",
+    };
+    assert.equal(svgTextTspanY(2, typo), 2 + 11);
+  });
+
   it("returns a baseline below the top padding", () => {
     installTextMeasureDomStub();
     const node = {

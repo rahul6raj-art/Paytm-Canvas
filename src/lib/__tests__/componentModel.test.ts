@@ -7,6 +7,7 @@ import {
   filterComponentLibraryGroups,
   findInstanceRoot,
   groupComponentMasters,
+  libraryPanelMasters,
 } from "@/lib/componentModel";
 
 function master(partial: Partial<EditorNode> & Pick<EditorNode, "id" | "name">): EditorNode {
@@ -40,6 +41,51 @@ describe("component library search", () => {
     assert.equal(filtered.length, 1);
     assert.equal(filtered[0]!.variants.length, 1);
     assert.equal(filtered[0]!.variants[0]!.id, "b");
+  });
+
+  it("uses component set container name when nodes are provided", () => {
+    const setId = "set-1";
+    const a = master({
+      id: "a",
+      name: "Rectangle 1",
+      parentId: setId,
+      variantGroupId: "vg1",
+      variantProperties: { Variant: "Default" },
+    });
+    const b = master({
+      id: "b",
+      name: "Rectangle 2",
+      parentId: setId,
+      variantGroupId: "vg1",
+      variantProperties: { Variant: "Alt" },
+    });
+    const masters = [a, b];
+    const nodes: Record<string, EditorNode> = {
+      [setId]: {
+        ...master({ id: setId, name: "Component 1" }),
+        isComponent: false,
+        isComponentSet: true,
+        variantGroupId: "vg1",
+      },
+      a,
+      b,
+    };
+    const groups = groupComponentMasters(masters, nodes);
+    assert.equal(groups.find((g) => g.id === "vg1")!.label, "Component 1");
+  });
+
+  it("libraryPanelMasters returns one entry per variant set", () => {
+    const masters = [
+      master({ id: "a", name: "Button · variant", variantGroupId: "vg1", variantProperties: { Variant: "Primary" } }),
+      master({ id: "b", name: "Button · variant", variantGroupId: "vg1", variantProperties: { Variant: "Secondary" } }),
+      master({ id: "c", name: "Card" }),
+    ];
+    const panel = libraryPanelMasters(masters);
+    assert.equal(panel.length, 2);
+    assert.deepEqual(
+      panel.map((m) => m.id),
+      ["a", "c"],
+    );
   });
 
   it("matches variant property keys and values", () => {

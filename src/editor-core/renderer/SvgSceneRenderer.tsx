@@ -12,6 +12,7 @@ import {
   subscribeEllipseArcPreview,
 } from "@/lib/shapes/ellipseArcDrag";
 import { buildSvgScene } from "@/lib/svgSceneMarkup";
+import { isNativeRendererEnabled } from "@/lib/rendererMode";
 import { useEditorStore } from "@/stores/useEditorStore";
 import type { SceneRendererProps } from "./RendererTypes";
 import { TextFidelityDebugOverlay } from "@/components/editor/TextFidelityDebugOverlay";
@@ -49,10 +50,17 @@ export function SvgSceneRenderer({
     return useEditorStore.getState().nodes;
   }, [nodes, interactionPreview, transformInteractionMode, resizeEpoch]);
 
-  const excludeNodeIds = useMemo(
-    () => (editingTextId ? new Set([editingTextId]) : undefined),
-    [editingTextId],
-  );
+  const excludeNodeIds = useMemo(() => {
+    const set = new Set<string>();
+    if (isNativeRendererEnabled()) {
+      for (const [id, node] of Object.entries(nodesForScene)) {
+        if (node?.type === "text" && node.visible !== false) set.add(id);
+      }
+    } else if (editingTextId) {
+      set.add(editingTextId);
+    }
+    return set.size > 0 ? set : undefined;
+  }, [editingTextId, nodesForScene]);
 
   const activeDragPreview =
     interactionPreview && dragPreview?.movingIds.length ? dragPreview : undefined;

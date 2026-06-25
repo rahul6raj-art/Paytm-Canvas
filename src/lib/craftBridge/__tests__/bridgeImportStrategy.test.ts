@@ -44,7 +44,7 @@ describe("resolveBridgeImportStrategy", () => {
           childOrder: { [EDITOR_ROOT_KEY]: ["more"] },
           nodes: {
             more: frame("more", {
-              name: "PMLMorePage",
+              name: "PML- More",
               bridgeSourcePath: "src/screens/PMLMorePage/PMLMorePage.tsx",
             }),
           },
@@ -62,7 +62,7 @@ describe("resolveBridgeImportStrategy", () => {
           childOrder: { [EDITOR_ROOT_KEY]: ["more"] },
           nodes: {
             more: frame("more", {
-              name: "PMLMorePage",
+              name: "PML- More",
               bridgeSourcePath: "src/screens/PMLMorePage/PMLMorePage.tsx",
               x: 120,
               y: 64,
@@ -78,13 +78,13 @@ describe("resolveBridgeImportStrategy", () => {
   it("matches by screen label when bridgeSourcePath is missing", () => {
     assert.equal(
       screenLabelFromSourcePath("src/screens/PMLMorePage/PMLMorePage.tsx"),
-      "PMLMorePage",
+      "PML- More",
     );
     assert.deepEqual(
       resolveBridgeImportStrategy(
         {
           childOrder: { [EDITOR_ROOT_KEY]: ["more"] },
-          nodes: { more: frame("more", { name: "PMLMorePage", x: 80, y: 80 }) },
+          nodes: { more: frame("more", { name: "PML- More", x: 80, y: 80 }) },
         },
         "src/screens/PMLMorePage/PMLMorePage.tsx",
       ),

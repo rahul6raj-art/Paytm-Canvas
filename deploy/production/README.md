@@ -69,8 +69,8 @@ Terminate TLS at your edge (Vercel, Fly, ALB, or [deploy/nginx/craft-proxy.conf]
 
 - [ ] `CRAFT_API_ALLOW_ANON=0` and `CRAFT_SYNC_ALLOW_ANON=0`
 - [ ] `CRAFT_API_CORS_ORIGIN` matches web origin exactly (HTTPS)
-- [ ] `CRAFT_APP_URL` set for invite email links
-- [ ] SMTP vars set (or accept log-only invites)
+- [ ] `CRAFT_APP_URL` set for invite and password reset email links
+- [ ] SMTP vars set (or accept log-only invites / reset emails)
 - [ ] Prisma migrations applied
 - [ ] R2 upload smoke: create asset via editor or `POST /v1/workspaces/:id/assets/upload-url`
 - [ ] Sign-in flow works (session cookie `Secure` on HTTPS)

@@ -9,7 +9,8 @@ import {
   requireFileAccess,
   requireWorkspaceAccess,
 } from "../access/workspaceAccess.js";
-import { resolveRequestUser, userDto } from "../middleware/auth.js";
+import { resolveRequestUser } from "../middleware/auth.js";
+import { meRouter } from "./me.js";
 
 function fileSummary(row: File) {
   return {
@@ -69,14 +70,7 @@ v1Router.get("/health", (_req, res) => {
   res.status(200).json({ ok: true });
 });
 
-v1Router.get("/me", async (req, res) => {
-  const user = await resolveRequestUser(req);
-  if (!user) {
-    res.status(401).json(jsonV1Error("UNAUTHORIZED", "Not signed in", 401).body);
-    return;
-  }
-  res.status(200).json(jsonV1Data(userDto(user)).body);
-});
+v1Router.use("/me", meRouter);
 
 v1Router.get("/workspaces", async (req, res) => {
   const user = await resolveRequestUser(req);

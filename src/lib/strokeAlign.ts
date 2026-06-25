@@ -2,6 +2,9 @@ import { clampCornerRadii, cornerRadiiToCss, getNodeCornerRadii } from "@/lib/co
 import { effectiveStrokeType } from "@/lib/fillGradient";
 import { effectColorToRgba } from "@/lib/nodeEffects";
 import { resolveStrokeStyle } from "@/lib/stroke";
+import { pathHasCurveHandles } from "@/lib/shapes/shapeToPath";
+import { resolveStrokeEndPoint, resolveStrokeStartPoint } from "@/lib/strokeEndpoints";
+import { resolveStrokeTaperActive } from "@/lib/taperedStrokePath";
 import type { StrokePosition, EditorNode } from "@/stores/useEditorStore";
 
 export type StrokeSidesMode = "all" | "top" | "bottom" | "left" | "right" | "custom";
@@ -378,13 +381,145 @@ export function shouldUseAlignedPathStroke(
   return (node.strokePosition ?? "center") !== "center";
 }
 
-/** Open vector paths render stroke as filled outline geometry (freehand, pen paths). */
-export function shouldUseOutlinedOpenPathStroke(
-  node: Pick<EditorNode, "type" | "strokeSides">,
+/**
+ * Closed shapes that need a filled even-odd stroke ring instead of native SVG stroke.
+ * Center-aligned strokes on every closed shape (solid, gradient, image, video) use native
+ * SVG stroke on the fill path. Filled rings are reserved for inside/outside alignment.
+ */
+export function shouldUseFilledStrokeRingForNode(
+  node: Pick<
+    EditorNode,
+    | "type"
+    | "strokePosition"
+    | "strokeSides"
+    | "strokeType"
+    | "width"
+    | "height"
+    | "cornerRadius"
+    | "cornerRadii"
+    | "cornerSmoothing"
+    | "pathPoints"
+    | "pathClosed"
+    | "polygonSides"
+    | "starPoints"
+    | "starInnerRadius"
+    | "starOuterCornerRadius"
+    | "starInnerCornerRadius"
+  >,
+  opts: { closed: boolean; showStroke?: boolean },
+): boolean {
+  if (opts.showStroke === false || !opts.closed) return false;
+  if (usesPerEdgeStroke(node)) return false;
+  if (shouldUseAlignedPathStroke(node, opts.closed)) return true;
+  if ((node.strokePosition ?? "center") === "center") return false;
+  if (effectiveStrokeType(node) !== "solid") return true;
+  return false;
+}
+
+/**
+ * Filled stroke-ring layer order (even-odd outline geometry).
+ * Outside: ring below fill so fill covers the inner edge of the band.
+ * Center/inside: ring above fill so the stroke stays visible on the shape edge.
+ */
+export function strokeRingLayersBeforeFill(
+  position: EditorNode["strokePosition"] | undefined,
+): boolean {
+  return (position ?? "center") === "outside";
+}
+
+/** True when the fill path should paint below the stroke layer. */
+export function strokeFillLayerBeforeStrokeLayer(
+  position: EditorNode["strokePosition"] | undefined,
+  usesFilledRing: boolean,
+): boolean {
+  if (usesFilledRing) return !strokeRingLayersBeforeFill(position);
+  return (position ?? "center") !== "outside";
+}
+
+/** Expand SVG viewport so center/outside stroke bands are not clipped at node bounds. */
+export function closedShapeStrokeViewport(
+  width: number,
+  height: number,
+  strokeWidth: number,
+  position: EditorNode["strokePosition"] | undefined,
+): {
+  viewBox: string;
+  svgWidth: number;
+  svgHeight: number;
+  offsetLeft: number;
+  offsetTop: number;
+} | null {
+  const sw = Math.max(0, strokeWidth);
+  if (sw <= 1e-9) return null;
+  const pos = position ?? "center";
+  const pad = pos === "outside" ? sw : pos === "center" ? sw / 2 : 0;
+  if (pad <= 1e-9) return null;
+  const w = width + pad * 2;
+  const h = height + pad * 2;
+  return {
+    viewBox: `${-pad} ${-pad} ${w} ${h}`,
+    svgWidth: w,
+    svgHeight: h,
+    offsetLeft: -pad,
+    offsetTop: -pad,
+  };
+}
+
+/** Open vector paths with taper use filled outline geometry instead of native SVG stroke. */
+export function shouldUseTaperedOpenPathStroke(
+  node: Pick<
+    EditorNode,
+    | "type"
+    | "strokeSides"
+    | "strokeLinecap"
+    | "strokeTaperStart"
+    | "strokeTaperEnd"
+    | "strokeWidthProfile"
+    | "strokeStyle"
+    | "strokeDashLength"
+    | "strokeDashGap"
+    | "strokeStartPoint"
+    | "strokeEndPoint"
+    | "arrowHead"
+  >,
   closed: boolean,
 ): boolean {
   if (closed || node.type !== "path") return false;
-  return !usesPerEdgeStroke(node);
+  if (!resolveStrokeTaperActive(node)) return false;
+  if (usesPerEdgeStroke(node)) return false;
+  const style = node.strokeStyle ?? "solid";
+  if (style !== "solid") return false;
+  const start = resolveStrokeStartPoint(node);
+  const end = resolveStrokeEndPoint(node);
+  if (start !== "none" || end !== "none") return false;
+  return true;
+}
+
+/** Open vector paths with inside/outside stroke use filled outline bands. */
+export function shouldUseOutlinedOpenPathStroke(
+  node: Pick<
+    EditorNode,
+    | "type"
+    | "strokeSides"
+    | "pathPoints"
+    | "strokePosition"
+    | "strokeStartPoint"
+    | "strokeEndPoint"
+    | "arrowHead"
+  >,
+  closed: boolean,
+): boolean {
+  if (closed || node.type !== "path") return false;
+  if (usesPerEdgeStroke(node)) return false;
+  // Pen paths with Bézier handles use native SVG stroke so curves match edit outline.
+  if (pathHasCurveHandles(node.pathPoints)) return false;
+  // SVG markers (arrow caps) require a centerline stroke, not a filled outline band.
+  const start = resolveStrokeStartPoint(node);
+  const end = resolveStrokeEndPoint(node);
+  if (start !== "none" || end !== "none") return false;
+  // Center strokes (default pen/line): native SVG for uniform width and round caps.
+  if ((node.strokePosition ?? "center") === "center") return false;
+  return true;
 }
 
 export function fullEllipsePathD(width: number, height: number): string {

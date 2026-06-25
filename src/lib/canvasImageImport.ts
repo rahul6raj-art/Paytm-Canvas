@@ -119,3 +119,37 @@ export function canAcceptCanvasImageDrop(dt: DataTransfer): boolean {
   if ([...dt.types].includes("text/html")) return true;
   return false;
 }
+
+/** True when a component is being dragged from the assets/components panel. */
+export function isCanvasComponentDrag(dt: DataTransfer): boolean {
+  return [...dt.types].includes("application/x-pc-component");
+}
+
+export function readCanvasComponentDragId(dt: DataTransfer): string | null {
+  const direct = dt.getData("application/x-pc-component").trim();
+  if (direct) return direct;
+  if (isCanvasComponentDrag(dt)) {
+    const fallback = dt.getData("text/plain").trim();
+    if (fallback) return fallback;
+  }
+  return null;
+}
+
+export function canAcceptCanvasComponentDrop(
+  dt: DataTransfer,
+  placingComponentMasterId?: string | null,
+): boolean {
+  if (placingComponentMasterId) return true;
+  return isCanvasComponentDrag(dt);
+}
+
+/** Resolve component master key on canvas drop (drag payload, then active placement). */
+export function resolveCanvasComponentDropKey(
+  dt: DataTransfer,
+  placingComponentMasterId?: string | null,
+): string | null {
+  const fromDrag = readCanvasComponentDragId(dt);
+  if (fromDrag) return fromDrag;
+  const placing = placingComponentMasterId?.trim();
+  return placing || null;
+}

@@ -50,6 +50,9 @@ export const MIN_TEXT_BOX = 8;
 export const TEXT_BOX_PAD_X = 4;
 export const TEXT_BOX_PAD_Y = 2;
 
+/** SVG baseline for `<tspan y>` — paired with {@link svgTextTspanY} from canvas line-top coords. */
+export const SVG_TEXT_DOMINANT_BASELINE = "alphabetic";
+
 export function textInnerWidth(boxWidth: number): number {
   return Math.max(1, boxWidth - TEXT_BOX_PAD_X * 2);
 }

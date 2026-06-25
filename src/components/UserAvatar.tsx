@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 
@@ -18,12 +17,6 @@ const sizeClasses = {
   sm: "h-7 w-7 text-ui",
   md: "h-9 w-9 text-ui",
   lg: "h-11 w-11 text-ui-lg",
-} as const;
-
-const imageSizes = {
-  sm: 28,
-  md: 36,
-  lg: 44,
 } as const;
 
 export function UserAvatar({
@@ -53,11 +46,10 @@ export function UserAvatar({
       }
     >
       {showImage ? (
-        <Image
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
           src={avatarUrl!}
           alt={`${name} profile photo`}
-          width={imageSizes[size]}
-          height={imageSizes[size]}
           className={cn("h-full w-full object-cover", imageClassName)}
           onError={() => setImageFailed(true)}
         />

@@ -13,9 +13,11 @@ import {
   ChevronDown,
   UserPlus,
   ListChecks,
+  Settings,
 } from "lucide-react";
 import type { MockWorkspace } from "@/lib/mockAuth";
 import type { DashboardTeamGroup } from "@/lib/dashboardTeamGrouping";
+import { profileSettingsHref } from "@/lib/profileSettingsNavigation";
 import { DashboardBrandHeader } from "./DashboardBrandHeader";
 
 export type DashboardNavId = "home" | "recent" | "drafts" | "templates" | "team" | "trash";
@@ -53,6 +55,7 @@ export function DashboardSidebar({
   teamGroups,
   orgTeamName,
   teamSwitcher,
+  showProfileSettings = false,
 }: {
   active: DashboardNavId;
   onNavigate: (id: DashboardNavId) => void;
@@ -67,6 +70,7 @@ export function DashboardSidebar({
   teamGroups?: DashboardTeamGroup[];
   orgTeamName?: string;
   teamSwitcher?: { teams: { id: string; name: string }[]; activeTeamId: string; onSwitchTeam: (teamId: string) => void };
+  showProfileSettings?: boolean;
 }) {
   return (
     <div className="pointer-events-auto flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
@@ -129,16 +133,6 @@ export function DashboardSidebar({
             strokeWidth={2}
           />
         </div>
-        <p className="mt-2 text-ui leading-snug text-app-muted">
-          Scoped to <span className="font-medium text-app-fg">{activeWorkspace.name}</span>
-          {orgTeamName ? (
-            <>
-              {" "}
-              in <span className="font-medium text-app-fg">{orgTeamName}</span>
-            </>
-          ) : null}
-          .
-        </p>
       </section>
 
       {teamGroups && teamGroups.length > 0 ? (
@@ -253,6 +247,15 @@ export function DashboardSidebar({
       </section>
 
       <section className="editor-sidebar-section shrink-0 px-2 py-2">
+        {showProfileSettings ? (
+          <Link
+            href={profileSettingsHref("/")}
+            className="panel-list-row w-full text-app-muted hover:bg-app-hover hover:text-app-fg"
+          >
+            <Settings className="size-icon-ui shrink-0 text-app-subtle" strokeWidth={1.75} />
+            Profile &amp; settings
+          </Link>
+        ) : null}
         <Link
           href="/demo-checklist"
           target="_blank"

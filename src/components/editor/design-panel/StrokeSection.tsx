@@ -22,6 +22,7 @@ import { useDismissAnchoredDropdown } from "../useAnchoredDropdown";
 import { StrokeAdvancedPanel } from "./StrokeAdvancedPanel";
 import { StrokeEndpointPicker } from "./StrokeEndpointPicker";
 import type { StrokeEndpoint } from "@/lib/strokeEndpoints";
+import { resolveStrokeEndPoint, resolveStrokeStartPoint } from "@/lib/strokeEndpoints";
 import {
   appFieldClass,
   appFieldInnerClass,
@@ -127,8 +128,8 @@ export function StrokeSection({
   strokeMiterAngle,
   strokeWidthProfile,
   strokeWidthProfileFlipped,
-  strokeStartPoint = "none",
-  strokeEndPoint = "none",
+  strokeStartPoint: strokeStartPointProp = "none",
+  strokeEndPoint: strokeEndPointProp = "none",
   showEndpoints = false,
   onStyle,
 }: {
@@ -162,6 +163,8 @@ export function StrokeSection({
   showEndpoints?: boolean;
   onStyle: (patch: StrokeStylePatch, opts?: { skipHistory?: boolean }) => void;
 }) {
+  const strokeStartPoint = resolveStrokeStartPoint({ strokeStartPoint: strokeStartPointProp });
+  const strokeEndPoint = resolveStrokeEndPoint({ strokeEndPoint: strokeEndPointProp });
   const [strokeEditorActive, setStrokeEditorActive] = useState(strokeWidth > 0);
   const [weightDraft, setWeightDraft] = useState(() => String(strokeWidth ?? 0));
   const [weightFocused, setWeightFocused] = useState(false);

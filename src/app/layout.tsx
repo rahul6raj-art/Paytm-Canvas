@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { CraftAuthProvider } from "@/components/auth/CraftAuthProvider";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { craftPublicConfigInitScript } from "@/lib/craftPublicConfigScript";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
@@ -28,7 +29,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         className={`${inter.className} min-h-dvh bg-app-bg font-sans text-app-fg antialiased`}
         data-app-chrome
       >
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          <CraftAuthProvider>{children}</CraftAuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

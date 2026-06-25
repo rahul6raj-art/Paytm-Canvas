@@ -1074,18 +1074,21 @@ function finalizeRichResult(
   const title = options.title?.trim() || ctx.nodes[ctx.frameId]?.name || "Screen";
 
   const contentHeight = measureFlatContentHeight(ctx.nodes, ctx.frameId);
-  ctx.layout.h = contentHeight;
+  const frameHeight = Math.max(contentHeight, ctx.tokens.shellHeight);
+  ctx.layout.h = frameHeight;
   ctx.nodes[ctx.frameId] = {
     ...ctx.nodes[ctx.frameId]!,
-    height: contentHeight,
+    height: frameHeight,
+    layoutSizingVertical: "fixed",
   };
 
   const structured = organizeRichScreenHierarchy(ctx.nodes, ctx.childOrder, ctx.frameId, {
     w: ctx.layout.w,
-    h: ctx.layout.h,
+    h: frameHeight,
     gutter: ctx.layout.gutter,
     sectionGap: ctx.layout.sectionGap,
     gridGap: ctx.layout.gridGap,
+    shellMinHeight: ctx.tokens.shellHeight,
   });
 
   const slice: EditorPersistSlice = wrapPersistSliceWithPages({

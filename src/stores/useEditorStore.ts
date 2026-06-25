@@ -55,6 +55,7 @@ import {
   canAddAutoLayoutToSelection,
   type ApplyAutoLayoutSelectionResult,
 } from "@/lib/autoLayoutSelection";
+import { isUngroupableContainer } from "@/lib/ungroupSelection";
 import { freezeAutoLayoutGapBeforeChildInsert } from "@/lib/layoutEngine/inferGap";
 import { idsToDetachForAutoLayoutDrag } from "@/lib/autoLayoutDrag";
 import {
@@ -93,6 +94,7 @@ import {
   canAlignSelection,
   distributeNodesInDocument,
   relayoutParentKeysAfterManualPosition,
+  resolveAlignTargetIds,
 } from "@/lib/alignSelection";
 import {
   clampStrokeWidth,
@@ -100,6 +102,7 @@ import {
   nodeSupportsStrokeWidth,
 } from "@/lib/strokeAdjust";
 import { nodeSupportsFillColor } from "@/lib/fillAdjust";
+import { expandStyleTargetIds } from "@/lib/groupStyleTargets";
 import type { CloneWorldOffset } from "@/lib/editorGraph";
 import {
   getDuplicateStepOffset,
@@ -145,6 +148,78 @@ import {
   type InstanceOverridePatch,
 } from "@/lib/componentModel";
 import {
+  canCreateComponentSetFromSelection,
+  buildCreateComponentSetFromSelectionResult,
+  instancePlacementParentAtWorldPoint,
+  nextVariantMasterPosition,
+  recordRecentComponent,
+} from "@/lib/componentUx";
+import {
+  buildGoToMainComponentSelection,
+  buildInstanceFromMaster,
+  buildResetInstanceOverridesResult,
+  buildSetInstanceVariantResult,
+  buildSwapInstanceComponentResult,
+  pushInstanceOverridesToMaster,
+} from "@/lib/components/componentActions";
+import { resolveComponentInstance } from "@/lib/components/resolveComponentInstance";
+import {
+  applyInstanceInteractionTrigger,
+  clearEphemeralInteractiveFields,
+} from "@/lib/components/componentInteractiveActions";
+import {
+  syncInteractionsToVariantGroup,
+  type ComponentInteraction,
+  type ComponentInteractionTrigger,
+} from "@/lib/components/componentInteractions";
+import {
+  addPropertyToSet,
+  addVariantForPropertyValue,
+  deletePropertyFromSet,
+  deleteVariantMaster as buildDeleteVariantMasterResult,
+  duplicateVariantMaster as buildDuplicateVariantMasterResult,
+  reflowComponentSetContainer,
+  renamePropertyInSet,
+} from "@/lib/components/componentSet";
+import { applyComponentPropertyDefs } from "@/lib/components/resolveInstance";
+import {
+  buildInstanceSwapPropertyForNestedInstance,
+  buildResetComponentPropertyValueResult,
+} from "@/lib/components/componentInstanceSwap";
+import {
+  buildResetSlotContentResult,
+  buildSetSlotContentResult,
+  buildSlotPropertyForContainer,
+  buildSlotTextContentSnapshot,
+  captureSlotContentFromInstance,
+  snapshotContentSignature,
+} from "@/lib/components/componentSlots";
+import {
+  buildSlotEditBreadcrumb,
+  resolveSlotEditScope,
+  slotContentChanged,
+  isDeletableDuringSlotEdit,
+  resolveInstanceDropParentId,
+  type ActiveSlotEditState,
+} from "@/lib/slotEditScope";
+import { readInstanceOverrideMap, writeInstanceOverrideState } from "@/lib/components/overrides";
+import { recordInstanceOverrideForNode } from "@/lib/components/propagate";
+import {
+  applyComponentPropagationToStoreResult,
+  isMasterComponentEdit,
+} from "@/lib/components/componentPropagation";
+import {
+  applyMasterComponentDocumentChanges,
+  type MasterDocumentMutation,
+} from "@/lib/components/componentMasterMutation";
+import {
+  beginComponentUpdateTransaction,
+  recordMasterMutation,
+} from "@/lib/components/componentUpdateTransaction";
+import { findMasterRootForNode } from "@/lib/components/propagate";
+import { assignStableLayerIds } from "@/lib/components/stableIds";
+import type { ComponentPropertyDef } from "@/lib/components/types";
+import {
   defaultPrototypeLink,
   findPrototypeLinkOwner,
   newPrototypeLinkId,
@@ -178,9 +253,12 @@ import {
 import { effectiveFillType, normalizeFillGradient } from "@/lib/fillGradient";
 import { buildPaletteTokens, createColorDesignToken, DEFAULT_COLOR_PALETTE } from "@/lib/designSystemPresets";
 import {
+  buildResizeContentOpts,
   buildResizeContentPatches,
+  pathContentPatchFromBoxResize,
   scaleSubtreeContentPatches,
   shouldProportionalFrameScale,
+  syncEditablePathAfterBoxChange,
 } from "@/lib/resizeContent";
 import { convertFigFileAsync, isFigmaFigFile } from "@/lib/figImport";
 import {
@@ -237,13 +315,15 @@ import {
   nextNumberedLayerName,
 } from "@/lib/layerNaming";
 import {
-  lineEndpointsPatchFromLayout,
+  lineEndpointsPatchFromBoxResize,
   linePatchFromEndpoints,
   lineEndpointsFromNode,
 } from "@/lib/shapes/lineGeometry";
 import { polygonGeometryPatch } from "@/lib/shapes/polygonGeometry";
+import { isStarNode, starGeometryPatch } from "@/lib/shapes/starGeometry";
 import {
   DEFAULT_FRAME_FILL,
+  DEFAULT_LINE_STROKE_WIDTH,
   DEFAULT_SHAPE_FILL,
   type ShapeType,
 } from "@/lib/shapes/shapeModel";
@@ -264,6 +344,7 @@ import {
   canOutlineStroke,
   convertStrokeToVector,
 } from "@/lib/outlineStroke";
+import { convertTextToOutlineVectorGroup } from "@/lib/text/textOutlineToVectors";
 import { expandBooleanFillStylePatches } from "@/lib/booleanGroupFill";
 import {
   getResizeAnchorLocal,
@@ -363,10 +444,16 @@ import {
   type PathPoint,
 } from "@/lib/pathGeometry";
 import { mergePathPointHandles } from "@/lib/pathHandles";
+import { canClosePathAt, effectiveHandleMirroring } from "@/lib/penTool";
+import {
+  buildCornerPathPoint,
+  buildSmoothPathPointFromDrag,
+} from "@/lib/penTool/bezierGeometry";
 import {
   convertNodeToPath,
   ensureRoundedRectPathPoints,
   isVectorEditableShape,
+  needsVectorPathConversion,
   shapeToPathPoints,
 } from "@/lib/shapes/shapeToPath";
 import { getPluginById, readInstalledPluginIds, writeInstalledPluginIds } from "@/lib/plugins";
@@ -527,6 +614,8 @@ export interface EditorNode {
   /** Per-corner radii [top-left, top-right, bottom-right, bottom-left]. */
   /** Per-corner radii (4 for rects; one per path vertex for vectors). */
   cornerRadii?: number[];
+  /** 0 = circular corners, 1 = Figma-style corner smoothing. Default 0. */
+  cornerSmoothing?: number;
   /** Text color; falls back to `fill` when unset */
   textColor?: string;
   fontFamily?: string;
@@ -542,16 +631,24 @@ export interface EditorNode {
   strokeDashLength?: number;
   /** Custom gap length (px) when dashed/dotted */
   strokeDashGap?: number;
-  /** SVG stroke-linecap */
-  strokeLinecap?: "butt" | "round" | "square";
+  /** SVG stroke-linecap (includes Figma-style taper). */
+  strokeLinecap?: "butt" | "round" | "square" | "taper";
   /** SVG stroke-linejoin */
   strokeLinejoin?: "miter" | "round" | "bevel";
   /** Minimum corner angle (degrees) before miter becomes bevel */
   strokeMiterAngle?: number;
-  /** Variable width along path (partial sides default to taper). */
+  /** Variable width along path; defaults to uniform (constant thickness). */
   strokeWidthProfile?: "uniform" | "taper";
   /** Flip width profile along path */
   strokeWidthProfileFlipped?: boolean;
+  /** Taper amount at path start (0 = none, 1 = full point). */
+  strokeTaperStart?: number;
+  /** Taper amount at path end (0 = none, 1 = full point). */
+  strokeTaperEnd?: number;
+  /** Distance in px over which start taper ramps to full width. */
+  strokeTaperLengthStart?: number;
+  /** Distance in px over which end taper ramps to full width. */
+  strokeTaperLengthEnd?: number;
   /** Ellipse arc start angle in degrees (0° = 3 o'clock, clockwise). */
   arcStartDeg?: number;
   /** Ellipse arc sweep in degrees (360 = full ellipse). */
@@ -656,6 +753,8 @@ export interface EditorNode {
   constraintsHorizontal?: ConstraintHorizontal;
   constraintsVertical?: ConstraintVertical;
 
+  /** Component set container (frame): wraps variant masters (Figma component set). */
+  isComponentSet?: boolean;
   /** Component master (frame/group): reusable definition */
   isComponent?: boolean;
   /** Stable id for this component definition (master + instances share family id) */
@@ -668,6 +767,38 @@ export interface EditorNode {
   variantGroupId?: string;
   /** Variant dimension values (e.g. { State: "Hover" }) */
   variantProperties?: Record<string, string>;
+
+  /** Master: stable internal layer id per descendant (nodeId → stableLayerId) */
+  componentLayerStableIds?: Record<string, string>;
+  componentDescription?: string;
+  componentPropertyDefs?: import("@/lib/components/types").ComponentPropertyDef[];
+  componentVersion?: number;
+  libraryId?: string;
+  remoteComponentId?: string;
+  publishStatus?: "local" | "published" | "library";
+  lastPublishedVersion?: number;
+  updateAvailable?: boolean;
+
+  /** Instance: maps cloned node id → stable layer id */
+  instanceStableIdMap?: Record<string, string>;
+  /** Instance overrides keyed by stable layer id */
+  instanceOverridesByStableId?: Record<string, Record<string, unknown>>;
+  /** Instance: selected variant property values */
+  selectedVariantProperties?: Record<string, string>;
+  /** Instance: component version at last resolve */
+  componentVersionAtInsert?: number;
+  /** Instance: cached resolved tree version */
+  resolvedTreeCacheVersion?: number;
+  instanceDetached?: boolean;
+  /** Instance: exposed property values set on this instance */
+  componentPropertyValues?: Record<string, string | boolean>;
+
+  /** Component set: prototype-style variant interactions (shared across variant masters). */
+  componentInteractions?: ComponentInteraction[];
+  /** Instance: runtime interactive variant override (preview/ephemeral; not inspector selection). */
+  currentInteractiveVariantValues?: Record<string, string>;
+  /** Instance: runtime pointer/focus state for interactive preview. */
+  interactionState?: InstanceInteractionState;
 
   /** Prototype interactions originating from this node (source = this id). */
   prototypeLinks?: PrototypeLink[];
@@ -940,6 +1071,12 @@ export interface EditorState {
     overlayFrameId: string | null;
   };
 
+  /** Interactive component variant preview on canvas (runtime-only state). */
+  componentInteractionPreview: boolean;
+
+  /** Active slot edit mode: instance root + slot property key + scope metadata. */
+  activeSlotEdit: ActiveSlotEditState | null;
+
   /** Live responsive preview (temporary geometry); Apply commits with one undo step. */
   responsivePreview: null | {
     frameId: string;
@@ -1087,7 +1224,7 @@ export interface EditorState {
   createBooleanGroup: (operation: BooleanOperation) => void;
   updateBooleanOperation: (groupId: string, operation: BooleanOperation) => void;
   flattenSelection: () => void;
-  outlineStrokeSelection: () => void;
+  outlineStrokeSelection: (nodeId?: string) => void;
   enterObjectEditMode: (nodeId: string) => void;
   exitObjectEditMode: () => void;
   useSelectionAsMask: () => void;
@@ -1236,11 +1373,12 @@ export interface EditorState {
     nodeId: string,
     pointId: string,
     patch: Partial<PathPoint>,
-    opts?: { skipHistory?: boolean },
+    opts?: { skipHistory?: boolean; breakHandleMirror?: boolean },
   ) => void;
   deletePathPoint: (nodeId: string, pointId: string) => void;
   togglePathClosed: (nodeId: string) => void;
   setPathEditMode: (nodeId: string | null) => void;
+  selectPathPoint: (nodeId: string, pointId: string | null) => void;
   enterShapeEditMode: (nodeId?: string) => void;
   exitShapeEditMode: () => void;
   exitAllEditModes: () => void;
@@ -1292,6 +1430,8 @@ export interface EditorState {
       fixedWorld?: { x: number; y: number } | null;
       pointerWorld?: { x: number; y: number };
       startPointerWorld?: { x: number; y: number };
+      startPathPoints?: import("@/lib/pathGeometry").PathPoint[];
+      startNodesSnapshot?: Record<string, EditorNode>;
     },
   ) => void;
   resizeFrameWithConstraints: (
@@ -1392,6 +1532,8 @@ export interface EditorState {
   placingComponentMasterId: string | null;
   setPlacingComponentMasterId: (id: string | null) => void;
   createComponentFromSelection: () => void;
+  combineAsVariants: () => void;
+  createComponentSetFromSelection: () => void;
   createInstance: (componentKey: string, worldX: number, worldY: number) => void;
   detachInstance: (instanceRootId: string) => void;
   updateInstanceOverride: (
@@ -1401,6 +1543,72 @@ export interface EditorState {
   ) => void;
   createVariantFromComponent: (componentKey: string) => void;
   updateVariantProperties: (componentKey: string, properties: Record<string, string>) => void;
+  addVariantPropertyAxis: (masterId: string, axis: string, defaultValue: string) => void;
+  renameVariantProperty: (masterId: string, oldName: string, newName: string) => void;
+  deleteVariantProperty: (masterId: string, propertyName: string) => void;
+  addVariantPropertyValue: (masterId: string, propertyName: string, value: string) => void;
+  duplicateVariantMaster: (masterId: string) => void;
+  deleteVariantMaster: (masterId: string) => void;
+  goToMainComponent: (instanceRootId: string) => void;
+  resetInstanceOverrides: (instanceRootId: string, stableId?: string, propertyPath?: string) => void;
+  swapInstanceComponent: (instanceRootId: string, newMasterKey: string) => void;
+  setInstanceVariant: (instanceRootId: string, variantProperties: Record<string, string>) => void;
+  pushInstanceChangesToMain: (instanceRootId: string) => void;
+  setComponentDescription: (masterId: string, description: string) => void;
+  addComponentProperty: (
+    masterId: string,
+    property: import("@/lib/components/types").ComponentPropertyDef,
+  ) => void;
+  setComponentPropertyValue: (
+    instanceRootId: string,
+    propertyKey: string,
+    value: string | boolean,
+  ) => void;
+  resetComponentPropertyValue: (instanceRootId: string, propertyKey: string) => void;
+  createInstanceSwapPropertyFromSelection: (
+    masterId: string,
+    nestedInstanceNodeId: string,
+    label?: string,
+  ) => void;
+  updateComponentProperty: (
+    masterId: string,
+    propertyId: string,
+    patch: Partial<import("@/lib/components/types").ComponentPropertyDef>,
+  ) => void;
+  createSlotPropertyFromSelection: (
+    masterId: string,
+    containerNodeId: string,
+    label?: string,
+  ) => void;
+  setSlotContent: (
+    instanceRootId: string,
+    propertyKey: string,
+    snapshot: import("@/lib/components/types").SlotContentSnapshot,
+  ) => void;
+  resetSlotContent: (instanceRootId: string, propertyKey: string) => void;
+  enterSlotEditMode: (
+    instanceRootId: string,
+    propertyKey: string,
+    priorBreadcrumb?: import("@/lib/slotEditScope").SlotEditBreadcrumbCrumb[],
+  ) => void;
+  exitSlotEditMode: (save?: boolean) => void;
+  navigateSlotEditBreadcrumb: (index: number) => void;
+  pasteIntoActiveSlot: () => void;
+
+  /** When true, canvas pointer events drive interactive component variant switching. */
+  componentInteractionPreview: boolean;
+  activeSlotEdit: ActiveSlotEditState | null;
+  setComponentInteractionPreview: (enabled: boolean) => void;
+  setComponentInteractions: (masterId: string, interactions: ComponentInteraction[]) => void;
+  addComponentInteraction: (masterId: string, interaction: ComponentInteraction) => void;
+  updateComponentInteraction: (
+    masterId: string,
+    interactionId: string,
+    patch: Partial<ComponentInteraction>,
+  ) => void;
+  removeComponentInteraction: (masterId: string, interactionId: string) => void;
+  triggerInstanceInteraction: (instanceRootId: string, trigger: ComponentInteractionTrigger) => void;
+  clearInteractiveInstanceStates: () => void;
 
   presenceUsers: PresenceUser[];
   showPresence: boolean;
@@ -1816,7 +2024,40 @@ function editableTopLevelSelection(
   });
 }
 
-type StructuralDocumentResult = DocumentMutationResult;
+type StructuralDocumentResult = DocumentMutationResult & {
+  componentMutation?: MasterDocumentMutation;
+};
+
+function applyMasterPropagationFromResult(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  mutation: MasterDocumentMutation | undefined,
+): { nodes: Record<string, EditorNode>; childOrder: Record<string, string[]> } {
+  if (!mutation) return { nodes, childOrder };
+  const refresh = new Set<string>();
+  const propagated = applyMasterComponentDocumentChanges(nodes, childOrder, refresh, mutation);
+  let nextNodes = propagated.nodes;
+  let nextOrder = propagated.childOrder;
+  if (refresh.size > 0) {
+    nextNodes = relayoutParentsWithAutoLayout(nextNodes, nextOrder, refresh);
+  }
+  return { nodes: nextNodes, childOrder: nextOrder };
+}
+
+function propagateMasterLayerInsert(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  nodeId: string,
+  reason = "insert",
+): { nodes: Record<string, EditorNode>; childOrder: Record<string, string[]> } {
+  if (!isMasterComponentEdit(nodes, nodeId)) return { nodes, childOrder };
+  return applyMasterPropagationFromResult(nodes, childOrder, {
+    addedNodeIds: [nodeId],
+    changedNodeIds: [nodeId],
+    structural: true,
+    reason,
+  });
+}
 
 const PAGE_SCOPED_UI_KEYS = [
   "layoutGuides",
@@ -1943,6 +2184,21 @@ function buildReorderNodeResult(
   if (!res) return null;
   let { nodes, childOrder } = res;
   nodes = relayoutParentsWithAutoLayout(nodes, childOrder, [targetParentId]);
+
+  if (isMasterComponentEdit(s.nodes, id)) {
+    const refresh = new Set<string>();
+    const propagated = applyMasterComponentDocumentChanges(nodes, childOrder, refresh, {
+      changedNodeIds: [id],
+      structural: true,
+      reason: "reorder",
+    });
+    nodes = propagated.nodes;
+    childOrder = propagated.childOrder;
+    if (refresh.size > 0) {
+      nodes = relayoutParentsWithAutoLayout(nodes, childOrder, refresh);
+    }
+  }
+
   return { nodes, childOrder, ui: {} };
 }
 
@@ -1983,6 +2239,21 @@ function buildMoveNodeToParentResult(
     refresh.add(oldKey);
   }
   nodes = relayoutParentsWithAutoLayout(nodes, childOrder, refresh);
+
+  const movedWithinMaster = isMasterComponentEdit(s.nodes, id);
+  if (movedWithinMaster) {
+    const propagated = applyMasterComponentDocumentChanges(nodes, childOrder, refresh, {
+      changedNodeIds: [id],
+      structural: true,
+      reason: "reparent",
+    });
+    nodes = propagated.nodes;
+    childOrder = propagated.childOrder;
+    if (refresh.size > 0) {
+      nodes = relayoutParentsWithAutoLayout(nodes, childOrder, refresh);
+    }
+  }
+
   return { nodes, childOrder, ui: {} };
 }
 
@@ -2104,7 +2375,17 @@ function buildCreateTextBoxFromDragResult(
 function commitStructuralResult(result: StructuralDocumentResult | null): void {
   if (!result) return;
   const stBefore = useEditorStore.getState();
-  commitDocumentMutation(result, (built) => {
+  const propagated = applyMasterPropagationFromResult(
+    result.nodes,
+    result.childOrder,
+    result.componentMutation,
+  );
+  const mergedResult: StructuralDocumentResult = {
+    ...result,
+    nodes: propagated.nodes,
+    childOrder: propagated.childOrder,
+  };
+  commitDocumentMutation(mergedResult, (built) => {
     const st = useEditorStore.getState();
     const pageFields: Partial<EditorState> = {};
     for (const key of PAGE_SCOPED_UI_KEYS) {
@@ -2253,7 +2534,7 @@ function buildAddLineResult(
   worldY: number,
 ): StructuralDocumentResult {
   const w = 120;
-  const h = 8;
+  const h = 0;
   const { x, y } = worldCenteredRootPoint(worldX, worldY, w, h);
   const id = `line-${Date.now()}`;
   const node: EditorNode = {
@@ -2273,8 +2554,11 @@ function buildAddLineResult(
     fillEnabled: false,
     fillOpacity: 0,
     strokeColor: defaultCanvasForegroundColor(),
-    strokeWidth: 3,
+    strokeWidth: DEFAULT_LINE_STROKE_WIDTH,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
     strokePosition: "center",
+    strokeWidthProfile: "uniform",
   };
   const inserted = insertNodeWithFrameParenting(
     node,
@@ -2282,6 +2566,7 @@ function buildAddLineResult(
     s.nodes,
     s.childOrder,
     s.selectedIds,
+    { minDimension: 0 },
   );
   return {
     nodes: inserted.nodes,
@@ -2360,6 +2645,7 @@ function buildCreateShapeFromDragResult(
     s.nodes,
     s.childOrder,
     s.selectedIds,
+    shapeType === "line" || shapeType === "arrow" ? { minDimension: 0 } : undefined,
   );
   const frameId = inserted.nodes[id]?.parentId;
   const nodesOut = frameId
@@ -2772,13 +3058,13 @@ function buildAlignSelectionResult(
   direction: AlignDirection,
 ): StructuralDocumentResult | null {
   if (!canAlignSelection(s.selectedIds, s.nodes, s.childOrder)) return null;
-  const tops = alignableSelectionIds(s.selectedIds, s.nodes);
-  if (!canAlignSelection(s.selectedIds, s.nodes, s.childOrder)) return null;
-  let nodes = alignNodesInDocument(s.nodes, s.childOrder, tops, direction);
+  const targets = resolveAlignTargetIds(s.selectedIds, s.nodes, s.childOrder);
+  if (targets.length === 0) return null;
+  let nodes = alignNodesInDocument(s.nodes, s.childOrder, targets, direction);
   const relayoutKeys = relayoutParentKeysAfterManualPosition(
     nodes,
     s.childOrder,
-    tops,
+    targets,
     parentListKey,
   );
   nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, relayoutKeys);
@@ -2791,13 +3077,13 @@ function buildAlignSelectionGridResult(
   col: number,
 ): StructuralDocumentResult | null {
   if (!canAlignSelection(s.selectedIds, s.nodes, s.childOrder)) return null;
-  const tops = alignableSelectionIds(s.selectedIds, s.nodes);
-  if (!canAlignSelection(s.selectedIds, s.nodes, s.childOrder)) return null;
-  let nodes = alignNodesInDocumentToGrid(s.nodes, s.childOrder, tops, row, col);
+  const targets = resolveAlignTargetIds(s.selectedIds, s.nodes, s.childOrder);
+  if (targets.length === 0) return null;
+  let nodes = alignNodesInDocumentToGrid(s.nodes, s.childOrder, targets, row, col);
   const relayoutKeys = relayoutParentKeysAfterManualPosition(
     nodes,
     s.childOrder,
-    tops,
+    targets,
     parentListKey,
   );
   nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, relayoutKeys);
@@ -2950,6 +3236,49 @@ function buildFlattenBooleanGroupResult(
   };
 }
 
+function buildOutlineTextToVectorsResult(
+  s: Pick<EditorState, "nodes" | "childOrder">,
+  textId: string,
+  group: EditorNode,
+  vectors: EditorNode[],
+): StructuralDocumentResult | null {
+  const text = s.nodes[textId];
+  if (!text) return null;
+  const parentId = text.parentId;
+  const P = parentListKey(parentId);
+  const nodes = { ...s.nodes };
+  const childOrder = { ...s.childOrder };
+
+  delete nodes[textId];
+  nodes[group.id] = group;
+  for (const vector of vectors) {
+    nodes[vector.id] = vector;
+  }
+
+  const list = [...(childOrder[P] ?? [])];
+  const idx = list.indexOf(textId);
+  if (idx >= 0) list[idx] = group.id;
+  else list.push(group.id);
+  childOrder[P] = list;
+  // childOrder is back-to-front; layer panel reverses for display (reading order top-to-bottom).
+  childOrder[group.id] = [...vectors].reverse().map((v) => v.id);
+
+  const nodes2 = relayoutParentsWithAutoLayout(nodes, childOrder, [P]);
+  return {
+    nodes: nodes2,
+    childOrder,
+    ui: {
+      pathEditModeNodeId: null,
+      shapeEditModeNodeId: null,
+      objectEditModeNodeId: null,
+      selectedPathPointIds: [] as string[],
+      selectedIds: [group.id],
+      tool: "move" as Tool,
+      editingTextId: null,
+    },
+  };
+}
+
 function buildOutlineStrokeSelectionResult(
   s: Pick<EditorState, "nodes" | "childOrder">,
   id: string,
@@ -2989,7 +3318,7 @@ function buildStartPathAtResult(
 ): StructuralDocumentResult | null {
   if (s.editorMode !== "design" || s.tool !== "pen" || s.penDrawingNodeId) return null;
   const id = `path-${Date.now()}`;
-  const pt0: PathPoint = { id: newPathPointId(), x: 0, y: 0 };
+  const pt0 = buildCornerPathPoint(0, 0);
   let node: EditorNode = {
     id,
     parentId: null,
@@ -3010,7 +3339,11 @@ function buildStartPathAtResult(
     fill: "transparent",
     strokeColor: defaultCanvasForegroundColor(),
     strokeWidth: 2,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
     strokePosition: "center",
+    strokeWidthProfile: "uniform",
+    pathHandleMirroring: "angle-length",
   };
   node = normalizePathNode(node);
   const inserted = insertNodeWithFrameParenting(
@@ -3019,6 +3352,7 @@ function buildStartPathAtResult(
     s.nodes,
     s.childOrder,
     s.selectedIds,
+    { minDimension: 0 },
   );
   return {
     nodes: inserted.nodes,
@@ -3037,7 +3371,7 @@ function buildAddPathPointResult(
   const nOrigin = getRenderedWorldTopLeft(drawId, s.nodes, s.childOrder);
   const plx = worldPoint.x - nOrigin.x;
   const ply = worldPoint.y - nOrigin.y;
-  const pts = [...n.pathPoints, { id: newPathPointId(), x: plx, y: ply }];
+  const pts = [...n.pathPoints, buildCornerPathPoint(plx, ply)];
   let next: EditorNode = { ...n, pathPoints: pts };
   next = normalizePathNode(next);
   let nodes = { ...s.nodes, [drawId]: next };
@@ -3057,19 +3391,12 @@ function buildAddPathPointDragResult(
   const nOrigin = getRenderedWorldTopLeft(drawId, s.nodes, s.childOrder);
   const anchorLocal = { x: anchorWorld.x - nOrigin.x, y: anchorWorld.y - nOrigin.y };
   const dragLocal = { x: dragWorld.x - nOrigin.x, y: dragWorld.y - nOrigin.y };
-  const hx = dragLocal.x - anchorLocal.x;
-  const hy = dragLocal.y - anchorLocal.y;
   const pts = [...n.pathPoints];
   const prevIdx = pts.length - 1;
   const prev = pts[prevIdx]!;
-  pts[prevIdx] = { ...prev, handleOut: { x: hx, y: hy } };
-  const newPt: PathPoint = {
-    id: newPathPointId(),
-    x: anchorLocal.x,
-    y: anchorLocal.y,
-    handleIn: { x: -hx, y: -hy },
-  };
-  pts.push(newPt);
+  const { prevPatch, newPoint } = buildSmoothPathPointFromDrag(prev, anchorLocal, dragLocal);
+  pts[prevIdx] = { ...prev, ...prevPatch };
+  pts.push(newPoint);
   let next: EditorNode = { ...n, pathPoints: pts };
   next = normalizePathNode(next);
   let nodes = { ...s.nodes, [drawId]: next };
@@ -3115,7 +3442,7 @@ function buildFinishPathResult(
     ui: {
       penDrawingNodeId: null,
       selectedIds: [pathId],
-      pathEditModeNodeId: null,
+      pathEditModeNodeId: pathId,
       objectEditModeNodeId: null,
       selectedPathPointIds: [] as string[],
     },
@@ -3342,7 +3669,7 @@ function buildSetNodeFillHexResult(
   const stylePatch: NodeStylePatch =
     n.type === "text"
       ? { fill: normalized, fillType: "solid", textColor: normalized, fillEnabled: true }
-      : { fill: normalized, fillType: "solid" };
+      : { fill: normalized, fillType: "solid", fillEnabled: true };
   const instRoot = findInstanceRoot(s.nodes, nodeId);
   let nodes = { ...s.nodes };
 
@@ -3388,13 +3715,19 @@ function buildSetSelectionFillHexResult(
 
   const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
     const n = s.nodes[id];
-    return n && !n.locked && n.visible && nodeSupportsFillColor(n);
+    return n && !n.locked && n.visible;
   });
   if (tops.length === 0) return null;
 
+  const targetIds = [
+    ...new Set(tops.flatMap((id) => expandStyleTargetIds(id, s.nodes, s.childOrder))),
+  ].filter((id) => nodeSupportsFillColor(s.nodes[id]));
+
+  if (targetIds.length === 0) return null;
+
   let nodes = { ...s.nodes };
   let changed = false;
-  for (const nodeId of tops) {
+  for (const nodeId of targetIds) {
     const slice = buildSetNodeFillHexResult({ nodes, childOrder: s.childOrder }, nodeId, normalized);
     if (!slice) continue;
     nodes = slice.nodes;
@@ -3483,16 +3816,18 @@ function buildUpdatePathPointResult(
   s: Pick<EditorState, "nodes" | "childOrder">,
   nodeId: string,
   pointId: string,
-  patch: Partial<Pick<PathPoint, "x" | "y" | "handleIn" | "handleOut">>,
+  patch: Partial<Pick<PathPoint, "x" | "y" | "handleIn" | "handleOut" | "pointType">>,
+  opts?: { breakHandleMirror?: boolean },
 ): StructuralDocumentResult | null {
   const n = s.nodes[nodeId];
   if (!n || n.type !== "path" || !n.pathPoints) return null;
-  const mirroring = n.pathHandleMirroring ?? "none";
+  const nodeMirroring = n.pathHandleMirroring ?? "none";
   const pts = n.pathPoints.map((p) => {
     if (p.id !== pointId) return p;
     let merged: PathPoint = { ...p };
     if (patch.x !== undefined) merged.x = patch.x;
     if (patch.y !== undefined) merged.y = patch.y;
+    if (patch.pointType !== undefined) merged.pointType = patch.pointType;
     const handlePatch: Partial<PathPoint> = {};
     if ("handleIn" in patch) handlePatch.handleIn = patch.handleIn;
     if ("handleOut" in patch) handlePatch.handleOut = patch.handleOut;
@@ -3503,11 +3838,12 @@ function buildUpdatePathPointResult(
           : "handleOut" in patch && !("handleIn" in patch)
             ? "out"
             : undefined;
+      const mirroring = effectiveHandleMirroring(merged, nodeMirroring, opts?.breakHandleMirror);
       merged = mergePathPointHandles(merged, handlePatch, mirroring, movedWhich);
     }
     return merged;
   });
-  let next: EditorNode = { ...n, pathPoints: pts };
+  let next: EditorNode = { ...n, pathPoints: pts, flattenedPathData: undefined };
   next = normalizePathNode(next);
   let nodes = { ...s.nodes, [nodeId]: next };
   nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
@@ -3536,7 +3872,7 @@ function buildDeletePathPointResult(
       },
     };
   }
-  let next: EditorNode = { ...n, pathPoints: nextPts };
+  let next: EditorNode = { ...n, pathPoints: nextPts, flattenedPathData: undefined };
   next = normalizePathNode(next);
   let nodes = { ...s.nodes, [nodeId]: next };
   nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
@@ -3550,9 +3886,10 @@ function buildDeletePathPointResult(
 function applyPathPointPatches(
   n: EditorNode,
   patches: Record<string, Partial<Pick<PathPoint, "x" | "y" | "handleIn" | "handleOut">>>,
+  opts?: { breakHandleMirror?: boolean },
 ): EditorNode {
   if (!n.pathPoints) return n;
-  const mirroring = n.pathHandleMirroring ?? "none";
+  const nodeMirroring = n.pathHandleMirroring ?? "none";
   const pts = n.pathPoints.map((p) => {
     const patch = patches[p.id];
     if (!patch) return p;
@@ -3569,11 +3906,12 @@ function applyPathPointPatches(
           : "handleOut" in patch && !("handleIn" in patch)
             ? "out"
             : undefined;
+      const mirroring = effectiveHandleMirroring(merged, nodeMirroring, opts?.breakHandleMirror);
       merged = mergePathPointHandles(merged, handlePatch, mirroring, movedWhich);
     }
     return merged;
   });
-  let next: EditorNode = { ...n, pathPoints: pts };
+  let next: EditorNode = { ...n, pathPoints: pts, flattenedPathData: undefined };
   next = normalizePathNode(next);
   return next;
 }
@@ -3615,7 +3953,7 @@ function buildDeletePathPointsResult(
       },
     };
   }
-  let next: EditorNode = { ...n, pathPoints: nextPts };
+  let next: EditorNode = { ...n, pathPoints: nextPts, flattenedPathData: undefined };
   next = normalizePathNode(next);
   let nodes = { ...s.nodes, [nodeId]: next };
   nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId ?? ROOT]);
@@ -3950,15 +4288,7 @@ function buildEnterVectorEditModeResult(
   if (s.editingTextId || s.penDrawingNodeId || s.pencilDrawingNodeId) return null;
 
   let converted: EditorNode = current;
-  if (current.type === "polygon") {
-    const built = shapeToPathPoints(current);
-    if (!built) return null;
-    converted = {
-      ...current,
-      pathPoints: built.pathPoints,
-      pathClosed: built.pathClosed,
-    };
-  } else if (current.type !== "path") {
+  if (needsVectorPathConversion(current)) {
     const c = convertNodeToPath(current);
     if (!c) return null;
     converted = ensureRoundedRectPathPoints(c);
@@ -4059,7 +4389,7 @@ function buildUngroupSelectionResult(
   if (s.selectedIds.length !== 1) return null;
   const gid = s.selectedIds[0]!;
   const g = s.nodes[gid];
-  if (!g || g.type !== "group" || g.locked || !g.visible) return null;
+  if (!isUngroupableContainer(g)) return null;
   const kids = [...(s.childOrder[gid] ?? [])];
   if (kids.length === 0) return null;
 
@@ -4093,6 +4423,7 @@ function buildUngroupSelectionResult(
       selectedIds: kids,
       tool: "move" as Tool,
       editingTextId: null,
+      objectEditModeNodeId: null,
     },
   };
 }
@@ -4525,7 +4856,7 @@ function buildCreateComponentFromSelectionResult(
   const root = nodes[rootId];
   if (!root || root.isComponent) return null;
 
-  nodes = markNodeAsComponent(nodes, rootId);
+  nodes = markNodeAsComponent(nodes, childOrder, rootId);
   const parentId = nodes[rootId]!.parentId;
   if (parentId) {
     nodes = relayoutParentsWithAutoLayout(nodes, childOrder, [parentId]);
@@ -4537,12 +4868,13 @@ function buildCreateComponentFromSelectionResult(
     ui: {
       selectedIds: [rootId],
       tool: "move" as Tool,
+      leftTab: "components" as LeftTab,
     },
   };
 }
 
 function buildCreateInstanceResult(
-  s: Pick<EditorState, "nodes" | "childOrder">,
+  s: Pick<EditorState, "nodes" | "childOrder" | "activeSlotEdit">,
   componentKey: string,
   worldX: number,
   worldY: number,
@@ -4551,7 +4883,17 @@ function buildCreateInstanceResult(
   if (!masterId) return null;
   const master = s.nodes[masterId];
   if (!master?.isComponent || !master.componentId) return null;
-  const pid = frameParentAtWorldPoint(worldX, worldY, s.nodes, s.childOrder);
+  const slotParent = resolveInstanceDropParentId(
+    s.nodes,
+    s.childOrder,
+    s.activeSlotEdit,
+    worldX,
+    worldY,
+    (x, y) => pickDeepestVisibleNodeAtWorldPoint(x, y, s.nodes, s.childOrder) ?? "",
+  );
+    const pid =
+    slotParent ??
+    instancePlacementParentAtWorldPoint(worldX, worldY, s.nodes, s.childOrder);
   const pos = centeredLocalPointInParent(
     worldX,
     worldY,
@@ -4561,25 +4903,20 @@ function buildCreateInstanceResult(
     master.height,
     s.childOrder,
   );
-  const parentKey = parentListKey(pid);
-  const res = cloneEditorSubtree(
+  const res = buildInstanceFromMaster(
     s.nodes,
     s.childOrder,
     masterId,
     pid,
-    parentKey,
-    (root) => ({
-      ...root,
-      x: pos.x,
-      y: pos.y,
-      sourceComponentId: masterId,
-      componentId: master.componentId,
-      instanceOverrides: {},
-    }),
-    (_old, fresh) => stripComponentFields(fresh),
+    pos.x,
+    pos.y,
+    master.variantProperties,
   );
   if (!res) return null;
   let { nodes, childOrder, newRootId } = res;
+  const resolved = resolveComponentInstance(nodes, childOrder, newRootId, { force: true });
+  nodes = resolved.nodes;
+  childOrder = resolved.childOrder;
   if (pid) nodes = relayoutParentsWithAutoLayout(nodes, childOrder, [pid]);
   const repaired = repairNodeHierarchy(nodes, childOrder);
   return {
@@ -4600,11 +4937,12 @@ function buildDetachInstanceResult(
 ): StructuralDocumentResult | null {
   const root = s.nodes[instanceRootId];
   if (!root?.sourceComponentId || root.locked) return null;
-  const next = detachInstanceTree(s.nodes, s.childOrder, instanceRootId);
+  const resolved = resolveComponentInstance(s.nodes, s.childOrder, instanceRootId, { force: true });
+  const next = detachInstanceTree(resolved.nodes, resolved.childOrder, instanceRootId);
   if (!next) return null;
   return {
     nodes: next,
-    childOrder: s.childOrder,
+    childOrder: resolved.childOrder,
     ui: { selectedIds: [instanceRootId] },
   };
 }
@@ -4617,18 +4955,13 @@ function buildUpdateInstanceOverrideResult(
 ): StructuralDocumentResult | null {
   const root = s.nodes[instanceRootId];
   if (!root?.sourceComponentId || root.locked) return null;
-  const io: Record<string, Record<string, unknown>> = { ...(root.instanceOverrides ?? {}) };
-  const prev =
-    io[targetNodeId] && typeof io[targetNodeId] === "object" && !Array.isArray(io[targetNodeId])
-      ? { ...(io[targetNodeId] as Record<string, unknown>) }
-      : {};
-  io[targetNodeId] = { ...prev, ...patch };
+  const updatedRoot = recordInstanceOverrideForNode(s.nodes, instanceRootId, targetNodeId, patch);
+  if (!updatedRoot) return null;
+  let nextNodes = { ...s.nodes, [instanceRootId]: updatedRoot };
+  const resolved = resolveComponentInstance(nextNodes, s.childOrder, instanceRootId, { force: true });
   return {
-    nodes: {
-      ...s.nodes,
-      [instanceRootId]: { ...root, instanceOverrides: io },
-    },
-    childOrder: s.childOrder,
+    nodes: resolved.nodes,
+    childOrder: resolved.childOrder,
     ui: {},
   };
 }
@@ -4642,12 +4975,12 @@ function buildCreateVariantFromComponentResult(
   const m = s.nodes[masterId];
   if (!m?.isComponent || m.locked) return null;
 
-  const OFFSET = 24;
   const vg = m.variantGroupId ?? newVariantGroupId();
   const siblingCount =
     (m.variantGroupId
       ? Object.values(s.nodes).filter((x) => x.variantGroupId === vg).length
       : 0) + 1;
+  const variantPos = nextVariantMasterPosition(s.nodes, vg, m);
   const res = cloneEditorSubtree(
     s.nodes,
     s.childOrder,
@@ -4668,7 +5001,7 @@ function buildCreateVariantFromComponentResult(
     (old, fresh) => {
       let next = stripComponentFields(fresh);
       if (old.id === masterId) {
-        next = { ...next, x: next.x + OFFSET, y: next.y + OFFSET };
+        next = { ...next, x: variantPos.x, y: variantPos.y };
       }
       return next;
     },
@@ -4676,9 +5009,18 @@ function buildCreateVariantFromComponentResult(
   if (!res) return null;
   let nodes = res.nodes;
   const childOrder = res.childOrder;
+  const stableIds = assignStableLayerIds(nodes, childOrder, res.newRootId);
   if (!m.variantGroupId) {
     nodes = { ...nodes, [masterId]: { ...m, variantGroupId: vg } };
   }
+  nodes = {
+    ...nodes,
+    [res.newRootId]: {
+      ...nodes[res.newRootId]!,
+      componentLayerStableIds: stableIds,
+      componentVersion: 1,
+    },
+  };
   nodes = relayoutParentsWithAutoLayout(nodes, childOrder, [parentListKey(m.parentId)]);
   return {
     nodes,
@@ -4756,6 +5098,7 @@ function buildDeleteSingleResult(
       toRemove.add(tid);
     }
   }
+  const removedIds = [...toRemove];
   let nodes = { ...s.nodes };
   const childOrder: Record<string, string[]> = {};
   for (const [k, arr] of Object.entries(s.childOrder)) {
@@ -4765,10 +5108,22 @@ function buildDeleteSingleResult(
     delete nodes[tid];
     delete childOrder[tid];
   }
-  nodes = relayoutParentsWithAutoLayout(nodes, childOrder, parentsToRelayout);
+  const refresh = new Set<string>();
+  for (const root of tops) {
+    parentsToRelayout.add(parentListKey(s.nodes[root]!.parentId));
+  }
+  const propagated = applyMasterComponentDocumentChanges(nodes, childOrder, refresh, {
+    removedNodeIds: removedIds,
+    changedNodeIds: tops.filter((id) => isMasterComponentEdit(s.nodes, id)),
+    structural: true,
+    reason: "delete",
+  });
+  nodes = propagated.nodes;
+  const nextChildOrder = propagated.childOrder;
+  nodes = relayoutParentsWithAutoLayout(nodes, nextChildOrder, parentsToRelayout);
   return {
     nodes,
-    childOrder,
+    childOrder: nextChildOrder,
     ui: {
       selectedIds: [] as string[],
       editingTextId: null,
@@ -5399,8 +5754,10 @@ function buildTogglePathClosedResult(
 ): StructuralDocumentResult | null {
   const n = s.nodes[nodeId];
   if (!n || n.type !== "path") return null;
+  let next: EditorNode = { ...n, pathClosed: !n.pathClosed };
+  next = normalizePathNode(next);
   return {
-    nodes: { ...s.nodes, [nodeId]: { ...n, pathClosed: !n.pathClosed } },
+    nodes: { ...s.nodes, [nodeId]: next },
     childOrder: s.childOrder,
     ui: {},
   };
@@ -5687,18 +6044,19 @@ function buildUpdateNodeStyleResult(
 
   let nodes: Record<string, EditorNode>;
   if (instRoot && instRoot !== id) {
-    const rn = s.nodes[instRoot]!;
-    const io: Record<string, Record<string, unknown>> = { ...(rn.instanceOverrides ?? {}) };
-    const prev =
-      io[id] && typeof io[id] === "object" && !Array.isArray(io[id])
-        ? { ...(io[id] as Record<string, unknown>) }
-        : {};
-    io[id] = { ...prev, ...finalPatch };
-    if ("fillGradient" in finalPatch) {
-      delete (io[id] as Record<string, unknown>).fillTokenId;
-      nodes = { ...s.nodes, [instRoot]: { ...rn, instanceOverrides: io }, [id]: { ...n, fillTokenId: undefined } };
+    const updatedRoot = recordInstanceOverrideForNode(
+      s.nodes,
+      instRoot,
+      id,
+      finalPatch as InstanceOverridePatch,
+    );
+    if (updatedRoot) {
+      nodes = { ...s.nodes, [instRoot]: updatedRoot };
+      if ("fillGradient" in finalPatch) {
+        nodes[id] = { ...n, fillTokenId: undefined };
+      }
     } else {
-      nodes = { ...s.nodes, [instRoot]: { ...rn, instanceOverrides: io } };
+      nodes = { ...s.nodes };
     }
   } else {
     const expanded = expandBooleanFillStylePatches(id, finalPatch, s.nodes, s.childOrder);
@@ -5739,13 +6097,34 @@ function buildUpdateNodeStyleResult(
   }
 
   const fp = finalPatch as Partial<EditorNode>;
+  if (n.type === "path" && fp.pathClosed === true && !n.pathClosed) {
+    const cur = nodes[id];
+    if (cur?.type === "path") nodes[id] = normalizePathNode(cur);
+  }
+
   let childOrder = s.childOrder;
+  const styleRefresh = new Set<string>();
   if (
     n.parentId &&
     (fp.width != null || fp.height != null) &&
     (n.type === "text" ? patchAffectsTextLayout(patch) : true)
   ) {
-    nodes = relayoutParentsWithAutoLayout(nodes, childOrder, [n.parentId]);
+    styleRefresh.add(n.parentId);
+  }
+  if (!instRoot && isMasterComponentEdit(nodes, id)) {
+    const styleKeys = Object.keys(finalPatch) as (keyof EditorNode)[];
+    const propagated = applyComponentPropagationToStoreResult(
+      nodes,
+      childOrder,
+      styleRefresh,
+      id,
+      styleKeys,
+    );
+    nodes = propagated.nodes;
+    childOrder = propagated.childOrder;
+  }
+  if (styleRefresh.size > 0) {
+    nodes = relayoutParentsWithAutoLayout(nodes, childOrder, styleRefresh);
   }
   if (n.type === "text" && patchAffectsTextLayout(patch)) {
     clearCanonicalTextLayoutCache(id);
@@ -5843,14 +6222,13 @@ function buildUpdateNodeResult(
       }
     }
     if (Object.keys(stylePart).length > 0) {
-      const root = nodes[instRoot]!;
-      const io: Record<string, Record<string, unknown>> = { ...(root.instanceOverrides ?? {}) };
-      const prev =
-        io[id] && typeof io[id] === "object" && !Array.isArray(io[id])
-          ? { ...(io[id] as Record<string, unknown>) }
-          : {};
-      io[id] = { ...prev, ...stylePart };
-      nodes[instRoot] = { ...root, instanceOverrides: io };
+      const updatedRoot = recordInstanceOverrideForNode(
+        nodes,
+        instRoot,
+        id,
+        stylePart as InstanceOverridePatch,
+      );
+      if (updatedRoot) nodes[instRoot] = updatedRoot;
     }
   } else {
     Object.assign(directPart, layoutAwarePatch);
@@ -5895,7 +6273,7 @@ function buildUpdateNodeResult(
         ...linePatchFromEndpoints(ep.x1, ep.y1, ep.x2, ep.y2, merged, allowZeroGeometry ? 0 : undefined),
       };
     } else if (boxTouched) {
-      nodes[id] = { ...merged, ...lineEndpointsPatchFromLayout(merged) };
+      nodes[id] = { ...merged, ...lineEndpointsPatchFromBoxResize(n, merged) };
     }
     merged = nodes[id]!;
   }
@@ -5915,6 +6293,37 @@ function buildUpdateNodeResult(
           cornerRadius: layoutAwarePatch.cornerRadius ?? merged.cornerRadius,
         }),
       };
+      merged = nodes[id]!;
+    }
+  }
+  if (isStarNode(merged)) {
+    const touchesBox =
+      layoutAwarePatch.width != null ||
+      layoutAwarePatch.height != null ||
+      layoutAwarePatch.x != null ||
+      layoutAwarePatch.y != null;
+    if (touchesBox) {
+      nodes[id] = {
+        ...merged,
+        ...starGeometryPatch(merged, {
+          starPoints: merged.starPoints,
+          starInnerRadius: merged.starInnerRadius,
+          cornerRadius: merged.cornerRadius,
+        }),
+      };
+      merged = nodes[id]!;
+    }
+  }
+  if (
+    merged.type === "path" &&
+    (layoutAwarePatch.width != null ||
+      layoutAwarePatch.height != null ||
+      layoutAwarePatch.x != null ||
+      layoutAwarePatch.y != null)
+  ) {
+    const pathPatch = syncEditablePathAfterBoxChange(n, merged);
+    if (pathPatch.pathPoints) {
+      nodes[id] = { ...merged, ...pathPatch };
       merged = nodes[id]!;
     }
   }
@@ -5954,8 +6363,20 @@ function buildUpdateNodeResult(
       nodes = syncGroupFrameToVisible(id, nodes, s.childOrder);
     }
   }
+  let childOrder = s.childOrder;
+  if (!rotationOnly && isMasterComponentEdit(nodes, id)) {
+    const propagated = applyComponentPropagationToStoreResult(
+      nodes,
+      childOrder,
+      refresh,
+      id,
+      keys as (keyof EditorNode)[],
+    );
+    nodes = propagated.nodes;
+    childOrder = propagated.childOrder;
+  }
   if (!rotationOnly) {
-    nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
+    nodes = relayoutParentsWithAutoLayout(nodes, childOrder, refresh);
   }
   const finalNode = nodes[id];
   if (finalNode) {
@@ -5977,7 +6398,7 @@ function buildUpdateNodeResult(
     clearCanonicalTextLayoutCache(id);
     bumpTextLayoutEpoch();
   }
-  return { nodes, childOrder: s.childOrder, ui: {} };
+  return { nodes, childOrder, ui: {} };
 }
 
 function buildUpdateNodesResult(
@@ -5987,6 +6408,7 @@ function buildUpdateNodesResult(
   const ids = Object.keys(patches);
   if (ids.length === 0) return null;
   let nodes = { ...s.nodes };
+  let childOrder = s.childOrder;
   const refresh = new Set<string>();
   let changed = false;
   let rotationOnlyBatch = true;
@@ -6058,8 +6480,37 @@ function buildUpdateNodesResult(
   }
   if (!changed) return null;
   if (textLayoutEpochBump) bumpTextLayoutEpoch();
+
+  beginComponentUpdateTransaction("batch-update");
+  for (const id of ids) {
+    const patch = patches[id];
+    if (!patch) continue;
+    if (isMasterComponentEdit(nodes, id)) {
+      const masterRootId = findMasterRootForNode(nodes, id);
+      if (masterRootId) {
+        recordMasterMutation(
+          masterRootId,
+          id,
+          nodes[masterRootId]?.componentLayerStableIds?.[id] ?? null,
+          Object.keys(patch) as (keyof EditorNode)[],
+        );
+      }
+    }
+  }
   if (!rotationOnlyBatch) {
-    nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
+    const propagated = applyComponentPropagationToStoreResult(
+      nodes,
+      s.childOrder,
+      refresh,
+      ids[0]!,
+      Object.keys(patches[ids[0]!] ?? {}) as (keyof EditorNode)[],
+    );
+    nodes = propagated.nodes;
+    childOrder = propagated.childOrder;
+  }
+
+  if (!rotationOnlyBatch) {
+    nodes = relayoutParentsWithAutoLayout(nodes, childOrder, refresh);
   }
   if (isRotateGeometryLockActive(s)) {
     for (const id of ids) {
@@ -6083,13 +6534,15 @@ function buildUpdateNodesResult(
       if (geom) warnInvalidNodeGeometry("updateNodes", id, merged, nodes);
     }
   }
-  return { nodes, childOrder: s.childOrder, ui: {} };
+  return { nodes, childOrder, ui: {} };
 }
 
 type ResizeNodeOpts = {
   fixedWorld?: { x: number; y: number } | null;
   pointerWorld?: { x: number; y: number };
   startPointerWorld?: { x: number; y: number };
+  startPathPoints?: import("@/lib/pathGeometry").PathPoint[];
+  startNodesSnapshot?: Record<string, EditorNode>;
 };
 
 function buildResizeNodeResult(
@@ -6188,8 +6641,45 @@ function buildResizeNodeResult(
     y = solved.y;
   }
 
-  const content = buildResizeContentPatches(n, startBounds, { x, y, width, height }, handle, modifiers);
+  const content = buildResizeContentPatches(
+    n,
+    startBounds,
+    { x, y, width, height },
+    handle,
+    modifiers,
+    buildResizeContentOpts(id, {
+      startPathPoints: opts?.startPathPoints,
+      startNodesSnapshot: opts?.startNodesSnapshot,
+    }),
+  );
   let nodePatch: Partial<EditorNode> = { x, y, width, height, ...content };
+  if (
+    n.type === "path" &&
+    !isPolygonNode(n) &&
+    !isStarNode(n) &&
+    (n.pathPoints?.length || n.flattenedPathData?.trim()) &&
+    (width !== startBounds.width || height !== startBounds.height)
+  ) {
+    const resizeOpts = buildResizeContentOpts(id, {
+      startPathPoints: opts?.startPathPoints,
+      startNodesSnapshot: opts?.startNodesSnapshot,
+    });
+    const startPts = resizeOpts?.startPathPoints ?? n.pathPoints;
+    Object.assign(
+      nodePatch,
+      pathContentPatchFromBoxResize(
+        {
+          type: "path",
+          width: startBounds.width,
+          height: startBounds.height,
+          pathPoints: startPts,
+          flattenedPathData: resizeOpts?.startFlattenedPathData ?? n.flattenedPathData,
+        },
+        width,
+        height,
+      ),
+    );
+  }
   if (n.type === "text") {
     const textPatch = buildTextResizeGeometryPatch(n, startBounds, {
       x,
@@ -6214,7 +6704,15 @@ function buildResizeNodeResult(
   const layoutMode = n.layoutMode ?? "none";
   if (isContainer && layoutMode === "none") {
     if (shouldProportionalFrameScale(handle, modifiers)) {
-      const childPatches = scaleSubtreeContentPatches(id, nodes, s.childOrder, sx, sy, uniform);
+      const childPatches = scaleSubtreeContentPatches(
+        id,
+        nodes,
+        s.childOrder,
+        sx,
+        sy,
+        uniform,
+        opts?.startNodesSnapshot,
+      );
       for (const [cid, patch] of Object.entries(childPatches)) {
         const cn = nodes[cid];
         if (cn && !cn.locked) nodes[cid] = { ...cn, ...patch };
@@ -6249,9 +6747,31 @@ function buildResizeNodeResult(
     nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [n.parentId]);
   }
   nodes[id] = sanitizeNodeGeometry(nodes[id]!, n);
-  const merged = nodes[id]!;
+  let merged = nodes[id]!;
+  if (merged.type === "line" || merged.type === "arrow") {
+    nodes[id] = { ...merged, ...lineEndpointsPatchFromBoxResize(n, merged) };
+    merged = nodes[id]!;
+  }
   warnInvalidNodeGeometry("resizeNode", id, merged, nodes);
-  return { nodes, childOrder: s.childOrder, ui: {} };
+
+  let childOrder = s.childOrder;
+  if (isMasterComponentEdit(nodes, id)) {
+    const refresh = new Set<string>();
+    const propagated = applyMasterComponentDocumentChanges(nodes, childOrder, refresh, {
+      changedNodeIds: [id],
+      changedKeysByNode: {
+        [id]: ["width", "height", "x", "y", "layoutSizingHorizontal", "layoutSizingVertical"],
+      },
+      reason: "resize",
+    });
+    nodes = propagated.nodes;
+    childOrder = propagated.childOrder;
+    if (refresh.size > 0) {
+      nodes = relayoutParentsWithAutoLayout(nodes, childOrder, refresh);
+    }
+  }
+
+  return { nodes, childOrder, ui: {} };
 }
 
 function buildResizeFrameWithConstraintsResult(
@@ -6632,6 +7152,8 @@ const INSTANCE_STYLE_KEYS = new Set<string>([
   "strokeSides",
   "strokeSidesCustom",
   "strokeSidesCustomColors",
+  "strokeStartPoint",
+  "strokeEndPoint",
   "cornerRadius",
   "cornerRadii",
   "textColor",
@@ -6844,7 +7366,7 @@ function textStyleFromSelection(
 export function toPersistSlice(s: EditorState): EditorPersistSlice {
   const { pages, pageOrder } = pagesWithActiveCaptured(s);
   return {
-    nodes: s.nodes,
+    nodes: clearEphemeralInteractiveFields(s.nodes),
     childOrder: s.childOrder,
     assets: s.assets,
     fontAssets: s.fontAssets,
@@ -7146,6 +7668,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
   prototypeWireDrag: null,
   selectedPrototypeLinkId: null,
   prototypePreview: null,
+  componentInteractionPreview: false,
+  activeSlotEdit: null,
   responsivePreview: null,
   documentSaveStatus: "saved",
   realtimeSyncStatus: "idle" as RealtimeSyncStatus,
@@ -7872,7 +8396,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const before = get();
     clearPostCreationPointerSuppress();
     if (before.tool === "pen" && tool !== "pen" && before.penDrawingNodeId) {
-      get().cancelPath();
+      const drawNode = before.nodes[before.penDrawingNodeId];
+      const pointCount =
+        drawNode?.type === "path" ? (drawNode.pathPoints?.length ?? 0) : 0;
+      if (pointCount >= 2) {
+        get().finishPath(false);
+      } else {
+        get().cancelPath();
+      }
     }
     if (before.pencilDrawingNodeId && tool !== "pencil") {
       get().cancelPencilStroke();
@@ -8105,6 +8636,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
     });
     const st = get();
     syncDuplicateRepeatSelection(st.selectedIds, st.nodes);
+    if (id && !additive) {
+      const selected = st.nodes[id];
+      if (selected?.isComponentSet && (selected.layoutMode ?? "none") === "none") {
+        const migrated = reflowComponentSetContainer(st.nodes, st.childOrder, id);
+        set({ nodes: migrated.nodes, childOrder: migrated.childOrder });
+      }
+    }
   },
 
   clearSelection: () => {
@@ -8974,17 +9512,53 @@ export const useEditorStore = create<EditorState>((set, get) => {
     commitStructuralResult(buildFlattenBooleanGroupResult(get(), result));
   },
 
-  outlineStrokeSelection: () => {
+  outlineStrokeSelection: (nodeId?: string) => {
     const s0 = get();
-    if (s0.editorMode !== "design" || s0.selectedIds.length !== 1) {
+    if (s0.editorMode !== "design") {
       window.alert("Select one shape with a visible stroke to outline.");
       return;
     }
-    const id = s0.selectedIds[0]!;
+    const id = nodeId ?? s0.selectedIds[0];
+    if (!id || (s0.selectedIds.length !== 1 && !nodeId)) {
+      window.alert("Select one shape with a visible stroke to outline.");
+      return;
+    }
     const node = s0.nodes[id];
     if (!node) return;
     if (!canOutlineStroke(node)) {
       window.alert("Select a layer with a visible stroke to outline.");
+      return;
+    }
+    if (node.type === "text") {
+      void (async () => {
+        try {
+          let outlineSeq = 0;
+          const converted = await convertTextToOutlineVectorGroup(
+            node,
+            get().fontAssets,
+            (prefix) =>
+              `${prefix}-${Date.now()}-${++outlineSeq}-${Math.random().toString(36).slice(2, 7)}`,
+          );
+          if (!converted) {
+            window.alert("Could not outline this text.");
+            return;
+          }
+          const result = buildOutlineTextToVectorsResult(
+            get(),
+            id,
+            converted.group,
+            converted.vectors,
+          );
+          if (!result) {
+            window.alert("Could not outline this text.");
+            return;
+          }
+          get().pushHistory();
+          commitStructuralResult(result);
+        } catch {
+          window.alert("Could not outline this text.");
+        }
+      })();
       return;
     }
     const ctx = { childOrder: s0.childOrder, nodes: s0.nodes };
@@ -9172,6 +9746,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
   },
 
   deleteSelection: (opts) => {
+    const edit = get().activeSlotEdit;
+    if (edit) {
+      const tops = editableTopLevelSelection(get()).filter((id) =>
+        isDeletableDuringSlotEdit(get().nodes, edit, id),
+      );
+      if (tops.length === 0) return;
+      if (tops.length !== get().selectedIds.length) {
+        set({ selectedIds: tops });
+      }
+    }
     if (editableTopLevelSelection(get()).length === 0) return;
     if (!opts?.skipHistory) get().pushHistory();
     const result = buildDeleteSelectionResult(get());
@@ -9483,9 +10067,34 @@ export const useEditorStore = create<EditorState>((set, get) => {
     commitStructuralResult(result);
   },
 
+  createComponentSetFromSelection: () => {
+    const s = get();
+    const result = buildCreateComponentSetFromSelectionResult(
+      s.nodes,
+      s.childOrder,
+      s.selectedIds,
+    );
+    if (!result) return;
+    get().pushHistory();
+    commitStructuralResult({
+      nodes: result.nodes,
+      childOrder: result.childOrder,
+      ui: {
+        selectedIds: [result.setContainerId],
+        leftTab: "components" as LeftTab,
+      },
+    });
+  },
+
+  combineAsVariants: () => {
+    get().createComponentSetFromSelection();
+  },
+
   createInstance: (componentKey, worldX, worldY) => {
     const result = buildCreateInstanceResult(get(), componentKey, worldX, worldY);
     if (!result) return;
+    const masterId = resolveMasterRootId(result.nodes, componentKey);
+    if (masterId) recordRecentComponent(masterId);
     get().pushHistory();
     commitStructuralResult(result);
   },
@@ -9518,6 +10127,420 @@ export const useEditorStore = create<EditorState>((set, get) => {
     commitStructuralResult(result);
   },
 
+  addVariantPropertyAxis: (masterId, axis, defaultValue) => {
+    const master = get().nodes[masterId];
+    if (!master?.isComponent || master.locked) return;
+    get().pushHistory();
+    if (!master.variantGroupId) {
+      const vg = newVariantGroupId();
+      set({
+        nodes: {
+          ...get().nodes,
+          [masterId]: {
+            ...master,
+            variantGroupId: vg,
+            variantProperties: { ...(master.variantProperties ?? {}), [axis]: defaultValue },
+          },
+        },
+      });
+      return;
+    }
+    set({
+      nodes: addPropertyToSet(get().nodes, master.variantGroupId, axis, defaultValue) ?? get().nodes,
+    });
+  },
+
+  renameVariantProperty: (masterId, oldName, newName) => {
+    const master = get().nodes[masterId];
+    if (!master?.isComponent || !master.variantGroupId || master.locked) return;
+    const next = renamePropertyInSet(get().nodes, master.variantGroupId, oldName, newName);
+    if (!next) return;
+    get().pushHistory();
+    set({ nodes: next });
+  },
+
+  deleteVariantProperty: (masterId, propertyName) => {
+    const master = get().nodes[masterId];
+    if (!master?.isComponent || !master.variantGroupId || master.locked) return;
+    const next = deletePropertyFromSet(get().nodes, master.variantGroupId, propertyName);
+    if (!next) return;
+    get().pushHistory();
+    set({ nodes: next });
+  },
+
+  addVariantPropertyValue: (masterId, propertyName, value) => {
+    const master = get().nodes[masterId];
+    if (!master?.isComponent || master.locked) return;
+    const result = addVariantForPropertyValue(get().nodes, get().childOrder, masterId, propertyName, value);
+    if (!result) return;
+    get().pushHistory();
+    commitStructuralResult({
+      nodes: result.nodes,
+      childOrder: result.childOrder,
+      ui: { selectedIds: [result.newMasterId] },
+    });
+  },
+
+  duplicateVariantMaster: (masterId) => {
+    const master = get().nodes[masterId];
+    if (!master?.isComponent || master.locked) return;
+    const result = buildDuplicateVariantMasterResult(get().nodes, get().childOrder, masterId);
+    if (!result) return;
+    get().pushHistory();
+    commitStructuralResult({
+      nodes: result.nodes,
+      childOrder: result.childOrder,
+      ui: { selectedIds: [result.newMasterId] },
+    });
+  },
+
+  deleteVariantMaster: (masterId) => {
+    const master = get().nodes[masterId];
+    if (!master?.isComponent || master.locked) return;
+    const result = buildDeleteVariantMasterResult(get().nodes, get().childOrder, masterId);
+    if (!result) return;
+    const remaining = Object.values(result.nodes).find(
+      (n) => n.isComponent && n.variantGroupId === master.variantGroupId,
+    );
+    get().pushHistory();
+    commitStructuralResult({
+      ...result,
+      ui: { selectedIds: remaining ? [remaining.id] : [] },
+    });
+  },
+
+  goToMainComponent: (instanceRootId) => {
+    const masterId = buildGoToMainComponentSelection(get().nodes, instanceRootId);
+    if (!masterId) return;
+    get().select(masterId, false);
+  },
+
+  resetInstanceOverrides: (instanceRootId, stableId, propertyPath) => {
+    const next = buildResetInstanceOverridesResult(get().nodes, instanceRootId, stableId, propertyPath);
+    if (!next) return;
+    const resolved = resolveComponentInstance(next, get().childOrder, instanceRootId, { force: true });
+    get().pushHistory();
+    set({ nodes: resolved.nodes, childOrder: resolved.childOrder });
+  },
+
+  swapInstanceComponent: (instanceRootId, newMasterKey) => {
+    const result = buildSwapInstanceComponentResult(get().nodes, get().childOrder, instanceRootId, newMasterKey);
+    if (!result) return;
+    const resolved = resolveComponentInstance(result.nodes, result.childOrder, result.newRootId, {
+      force: true,
+    });
+    get().pushHistory();
+    commitStructuralResult({
+      ...result,
+      nodes: resolved.nodes,
+      childOrder: resolved.childOrder,
+      ui: { selectedIds: [result.newRootId] },
+    });
+  },
+
+  setInstanceVariant: (instanceRootId, variantProperties) => {
+    const result = buildSetInstanceVariantResult(get().nodes, get().childOrder, instanceRootId, variantProperties);
+    if (!result) return;
+    const resolved = resolveComponentInstance(result.nodes, result.childOrder, result.newRootId, {
+      force: true,
+    });
+    get().pushHistory();
+    commitStructuralResult({
+      ...result,
+      nodes: resolved.nodes,
+      childOrder: resolved.childOrder,
+      ui: { selectedIds: [result.newRootId] },
+    });
+  },
+
+  pushInstanceChangesToMain: (instanceRootId) => {
+    const out = pushInstanceOverridesToMaster(get().nodes, instanceRootId);
+    if (!out) return;
+    const layerNodeId = get().nodes[instanceRootId]?.sourceComponentId;
+    const refresh = new Set<string>();
+    let nodes = out.nodes;
+    let childOrder = get().childOrder;
+    if (layerNodeId) {
+      const propagated = applyMasterComponentDocumentChanges(nodes, childOrder, refresh, {
+        changedNodeIds: [layerNodeId],
+        reason: "push-to-main",
+      });
+      nodes = propagated.nodes;
+      childOrder = propagated.childOrder;
+      if (refresh.size > 0) {
+        nodes = relayoutParentsWithAutoLayout(nodes, childOrder, refresh);
+      }
+    }
+    get().pushHistory();
+    set({ nodes, childOrder });
+  },
+
+  setComponentDescription: (masterId, description) => {
+    const n = get().nodes[masterId];
+    if (!n?.isComponent) return;
+    get().pushHistory();
+    set({ nodes: { ...get().nodes, [masterId]: { ...n, componentDescription: description } } });
+  },
+
+  addComponentProperty: (masterId, property) => {
+    const n = get().nodes[masterId];
+    if (!n?.isComponent) return;
+    const defs = [...(n.componentPropertyDefs ?? []), property];
+    get().pushHistory();
+    set({ nodes: { ...get().nodes, [masterId]: { ...n, componentPropertyDefs: defs } } });
+  },
+
+  setComponentPropertyValue: (instanceRootId, propertyKey, value) => {
+    const root = get().nodes[instanceRootId];
+    if (!root?.sourceComponentId) return;
+    const master = get().nodes[root.sourceComponentId];
+    const defs = master?.componentPropertyDefs ?? [];
+    const def = defs.find((d) => d.key === propertyKey);
+    if (!def) return;
+    const values = { ...(root.componentPropertyValues ?? {}), [propertyKey]: value };
+
+    let nextNodes: Record<string, EditorNode>;
+    if (def.kind === "instanceSwap") {
+      nextNodes = {
+        ...get().nodes,
+        [instanceRootId]: { ...root, componentPropertyValues: values },
+      };
+    } else if (def.kind === "slot") {
+      return;
+    } else {
+      const overrideMap = applyComponentPropertyDefs({ ...root, componentPropertyValues: values }, values, defs);
+      nextNodes = {
+        ...get().nodes,
+        [instanceRootId]: writeInstanceOverrideState({ ...root, componentPropertyValues: values }, overrideMap),
+      };
+    }
+
+    const resolved = resolveComponentInstance(nextNodes, get().childOrder, instanceRootId, { force: true });
+    get().pushHistory();
+    set({ nodes: resolved.nodes, childOrder: resolved.childOrder });
+  },
+
+  resetComponentPropertyValue: (instanceRootId, propertyKey) => {
+    const root = get().nodes[instanceRootId];
+    const master = root?.sourceComponentId ? get().nodes[root.sourceComponentId] : null;
+    const def = master?.componentPropertyDefs?.find((d) => d.key === propertyKey);
+    const next =
+      def?.kind === "slot"
+        ? buildResetSlotContentResult(get().nodes, instanceRootId, propertyKey)
+        : buildResetComponentPropertyValueResult(get().nodes, instanceRootId, propertyKey);
+    if (!next) return;
+    const resolved = resolveComponentInstance(next, get().childOrder, instanceRootId, { force: true });
+    get().pushHistory();
+    set({ nodes: resolved.nodes, childOrder: resolved.childOrder });
+  },
+
+  createInstanceSwapPropertyFromSelection: (masterId, nestedInstanceNodeId, label) => {
+    const master = get().nodes[masterId];
+    if (!master?.isComponent || master.locked) return;
+    const def = buildInstanceSwapPropertyForNestedInstance(
+      get().nodes,
+      masterId,
+      nestedInstanceNodeId,
+      label,
+    );
+    if (!def) return;
+    const defs = [...(master.componentPropertyDefs ?? []), def];
+    get().pushHistory();
+    set({ nodes: { ...get().nodes, [masterId]: { ...master, componentPropertyDefs: defs } } });
+  },
+
+  updateComponentProperty: (masterId, propertyId, patch) => {
+    const master = get().nodes[masterId];
+    if (!master?.isComponent || master.locked) return;
+    const defs = (master.componentPropertyDefs ?? []).map((d) =>
+      d.id === propertyId ? { ...d, ...patch } : d,
+    );
+    get().pushHistory();
+    set({ nodes: { ...get().nodes, [masterId]: { ...master, componentPropertyDefs: defs } } });
+  },
+
+  createSlotPropertyFromSelection: (masterId, containerNodeId, label) => {
+    const master = get().nodes[masterId];
+    if (!master?.isComponent || master.locked) return;
+    const def = buildSlotPropertyForContainer(
+      get().nodes,
+      get().childOrder,
+      masterId,
+      containerNodeId,
+      label,
+    );
+    if (!def) return;
+    const defs = [...(master.componentPropertyDefs ?? []), def];
+    get().pushHistory();
+    set({ nodes: { ...get().nodes, [masterId]: { ...master, componentPropertyDefs: defs } } });
+  },
+
+  setSlotContent: (instanceRootId, propertyKey, snapshot) => {
+    const next = buildSetSlotContentResult(get().nodes, get().childOrder, instanceRootId, propertyKey, snapshot);
+    if (!next) return;
+    const resolved = resolveComponentInstance(next, get().childOrder, instanceRootId, { force: true });
+    get().pushHistory();
+    set({ nodes: resolved.nodes, childOrder: resolved.childOrder });
+  },
+
+  resetSlotContent: (instanceRootId, propertyKey) => {
+    get().resetComponentPropertyValue(instanceRootId, propertyKey);
+  },
+
+  enterSlotEditMode: (instanceRootId, propertyKey, priorBreadcrumb) => {
+    const scope = resolveSlotEditScope(get().nodes, get().childOrder, instanceRootId, propertyKey);
+    if (!scope) return;
+    const baseline = captureSlotContentFromInstance(
+      get().nodes,
+      get().childOrder,
+      instanceRootId,
+      propertyKey,
+    );
+    const breadcrumb = buildSlotEditBreadcrumb(get().nodes, scope, priorBreadcrumb ?? []);
+    set({
+      activeSlotEdit: {
+        instanceRootId,
+        propertyKey,
+        containerId: scope.containerId,
+        baselineSignature: snapshotContentSignature(
+          baseline ?? { version: 1, nodes: {}, childOrder: {}, rootChildIds: [] },
+        ),
+        breadcrumb,
+      },
+      objectEditModeNodeId: scope.containerId,
+      selectedIds: [scope.containerId],
+      pathEditModeNodeId: null,
+      shapeEditModeNodeId: null,
+      componentInteractionPreview: false,
+    });
+  },
+
+  exitSlotEditMode: (save = true) => {
+    const edit = get().activeSlotEdit;
+    if (!edit) return;
+    if (save) {
+      const snapshot = captureSlotContentFromInstance(
+        get().nodes,
+        get().childOrder,
+        edit.instanceRootId,
+        edit.propertyKey,
+      );
+      const changed = slotContentChanged(edit.baselineSignature, snapshot);
+      if (changed && snapshot) {
+        const next = buildSetSlotContentResult(
+          get().nodes,
+          get().childOrder,
+          edit.instanceRootId,
+          edit.propertyKey,
+          snapshot,
+        );
+        if (next) {
+          const resolved = resolveComponentInstance(next, get().childOrder, edit.instanceRootId, {
+            force: true,
+          });
+          get().pushHistory();
+          set({
+            nodes: resolved.nodes,
+            childOrder: resolved.childOrder,
+            activeSlotEdit: null,
+            objectEditModeNodeId: null,
+          });
+          return;
+        }
+      }
+    }
+    set({ activeSlotEdit: null, objectEditModeNodeId: null });
+  },
+
+  navigateSlotEditBreadcrumb: (index) => {
+    const edit = get().activeSlotEdit;
+    if (!edit) return;
+    const crumb = edit.breadcrumb[index];
+    if (!crumb) return;
+    const prior = edit.breadcrumb.slice(0, index);
+    get().exitSlotEditMode(true);
+    get().enterSlotEditMode(crumb.instanceRootId, crumb.propertyKey, prior);
+  },
+
+  pasteIntoActiveSlot: () => {
+    if (!get().activeSlotEdit) {
+      get().pasteSelection();
+      return;
+    }
+    get().pasteSelection({ inPlace: true });
+  },
+
+  setComponentInteractionPreview: (enabled) => {
+    if (!enabled) {
+      set({
+        componentInteractionPreview: false,
+        nodes: clearEphemeralInteractiveFields(get().nodes),
+      });
+      return;
+    }
+    set({ componentInteractionPreview: true });
+  },
+
+  setComponentInteractions: (masterId, interactions) => {
+    const master = get().nodes[masterId];
+    if (!master?.isComponent || !master.variantGroupId || master.locked) return;
+    get().pushHistory();
+    set({
+      nodes: syncInteractionsToVariantGroup(get().nodes, master.variantGroupId, interactions),
+    });
+  },
+
+  addComponentInteraction: (masterId, interaction) => {
+    const master = get().nodes[masterId];
+    if (!master?.isComponent || !master.variantGroupId || master.locked) return;
+    const existing = master.componentInteractions ?? [];
+    get().pushHistory();
+    set({
+      nodes: syncInteractionsToVariantGroup(get().nodes, master.variantGroupId, [...existing, interaction]),
+    });
+  },
+
+  updateComponentInteraction: (masterId, interactionId, patch) => {
+    const master = get().nodes[masterId];
+    if (!master?.isComponent || !master.variantGroupId || master.locked) return;
+    const existing = master.componentInteractions ?? [];
+    const next = existing.map((it) => (it.id === interactionId ? { ...it, ...patch } : it));
+    get().pushHistory();
+    set({
+      nodes: syncInteractionsToVariantGroup(get().nodes, master.variantGroupId, next),
+    });
+  },
+
+  removeComponentInteraction: (masterId, interactionId) => {
+    const master = get().nodes[masterId];
+    if (!master?.isComponent || !master.variantGroupId || master.locked) return;
+    const existing = master.componentInteractions ?? [];
+    get().pushHistory();
+    set({
+      nodes: syncInteractionsToVariantGroup(
+        get().nodes,
+        master.variantGroupId,
+        existing.filter((it) => it.id !== interactionId),
+      ),
+    });
+  },
+
+  triggerInstanceInteraction: (instanceRootId, trigger) => {
+    const result = applyInstanceInteractionTrigger(get().nodes, get().childOrder, instanceRootId, trigger);
+    if (!result) return;
+    const parentId = result.nodes[result.newRootId]?.parentId;
+    let nodes = result.nodes;
+    let childOrder = result.childOrder;
+    if (parentId) {
+      nodes = relayoutParentsWithAutoLayout(nodes, childOrder, [parentId]);
+    }
+    set({ nodes, childOrder, selectedIds: get().selectedIds.map((id) => (id === instanceRootId ? result.newRootId : id)) });
+  },
+
+  clearInteractiveInstanceStates: () => {
+    set({ nodes: clearEphemeralInteractiveFields(get().nodes) });
+  },
+
   duplicateSingle: (id) => {
     const s0 = get();
     const tops0 = topLevelSelectedIds([id], s0.nodes).filter((tid) => {
@@ -9537,6 +10560,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   },
 
   deleteSingle: (id) => {
+    if (!isDeletableDuringSlotEdit(get().nodes, get().activeSlotEdit, id)) return;
     const result = buildDeleteSingleResult(get(), id);
     if (!result) return;
     get().pushHistory();
@@ -9848,9 +10872,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     if (!path || path.type !== "path" || !path.pathPoints?.length) return;
     const origin = getRenderedWorldTopLeft(drawId, s0.nodes, s0.childOrder);
     const first = path.pathPoints[0]!;
-    const wfx = origin.x + first.x;
-    const wfy = origin.y + first.y;
-    if (path.pathPoints.length >= 2 && Math.hypot(worldPoint.x - wfx, worldPoint.y - wfy) <= 12) {
+    const firstWorld = { x: origin.x + first.x, y: origin.y + first.y };
+    if (path.pathPoints.length >= 2 && canClosePathAt(worldPoint, firstWorld, path.pathPoints.length, s0.zoom)) {
       get().finishPath(true);
       return;
     }
@@ -9866,9 +10889,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     const origin = getRenderedWorldTopLeft(drawId, s0.nodes, s0.childOrder);
     const first = path.pathPoints[0]!;
-    const wfx = origin.x + first.x;
-    const wfy = origin.y + first.y;
-    if (path.pathPoints.length >= 2 && Math.hypot(anchorWorld.x - wfx, anchorWorld.y - wfy) <= 12) {
+    const firstWorld = { x: origin.x + first.x, y: origin.y + first.y };
+    if (path.pathPoints.length >= 2 && canClosePathAt(anchorWorld, firstWorld, path.pathPoints.length, s0.zoom)) {
       get().finishPath(true);
       return;
     }
@@ -9930,7 +10952,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   updatePathPoint: (nodeId, pointId, patch, opts) => {
     if (!opts?.skipHistory && !get().isApplyingHistory) get().pushHistory();
-    commitStructuralResult(buildUpdatePathPointResult(get(), nodeId, pointId, patch));
+    commitStructuralResult(
+      buildUpdatePathPointResult(get(), nodeId, pointId, patch, {
+        breakHandleMirror: opts?.breakHandleMirror,
+      }),
+    );
   },
 
   deletePathPoint: (nodeId, pointId) => {
@@ -9944,10 +10970,22 @@ export const useEditorStore = create<EditorState>((set, get) => {
   },
 
   setPathEditMode: (nodeId) =>
+    set((s) => {
+      if (s.pathEditModeNodeId === nodeId) return s;
+      return {
+        pathEditModeNodeId: nodeId,
+        shapeEditModeNodeId: null,
+        selectedPathPointIds:
+          nodeId === null || s.pathEditModeNodeId !== nodeId ? [] : s.selectedPathPointIds,
+      };
+    }),
+
+  selectPathPoint: (nodeId, pointId) =>
     set({
       pathEditModeNodeId: nodeId,
       shapeEditModeNodeId: null,
-      selectedPathPointIds: [],
+      selectedIds: [nodeId],
+      selectedPathPointIds: pointId ? [pointId] : [],
     }),
 
   enterShapeEditMode: (nodeId) => {
@@ -10092,7 +11130,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const raw = s.nodes[id];
     if (!raw || !isVectorEditableShape(raw)) return;
     if (s.editingTextId || s.penDrawingNodeId || s.pencilDrawingNodeId) return;
-    const needsConvert = raw.type !== "path" && raw.type !== "polygon";
+    const needsConvert = needsVectorPathConversion(raw);
     if (needsConvert) get().pushHistory();
     commitStructuralResult(buildEnterVectorEditModeResult(get(), nodeId));
   },

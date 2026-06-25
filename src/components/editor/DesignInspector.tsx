@@ -11,7 +11,13 @@ import {
   Unlink,
 } from "lucide-react";
 import { canAlignSelection } from "@/lib/alignSelection";
+import {
+  collectContainerStyleTargets,
+  containerSupportsAggregateFillStroke,
+} from "@/lib/groupStyleTargets";
+import { canCreateComponentSetFromSelection } from "@/lib/componentUx";
 import { AlignControls } from "./AlignControls";
+import { ComponentInspectorPanel } from "./ComponentInspectorPanel";
 import { PropertiesSection } from "./PropertiesSection";
 import { TypographySection } from "./design-panel/TypographySection";
 import { TextResizingSection } from "./design-panel/TextResizingSection";
@@ -54,6 +60,7 @@ import {
   resolveArrowStartKind,
   strokeEndpointToArrowHead,
 } from "@/lib/shapes/arrowGeometry";
+import { resolveStrokeEndPoint, resolveStrokeStartPoint } from "@/lib/strokeEndpoints";
 import { isPolygonNode, polygonGeometryPatch } from "@/lib/shapes/polygonGeometry";
 import {
   cornerRadiiStylePatch,
@@ -78,7 +85,6 @@ import { PositionSection } from "./design-panel/PositionSection";
 import { InspectorLayerHeaderActions } from "./design-panel/InspectorLayerHeaderActions";
 import { InspectorExportSection } from "./design-panel/InspectorExportSection";
 import { AutoLayoutInspectorPanel } from "./design-panel/AutoLayoutInspectorPanel";
-import { resolveStrokeEndPoint } from "@/lib/strokeEndpoints";
 import {
   downloadNodePdf,
   downloadNodePng,
@@ -153,6 +159,19 @@ export function DesignInspector({ node }: { node: EditorNode }) {
 
   const display = useMemo(() => resolveNodeWithDesignTokens(node, designTokens), [node, designTokens]);
 
+  const aggregateStyleTargets = useMemo(() => {
+    if (containerSupportsAggregateFillStroke(node, nodesAll, childOrder)) {
+      return collectContainerStyleTargets(node.id, nodesAll, childOrder);
+    }
+    return [];
+  }, [node, nodesAll, childOrder]);
+  const styleNode = aggregateStyleTargets[0] ?? node;
+  const styleDisplay = useMemo(
+    () => resolveNodeWithDesignTokens(styleNode, designTokens),
+    [styleNode, designTokens],
+  );
+  const showPaintSectionsEarly = node.type === "path" || aggregateStyleTargets.length > 0;
+
   const locked = node.locked;
   const id = node.id;
   const key = id;
@@ -221,7 +240,8 @@ export function DesignInspector({ node }: { node: EditorNode }) {
     node.type === "polygon" ||
     node.type === "path" ||
     node.type === "text" ||
-    Boolean(node.isBooleanGroup);
+    Boolean(node.isBooleanGroup) ||
+    aggregateStyleTargets.length > 0;
   const showStrokeSides = node.type === "rectangle" || node.type === "frame";
   const isLine = node.type === "line";
   const isArrow = node.type === "arrow";
@@ -257,7 +277,16 @@ export function DesignInspector({ node }: { node: EditorNode }) {
   }, [node.content, id]);
 
   const patch = (p: Partial<EditorNode>) => updateNode(id, p);
-  const style = (p: NodeStylePatch, opts?: { skipHistory?: boolean }) => updateNodeStyle(id, p, opts);
+  const style = (p: NodeStylePatch, opts?: { skipHistory?: boolean }) => {
+    if (aggregateStyleTargets.length > 0) {
+      if (!opts?.skipHistory) pushHistory();
+      for (const target of aggregateStyleTargets) {
+        updateNodeStyle(target.id, p, { skipHistory: true });
+      }
+      return;
+    }
+    updateNodeStyle(id, p, opts);
+  };
   const applyCornerStyle = (p: NodeStylePatch) => {
     if (!canRadius) {
       style(p);
@@ -288,10 +317,10 @@ export function DesignInspector({ node }: { node: EditorNode }) {
     style(p);
   };
 
-  const fillOpacity = display.fillOpacity ?? 1;
-  const fillEnabled = node.fillEnabled !== false;
-  const fillToken = node.fillTokenId ? designTokens[node.fillTokenId] : undefined;
-  const strokePos: StrokePosition = node.strokePosition ?? "center";
+  const fillOpacity = styleDisplay.fillOpacity ?? 1;
+  const fillEnabled = styleNode.fillEnabled !== false;
+  const fillToken = styleNode.fillTokenId ? designTokens[styleNode.fillTokenId] : undefined;
+  const strokePos: StrokePosition = styleNode.strokePosition ?? "center";
 
   const canAlignLayer = useMemo(
     () => canAlignSelection(selectedIds, nodesAll, childOrder),
@@ -300,6 +329,107 @@ export function DesignInspector({ node }: { node: EditorNode }) {
 
   const showMakeComponent =
     !node.isComponent && !instRootId && selectedIds.length >= 1 && selectedIds[0] === id;
+  const showCreateComponentSet = useMemo(
+    () => canCreateComponentSetFromSelection(selectedIds, nodesAll),
+    [selectedIds, nodesAll],
+  );
+
+  const paintInspectorSections = (
+    <>
+      <AppearanceSection
+        node={styleNode}
+        instanceKey={key}
+        locked={locked}
+        visible={node.visible}
+        layerOpacity={styleDisplay.opacity ?? 1}
+        canCornerRadius={canRadius}
+        cornerLabels={cornerRadiusLabels}
+        showArc={node.type === "ellipse"}
+        onOpacityCommit={(opacity) => style({ opacity })}
+        onBlendModeChange={(blendMode) => style({ blendMode })}
+        onToggleVisible={() => toggleVisible(id)}
+        onCornerStyle={applyCornerStyle}
+        onArcStyle={style}
+      />
+
+      {canFillStroke && (
+        <FillSection
+          node={styleNode}
+          display={styleDisplay}
+          instanceKey={key}
+          locked={locked}
+          fillEnabled={fillEnabled}
+          fillOpacity={fillOpacity}
+          fillToken={fillToken}
+          designTokens={designTokens}
+          onStyle={style}
+          onDetachToken={(kind) => detachTokenFromSelection(kind)}
+          onUpdateDesignToken={(tokenId, patch) => updateDesignToken(tokenId, patch)}
+        />
+      )}
+
+      {(canFillStroke || isLine || isArrow) && (
+        <StrokeSection
+          nodeId={styleNode.id}
+          instanceKey={key}
+          locked={locked}
+          strokeWidth={styleNode.strokeWidth ?? 0}
+          strokeColor={styleNode.strokeColor ?? "#000000"}
+          strokeType={styleNode.strokeType}
+          strokeGradient={styleNode.strokeGradient}
+          strokeImageAssetId={styleNode.strokeImageAssetId}
+          strokeVideoAssetId={styleNode.strokeVideoAssetId}
+          strokeOpacity={styleNode.strokeOpacity ?? 1}
+          strokeEnabled={styleNode.strokeEnabled !== false}
+          strokeStyle={styleNode.strokeStyle ?? "solid"}
+          strokePosition={strokePos}
+          strokeSides={styleNode.strokeSides ?? "all"}
+          strokeSidesCustom={styleNode.strokeSidesCustom}
+          strokeSidesCustomColors={styleNode.strokeSidesCustomColors}
+          showSides={showStrokeSides}
+          strokeDashLength={styleNode.strokeDashLength}
+          strokeDashGap={styleNode.strokeDashGap}
+          strokeLinecap={styleNode.strokeLinecap}
+          strokeLinejoin={styleNode.strokeLinejoin}
+          strokeMiterAngle={styleNode.strokeMiterAngle}
+          strokeWidthProfile={styleNode.strokeWidthProfile}
+          strokeWidthProfileFlipped={styleNode.strokeWidthProfileFlipped}
+          strokeStartPoint={
+            isArrow
+              ? arrowHeadToStrokeEndpoint(resolveArrowStartKind(node))
+              : resolveStrokeStartPoint(styleNode)
+          }
+          strokeEndPoint={
+            isArrow
+              ? arrowHeadToStrokeEndpoint(resolveArrowEndKind(node))
+              : resolveStrokeEndPoint(styleNode)
+          }
+          showEndpoints={
+            styleNode.type === "line" ||
+            styleNode.type === "arrow" ||
+            (styleNode.type === "path" && !styleNode.pathClosed)
+          }
+          onStyle={(patch, opts) => {
+            if (isArrow && (patch.strokeStartPoint != null || patch.strokeEndPoint != null)) {
+              style({
+                ...patch,
+                ...arrowEndpointStylePatch({
+                  ...(patch.strokeStartPoint != null
+                    ? { startArrow: strokeEndpointToArrowHead(patch.strokeStartPoint) }
+                    : {}),
+                  ...(patch.strokeEndPoint != null
+                    ? { endArrow: strokeEndpointToArrowHead(patch.strokeEndPoint) }
+                    : {}),
+                }),
+              }, opts);
+              return;
+            }
+            style(patch, opts);
+          }}
+        />
+      )}
+    </>
+  );
 
   return (
     <>
@@ -309,21 +439,24 @@ export function DesignInspector({ node }: { node: EditorNode }) {
             {typeLabel(node.type)}
           </span>
           {node.isComponent ? (
-            <span className="inline-flex items-center gap-1 rounded-md border border-violet-500/35 bg-violet-500/15 px-2 py-0.5 text-ui font-medium text-violet-200">
+            <span className="inline-flex items-center gap-1 rounded-md border border-violet-400/35 bg-violet-400/15 px-2 py-0.5 text-ui font-medium text-violet-100">
               <Component className="h-3 w-3" strokeWidth={1.75} />
               Component
             </span>
           ) : null}
           {instRootId ? (
-            <span className="inline-flex items-center gap-1 rounded-md border border-violet-400/30 bg-violet-400/10 px-2 py-0.5 text-ui font-medium text-violet-100">
+            <span className="inline-flex items-center gap-1 rounded-md border border-violet-300/30 bg-violet-300/12 px-2 py-0.5 text-ui font-medium text-violet-50">
               <Boxes className="h-3 w-3" strokeWidth={1.75} />
               Instance
             </span>
           ) : null}
-          <InspectorLayerHeaderActions
-            locked={locked}
-            showMakeComponent={showMakeComponent}
-          />
+          <div className="ml-auto shrink-0">
+            <InspectorLayerHeaderActions
+              locked={locked}
+              showMakeComponent={showMakeComponent}
+              showCreateComponentSet={showCreateComponentSet}
+            />
+          </div>
         </div>
         <PropertyTextInput
           label="Name"
@@ -339,64 +472,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
         </PropertiesSection>
       ) : null}
 
-      {node.isComponent && isContainer && (
-        <PropertiesSection title="Component" defaultOpen>
-          <div className="flex flex-col gap-1.5">
-            <button
-              type="button"
-              disabled={locked}
-              onClick={() => setPlacingComponentMasterId(node.id)}
-              className="inspector-section-action"
-            >
-              <Copy className="h-3.5 w-3.5" strokeWidth={1.75} />
-              Create instance
-            </button>
-            <button
-              type="button"
-              disabled={locked}
-              onClick={() => createVariantFromComponent(node.componentId ?? node.id)}
-              className="inspector-section-action"
-            >
-              <Link2 className="h-3.5 w-3.5" strokeWidth={1.75} />
-              Add variant
-            </button>
-            <PropertyTextInput
-              label="Variant props (JSON)"
-              value={JSON.stringify(node.variantProperties ?? {})}
-              instanceKey={`${key}-vp`}
-              disabled={locked}
-              onCommit={(raw) => {
-                try {
-                  const parsed = JSON.parse(raw) as Record<string, string>;
-                  if (parsed && typeof parsed === "object") {
-                    updateVariantProperties(node.componentId ?? node.id, parsed);
-                  }
-                } catch {
-                  /* ignore */
-                }
-              }}
-            />
-          </div>
-        </PropertiesSection>
-      )}
-
-      {instRootId && (
-        <PropertiesSection title="Instance" defaultOpen>
-          <p className="mb-1.5 inspector-helper-text text-app-muted">
-            Source:{" "}
-            <span className="font-medium text-app-fg">{sourceMaster?.name ?? "Unknown"}</span>
-          </p>
-          <button
-            type="button"
-            disabled={locked}
-            onClick={() => detachInstance(instRootId)}
-            className="inspector-section-action"
-          >
-            <Unlink className="h-3.5 w-3.5" strokeWidth={1.75} />
-            Detach instance
-          </button>
-        </PropertiesSection>
-      )}
+      <ComponentInspectorPanel nodeId={id} locked={locked} />
 
       <PositionSection
         node={node}
@@ -407,10 +483,13 @@ export function DesignInspector({ node }: { node: EditorNode }) {
         isAutoLayoutContainer={isContainer && layoutMode !== "none"}
         nodesAll={nodesAll}
         hideDimensions={isText}
+        dimensionMin={node.type === "path" ? 0 : 1}
         onPatch={patch}
         onResizeFrame={(width, height) => resizeFrameWithConstraints(id, { width, height })}
         onUpdateLayout={(layoutPatch) => updateLayout(id, layoutPatch)}
       />
+
+      {showPaintSectionsEarly ? paintInspectorSections : null}
 
       {isText ? (
         <TextResizingSection
@@ -809,38 +888,6 @@ export function DesignInspector({ node }: { node: EditorNode }) {
         </PropertiesSection>
       )}
 
-      <AppearanceSection
-        node={node}
-        instanceKey={key}
-        locked={locked}
-        visible={node.visible}
-        layerOpacity={display.opacity ?? 1}
-        canCornerRadius={canRadius}
-        cornerLabels={cornerRadiusLabels}
-        showArc={node.type === "ellipse"}
-        onOpacityCommit={(opacity) => style({ opacity })}
-        onBlendModeChange={(blendMode) => style({ blendMode })}
-        onToggleVisible={() => toggleVisible(id)}
-        onCornerStyle={applyCornerStyle}
-        onArcStyle={style}
-      />
-
-      {canFillStroke && (
-        <FillSection
-          node={node}
-          display={display}
-          instanceKey={key}
-          locked={locked}
-          fillEnabled={fillEnabled}
-          fillOpacity={fillOpacity}
-          fillToken={fillToken}
-          designTokens={designTokens}
-          onStyle={style}
-          onDetachToken={(kind) => detachTokenFromSelection(kind)}
-          onUpdateDesignToken={(tokenId, patch) => updateDesignToken(tokenId, patch)}
-        />
-      )}
-
       {isLine ? (
         <PropertiesSection title="Line" defaultOpen>
           <PropertyNumberInput
@@ -905,66 +952,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
         </PropertiesSection>
       ) : null}
 
-      {(canFillStroke || isLine || isArrow) && (
-        <StrokeSection
-          nodeId={node.id}
-          instanceKey={key}
-          locked={locked}
-          strokeWidth={node.strokeWidth ?? 0}
-          strokeColor={node.strokeColor ?? "#000000"}
-          strokeType={node.strokeType}
-          strokeGradient={node.strokeGradient}
-          strokeImageAssetId={node.strokeImageAssetId}
-          strokeVideoAssetId={node.strokeVideoAssetId}
-          strokeOpacity={node.strokeOpacity ?? 1}
-          strokeEnabled={node.strokeEnabled !== false}
-          strokeStyle={node.strokeStyle ?? "solid"}
-          strokePosition={strokePos}
-          strokeSides={node.strokeSides ?? "all"}
-          strokeSidesCustom={node.strokeSidesCustom}
-          strokeSidesCustomColors={node.strokeSidesCustomColors}
-          showSides={showStrokeSides}
-          strokeDashLength={node.strokeDashLength}
-          strokeDashGap={node.strokeDashGap}
-          strokeLinecap={node.strokeLinecap}
-          strokeLinejoin={node.strokeLinejoin}
-          strokeMiterAngle={node.strokeMiterAngle}
-          strokeWidthProfile={node.strokeWidthProfile}
-          strokeWidthProfileFlipped={node.strokeWidthProfileFlipped}
-          strokeStartPoint={
-            isArrow
-              ? arrowHeadToStrokeEndpoint(resolveArrowStartKind(node))
-              : node.strokeStartPoint
-          }
-          strokeEndPoint={
-            isArrow
-              ? arrowHeadToStrokeEndpoint(resolveArrowEndKind(node))
-              : resolveStrokeEndPoint(node)
-          }
-          showEndpoints={
-            node.type === "line" ||
-            node.type === "arrow" ||
-            (node.type === "path" && !node.pathClosed)
-          }
-          onStyle={(patch, opts) => {
-            if (isArrow && (patch.strokeStartPoint != null || patch.strokeEndPoint != null)) {
-              style({
-                ...patch,
-                ...arrowEndpointStylePatch({
-                  ...(patch.strokeStartPoint != null
-                    ? { startArrow: strokeEndpointToArrowHead(patch.strokeStartPoint) }
-                    : {}),
-                  ...(patch.strokeEndPoint != null
-                    ? { endArrow: strokeEndpointToArrowHead(patch.strokeEndPoint) }
-                    : {}),
-                }),
-              }, opts);
-              return;
-            }
-            style(patch, opts);
-          }}
-        />
-      )}
+      {!showPaintSectionsEarly ? paintInspectorSections : null}
 
       <EffectsSection
         instanceKey={key}

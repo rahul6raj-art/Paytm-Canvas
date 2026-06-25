@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { useEditorStore, ROOT, type EditorNode } from "@/stores/useEditorStore";
+import { findDeepestInteractiveInstanceRoot } from "@/lib/components/stablePaths";
 import { CanvasObject } from "./CanvasObject";
 import { worldRect, pickDeepestVisibleNodeAtWorldPoint } from "@/lib/tree";
 import type { PrototypeLink } from "@/lib/prototype";
@@ -43,6 +44,8 @@ export function PrototypePreviewModal() {
   const closePrototypePreview = useEditorStore((s) => s.closePrototypePreview);
   const navigatePrototype = useEditorStore((s) => s.navigatePrototype);
   const prototypePreviewBack = useEditorStore((s) => s.prototypePreviewBack);
+  const triggerInstanceInteraction = useEditorStore((s) => s.triggerInstanceInteraction);
+  const clearInteractiveInstanceStates = useEditorStore((s) => s.clearInteractiveInstanceStates);
 
   const clipRef = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
@@ -52,6 +55,7 @@ export function PrototypePreviewModal() {
   const [displayTick, setDisplayTick] = useState(0);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastHoverFire = useRef<string | null>(null);
+  const lastInstanceHover = useRef<string | null>(null);
   const prevPreviewRef = useRef(prototypePreview);
 
   useEffect(() => {
@@ -106,11 +110,45 @@ export function PrototypePreviewModal() {
     (e: React.MouseEvent) => {
       const wpt = clientToWorld(e.clientX, e.clientY);
       const hit = pickDeepestVisibleNodeAtWorldPoint(wpt.x, wpt.y, nodes, childOrder);
+      const instRoot = hit ? findDeepestInteractiveInstanceRoot(nodes, hit) : null;
+      if (instRoot) triggerInstanceInteraction(instRoot, "ON_CLICK");
       const link = findClickLinkAlongChain(nodes, hit);
       if (!link) return;
       applyLink(link);
     },
-    [applyLink, childOrder, clientToWorld, nodes],
+    [applyLink, childOrder, clientToWorld, nodes, triggerInstanceInteraction],
+  );
+
+  const handleInstancePointer = useCallback(
+    (clientX: number, clientY: number, trigger: "ON_MOUSE_ENTER" | "ON_MOUSE_LEAVE" | "ON_PRESS" | "ON_RELEASE") => {
+      const wpt = clientToWorld(clientX, clientY);
+      const hit = pickDeepestVisibleNodeAtWorldPoint(wpt.x, wpt.y, nodes, childOrder);
+      const instRoot = hit ? findDeepestInteractiveInstanceRoot(nodes, hit) : null;
+      if (!instRoot) {
+        if (trigger === "ON_MOUSE_LEAVE" && lastInstanceHover.current) {
+          triggerInstanceInteraction(lastInstanceHover.current, "ON_MOUSE_LEAVE");
+          lastInstanceHover.current = null;
+        }
+        return;
+      }
+      if (trigger === "ON_MOUSE_ENTER") {
+        if (lastInstanceHover.current && lastInstanceHover.current !== instRoot) {
+          triggerInstanceInteraction(lastInstanceHover.current, "ON_MOUSE_LEAVE");
+        }
+        lastInstanceHover.current = instRoot;
+        triggerInstanceInteraction(instRoot, "ON_MOUSE_ENTER");
+        return;
+      }
+      if (trigger === "ON_MOUSE_LEAVE") {
+        if (lastInstanceHover.current === instRoot) {
+          triggerInstanceInteraction(instRoot, "ON_MOUSE_LEAVE");
+          lastInstanceHover.current = null;
+        }
+        return;
+      }
+      triggerInstanceInteraction(instRoot, trigger);
+    },
+    [childOrder, clientToWorld, nodes, triggerInstanceInteraction],
   );
 
   const onOverlayMouseMove = useCallback(
@@ -119,6 +157,7 @@ export function PrototypePreviewModal() {
       hoverTimer.current = setTimeout(() => {
         const wpt = clientToWorld(e.clientX, e.clientY);
         const hit = pickDeepestVisibleNodeAtWorldPoint(wpt.x, wpt.y, nodes, childOrder);
+        handleInstancePointer(e.clientX, e.clientY, "ON_MOUSE_ENTER");
         const link = findHoverLinkAlongChain(nodes, hit);
         if (!link || !link.targetFrameId) return;
         const key = `${hit}-${link.id}`;
@@ -136,7 +175,7 @@ export function PrototypePreviewModal() {
         navigatePrototype(link.targetFrameId, link.action === "open-overlay");
       }, 90);
     },
-    [childOrder, clientToWorld, navigatePrototype, nodes, prototypePreviewBack],
+    [childOrder, clientToWorld, handleInstancePointer, navigatePrototype, nodes, prototypePreviewBack],
   );
 
   useEffect(() => {
@@ -144,6 +183,12 @@ export function PrototypePreviewModal() {
       if (hoverTimer.current) clearTimeout(hoverTimer.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (pv) return;
+    clearInteractiveInstanceStates();
+    lastInstanceHover.current = null;
+  }, [pv, clearInteractiveInstanceStates]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -226,6 +271,14 @@ export function PrototypePreviewModal() {
               className="absolute inset-0 z-10 cursor-pointer"
               onClick={onOverlayClick}
               onMouseMove={onOverlayMouseMove}
+              onMouseDown={(e) => handleInstancePointer(e.clientX, e.clientY, "ON_PRESS")}
+              onMouseUp={(e) => handleInstancePointer(e.clientX, e.clientY, "ON_RELEASE")}
+              onMouseLeave={() => {
+                if (lastInstanceHover.current) {
+                  triggerInstanceInteraction(lastInstanceHover.current, "ON_MOUSE_LEAVE");
+                  lastInstanceHover.current = null;
+                }
+              }}
               aria-hidden
             />
           </div>

@@ -15,6 +15,10 @@ import {
 import type { LayoutNode } from "@/lib/autoLayout";
 import { buildParentMapFromChildOrder, isAncestorOf } from "@/lib/editorGraph";
 import { findInstanceRoot } from "@/lib/componentModel";
+import { isVariantMasterInComponentSet } from "@/lib/components/componentSet";
+import { resolveNodeForDisplay } from "@/lib/components/resolveForDisplay";
+import { ComponentCanvasMarker } from "./ComponentCanvasMarker";
+import { useComponentInteractionPreview } from "./useComponentInteractionPreview";
 import { legacyEffectShadowAppend, resolveEffectBoxShadow, resolveNodeWithDesignTokens } from "@/lib/designTokens";
 import { buildNodeEffectRenderStyle, firstVisibleDropShadowFilter } from "@/lib/nodeEffects";
 import { EffectOverlays } from "./EffectOverlays";
@@ -33,9 +37,17 @@ import {
   isDeepSelectClick,
   drillTargetForDoubleClick,
   frameBodyReceivesPointerHits,
+  hasVisibleChildren,
+  resolveCanvasDragNodeId,
   selectionTargetForClick,
   shouldCollapseContainerHits,
 } from "@/lib/containerSelection";
+import {
+  findSlotPropertyForHit,
+  isSlotShellLayer,
+  slotDrillTargetForDoubleClick,
+  slotSelectionTargetForClick,
+} from "@/lib/slotEditScope";
 import {
   canEnterParametricShapeEdit,
   shouldEnterPathEditOnEdit,
@@ -45,8 +57,11 @@ import { isRoundedRectPath } from "@/lib/shapes/shapeToPath";
 import {
   pathEditAnchorStyle,
   pathEditBezierHandleStyle,
-  selectedPathPoints,
+  PATH_EDIT_HANDLE_LINE_STROKE,
+  pathPointForBezierHandleDisplay,
+  pathPointHandleAffordances,
 } from "@/lib/pathEditAnchors";
+import { applyPathPointHitOnPath } from "@/lib/pathEditSelection";
 import { layerBlendCanvasStyle } from "@/lib/layerBlendMode";
 import { prepareAltDragDuplicate } from "@/lib/canvasAltDrag";
 import { EMPTY_CHILD_IDS } from "@/lib/editorConstants";
@@ -144,27 +159,20 @@ export function CanvasObject({
   skipViewportCull?: boolean;
 }) {
   const nodeRaw = useEditorStore((s) => s.nodes[id]);
+  const childOrder = useEditorStore((s) => s.childOrder);
+  const nodes = useEditorStore((s) => s.nodes);
   const instanceRootId = useEditorStore((s) => findInstanceRoot(s.nodes, id));
-  const instanceOverridePatch = useEditorStore((s) => {
-    if (!instanceRootId) return undefined;
-    const raw = s.nodes[instanceRootId]?.instanceOverrides?.[id];
-    return raw && typeof raw === "object" ? raw : undefined;
-  });
   const assets = useEditorStore((s) => s.assets);
   const designTokens = useEditorStore((s) => s.designTokens);
   const node = useMemo(() => {
     if (!nodeRaw) return null;
-    const merged =
-      instanceOverridePatch != null
-        ? ({ ...nodeRaw, ...instanceOverridePatch } as EditorNode)
-        : nodeRaw;
+    const merged = resolveNodeForDisplay(nodes, childOrder, id) ?? nodeRaw;
     return resolveNodeWithDesignTokens(merged, designTokens);
-  }, [nodeRaw, instanceOverridePatch, designTokens]);
+  }, [nodeRaw, nodes, childOrder, id, designTokens]);
   const maskNode = useEditorStore((s) =>
     nodeRaw?.maskId ? s.nodes[nodeRaw.maskId] : undefined,
   );
   const viewportCull = useCanvasViewportCull();
-  const childOrder = useEditorStore((s) => s.childOrder);
   const dragOffset = getDragPreviewOffsetForIds([id]);
   const childIds = childOrder[id] ?? EMPTY_CHILD_IDS;
   const imageSrcResolved = useMemo(() => {
@@ -172,6 +180,7 @@ export function CanvasObject({
     return node.imageSrc ?? (node.assetId ? assets[node.assetId]?.dataUrl : undefined);
   }, [node, assets]);
   const objectEditModeNodeId = useEditorStore((s) => s.objectEditModeNodeId);
+  const activeSlotEdit = useEditorStore((s) => s.activeSlotEdit);
   const tool = useEditorStore((s) => s.tool);
   const zoom = useEditorStore((s) => s.zoom);
   const penDrawingNodeId = useEditorStore((s) => s.penDrawingNodeId);
@@ -189,6 +198,7 @@ export function CanvasObject({
   const editingTextId = useEditorStore((s) => s.editingTextId);
   const textEditSelection = useEditorStore((s) => s.textEditSelection);
   const editorMode = useEditorStore((s) => s.editorMode);
+  const isPlacingComment = useEditorStore((s) => s.isPlacingComment);
   const startPrototypeConnection = useEditorStore((s) => s.startPrototypeConnection);
   const finishPrototypeConnection = useEditorStore((s) => s.finishPrototypeConnection);
   const updatePrototypeWirePointer = useEditorStore((s) => s.updatePrototypeWirePointer);
@@ -199,11 +209,20 @@ export function CanvasObject({
   const setPathEditMode = useEditorStore((s) => s.setPathEditMode);
   const pushHistory = useEditorStore((s) => s.pushHistory);
   const createInstance = useEditorStore((s) => s.createInstance);
+  const interactionPreview = useComponentInteractionPreview(id);
 
   const toWorld = useCanvasToWorld();
   const { spaceDown, panning: canvasPanning, commandDown, optionDown, optionOverSelection } =
     useCanvasInteraction();
-  const isPlacingComment = useEditorStore((s) => s.isPlacingComment);
+  const variantSetSize = useEditorStore((s) => {
+    const n = s.nodes[id];
+    if (!n?.isComponent || !n.variantGroupId) return 0;
+    let count = 0;
+    for (const m of Object.values(s.nodes)) {
+      if (m.isComponent && m.variantGroupId === n.variantGroupId) count++;
+    }
+    return count;
+  });
   const objectPointerEvents = canvasObjectPointerEvents({
     tool,
     editorMode,
@@ -266,14 +285,16 @@ export function CanvasObject({
 
   const onPathAnchorPointerDown = useCallback(
     (pointId: string, e: React.PointerEvent) => {
-      if (editorMode === "inspect" || tool !== "move" || node?.type !== "path") return;
+      if (editorMode === "inspect" || (tool !== "move" && tool !== "pen") || node?.type !== "path") return;
       e.stopPropagation();
       e.preventDefault();
       const st0 = useEditorStore.getState();
       const pathNode = st0.nodes[id];
       const pt = pathNode?.pathPoints?.find((p) => p.id === pointId);
       if (!pt || !pathNode) return;
-      setPathEditMode(id);
+      if (st0.pathEditModeNodeId !== id) {
+        setPathEditMode(id);
+      }
       let dragIds: string[];
       if (e.shiftKey) {
         if (st0.selectedPathPointIds.includes(pointId)) {
@@ -372,17 +393,32 @@ export function CanvasObject({
 
       if (objectPointerEvents === "none") return;
 
+      if (interactionPreview.previewActive) {
+        interactionPreview.onPreviewPointerDown?.(e);
+        return;
+      }
+
       if (e.button === 0) releaseFieldFocusForCanvas();
 
       const st = useEditorStore.getState();
       const deepSelect = isDeepSelectClick(e);
-      const targetId = selectionTargetForClick(
+      let targetId = selectionTargetForClick(
         node.id,
         st.nodes,
         st.childOrder,
         st.objectEditModeNodeId,
         deepSelect,
       );
+      if (st.activeSlotEdit) {
+        targetId = slotSelectionTargetForClick(
+          node.id,
+          st.nodes,
+          st.childOrder,
+          st.activeSlotEdit,
+          st.objectEditModeNodeId,
+          deepSelect,
+        );
+      }
 
       if (editorMode === "inspect") {
         e.stopPropagation();
@@ -398,6 +434,19 @@ export function CanvasObject({
       }
       e.stopPropagation();
 
+      if (tool === "pen" && !st.penDrawingNodeId && node.type === "path") {
+        const w = clientToWorld(e.clientX, e.clientY);
+        if (
+          applyPathPointHitOnPath(id, w.x, w.y, st, {
+            setPathEditMode: st.setPathEditMode,
+            setSelectedPathPointIds: st.setSelectedPathPointIds,
+            select: (nodeId) => select(nodeId, false),
+          })
+        ) {
+          return;
+        }
+      }
+
       if (tool === "comment" || tool === "pen" || tool === "pencil" || e.button === 1) return;
 
       if (tool !== "move" && tool !== "frame") {
@@ -406,11 +455,13 @@ export function CanvasObject({
       }
 
       const additive = isAdditiveSelectionClick(e);
-      applyMoveToolPointerSelection(targetId, st.selectedIds, additive, select);
+      applyMoveToolPointerSelection(targetId, st.selectedIds, additive, select, st.nodes);
 
       if (additive) return;
 
-      const dragNode = st.nodes[targetId];
+      const dragSt = useEditorStore.getState();
+      const dragNodeId = resolveCanvasDragNodeId(targetId, dragSt.selectedIds, dragSt.nodes);
+      const dragNode = dragSt.nodes[dragNodeId];
       if (
         e.button === 0 &&
         e.altKey &&
@@ -440,7 +491,7 @@ export function CanvasObject({
       if (e.altKey && !prepareAltDragDuplicate(targetId)) return;
 
       beginCanvasNodeDrag({
-        nodeId: targetId,
+        nodeId: dragNodeId,
         pointerId: e.pointerId,
         clientX: e.clientX,
         clientY: e.clientY,
@@ -478,21 +529,29 @@ export function CanvasObject({
       ? cornerRadiiToCss(clampCornerRadii(getNodeCornerRadii(node), node.width, node.height))
       : undefined;
   const isRootFrame = node.type === "frame" && renderParentId === null;
-  const frameBodyHits = frameBodyReceivesPointerHits(
-    id,
-    nodesSnapshot,
-    childOrder,
-    commandDown,
-  );
+  const frameIsSelected = selectedIds.includes(id);
+  const frameBodyHits =
+    frameBodyReceivesPointerHits(id, nodesSnapshot, childOrder, commandDown) ||
+    (frameIsSelected && hasVisibleChildren(id, nodesSnapshot, childOrder));
   const collapseChildHits = shouldCollapseContainerHits(
     id,
     nodesSnapshot,
     childOrder,
     objectEditModeNodeId,
     commandDown,
+    selectedIds,
   );
-  const layerPointerEvents =
-    node.type === "frame" && !frameBodyHits ? "none" : objectPointerEvents;
+  const slotShellLocked =
+    activeSlotEdit != null && isSlotShellLayer(nodesSnapshot, activeSlotEdit, id);
+  const slotHoverTarget =
+    !activeSlotEdit &&
+    hoveredCanvasId != null &&
+    findSlotPropertyForHit(nodesSnapshot, childOrder, hoveredCanvasId)?.containerId === id;
+  const layerPointerEvents = slotShellLocked
+    ? "none"
+    : node.type === "frame" && !frameBodyHits
+      ? "none"
+      : objectPointerEvents;
 
   const childrenTree = (
     <div
@@ -598,73 +657,64 @@ export function CanvasObject({
     const singleSelected = selectedIds.length === 1 && selectedIds[0] === id;
     const showAnchors =
       editorMode === "design" &&
-      tool === "move" &&
+      (tool === "move" || tool === "pen") &&
       singleSelected &&
-      pathEditModeNodeId === id &&
-      pts.length > 0;
+      pts.length > 0 &&
+      pathEditModeNodeId !== id;
     const roundedRectPath = isRoundedRectPath(node);
-    const selectedPts = selectedPathPoints(pts, selectedPathPointIds);
-    const primarySelectedId = selectedPathPointIds[0] ?? null;
-    const selectedPt = pts.find((p) => p.id === primarySelectedId);
-    const showBezierHandles = selectedPts.length === 1 && selectedPt && !roundedRectPath;
+    const selectedPt = pathPointForBezierHandleDisplay(pts, selectedPathPointIds, {
+      roundedRect: roundedRectPath,
+    });
+    const showBezierHandles = selectedPt != null;
     body = (
       <>
         <ShapeVectorView node={node} nodeId={id} />
         {showAnchors ? (
           <div className="pointer-events-none absolute inset-0">
             <PathEditPathOutline node={node} nodeId={id} zoom={zoom} />
-            {showBezierHandles && (selectedPt?.handleIn || selectedPt?.handleOut) ? (
-              <svg
-                className="pointer-events-none absolute inset-0 overflow-visible"
-                width={node.width}
-                height={node.height}
-                aria-hidden
-              >
-                {selectedPt.handleIn ? (
-                  <line
-                    x1={selectedPt.x}
-                    y1={selectedPt.y}
-                    x2={selectedPt.x + selectedPt.handleIn.x}
-                    y2={selectedPt.y + selectedPt.handleIn.y}
-                    stroke="var(--pc-canvas-selection)"
-                    strokeWidth={1}
+            {showBezierHandles && selectedPt ? (
+              <>
+                <svg
+                  className="pointer-events-none absolute inset-0 overflow-visible"
+                  width={node.width}
+                  height={node.height}
+                  aria-hidden
+                >
+                  {pathPointHandleAffordances(selectedPt, true).map(({ kind, vec }) => {
+                    if (Math.hypot(vec.x, vec.y) < 1e-3) return null;
+                    return (
+                      <line
+                        key={kind}
+                        x1={selectedPt.x}
+                        y1={selectedPt.y}
+                        x2={selectedPt.x + vec.x}
+                        y2={selectedPt.y + vec.y}
+                        stroke={PATH_EDIT_HANDLE_LINE_STROKE}
+                        strokeWidth={1}
+                      />
+                    );
+                  })}
+                </svg>
+                {pathPointHandleAffordances(selectedPt, true).map(({ kind, vec, virtual }) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    aria-label={kind === "handle-in" ? "Handle in" : "Handle out"}
+                    className="pointer-events-auto absolute touch-none"
+                    style={{
+                      ...pathEditBezierHandleStyle(zoom),
+                      left: selectedPt.x + vec.x,
+                      top: selectedPt.y + vec.y,
+                      opacity: virtual && Math.hypot(vec.x, vec.y) < 1e-3 ? 0.55 : 1,
+                    }}
+                    onPointerDown={(ev) => {
+                      ev.stopPropagation();
+                      togglePathPointSelection(selectedPt.id, ev.shiftKey);
+                    }}
                   />
-                ) : null}
-                {selectedPt.handleOut ? (
-                  <line
-                    x1={selectedPt.x}
-                    y1={selectedPt.y}
-                    x2={selectedPt.x + selectedPt.handleOut.x}
-                    y2={selectedPt.y + selectedPt.handleOut.y}
-                    stroke="var(--pc-canvas-selection)"
-                    strokeWidth={1}
-                  />
-                ) : null}
-              </svg>
+                ))}
+              </>
             ) : null}
-            {showBezierHandles && selectedPt
-              ? (["handle-in", "handle-out"] as const).map((kind) => {
-                  const h = kind === "handle-in" ? selectedPt.handleIn : selectedPt.handleOut;
-                  if (!h) return null;
-                  return (
-                    <button
-                      key={kind}
-                      type="button"
-                      aria-label={kind === "handle-in" ? "Handle in" : "Handle out"}
-                      className="pointer-events-auto absolute touch-none"
-                      style={{
-                        ...pathEditBezierHandleStyle(zoom),
-                        left: selectedPt.x + h.x,
-                        top: selectedPt.y + h.y,
-                      }}
-                      onPointerDown={(ev) => {
-                        ev.stopPropagation();
-                        togglePathPointSelection(selectedPt.id, ev.shiftKey);
-                      }}
-                    />
-                  );
-                })
-              : null}
             {pts.map((pt) => {
               const selected = selectedPathPointIds.includes(pt.id);
               return (
@@ -731,9 +781,28 @@ export function CanvasObject({
   const clipOverflow =
     node.type === "frame" || node.type === "group" ? "visible" : shouldClipChildren(node) ? "hidden" : "visible";
 
+  const isComponentMaster = Boolean(node.isComponent);
+  const isComponentSetContainer = Boolean(node.isComponentSet);
+  const isVariantInSet = isVariantMasterInComponentSet(nodes, id);
+  const isComponentInstanceRoot =
+    Boolean(node.sourceComponentId) && findInstanceRoot(nodes, id) === id;
+  const isComponentFrame =
+    isComponentMaster && (node.type === "frame" || node.type === "group");
+  const componentMasterOutline = isComponentSetContainer
+    ? "1px dashed rgba(139, 92, 246, 0.85)"
+    : isComponentFrame && !isVariantInSet
+    ? variantSetSize > 1
+      ? "1px dashed rgba(139, 92, 246, 0.85)"
+      : `1px solid ${CANVAS_VISUAL.component}`
+    : isComponentFrame && isVariantInSet
+      ? undefined
+    : undefined;
+
   return (
     <div
       data-canvas-node={id}
+      data-slot-hover={slotHoverTarget ? "true" : undefined}
+      title={slotHoverTarget ? "Edit slot (double-click)" : undefined}
       className="absolute box-border select-none"
       style={{
         left: node.x,
@@ -743,19 +812,22 @@ export function CanvasObject({
         pointerEvents: layerPointerEvents,
         borderRadius: radiusStyle,
         outline:
-          node.type === "group" &&
+          componentMasterOutline ??
+          (node.type === "group" &&
           !node.isBooleanGroup &&
           !node.maskId &&
           (node.layoutMode ?? "none") === "none"
             ? `1px dashed ${CANVAS_VISUAL.groupOutline}`
-            : undefined,
+            : undefined),
         boxShadow: combinedShadow,
         filter: combinedFilter,
         backdropFilter: er.backdropFilter,
         cursor:
           editorMode === "inspect"
             ? "default"
-            : optionDown &&
+            : slotHoverTarget
+              ? "cell"
+              : optionDown &&
                 (tool === "move" || tool === "frame") &&
                 selectedIds.includes(id) &&
                 optionOverSelection
@@ -766,7 +838,11 @@ export function CanvasObject({
                   ? "grab"
                   : undefined,
         ...cssRotationStyle(node),
-        opacity: imageAlpha < 0.999 ? imageAlpha : undefined,
+        opacity: slotShellLocked
+          ? 0.35
+          : imageAlpha < 0.999
+            ? imageAlpha
+            : undefined,
       }}
       onPointerDown={onPointerDown}
       onDoubleClick={(e) => {
@@ -786,6 +862,28 @@ export function CanvasObject({
 
         const st = useEditorStore.getState();
         const w = clientToWorld(e.clientX, e.clientY);
+        const slotDrill = slotDrillTargetForDoubleClick(
+          id,
+          w.x,
+          w.y,
+          st.nodes,
+          st.childOrder,
+          st.activeSlotEdit,
+          (x, y) => pickDeepestNodeAtWorldPoint(x, y, st.nodes, st.childOrder),
+        );
+        if (slotDrill) {
+          e.stopPropagation();
+          const priorCrumbs = st.activeSlotEdit?.breadcrumb ?? [];
+          if (st.activeSlotEdit) st.exitSlotEditMode(true);
+          st.enterSlotEditMode(
+            slotDrill.scope.instanceRootId,
+            slotDrill.scope.propertyKey,
+            priorCrumbs,
+          );
+          st.select(slotDrill.selectId);
+          return;
+        }
+
         const drill = drillTargetForDoubleClick(
           id,
           w.x,
@@ -813,8 +911,11 @@ export function CanvasObject({
           else st.enterShapeEditMode(id);
         }
       }}
-      onPointerEnter={() => {
+      onPointerEnter={(e) => {
         if (!node.visible) return;
+        if (interactionPreview.previewActive) {
+          interactionPreview.onPreviewPointerEnter?.(e);
+        }
         if (editorMode === "inspect") {
           setHoveredCanvasId(id);
           return;
@@ -822,8 +923,16 @@ export function CanvasObject({
         if (!node.locked) setHoveredCanvasId(id);
       }}
       onPointerLeave={(e) => {
+        if (interactionPreview.previewActive) {
+          interactionPreview.onPreviewPointerLeave?.(e);
+        }
         if (didPointerExitElement(e.currentTarget, e.relatedTarget)) {
           if (useEditorStore.getState().hoveredCanvasId === id) setHoveredCanvasId(null);
+        }
+      }}
+      onPointerUp={(e) => {
+        if (interactionPreview.previewActive) {
+          interactionPreview.onPreviewPointerUp?.(e);
         }
       }}
       onContextMenu={(e) => {
@@ -853,6 +962,9 @@ export function CanvasObject({
         }}
       >
         {body}
+        {(isComponentMaster || isComponentInstanceRoot) && !isVariantInSet ? (
+          <ComponentCanvasMarker nodeId={id} />
+        ) : null}
         {effectOverlays?.length ? <EffectOverlays layers={effectOverlays} /> : null}
       </div>
       {editorMode === "prototype" &&

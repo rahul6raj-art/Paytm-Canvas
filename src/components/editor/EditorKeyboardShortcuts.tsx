@@ -11,12 +11,13 @@ import {
   zoomCanvasToSelection,
 } from "@/lib/viewportZoom";
 import { KEYBOARD_ZOOM_STEP } from "@/lib/canvasZoom";
-import { cancelActiveMarqueeFromKeyboard } from "@/lib/canvasMarqueeController";
+import { resolvePenEscapeAction, shouldPenEnterFinish } from "@/lib/penTool/penInteraction";
 import { screenPxToWorld } from "@/lib/canvasVisual";
 import { enterTextEditMode } from "@/lib/text/textEditMode";
 import { topLevelSelectedIds } from "@/lib/editorGraph";
 import { nodeSupportsStrokeWidth } from "@/lib/strokeAdjust";
 import { canAddAutoLayoutToSelection } from "@/lib/autoLayoutSelection";
+import { canUngroupSelection } from "@/lib/ungroupSelection";
 import {
   activateCanvasForShortcuts,
   escapeToMovePointer,
@@ -33,12 +34,6 @@ import { pasteCanvasImageFromClipboard } from "@/lib/canvasImagePlace";
 import { isVectorEditableShape } from "@/lib/shapes/shapeToPath";
 import { clientToWorld } from "@/lib/canvasCoordinates";
 import { tryDeleteActiveGradientStop } from "@/lib/gradientStopKeyboard";
-function canUngroupSelection(st: EditorState): boolean {
-  if (st.editorMode !== "design" || st.selectedIds.length !== 1) return false;
-  const g = st.nodes[st.selectedIds[0]!];
-  if (!g || g.type !== "group" || g.locked || !g.visible) return false;
-  return ((st.childOrder[g.id] ?? []).length ?? 0) > 0;
-}
 
 export function EditorKeyboardShortcuts() {
   useEffect(() => {
@@ -100,7 +95,8 @@ export function EditorKeyboardShortcuts() {
           const drawNode = st.nodes[st.penDrawingNodeId];
           const pointCount =
             drawNode?.type === "path" ? (drawNode.pathPoints?.length ?? 0) : 0;
-          if (pointCount >= 2) {
+          const action = resolvePenEscapeAction(pointCount);
+          if (action === "finishOpen") {
             st.finishPath(false);
           } else {
             st.cancelPath();
@@ -133,6 +129,11 @@ export function EditorKeyboardShortcuts() {
           } else {
             st.setPathEditMode(null);
           }
+          escapeToMovePointer();
+          return;
+        }
+        if (st.activeSlotEdit) {
+          st.exitSlotEditMode(true);
           escapeToMovePointer();
           return;
         }
@@ -241,8 +242,13 @@ export function EditorKeyboardShortcuts() {
         const st = useEditorStore.getState();
         if (st.editingTextId) return;
         if (st.editorMode === "design" && st.tool === "pen" && st.penDrawingNodeId) {
-          e.preventDefault();
-          st.finishPath(false);
+          const drawNode = st.nodes[st.penDrawingNodeId];
+          const pointCount =
+            drawNode?.type === "path" ? (drawNode.pathPoints?.length ?? 0) : 0;
+          if (shouldPenEnterFinish(pointCount)) {
+            e.preventDefault();
+            st.finishPath(false);
+          }
           return;
         }
         if (st.editorMode === "design" && st.selectedIds.length === 1) {
@@ -465,7 +471,9 @@ export function EditorKeyboardShortcuts() {
       if (mod && e.shiftKey && e.code === "KeyV") {
         e.preventDefault();
         if (useEditorStore.getState().editorMode === "design") {
-          useEditorStore.getState().pasteSelection({ inPlace: true });
+          const st = useEditorStore.getState();
+          if (st.activeSlotEdit) st.pasteIntoActiveSlot();
+          else st.pasteSelection({ inPlace: true });
         }
         return;
       }
@@ -499,7 +507,10 @@ export function EditorKeyboardShortcuts() {
               st.pan,
               st.zoom,
             );
-            if (!imagePasted) st.pasteSelection();
+            if (!imagePasted) {
+              if (st.activeSlotEdit) st.pasteIntoActiveSlot();
+              else st.pasteSelection();
+            }
           })();
         }
         return;
@@ -664,7 +675,7 @@ export function EditorKeyboardShortcuts() {
         e.preventDefault();
         const st = useEditorStore.getState();
         if (e.shiftKey) {
-          if (canUngroupSelection(st)) st.ungroupSelection();
+          if (st.editorMode === "design" && canUngroupSelection(st)) st.ungroupSelection();
           else st.toggleGrid();
         } else {
           st.groupSelection();

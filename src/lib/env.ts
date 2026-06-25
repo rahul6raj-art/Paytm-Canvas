@@ -1,22 +1,25 @@
 export type PaytmCraftPublicMode = "local" | "api" | "remote";
 
+export type PaytmCraftPublicEnv = {
+  apiUrl: string;
+  syncUrl: string;
+  storageUrl: string;
+  mode: PaytmCraftPublicMode;
+};
+
+declare global {
+  interface Window {
+    __CRAFT_PUBLIC_ENV__?: PaytmCraftPublicEnv;
+  }
+}
+
 function readOptionalString(name: string): string {
   const v = process.env[name];
   return typeof v === "string" ? v.trim() : "";
 }
 
-/**
- * Public (browser-safe) environment for API / sync / storage wiring.
- * - **local** (default): no HTTP API; editor uses `LocalSyncProvider` and `localStorage`.
- * - **api**: `ApiSyncProvider` — local cache + `/api/v1/files/:id` when a file session is active.
- * - **remote**: `apiClient` calls `NEXT_PUBLIC_PAYTM_CRAFT_API_URL` when set; otherwise mutations throw.
- */
-export function getPaytmCraftPublicEnv(): {
-  apiUrl: string;
-  syncUrl: string;
-  storageUrl: string;
-  mode: PaytmCraftPublicMode;
-} {
+/** Server/build-time read from `process.env` (also used to seed `window.__CRAFT_PUBLIC_ENV__`). */
+export function readPaytmCraftPublicEnvFromProcessEnv(): PaytmCraftPublicEnv {
   const modeRaw = readOptionalString("NEXT_PUBLIC_PAYTM_CRAFT_MODE").toLowerCase();
   let mode: PaytmCraftPublicMode = "local";
   if (modeRaw === "remote") mode = "remote";
@@ -28,6 +31,19 @@ export function getPaytmCraftPublicEnv(): {
     storageUrl: readOptionalString("NEXT_PUBLIC_PAYTM_CRAFT_STORAGE_URL"),
     mode,
   };
+}
+
+/**
+ * Public (browser-safe) environment for API / sync / storage wiring.
+ * - **local** (default): no HTTP API; editor uses `LocalSyncProvider` and `localStorage`.
+ * - **api**: `ApiSyncProvider` — local cache + `/api/v1/files/:id` when a file session is active.
+ * - **remote**: `apiClient` calls `NEXT_PUBLIC_PAYTM_CRAFT_API_URL` when set; otherwise mutations throw.
+ */
+export function getPaytmCraftPublicEnv(): PaytmCraftPublicEnv {
+  if (typeof window !== "undefined" && window.__CRAFT_PUBLIC_ENV__?.mode) {
+    return window.__CRAFT_PUBLIC_ENV__;
+  }
+  return readPaytmCraftPublicEnvFromProcessEnv();
 }
 
 export function isPaytmCraftApiMode(): boolean {

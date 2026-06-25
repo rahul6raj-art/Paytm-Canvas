@@ -12,10 +12,13 @@ export const PATH_EDIT_ANCHOR_SELECTED_SCREEN_PX = 8;
 export const PATH_EDIT_BEZIER_HANDLE_SCREEN_PX = 5;
 
 /** Minimum pointer target for anchors/handles (screen px). */
-export const PATH_EDIT_HIT_TARGET_SCREEN_PX = 14;
+export const PATH_EDIT_HIT_TARGET_SCREEN_PX = 16;
 
-const PATH_EDIT_ANCHOR_FILL = "#18a0fb";
-const PATH_EDIT_ANCHOR_SELECTED_RING = "#ffffff";
+const PATH_EDIT_ANCHOR_STROKE = "#18a0fb";
+const PATH_EDIT_ANCHOR_FILL_UNSELECTED = "#ffffff";
+const PATH_EDIT_ANCHOR_FILL_SELECTED = "#18a0fb";
+/** Figma-style tangent arm (handles appear only for the selected anchor). */
+export const PATH_EDIT_HANDLE_LINE_STROKE = "#b3b3b3";
 
 export function pathEditAnchorSizePx(selected: boolean): number {
   return selected ? PATH_EDIT_ANCHOR_SELECTED_SCREEN_PX : PATH_EDIT_ANCHOR_SCREEN_PX;
@@ -29,23 +32,34 @@ export function pathEditBezierHandleLocalSize(zoom: number): number {
   return screenPxToWorld(PATH_EDIT_BEZIER_HANDLE_SCREEN_PX, zoom);
 }
 
-/** Anchor dot style in path-local coordinates (constant screen size). */
+/** True when exactly one path anchor is selected — Figma shows Bézier arms only then. */
+export function pathPointForBezierHandleDisplay(
+  pathPoints: PathPoint[] | undefined,
+  selectedIds: readonly string[],
+  opts?: { roundedRect?: boolean },
+): PathPoint | null {
+  if (opts?.roundedRect) return null;
+  const selected = selectedPathPoints(pathPoints, selectedIds);
+  return selected.length === 1 ? (selected[0] ?? null) : null;
+}
+
 export function pathEditAnchorStyle(zoom: number, selected: boolean): React.CSSProperties {
   const size = pathEditAnchorLocalSize(zoom, selected);
+  const border = screenPxToWorld(1, zoom);
   const style: React.CSSProperties = {
     width: size,
     height: size,
     borderRadius: "50%",
-    background: PATH_EDIT_ANCHOR_FILL,
+    backgroundColor: selected ? PATH_EDIT_ANCHOR_FILL_SELECTED : PATH_EDIT_ANCHOR_FILL_UNSELECTED,
     boxSizing: "border-box",
     transform: "translate(-50%, -50%)",
-    border: "none",
     padding: 0,
+    border: selected ? "none" : `${border}px solid ${PATH_EDIT_ANCHOR_STROKE}`,
   };
   if (selected) {
     const ring = screenPxToWorld(1, zoom);
     const glow = screenPxToWorld(4, zoom);
-    style.boxShadow = `0 0 0 ${ring}px ${PATH_EDIT_ANCHOR_SELECTED_RING}, 0 0 ${glow}px rgba(24, 160, 251, 0.7)`;
+    style.boxShadow = `0 0 0 ${ring}px #ffffff, 0 0 ${glow}px rgba(24, 160, 251, 0.7)`;
   }
   return style;
 }
@@ -62,14 +76,14 @@ export function pathEditAnchorOverlayStyle(
 ): React.CSSProperties {
   const visual = screenPxToOverlay(pathEditAnchorSizePx(selected), overlay);
   const hit = screenPxToOverlay(PATH_EDIT_HIT_TARGET_SCREEN_PX, overlay);
+  const ring = screenPxToOverlay(1, overlay);
   const style: React.CSSProperties = {
     width: hit,
     height: hit,
     borderRadius: "50%",
-    background: PATH_EDIT_ANCHOR_FILL,
+    backgroundColor: selected ? PATH_EDIT_ANCHOR_FILL_SELECTED : PATH_EDIT_ANCHOR_FILL_UNSELECTED,
     boxSizing: "border-box",
     transform: "translate(-50%, -50%)",
-    border: "none",
     padding: 0,
     backgroundClip: "content-box",
     borderWidth: (hit - visual) / 2,
@@ -77,9 +91,10 @@ export function pathEditAnchorOverlayStyle(
     borderColor: "transparent",
   };
   if (selected) {
-    const ring = screenPxToOverlay(1, overlay);
     const glow = screenPxToOverlay(4, overlay);
-    style.boxShadow = `0 0 0 ${ring}px ${PATH_EDIT_ANCHOR_SELECTED_RING}, 0 0 ${glow}px rgba(24, 160, 251, 0.7)`;
+    style.boxShadow = `0 0 0 ${ring}px #ffffff, 0 0 ${glow}px rgba(24, 160, 251, 0.7)`;
+  } else {
+    style.borderColor = PATH_EDIT_ANCHOR_STROKE;
   }
   return style;
 }
@@ -91,11 +106,11 @@ export function pathEditBezierHandleOverlayStyle(overlay: OverlaySpace): React.C
   return {
     width: hit,
     height: hit,
-    borderRadius: "50%",
-    background: "#ffffff",
+    borderRadius: 0,
+    backgroundColor: "#ffffff",
     boxSizing: "border-box",
-    transform: "translate(-50%, -50%)",
-    border: `${ring}px solid ${PATH_EDIT_ANCHOR_FILL}`,
+    transform: "translate(-50%, -50%) rotate(45deg)",
+    border: `${ring}px solid ${PATH_EDIT_ANCHOR_STROKE}`,
     padding: Math.max(0, (hit - visual - ring * 2) / 2),
     backgroundClip: "content-box",
   };
@@ -105,11 +120,11 @@ function pathEditHandleVisualStyle(size: number, borderWorld: number): React.CSS
   return {
     width: size,
     height: size,
-    borderRadius: "50%",
-    background: "#ffffff",
+    borderRadius: 0,
+    backgroundColor: "#ffffff",
     boxSizing: "border-box",
-    transform: "translate(-50%, -50%)",
-    border: `${borderWorld}px solid ${PATH_EDIT_ANCHOR_FILL}`,
+    transform: "translate(-50%, -50%) rotate(45deg)",
+    border: `${borderWorld}px solid ${PATH_EDIT_ANCHOR_STROKE}`,
     padding: 0,
   };
 }
@@ -146,4 +161,27 @@ export function pathPointSelectionPosition(
   const x = pts.reduce((s, p) => s + p.x, 0) / pts.length;
   const y = pts.reduce((s, p) => s + p.y, 0) / pts.length;
   return { x, y, mixed };
+}
+
+export type PathHandleAffordance = {
+  kind: "handle-in" | "handle-out";
+  vec: { x: number; y: number };
+  /** True when the handle is a pull-out affordance (not yet stored on the point). */
+  virtual: boolean;
+};
+
+/** Handles to render for a selected point (includes pull-out affordances on corner points). */
+export function pathPointHandleAffordances(
+  pt: PathPoint,
+  editable: boolean,
+): PathHandleAffordance[] {
+  if (!editable) return [];
+  const out: PathHandleAffordance[] = [];
+  if (pt.handleIn) out.push({ kind: "handle-in", vec: pt.handleIn, virtual: false });
+  else out.push({ kind: "handle-in", vec: { x: 0, y: 0 }, virtual: true });
+
+  if (pt.handleOut) out.push({ kind: "handle-out", vec: pt.handleOut, virtual: false });
+  else out.push({ kind: "handle-out", vec: { x: 0, y: 0 }, virtual: true });
+
+  return out;
 }

@@ -12,7 +12,7 @@ import { textLayoutPatchForNode } from "@/lib/text/textLayout";
 import { textAdvancedStyleFromNode } from "@/lib/text/textAdvancedStyle";
 import { textLayoutForEditorNode } from "@/lib/text/canonicalTextLayout";
 import { loadTextMediaFill } from "@/lib/text/textFillPaint";
-import { renderTextToCanvas } from "@/lib/text/textCanvasRender";
+import { renderTextToCanvas, resolveTextCanvasDpr } from "@/lib/text/textCanvasRender";
 import { getCursorPositionFromPoint } from "@/lib/text/textCursor";
 import {
   dispatchTextEditPointerDown,
@@ -28,6 +28,9 @@ type TextCanvasViewProps = {
   isEditing: boolean;
   selection: { anchor: number; focus: number } | null;
   className?: string;
+  /** When the overlay box is already sized in viewport pixels (screen-space text). */
+  contentScaleX?: number;
+  contentScaleY?: number;
 };
 
 /** Canvas-based text renderer (visual layer only — input comes from hidden textarea). */
@@ -36,6 +39,8 @@ export function TextCanvasView({
   isEditing,
   selection,
   className,
+  contentScaleX,
+  contentScaleY,
 }: TextCanvasViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dragRef = useRef<{ active: boolean; extend: boolean } | null>(null);
@@ -57,25 +62,42 @@ export function TextCanvasView({
     const canvas = canvasRef.current;
     if (!canvas || !model) return;
     let alive = true;
+    const scaleX = contentScaleX ?? 1;
+    const scaleY = contentScaleY ?? scaleX;
+    const screenSized = scaleX !== 1 || scaleY !== 1;
     const typo = textTypoFromModel(model);
+    const renderTypo = screenSized
+      ? {
+          ...typo,
+          fontSize: typo.fontSize * scaleX,
+          letterSpacing: typo.letterSpacing * scaleX,
+        }
+      : typo;
     const wrapWidth = wrapWidthForResizeMode(model.width, model.textResizeMode);
+    const renderWidth = model.width * scaleX;
+    const renderHeight = model.height * scaleY;
+    const renderWrapWidth =
+      wrapWidth === Number.POSITIVE_INFINITY
+        ? Number.POSITIVE_INFINITY
+        : wrapWidth * scaleX;
 
-    void Promise.all([
-      ensureFontFamilyLoaded(typo.fontFamily),
-      loadTextMediaFill(node, assets),
-    ]).then(([, mediaFill]) => {
+    const paint = (mediaFill: Awaited<ReturnType<typeof loadTextMediaFill>>) => {
       if (!alive || !canvasRef.current) return;
-      const prepared = textLayoutForEditorNode(node);
+      const prepared = screenSized ? null : textLayoutForEditorNode(node);
       renderTextToCanvas(canvasRef.current, {
-        typo,
+        typo: renderTypo,
         text: model.text,
-        width: model.width,
-        height: model.height,
+        width: renderWidth,
+        height: renderHeight,
         textAlign: model.textAlign,
         verticalAlign: model.verticalAlign,
         opacity: node.opacity ?? 1,
-        wrapWidth,
-        zoom,
+        wrapWidth: renderWrapWidth,
+        zoom: screenSized ? 1 : zoom,
+        layoutScale: screenSized ? scaleX : undefined,
+        dpr: screenSized
+          ? resolveTextCanvasDpr(renderWidth, renderHeight, 1)
+          : undefined,
         selection: isEditing ? selection : null,
         caretIndex: isEditing ? caretIndex : null,
         caretVisible: isEditing && caretVisible,
@@ -89,7 +111,7 @@ export function TextCanvasView({
       const rotateLocked =
         isRotateGeometryLockActive(rotateSt) &&
         rotateGeomSnapshotForNode(rotateSt, node.id) != null;
-      if (fresh?.type === "text" && !rotateLocked) {
+      if (fresh?.type === "text" && !rotateLocked && !screenSized) {
         const layoutPatch = textLayoutPatchForNode(fresh, fresh.content ?? "");
         if (
           layoutPatch &&
@@ -98,12 +120,31 @@ export function TextCanvasView({
           useEditorStore.getState().updateNodeStyle(node.id, layoutPatch, { skipHistory: true });
         }
       }
+    };
+
+    void Promise.all([
+      ensureFontFamilyLoaded(typo.fontFamily),
+      loadTextMediaFill(node, assets),
+    ]).then(([, mediaFill]) => {
+      paint(mediaFill);
     });
 
     return () => {
       alive = false;
     };
-  }, [model, isEditing, selection, caretIndex, caretVisible, zoom, node, assets, textLayoutEpoch]);
+  }, [
+    model,
+    isEditing,
+    selection,
+    caretIndex,
+    caretVisible,
+    zoom,
+    node,
+    assets,
+    textLayoutEpoch,
+    contentScaleX,
+    contentScaleY,
+  ]);
 
   const localFromEvent = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {

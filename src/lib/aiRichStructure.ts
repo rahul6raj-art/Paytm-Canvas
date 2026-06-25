@@ -9,6 +9,8 @@ export type RichStructureLayout = {
   gutter: number;
   sectionGap: number;
   gridGap: number;
+  /** Minimum device frame height (e.g. 812). Content shorter than this still fills the phone shell. */
+  shellMinHeight?: number;
 };
 
 type BBox = { minX: number; minY: number; maxX: number; maxY: number };
@@ -576,7 +578,12 @@ export function organizeRichScreenHierarchy(
   layoutMap = editorNodesToLayoutMap(layoutedNodes);
   layoutMap = applyDeepAutoLayoutAll(layoutMap, nextOrder);
   layoutedNodes = mergeLayoutIntoEditorNodes(layoutedNodes, layoutMap);
-  const contentHeight = fitRichFrameToContent(layoutedNodes, nextOrder, frameId);
+  const contentHeight = fitRichFrameToContent(
+    layoutedNodes,
+    nextOrder,
+    frameId,
+    layout.shellMinHeight,
+  );
 
   return {
     nodes: layoutedNodes,

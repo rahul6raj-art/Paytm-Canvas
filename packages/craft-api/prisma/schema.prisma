@@ -19,11 +19,17 @@ enum ApiTokenScope {
   write
 }
 
+enum OAuthProvider {
+  google
+  github
+}
+
 model User {
   id           String   @id
   email        String   @unique
   displayName  String   @map("display_name")
   passwordHash String?  @map("password_hash")
+  avatarUrl    String?  @map("avatar_url")
   createdAt    DateTime @default(now()) @map("created_at")
 
   fileVersions      FileVersion[]     @relation("FileVersionAuthor")
@@ -33,8 +39,25 @@ model User {
   workspaceMembers  WorkspaceMember[]
   workspaceInvitesSent WorkspaceInvite[] @relation("InviteSender")
   teamMembers       TeamMember[]
+  oauthAccounts     OAuthAccount[]
+  passwordResetTokens PasswordResetToken[]
 
   @@map("users")
+}
+
+model OAuthAccount {
+  id                String        @id
+  userId            String        @map("user_id")
+  provider          OAuthProvider
+  providerAccountId String        @map("provider_account_id")
+  email             String?
+  createdAt         DateTime      @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("oauth_accounts")
 }
 
 model Session {
@@ -48,6 +71,19 @@ model Session {
 
   @@index([userId])
   @@map("sessions")
+}
+
+model PasswordResetToken {
+  id        String   @id
+  userId    String   @map("user_id")
+  tokenHash String   @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
 }
 
 model ApiToken {

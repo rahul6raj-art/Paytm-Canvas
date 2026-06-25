@@ -23,7 +23,7 @@ export {
   resolveStrokeSpec,
 } from "@/lib/strokeSpec";
 
-export type StrokeLinecap = "butt" | "round" | "square";
+export type StrokeLinecap = "butt" | "round" | "square" | "taper";
 export type StrokeLinejoin = "miter" | "round" | "bevel";
 export type StrokeStyleKind = "solid" | "dashed" | "dotted";
 export type StrokeWidthProfile = "uniform" | "taper";
@@ -52,11 +52,11 @@ export type StrokeResolvableNode = Pick<
 export type { StrokePaintNode } from "@/lib/fillGradient";
 export { effectiveStrokeType, strokePaintCss, svgStrokePaint } from "@/lib/fillGradient";
 
-/** Partial-side strokes taper at path ends unless explicitly uniform. */
+/** Width profile along open paths; uniform unless taper is explicitly chosen. */
 export function resolveStrokeWidthProfile(
   node: Pick<EditorNode, "strokeWidthProfile">,
 ): StrokeWidthProfile {
-  return node.strokeWidthProfile ?? "taper";
+  return node.strokeWidthProfile ?? "uniform";
 }
 
 export const DEFAULT_STROKE_MITER_ANGLE = 28.967;
@@ -190,17 +190,23 @@ export function resolveStrokeDashArray(node: StrokeResolvableNode): string | und
 
 export type SvgStrokePresentation = {
   strokeDasharray?: string;
-  strokeLinecap: StrokeLinecap;
+  strokeLinecap: Exclude<StrokeLinecap, "taper">;
   strokeLinejoin: StrokeLinejoin;
   strokeMiterlimit: number;
 };
+
+function svgNativeLinecap(cap: StrokeLinecap): Exclude<StrokeLinecap, "taper"> {
+  return cap === "taper" ? "butt" : cap;
+}
+
+export { svgNativeLinecap };
 
 export function svgStrokePresentationFromNode(node: StrokeResolvableNode): SvgStrokePresentation {
   const spec = resolveStrokeSpec(node);
   const strokeLinejoin = spec.join;
   return {
     strokeDasharray: strokeSpecDashArray(spec),
-    strokeLinecap: spec.cap,
+    strokeLinecap: svgNativeLinecap(spec.cap),
     strokeLinejoin,
     strokeMiterlimit:
       strokeLinejoin !== "miter" ? 4 : strokeMiterAngleToLimit(resolveStrokeMiterAngle(node)),
@@ -209,7 +215,7 @@ export function svgStrokePresentationFromNode(node: StrokeResolvableNode): SvgSt
 
 export function svgStrokePropsFromNode(node: StrokeResolvableNode): {
   strokeDasharray?: string;
-  strokeLinecap: StrokeLinecap;
+  strokeLinecap: Exclude<StrokeLinecap, "taper">;
   strokeLinejoin: StrokeLinejoin;
   strokeMiterlimit: number;
 } {
@@ -226,7 +232,7 @@ export function applyCanvasStrokeStyle(
 ): void {
   const spec = resolveStrokeSpec(node);
   ctx.setLineDash(strokeSpecCanvasDash(spec));
-  ctx.lineCap = spec.cap;
+  ctx.lineCap = spec.cap === "taper" ? "butt" : spec.cap;
   ctx.lineJoin = spec.join;
   ctx.miterLimit =
     spec.join !== "miter" ? 4 : strokeMiterAngleToLimit(resolveStrokeMiterAngle(node));

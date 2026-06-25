@@ -13,6 +13,8 @@ import {
   shapeSupportsIndividualCornerRadius,
 } from "@/lib/shapes/parametricCornerRadii";
 import { buildSelectionInspectorModel } from "@/lib/selectionInspector";
+import { canCreateComponentSetFromSelection } from "@/lib/componentUx";
+import { findInstanceRoot } from "@/lib/componentModel";
 import { cn } from "@/lib/utils";
 import { useEditorStore, type EditorNode, type NodeStylePatch, type StrokePosition } from "@/stores/useEditorStore";
 import { AlignControls } from "./AlignControls";
@@ -24,6 +26,7 @@ import { EffectsSection } from "./design-panel/EffectsSection";
 import { FillSection } from "./design-panel/FillSection";
 import { PositionSection } from "./design-panel/PositionSection";
 import { StrokeSection } from "./design-panel/StrokeSection";
+import { InspectorLayerHeaderActions } from "./design-panel/InspectorLayerHeaderActions";
 import { resolveStrokeEndPoint } from "@/lib/strokeEndpoints";
 
 export function SelectionDesignInspector() {
@@ -57,6 +60,19 @@ export function SelectionDesignInspector() {
 
   const canAddAutoLayout = useMemo(
     () => canAddAutoLayoutToSelection(selectedIds, nodesAll),
+    [selectedIds, nodesAll],
+  );
+
+  const showMakeComponent = useMemo(
+    () =>
+      !model?.nodes.some(
+        (n) => n.isComponent || Boolean(findInstanceRoot(nodesAll, n.id)),
+      ),
+    [model?.nodes, nodesAll],
+  );
+
+  const showCreateComponentSet = useMemo(
+    () => canCreateComponentSetFromSelection(selectedIds, nodesAll),
     [selectedIds, nodesAll],
   );
 
@@ -129,7 +145,12 @@ export function SelectionDesignInspector() {
           <span className="rounded-md border border-app-border bg-app-hover px-2 py-0.5 text-ui font-medium text-app-muted">
             {count} layer{count === 1 ? "" : "s"} selected
           </span>
-          <div className="ml-auto flex items-center gap-1">
+          <div className="ml-auto flex items-center gap-2">
+            <InspectorLayerHeaderActions
+              locked={locked}
+              showMakeComponent={showMakeComponent}
+              showCreateComponentSet={showCreateComponentSet}
+            />
             <BooleanOperationsDropdown variant="inspector" />
           </div>
         </div>

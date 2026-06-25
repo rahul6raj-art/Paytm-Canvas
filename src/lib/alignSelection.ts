@@ -10,7 +10,7 @@ import {
 } from "@/lib/editorGraph";
 import { idsToDetachForAutoLayoutDrag } from "@/lib/autoLayoutDrag";
 import { findInstanceRoot } from "@/lib/componentModel";
-import { lineEndpointsPatchFromLayout } from "@/lib/shapes/lineGeometry";
+import { lineEndpointsPatchFromBoxResize } from "@/lib/shapes/lineGeometry";
 import { applyMatrixToPoint, type RectBounds } from "@/lib/transformMath";
 
 function moveNodeByWorldDelta(
@@ -30,7 +30,7 @@ function moveNodeByWorldDelta(
   });
   let next: EditorNode = { ...n, x: xy.x, y: xy.y };
   if (next.type === "line" || next.type === "arrow") {
-    next = { ...next, ...lineEndpointsPatchFromLayout(next) };
+    next = { ...next, ...lineEndpointsPatchFromBoxResize(n, next) };
   }
   return { ...nodes, [nodeId]: next };
 }
@@ -92,6 +92,36 @@ export function alignableSelectionIds(
     const n = nodes[id];
     return n && !n.locked && n.visible;
   });
+}
+
+function alignableContainerChildIds(
+  containerId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): string[] {
+  return (childOrder[containerId] ?? []).filter((cid) => {
+    const c = nodes[cid];
+    return c && c.visible && !c.locked;
+  });
+}
+
+/** Layers that alignment commands should move for the current selection. */
+export function resolveAlignTargetIds(
+  selectedIds: string[],
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): string[] {
+  const tops = alignableSelectionIds(selectedIds, nodes);
+  if (tops.length >= 2) return tops;
+  if (tops.length === 1) {
+    const id = tops[0]!;
+    const n = nodes[id];
+    if (n && (n.type === "group" || n.type === "frame") && !n.isBooleanGroup) {
+      const kids = alignableContainerChildIds(id, nodes, childOrder);
+      if (kids.length >= 2) return kids;
+    }
+  }
+  return tops;
 }
 
 function isAlignParentContainer(node: EditorNode | undefined): boolean {
@@ -163,10 +193,10 @@ export function canAlignSelection(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
 ): boolean {
-  const tops = alignableSelectionIds(selectedIds, nodes);
-  if (tops.length >= 2) return true;
-  if (tops.length === 1) {
-    return alignParentIdForSelection(tops, nodes, childOrder) != null;
+  const targets = resolveAlignTargetIds(selectedIds, nodes, childOrder);
+  if (targets.length >= 2) return true;
+  if (targets.length === 1) {
+    return alignParentIdForSelection(targets, nodes, childOrder) != null;
   }
   return false;
 }

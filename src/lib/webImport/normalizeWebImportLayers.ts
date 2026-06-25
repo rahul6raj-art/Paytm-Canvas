@@ -190,6 +190,13 @@ export function normalizeWebImportTextNodes(nodes: Record<string, EditorNode>): 
       next = { ...n, ...textResizePatch("auto-width") };
       const layoutPatch = expandImportedTextLayout(next, content);
       if (layoutPatch) next = { ...next, ...layoutPatch };
+    } else if (singleLine && estW <= n.width + 2) {
+      // Short single-line labels (bottom nav tabs, chips) — keep point text, do not wrap.
+      next = {
+        ...n,
+        width: Math.max(n.width, estW),
+        ...textResizePatch("auto-width"),
+      };
     } else {
       next = { ...n, ...textResizePatch("auto-height") };
       try {
@@ -211,6 +218,41 @@ export function normalizeWebImportTextNodes(nodes: Record<string, EditorNode>): 
       }
     }
     nodes[id] = next;
+  }
+}
+
+const BOTTOM_NAV_LABEL_RE = /\bbn__label\b/;
+
+/** Keep bottom nav tab labels on one centered line after import normalization. */
+export function normalizeBottomNavTextNodes(
+  nodes: Record<string, EditorNode>,
+): void {
+  for (const [id, n] of Object.entries(nodes)) {
+    if (n.type !== "text") continue;
+    if (!BOTTOM_NAV_LABEL_RE.test(n.codeClassName ?? "")) continue;
+    const content = n.content?.trim();
+    if (!content) continue;
+
+    const fontSize = n.fontSize ?? 12;
+    const lineH = importedTextLineHeightPx(n);
+    const estW = Math.ceil(content.length * fontSize * 0.58) + 4;
+    const width = Math.max(estW, 40);
+    const height = Math.ceil(lineH);
+
+    let x = n.x;
+    const parent = n.parentId ? nodes[n.parentId] : undefined;
+    if (parent) {
+      x = Math.max(0, Math.round((parent.width - width) / 2));
+    }
+
+    nodes[id] = {
+      ...n,
+      x,
+      width,
+      height,
+      textAlign: "center",
+      ...textResizePatch("auto-width"),
+    };
   }
 }
 

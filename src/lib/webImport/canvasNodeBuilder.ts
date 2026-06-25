@@ -125,7 +125,10 @@ function buildSceneNode(
     base.textDecoration = node.typography?.textDecoration;
     base.textAlign = node.typography?.textAlign ?? "left";
     base.verticalAlign = node.typography?.verticalAlign;
-    const resizeMode = webImportTextResizeMode(node.cssLayoutHints ?? {});
+    const resizeMode =
+      (node.codeClassName ?? "").includes("bn__label")
+        ? "auto-width"
+        : webImportTextResizeMode(node.cssLayoutHints ?? {});
     Object.assign(base, textResizePatch(resizeMode));
     base.fill = style.fill ?? "#111111";
     base.fillEnabled = true;

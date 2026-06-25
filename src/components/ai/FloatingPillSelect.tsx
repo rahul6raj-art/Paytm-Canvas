@@ -178,14 +178,14 @@ export function FloatingPillSelect({
         onClick={() => setOpen((v) => !v)}
         className={cn(
           "inline-flex min-h-[var(--pill-control-min-height,2rem)] items-center gap-2 rounded-full border border-app-border-subtle bg-app-inset py-1.5 pl-2.5 pr-2 text-ui font-medium text-app-fg transition-colors",
-          truncateLabel ? "min-w-0 max-w-full" : "shrink-0",
+          truncateLabel ? "min-w-0 w-full max-w-full" : "shrink-0",
           "hover:border-app-border hover:bg-app-hover disabled:cursor-not-allowed disabled:opacity-50",
           open && "border-app-border bg-app-hover",
           className,
         )}
       >
         <Icon className="h-4 w-4 shrink-0 text-app-muted" strokeWidth={2} />
-        <span className={truncateLabel ? "min-w-0 max-w-[100px] truncate" : "whitespace-nowrap"}>
+        <span className={truncateLabel ? "min-w-0 flex-1 truncate text-left" : "whitespace-nowrap"}>
           {display}
         </span>
         <ChevronDown className="h-3.5 w-3.5 shrink-0 text-app-subtle" strokeWidth={2.5} />

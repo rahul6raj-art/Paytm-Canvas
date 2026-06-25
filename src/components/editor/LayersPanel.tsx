@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { isAdditiveSelectionClick } from "@/lib/containerSelection";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
   Boxes,
   ChevronDown,
@@ -29,6 +28,7 @@ import { handlePanelFieldKeyDown } from "@/lib/panelFieldKeyboard";
 import { cn } from "@/lib/utils";
 import { ROOT, useEditorStore, type EditorNode } from "@/stores/useEditorStore";
 import { findInstanceRoot } from "@/lib/componentModel";
+import { isInsideComponentSet } from "@/lib/components/componentSet";
 import {
   childOrderIndexFromLayerPanelInsertBefore,
   isAncestorOf,
@@ -51,35 +51,42 @@ function autoLayoutLayerIconMode(
   return node.layoutMode === "vertical" ? "vertical" : "horizontal";
 }
 
-function KindIcon({ node }: { node: EditorNode }) {
+function KindIcon({ node, inComponentSet }: { node: EditorNode; inComponentSet?: boolean }) {
   const c = "h-3.5 w-3.5 shrink-0 text-app-subtle";
-  if (node.isBooleanGroup) return <Combine className={c} strokeWidth={1.75} />;
-  if (isMaskGroup(node)) return <Layers2 className={c} strokeWidth={1.75} />;
-  if (node.isMask) return <Circle className={c} strokeWidth={1.75} strokeDasharray="3 2" />;
+  const componentLayerClass = node.isComponent || inComponentSet ? "text-violet-300" : undefined;
+  if (node.isBooleanGroup) return <Combine className={cn(c, componentLayerClass)} strokeWidth={1.75} />;
+  if (isMaskGroup(node)) return <Layers2 className={cn(c, componentLayerClass)} strokeWidth={1.75} />;
+  if (node.isMask) return <Circle className={cn(c, componentLayerClass)} strokeWidth={1.75} strokeDasharray="3 2" />;
   if (node.type === "frame") {
     if (isAutoLayoutContainer(node)) {
       return (
-        <AutoLayoutFrameLayerIcon mode={autoLayoutLayerIconMode(node)} className={c} />
+        <AutoLayoutFrameLayerIcon
+          mode={autoLayoutLayerIconMode(node)}
+          className={cn(c, componentLayerClass)}
+        />
       );
     }
-    return <Frame className={c} strokeWidth={1.75} />;
+    return <Frame className={cn(c, componentLayerClass)} strokeWidth={1.75} />;
   }
   if (node.type === "group") {
     if (isAutoLayoutContainer(node)) {
       return (
-        <AutoLayoutFrameLayerIcon mode={autoLayoutLayerIconMode(node)} className={c} />
+        <AutoLayoutFrameLayerIcon
+          mode={autoLayoutLayerIconMode(node)}
+          className={cn(c, componentLayerClass)}
+        />
       );
     }
-    return <Group className={c} strokeWidth={1.75} />;
+    return <Group className={cn(c, componentLayerClass)} strokeWidth={1.75} />;
   }
-  if (node.type === "text") return <Type className={c} strokeWidth={1.75} />;
-  if (node.type === "image") return <ImageIcon className={c} strokeWidth={1.75} />;
-  if (node.type === "ellipse") return <Circle className={c} strokeWidth={1.75} />;
-  if (node.type === "line") return <Minus className={c} strokeWidth={1.75} />;
-  if (node.type === "arrow") return <MoveUpRight className={c} strokeWidth={1.75} />;
-  if (node.type === "polygon") return <Hexagon className={c} strokeWidth={1.75} />;
-  if (node.type === "path") return <PathLayerIcon node={node} className={c} />;
-  return <Square className={c} strokeWidth={1.75} />;
+  if (node.type === "text") return <Type className={cn(c, componentLayerClass)} strokeWidth={1.75} />;
+  if (node.type === "image") return <ImageIcon className={cn(c, componentLayerClass)} strokeWidth={1.75} />;
+  if (node.type === "ellipse") return <Circle className={cn(c, componentLayerClass)} strokeWidth={1.75} />;
+  if (node.type === "line") return <Minus className={cn(c, componentLayerClass)} strokeWidth={1.75} />;
+  if (node.type === "arrow") return <MoveUpRight className={cn(c, componentLayerClass)} strokeWidth={1.75} />;
+  if (node.type === "polygon") return <Hexagon className={cn(c, componentLayerClass)} strokeWidth={1.75} />;
+  if (node.type === "path") return <PathLayerIcon node={node} className={cn(c, componentLayerClass)} />;
+  return <Square className={cn(c, componentLayerClass)} strokeWidth={1.75} />;
 }
 
 type DropInd =
@@ -91,6 +98,34 @@ function layerRowKey(parentId: string, nodeId: string) {
   return `${parentId}::${nodeId}`;
 }
 
+function isLayerPanelToggleClick(e: Pick<MouseEvent, "metaKey" | "ctrlKey">): boolean {
+  return Boolean(e.metaKey || e.ctrlKey);
+}
+
+function isLayerPanelRangeClick(e: Pick<MouseEvent, "shiftKey" | "metaKey" | "ctrlKey">): boolean {
+  return e.shiftKey && !e.metaKey && !e.ctrlKey;
+}
+
+function selectLayerPanelRange(
+  anchorId: string,
+  targetId: string,
+  parentId: string,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): string[] {
+  const siblings = layerPanelDisplayChildIds(parentId, nodes, childOrder);
+  const a = siblings.indexOf(anchorId);
+  const b = siblings.indexOf(targetId);
+  if (a < 0 || b < 0) return [];
+  const [lo, hi] = a < b ? [a, b] : [b, a];
+  return siblings.slice(lo, hi + 1).filter((id) => {
+    const n = nodes[id];
+    return n?.visible && !n.locked;
+  });
+}
+
+type LayerSelectHandler = (nodeId: string, parentId: string, e: MouseEvent<HTMLElement>) => void;
+
 const EMPTY_REMOTE_PEERS: { id: string; color: string; name: string }[] = [];
 
 function Tree({
@@ -100,6 +135,7 @@ function Tree({
   indicator,
   setIndicator,
   onDragStartRow,
+  onLayerSelect,
   panelHovered,
 }: {
   parentId: string;
@@ -108,6 +144,7 @@ function Tree({
   indicator: DropInd;
   setIndicator: (v: DropInd) => void;
   onDragStartRow: (e: React.DragEvent, payloadId: string) => void;
+  onLayerSelect: LayerSelectHandler;
   panelHovered: boolean;
 }) {
   const childOrder = useEditorStore((s) => s.childOrder);
@@ -135,6 +172,7 @@ function Tree({
             indicator={indicator}
             setIndicator={setIndicator}
             onDragStartRow={onDragStartRow}
+            onLayerSelect={onLayerSelect}
             showChildren={showChildren}
             panelHovered={panelHovered}
           />
@@ -153,6 +191,7 @@ function LayerRow({
   indicator,
   setIndicator,
   onDragStartRow,
+  onLayerSelect,
   showChildren,
   panelHovered,
 }: {
@@ -164,11 +203,11 @@ function LayerRow({
   indicator: DropInd;
   setIndicator: (v: DropInd) => void;
   onDragStartRow: (e: React.DragEvent, payloadId: string) => void;
+  onLayerSelect: LayerSelectHandler;
   showChildren: boolean;
   panelHovered: boolean;
 }) {
   const selectedIds = useEditorStore((s) => s.selectedIds);
-  const select = useEditorStore((s) => s.select);
   const toggleVisible = useEditorStore((s) => s.toggleVisible);
   const toggleLock = useEditorStore((s) => s.toggleLock);
   const toggleExpanded = useEditorStore((s) => s.toggleExpanded);
@@ -205,6 +244,13 @@ function LayerRow({
   const active = selectedIds.includes(node.id);
   const nestHighlight = indicator?.kind === "nest" && indicator.targetId === node.id;
   const isRenaming = layerRenameId === node.id;
+  const inComponentSet = isInsideComponentSet(nodes, node.id);
+  const variantFrameInSet =
+    inComponentSet &&
+    !node.isComponentSet &&
+    (node.type === "frame" || node.type === "group") &&
+    Boolean(node.parentId && nodes[node.parentId]?.isComponentSet);
+  const useVioletLayer = inComponentSet || node.isComponent;
 
   const onRowDragOver = (e: React.DragEvent) => {
     if (!dragId) return;
@@ -310,9 +356,9 @@ function LayerRow({
         <button
           type="button"
           className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
-          onClick={(e) => select(node.id, isAdditiveSelectionClick(e))}
+          onClick={(e) => onLayerSelect(node.id, parentId, e)}
         >
-          <KindIcon node={node} />
+          <KindIcon node={node} inComponentSet={inComponentSet} />
           {remotePeers.length > 0 ? (
             <EditorHintWrap title={remotePeers.map((p) => p.name).join(", ")}>
               <span className="flex shrink-0 items-center gap-0.5">
@@ -323,13 +369,6 @@ function LayerRow({
                     style={{ backgroundColor: p.color }}
                   />
                 ))}
-              </span>
-            </EditorHintWrap>
-          ) : null}
-          {node.isComponent ? (
-            <EditorHintWrap title="Component source">
-              <span className="shrink-0 text-violet-300">
-                <Component className="h-3 w-3" strokeWidth={1.75} />
               </span>
             </EditorHintWrap>
           ) : null}
@@ -366,32 +405,51 @@ function LayerRow({
               onClick={(e) => e.stopPropagation()}
             />
           ) : (
-            <span
-              className={cn(
-                "min-w-0 flex-1 truncate font-medium",
-                active
-                  ? node.type === "frame"
-                    ? "text-[#18a0fb]"
-                    : "text-[#f0f0f0]"
-                  : "text-app-fg",
-              )}
-              onDoubleClick={(e) => {
-                e.stopPropagation();
-                if (!node.locked) {
-                  setDraftName(node.name);
-                  setLayerRenameId(node.id);
-                }
-              }}
-            >
-              {node.isBooleanGroup && node.booleanOperation
-                ? BOOLEAN_OPERATION_LABELS[node.booleanOperation]
-                : node.name}
-              {node.isMask ? (
-                <span className="ml-1 shrink-0 text-ui font-normal uppercase text-purple-300/90">
-                  Mask
-                </span>
+            <>
+              {node.isComponentSet ? (
+                <EditorHintWrap title="Component set">
+                  <span className="shrink-0 text-violet-300">
+                    <Layers2 className="h-3 w-3" strokeWidth={1.75} />
+                  </span>
+                </EditorHintWrap>
+              ) : node.isComponent || variantFrameInSet ? (
+                <EditorHintWrap title="Component source">
+                  <span className="shrink-0 text-violet-300">
+                    <Component className="h-3 w-3" strokeWidth={1.75} />
+                  </span>
+                </EditorHintWrap>
               ) : null}
-            </span>
+              <span
+                className={cn(
+                  "min-w-0 flex-1 truncate font-medium",
+                  useVioletLayer
+                    ? active
+                      ? "text-violet-200"
+                      : "text-violet-300"
+                    : active
+                      ? node.type === "frame"
+                        ? "text-[#18a0fb]"
+                        : "text-[#f0f0f0]"
+                      : "text-app-fg",
+                )}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  if (!node.locked) {
+                    setDraftName(node.name);
+                    setLayerRenameId(node.id);
+                  }
+                }}
+              >
+                {node.isBooleanGroup && node.booleanOperation
+                  ? BOOLEAN_OPERATION_LABELS[node.booleanOperation]
+                  : node.name}
+                {node.isMask ? (
+                  <span className="ml-1 shrink-0 text-ui font-normal uppercase text-purple-300/90">
+                    Mask
+                  </span>
+                ) : null}
+              </span>
+            </>
           )}
         </button>
         <EditorHintWrap title="Visibility">
@@ -433,6 +491,7 @@ function LayerRow({
           indicator={indicator}
           setIndicator={setIndicator}
           onDragStartRow={onDragStartRow}
+          onLayerSelect={onLayerSelect}
           panelHovered={panelHovered}
         />
       ) : null}
@@ -463,8 +522,45 @@ export function LayersPanel({ hideHeader = false }: { hideHeader?: boolean }) {
   const childOrder = useEditorStore((s) => s.childOrder);
   const nodes = useEditorStore((s) => s.nodes);
   const selectedIds = useEditorStore((s) => s.selectedIds);
+  const select = useEditorStore((s) => s.select);
+  const setSelection = useEditorStore((s) => s.setSelection);
   const moveNodeToParent = useEditorStore((s) => s.moveNodeToParent);
   const [layersTreeReady, setLayersTreeReady] = useState(true);
+  const layerSelectionAnchorRef = useRef<string | null>(null);
+
+  const onLayerSelect = useCallback<LayerSelectHandler>(
+    (nodeId, parentId, e) => {
+      if (isLayerPanelRangeClick(e)) {
+        const anchor = layerSelectionAnchorRef.current ?? selectedIds[0] ?? nodeId;
+        if (nodes[anchor]?.parentId === parentId) {
+          const rangeIds = selectLayerPanelRange(anchor, nodeId, parentId, nodes, childOrder);
+          if (rangeIds.length > 0) {
+            setSelection(rangeIds);
+            layerSelectionAnchorRef.current = nodeId;
+            return;
+          }
+        }
+        select(nodeId, true);
+        layerSelectionAnchorRef.current = nodeId;
+        return;
+      }
+
+      if (isLayerPanelToggleClick(e)) {
+        select(nodeId, true);
+        layerSelectionAnchorRef.current = nodeId;
+        return;
+      }
+
+      if (selectedIds.includes(nodeId) && selectedIds.length > 1) {
+        layerSelectionAnchorRef.current = nodeId;
+        return;
+      }
+
+      select(nodeId, false);
+      layerSelectionAnchorRef.current = nodeId;
+    },
+    [childOrder, nodes, select, selectedIds, setSelection],
+  );
 
   useEffect(() => {
     if (figImportBusy) {
@@ -639,7 +735,10 @@ export function LayersPanel({ hideHeader = false }: { hideHeader?: boolean }) {
           aria-expanded={layersSectionOpen}
           aria-label={layersSectionOpen ? "Collapse Layers" : "Expand Layers"}
           onClick={() => setLayersSectionOpen((v) => !v)}
-          className="flex w-full shrink-0 items-center justify-between px-3.5 pb-0.5 pt-2 text-left transition-colors hover:bg-app-hover"
+          className={cn(
+            "flex w-full shrink-0 items-center justify-between px-3.5 pb-0.5 pt-2 text-left transition-colors hover:bg-app-hover",
+            layersSectionOpen && "mb-[12px]",
+          )}
         >
           <span className="section-heading">Layers</span>
           <ChevronDown
@@ -685,6 +784,7 @@ export function LayersPanel({ hideHeader = false }: { hideHeader?: boolean }) {
             indicator={indicator}
             setIndicator={setIndicator}
             onDragStartRow={onDragStartRow}
+            onLayerSelect={onLayerSelect}
             panelHovered={panelHovered}
           />
         )}

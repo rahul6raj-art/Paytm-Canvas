@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { defaultFillGradient } from "@/lib/fillGradient";
 import { svgTextMarkup } from "@/lib/svgMarkupCore";
 import { textLayoutForEditorNode } from "@/lib/text/canonicalTextLayout";
-import { TEXT_BOX_PAD_X, TEXT_BOX_PAD_Y } from "@/lib/text/textNodeModel";
+import { TEXT_BOX_PAD_X, TEXT_BOX_PAD_Y, SVG_TEXT_DOMINANT_BASELINE } from "@/lib/text/textNodeModel";
+import { svgTextTspanY } from "@/lib/text/textBaseline";
 import { lineOffsetX, lineTopY } from "@/lib/text/textMeasure";
 import { strikethroughDecorationY } from "@/lib/text/textAdvancedStyle";
 import type { EditorNode } from "@/stores/useEditorStore";
@@ -68,11 +69,13 @@ describe("svgTextMarkup", () => {
         fullLineText: layout.lines[0]!.text,
         letterSpacing: typo.letterSpacing,
       }) + TEXT_BOX_PAD_X;
-    const y = lineTopY(layout, 0) + TEXT_BOX_PAD_Y + blockOffsetY;
+    const canvasY = lineTopY(layout, 0) + TEXT_BOX_PAD_Y + blockOffsetY;
+    const y = svgTextTspanY(canvasY, typo);
 
     const svg = svgTextMarkup(node);
     assert.match(svg, new RegExp(`<tspan x="${x}" y="${y}"`));
-    assert.doesNotMatch(svg, /y="14"/);
+    assert.match(svg, new RegExp(`dominant-baseline="${SVG_TEXT_DOMINANT_BASELINE}"`));
+    assert.doesNotMatch(svg, new RegExp(`<tspan x="${x}" y="${canvasY}"`));
   });
 
   it("draws explicit strikethrough lines for each layout line", () => {
@@ -111,6 +114,14 @@ describe("svgTextMarkup", () => {
     assert.ok(defs.some((d) => d.includes("linearGradient")));
   });
 
+  it("renders layer stroke on text markup", () => {
+    const node = textNode({ strokeWidth: 3, strokeColor: "#ff0000", strokeEnabled: true });
+    const svg = svgTextMarkup(node);
+    assert.match(svg, /stroke="rgba\(255,0,0,1\)"/);
+    assert.match(svg, /stroke-width="3"/);
+    assert.match(svg, /paint-order="stroke fill"/);
+  });
+
   it("wraps multiline text with the same line offsets as canvas layout", () => {
     const node = textNode({
       width: 80,
@@ -125,7 +136,8 @@ describe("svgTextMarkup", () => {
     for (let i = 0; i < prepared!.layout.lines.length; i++) {
       const line = prepared!.layout.lines[i]!;
       const isLast = i === prepared!.layout.lines.length - 1;
-      const y = lineTopY(prepared!.layout, i) + TEXT_BOX_PAD_Y + prepared!.blockOffsetY;
+      const canvasY = lineTopY(prepared!.layout, i) + TEXT_BOX_PAD_Y + prepared!.blockOffsetY;
+      const y = svgTextTspanY(canvasY, prepared!.typo);
       const x =
         lineOffsetX(line.width, prepared!.innerW, prepared!.textAlign, {
           isLastLine: isLast,

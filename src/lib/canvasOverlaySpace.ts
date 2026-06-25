@@ -85,20 +85,34 @@ export function worldRectToOverlay(
   };
 }
 
-export function orientedBoxOverlayStyle(
-  worldMatrix: Matrix2D,
-  localWidth: number,
-  localHeight: number,
-  space: OverlaySpace,
-  dragOffset: { dx: number; dy: number },
-): {
+export type OrientedBoxOverlayStyle = {
   left: number;
   top: number;
   width: number;
   height: number;
   transform: string;
   transformOrigin: string;
-} {
+  /** Canvas/raster overlays: render at this scale instead of CSS-zooming a tiny bitmap. */
+  contentScaleX?: number;
+  contentScaleY?: number;
+};
+
+export type OrientedBoxOverlayOptions = {
+  /**
+   * Size the overlay box in viewport pixels and keep zoom out of the CSS matrix.
+   * Use for canvas text — scaling a small canvas via transform can disappear at high zoom.
+   */
+  contentAtScreenSize?: boolean;
+};
+
+export function orientedBoxOverlayStyle(
+  worldMatrix: Matrix2D,
+  localWidth: number,
+  localHeight: number,
+  space: OverlaySpace,
+  dragOffset: { dx: number; dy: number },
+  options?: OrientedBoxOverlayOptions,
+): OrientedBoxOverlayStyle {
   if (!space.screenSpace) {
     const drag =
       dragOffset.dx === 0 && dragOffset.dy === 0
@@ -118,6 +132,22 @@ export function orientedBoxOverlayStyle(
   const ox = worldMatrix.e + dragOffset.dx;
   const oy = worldMatrix.f + dragOffset.dy;
   const origin = worldPointToOverlay(ox, oy, space);
+  const scaleX = Math.hypot(worldMatrix.a, worldMatrix.b) || 1;
+  const scaleY = Math.hypot(worldMatrix.c, worldMatrix.d) || 1;
+
+  if (options?.contentAtScreenSize) {
+    return {
+      left: 0,
+      top: 0,
+      width: localWidth * scaleX * z,
+      height: localHeight * scaleY * z,
+      transform: `translate(${origin.x}px, ${origin.y}px) matrix(${worldMatrix.a}, ${worldMatrix.b}, ${worldMatrix.c}, ${worldMatrix.d}, 0, 0)`,
+      transformOrigin: "0 0",
+      contentScaleX: scaleX * z,
+      contentScaleY: scaleY * z,
+    };
+  }
+
   return {
     left: 0,
     top: 0,

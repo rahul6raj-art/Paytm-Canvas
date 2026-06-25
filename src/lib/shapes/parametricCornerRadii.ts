@@ -61,6 +61,14 @@ export function getShapeVertexCornerRadii(
     | "pathClosed"
   >,
 ): number[] {
+  // Edited vector paths store radii on pathPoints — must match fill outline geometry.
+  if (
+    (node.type === "path" || node.type === "polygon") &&
+    (node.pathPoints?.length ?? 0) >= 3 &&
+    pathSupportsCornerRadius(node)
+  ) {
+    return getPathVertexCornerRadii(node);
+  }
   if (isPolygonNode(node)) return getPolygonVertexCornerRadii(node);
   if (isStarNode(node)) return getStarVertexCornerRadii(node);
   if (node.type === "path") return getPathVertexCornerRadii(node);

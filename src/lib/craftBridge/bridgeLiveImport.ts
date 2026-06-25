@@ -10,6 +10,11 @@ import { derivePreviewCaptureUrl } from "@/lib/codeRoundTrip/derivePreviewCaptur
 import { validateReactPreviewUrl } from "@/lib/codeRoundTrip/reactPreviewUrlValidation";
 import { prepareImportedSliceForCanvas } from "@/lib/prepareImportedSliceForCanvas";
 import { enrichSliceWithProjectColorTokens } from "@/lib/craftBridge/projectTokenCss";
+import {
+  applyCanvasScreenLabelToRoots,
+  canvasScreenLabelFromPageTitle,
+  canvasScreenLabelFromSource,
+} from "@/lib/craftBridge/canvasScreenLabels";
 import { defaultCaptureColorTheme } from "@/lib/webImport/captureTheme";
 import { assertPreviewReachable } from "@/lib/webImport/server/assertPreviewReachable";
 import { runImportWebCapture } from "@/lib/webImport/server/playwrightCaptureService";
@@ -94,6 +99,11 @@ export async function importBridgeFromLivePreview(
         Object.values(nodes).find((n) => n.parentId === null)?.name ??
         "ImportedScreen",
     );
+    const screenLabel =
+      (input.fileName ? canvasScreenLabelFromSource(input.fileName) : null) ??
+      canvasScreenLabelFromPageTitle(capture.page.title) ??
+      canvasScreenLabelFromSource(componentName);
+    nodes = applyCanvasScreenLabelToRoots(nodes, rootIds, screenLabel);
 
     const sourceHeader = input.sourceCode?.trim()
       ? extractSourceHeader(input.sourceCode)
@@ -102,7 +112,7 @@ export async function importBridgeFromLivePreview(
     const wrapped = wrapPersistSliceWithPages({
       ...slice,
       nodes,
-      fileName: componentName,
+      fileName: screenLabel,
       selectedIds: rootIds,
       canvasBackgroundColor: DEFAULT_CANVAS_BACKGROUND,
     });

@@ -1,4 +1,5 @@
 import { getPaytmCraftPublicEnv } from "@/lib/env";
+import type { OAuthProvider, OAuthProvidersStatus } from "@/lib/oauth";
 
 /** Thrown when remote API is not configured or a capability is still a stub. */
 export class ApiNotConnectedError extends Error {
@@ -24,6 +25,7 @@ export interface CraftUser {
   id: string;
   email: string;
   displayName: string;
+  avatarUrl?: string | null;
 }
 
 export type CraftApiTokenScope = "read" | "write";
@@ -172,7 +174,6 @@ function isLocalMode(): boolean {
   return getPaytmCraftPublicEnv().mode === "local";
 }
 
-/** Path segment after `/v1`, e.g. `/me` or `/files?x=1`. */
 function buildV1Url(path: string): string {
   const env = getPaytmCraftPublicEnv();
   const p = path.startsWith("/") ? path : `/${path}`;
@@ -247,12 +248,42 @@ export const apiClient = {
     });
   },
 
+  async register(email: string, displayName: string, password: string): Promise<CraftUser> {
+    if (isLocalMode()) throw new ApiNotConnectedError();
+    return v1Fetch<CraftUser>("/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ email, displayName, password }),
+    });
+  },
+
   async logout(): Promise<void> {
     if (isLocalMode()) throw new ApiNotConnectedError();
     await v1Fetch<{ ok: true }>("/auth/logout", {
       method: "POST",
       body: "{}",
     });
+  },
+
+  oauthStartUrl(provider: OAuthProvider, nextPath?: string): string {
+    if (isLocalMode()) throw new ApiNotConnectedError();
+    const env = getPaytmCraftPublicEnv();
+    const nextQ =
+      nextPath && nextPath !== "/"
+        ? `?next=${encodeURIComponent(nextPath)}`
+        : "";
+    if (env.mode === "api") {
+      return `/api/v1/auth/oauth/${provider}${nextQ}`;
+    }
+    if (env.mode === "remote") {
+      if (!env.apiUrl) throw new ApiNotConnectedError();
+      return `${env.apiUrl.replace(/\/$/, "")}/auth/oauth/${provider}${nextQ}`;
+    }
+    throw new ApiNotConnectedError();
+  },
+
+  async getOAuthProviders(): Promise<OAuthProvidersStatus> {
+    if (isLocalMode()) return { google: false, github: false };
+    return v1Fetch<OAuthProvidersStatus>("/auth/oauth/providers");
   },
 
   async listApiTokens(): Promise<CraftApiTokenSummary[]> {
@@ -293,7 +324,62 @@ export const apiClient = {
 
   async getCurrentUser(): Promise<CraftUser | null> {
     if (isLocalMode()) return null;
-    return v1Fetch<CraftUser>("/me");
+    try {
+      return await v1Fetch<CraftUser>("/me");
+    } catch (e) {
+      if (e instanceof ApiRequestError && e.status === 401) return null;
+      throw e;
+    }
+  },
+
+  async updateProfile(params: { displayName?: string; removeAvatar?: boolean }): Promise<CraftUser> {
+    if (isLocalMode()) throw new ApiNotConnectedError();
+    const body: Record<string, unknown> = {};
+    if (typeof params.displayName === "string") body.displayName = params.displayName;
+    if (params.removeAvatar) body.removeAvatar = true;
+    return v1Fetch<CraftUser>("/me", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  },
+
+  async uploadAvatar(file: File | Blob): Promise<CraftUser> {
+    if (isLocalMode()) throw new ApiNotConnectedError();
+    const form = new FormData();
+    form.append("file", file);
+    return v1Fetch<CraftUser>("/me/avatar", {
+      method: "POST",
+      body: form,
+    });
+  },
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<CraftUser> {
+    if (isLocalMode()) throw new ApiNotConnectedError();
+    return v1Fetch<CraftUser>("/me/password", {
+      method: "POST",
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+  },
+
+  async requestPasswordReset(
+    email: string,
+  ): Promise<{ message: string; devResetUrl?: string; emailSent?: boolean }> {
+    if (isLocalMode()) throw new ApiNotConnectedError();
+    return v1Fetch<{ message: string; devResetUrl?: string; emailSent?: boolean }>(
+      "/auth/forgot-password",
+      {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      },
+    );
+  },
+
+  async resetPassword(token: string, newPassword: string): Promise<CraftUser> {
+    if (isLocalMode()) throw new ApiNotConnectedError();
+    return v1Fetch<CraftUser>("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, newPassword }),
+    });
   },
 
   async listWorkspaces(): Promise<CraftWorkspace[]> {

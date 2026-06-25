@@ -46,14 +46,17 @@ describe("roundedPolygon", () => {
     assert.ok(Math.abs(percentToCornerRadius(verts, 0.5) - maxR * 0.5) < 1e-6);
   });
 
-  it("corner smoothing emits cubic transitions before arcs", () => {
+  it("corner smoothing emits cubic corner transitions", () => {
     const verts = polygonVertices(4, 100, 100);
     const d = buildRoundedPolygonPathSvgD(verts, {
       radiusPercent: 0.4,
       cornerSmoothing: 0.6,
     });
     assert.ok(d.includes(" C "));
-    assert.ok(d.includes(" A "));
+    assert.ok(d.endsWith(" Z"));
+    const nums = d.match(/-?\d+\.?\d*/g)?.map(Number) ?? [];
+    assert.ok(Math.min(...nums) >= -1, "smoothed square stays near bounds");
+    assert.ok(Math.max(...nums) <= 101, "smoothed square stays near bounds");
   });
 
   it("hexagon at max radius stays closed without degenerate segments", () => {

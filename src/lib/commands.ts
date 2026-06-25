@@ -1,5 +1,6 @@
 import { canAlignSelection, canDistributeSelection } from "@/lib/alignSelection";
 import { canAddAutoLayoutToSelection } from "@/lib/autoLayoutSelection";
+import { canUngroupSelection } from "@/lib/ungroupSelection";
 import { canCreateComponentFromSelection, findInstanceRoot } from "@/lib/componentModel";
 import { topLevelSelectedIds } from "@/lib/editorGraph";
 import { canOutlineStroke } from "@/lib/outlineStroke";
@@ -94,10 +95,7 @@ function groupEligible(s: EditorState) {
 }
 
 function ungroupEligible(s: EditorState) {
-  if (s.selectedIds.length !== 1) return false;
-  const g = s.nodes[s.selectedIds[0]!];
-  if (!g || g.type !== "group" || g.locked || !g.visible) return false;
-  return ((s.childOrder[g.id] ?? []).length ?? 0) > 0;
+  return canUngroupSelection(s);
 }
 
 function createComponentEligible(s: EditorState) {

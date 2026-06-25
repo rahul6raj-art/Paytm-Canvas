@@ -239,7 +239,7 @@ export function EditorSidebarJulesPanel({
       className={cn("shrink-0", className)}
       style={style}
       contentClassName="flex flex-col gap-2.5 px-3.5 pt-2"
-      footerClassName="flex min-h-0 flex-1 flex-col pb-3 pt-2"
+      footerClassName="flex min-h-0 min-w-0 flex-1 flex-col pb-3 pt-2"
       footer={
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="min-h-0 flex-1" aria-hidden />
@@ -254,25 +254,30 @@ export function EditorSidebarJulesPanel({
             />
             <div
               ref={composerBoxRef}
-              className="flex shrink-0 flex-col-reverse gap-2 rounded-2xl border border-app-border-subtle bg-app-inset px-2 pt-2 pb-3"
+              className="flex min-w-0 shrink-0 flex-col-reverse gap-2 overflow-hidden rounded-2xl border border-app-border-subtle bg-app-inset px-2.5 pt-2 pb-2.5"
               style={{ maxHeight: MITRA_COMPOSER_BOX_MAX_HEIGHT_PX }}
             >
-            <div ref={composerToolbarRef} className="flex min-w-0 shrink-0 items-center gap-1.5">
+            <div
+              ref={composerToolbarRef}
+              className="flex min-w-0 shrink-0 items-center gap-1.5 overflow-hidden"
+            >
               <MitraPlusMenu
                 disabled={busy}
                 anchorRef={plusAnchorRef}
                 onAttachFile={() => setAttachMenuOpen(true)}
                 onAttachSkills={() => pickContextKindRef.current?.("skills")}
               />
-              <AIModelPillSelect
-                icon={Sparkles}
-                value={modelId}
-                onChange={setModelId}
-                disabled={busy}
-                menuZClass={MITRA_MENU_Z}
-                className="text-ui"
-              />
-              <div className="min-w-0 flex-1" />
+              <div className="min-w-0 flex-1 overflow-hidden">
+                <AIModelPillSelect
+                  icon={Sparkles}
+                  value={modelId}
+                  onChange={setModelId}
+                  disabled={busy}
+                  menuZClass={MITRA_MENU_Z}
+                  truncateLabel
+                  className="max-w-full min-w-0 text-ui"
+                />
+              </div>
               <EditorHintWrap title="Send to Mitra" disabled={!canGenerate || busy}>
                 <button
                   type="button"

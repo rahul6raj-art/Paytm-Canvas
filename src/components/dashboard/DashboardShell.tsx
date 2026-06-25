@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Download, PanelLeft, Plus, Search, Sparkles, Upload } from "lucide-react";
@@ -33,6 +34,7 @@ import { CodeRoundTripModal } from "@/components/code/CodeRoundTripModal";
 import { ImportFigmaModal } from "@/components/import/ImportFigmaModal";
 import { McpConnectionsModal } from "@/components/mcp/McpConnectionsModal";
 import { ImportWebModal } from "@/components/import/ImportWebModal";
+import { IntentDialog } from "@/components/ui/IntentDialog";
 import {
   getActiveMockWorkspace,
   getMockCurrentUser,
@@ -54,7 +56,6 @@ import {
 } from "@/lib/apiFileHydration";
 import { inviteTeammateToWorkspace, workspaceInviteSuccessMessage } from "@/lib/workspaceTeamInvite";
 import { apiClient, ApiRequestError, type CraftApiTokenSummary, type CraftFileSummary, type CraftTeam, type CraftUser, type CraftWorkspace, type CraftWorkspaceInvite, type CraftWorkspaceMember } from "@/lib/apiClient";
-import { RemoteAuthLoginModal } from "@/components/auth/RemoteAuthLoginModal";
 import { signOutRemoteSession, subscribeRemoteAuthRefresh } from "@/lib/remoteAuthSession";
 import {
   accentGradientForApiId,
@@ -287,7 +288,6 @@ export function DashboardShell() {
   const [authTick, setAuthTick] = useState(0);
   const [sidebarInviteEmail, setSidebarInviteEmail] = useState("");
   const [leftSidebarVisible, setLeftSidebarVisible] = useState(true);
-  const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [storedActiveTeamId, setStoredActiveTeamId] = useState<string | null>(() =>
     typeof window !== "undefined" ? readDashboardActiveTeamId() : null,
   );
@@ -311,6 +311,7 @@ export function DashboardShell() {
   const [membersLoading, setMembersLoading] = useState(false);
   const [savedFilesTick, setSavedFilesTick] = useState(0);
   const [savedFilesReady, setSavedFilesReady] = useState(false);
+  const [deleteFileTarget, setDeleteFileTarget] = useState<DashboardSavedFile | null>(null);
 
   useEffect(() => subscribeMockAuth(() => setAuthTick((n) => n + 1)), []);
   useEffect(() => {
@@ -337,7 +338,14 @@ export function DashboardShell() {
         ]);
         if (cancelled) return;
         if (!user) {
-          setApiError("No user returned from API.");
+          setApiUser(null);
+          setApiWorkspaces([]);
+          setApiTeams([]);
+          setApiFilesByWorkspace({});
+          setApiMembersByWorkspace({});
+          setApiInvitesByWorkspace({});
+          setApiTeamMembersByTeam({});
+          setApiError(null);
           return;
         }
         setApiUser(user);
@@ -369,9 +377,15 @@ export function DashboardShell() {
         }
       } catch (e) {
         if (!cancelled) {
-          if (e instanceof ApiRequestError && e.status === 401 && isRemote) {
+          if (e instanceof ApiRequestError && e.status === 401 && (isRemote || isApi)) {
+            setApiUser(null);
+            setApiWorkspaces([]);
+            setApiTeams([]);
+            setApiFilesByWorkspace({});
+            setApiMembersByWorkspace({});
+            setApiInvitesByWorkspace({});
+            setApiTeamMembersByTeam({});
             setApiError(null);
-            setLoginModalOpen(true);
           } else {
             setApiError(e instanceof Error ? e.message : "Failed to load dashboard data.");
           }
@@ -432,11 +446,16 @@ export function DashboardShell() {
   const handleRemoteSignOut = useCallback(async () => {
     try {
       await signOutRemoteSession();
+      setApiUser(null);
+      setApiWorkspaces([]);
+      setApiTeams([]);
       setApiRefreshKey((k) => k + 1);
+      router.replace("/login");
+      router.refresh();
     } catch (e) {
       window.alert(e instanceof Error ? e.message : "Sign out failed.");
     }
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (!isApi || apiWorkspaces.length === 0) return;
@@ -583,10 +602,14 @@ export function DashboardShell() {
   );
 
   const deleteSavedFile = useCallback((file: DashboardSavedFile) => {
-    const ok = window.confirm(`Delete "${file.name}" permanently? This cannot be undone.`);
-    if (!ok) return;
-    removeDashboardSavedFile(file.id);
+    setDeleteFileTarget(file);
   }, []);
+
+  const confirmDeleteSavedFile = useCallback(() => {
+    if (!deleteFileTarget) return;
+    removeDashboardSavedFile(deleteFileTarget.id);
+    setDeleteFileTarget(null);
+  }, [deleteFileTarget]);
 
   const savedFilesMatchingSearch = useMemo(() => {
     const q = search;
@@ -869,14 +892,13 @@ export function DashboardShell() {
           <p className="mt-4 text-ui font-semibold text-app-fg">Could not load dashboard</p>
           <p className="mt-2 text-ui text-app-muted">{apiError}</p>
           <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-            {isRemote ? (
-              <button
-                type="button"
-                onClick={() => setLoginModalOpen(true)}
+            {isApi || isRemote ? (
+              <Link
+                href="/login"
                 className="rounded-lg border border-app-border-subtle bg-app-inset px-4 py-2 text-ui font-semibold text-app-fg transition-colors hover:bg-app-hover"
               >
                 Sign in
-              </button>
+              </Link>
             ) : null}
             <button
               type="button"
@@ -887,11 +909,6 @@ export function DashboardShell() {
             </button>
           </div>
         </div>
-        <RemoteAuthLoginModal
-          open={loginModalOpen}
-          onClose={() => setLoginModalOpen(false)}
-          onSuccess={() => setApiRefreshKey((k) => k + 1)}
-        />
       </div>
     );
   }
@@ -914,11 +931,15 @@ export function DashboardShell() {
       <FigImportFinishEffect />
       <FigImportToast />
       <ImportWebModal />
-      <RemoteAuthLoginModal
-        open={loginModalOpen}
-        onClose={() => setLoginModalOpen(false)}
-        onSuccess={() => setApiRefreshKey((k) => k + 1)}
-        defaultEmail="rahul6.raj@paytm.com"
+      <IntentDialog
+        open={deleteFileTarget != null}
+        title={deleteFileTarget ? `Delete "${deleteFileTarget.name}"?` : "Delete file?"}
+        description="This file and all of its content will be removed permanently. This cannot be undone."
+        cancelLabel="Cancel"
+        confirmLabel="Delete"
+        destructive
+        onCancel={() => setDeleteFileTarget(null)}
+        onConfirm={confirmDeleteSavedFile}
       />
       <EditorDocumentPersistence />
 
@@ -949,6 +970,7 @@ export function DashboardShell() {
                   ? { ...teamSwitcherProps, onSwitchTeam: handleSwitchTeam }
                   : undefined
               }
+              showProfileSettings={isApi}
             />
           </aside>
         ) : null}

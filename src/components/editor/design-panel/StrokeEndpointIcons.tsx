@@ -37,10 +37,12 @@ function EndpointEndGraphic({ endpoint }: { endpoint: StrokeEndpoint }) {
     case "line-arrow":
       return (
         <path
-          d={`M${x - 5},2 L${x},5 L${x - 5},8`}
+          d={`M${x - 5},1.5 L${x},5 L${x - 5},8.5`}
           fill="none"
           stroke="currentColor"
           strokeWidth={1.2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
         />
       );
     case "triangle-arrow":

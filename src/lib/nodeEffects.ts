@@ -306,17 +306,60 @@ export function buildNodeEffectRenderStyle(
   };
 }
 
-/** Best-effort CSS `filter` fragment for SVG / canvas from the first visible drop shadow. */
-export function firstVisibleDropShadowFilter(effects: NodeEffect[] | undefined): string | undefined {
+/** Extra clip-path padding so SVG layer effects (drop shadow, blur) are not cut off. */
+export function maxEffectBleedPad(effects: NodeEffect[] | undefined): number {
+  let pad = 0;
+  for (const e of effects ?? []) {
+    if (!e.visible) continue;
+    if (e.type === "drop-shadow" || e.type === "inner-shadow") {
+      const blur = Math.max(0, e.blur ?? 0);
+      const spread = Math.max(0, e.spread ?? 0);
+      const x = Math.abs(e.x ?? 0);
+      const y = Math.abs(e.y ?? 0);
+      pad = Math.max(pad, blur + spread + Math.max(x, y));
+    } else if (e.type === "layer-blur") {
+      pad = Math.max(pad, Math.max(0, e.blur ?? 0));
+    }
+  }
+  return pad;
+}
+
+/** CSS `drop-shadow()` fragments — follows painted alpha (glyphs), not the layer box. */
+export function dropShadowFilterFragments(effects: NodeEffect[] | undefined): string[] {
+  const out: string[] = [];
   for (const e of effects ?? []) {
     if (!e.visible || e.type !== "drop-shadow") continue;
     const x = e.x ?? 0;
     const y = e.y ?? 0;
     const b = Math.max(0, e.blur ?? 0);
     const rgba = effectColorToRgba(e.color, e.opacity);
-    return `drop-shadow(${x}px ${y}px ${b}px ${rgba})`;
+    out.push(`drop-shadow(${x}px ${y}px ${b}px ${rgba})`);
   }
-  return undefined;
+  return out;
+}
+
+/** Best-effort CSS `filter` fragment for SVG / canvas from the first visible drop shadow. */
+export function firstVisibleDropShadowFilter(effects: NodeEffect[] | undefined): string | undefined {
+  return dropShadowFilterFragments(effects)[0];
+}
+
+/**
+ * Canvas text effects: drop shadows use `filter: drop-shadow()` so they hug glyph ink.
+ * Box-shadow is omitted — it always shadows the text frame rectangle.
+ */
+export function buildTextCanvasEffectRenderStyle(
+  effects: NodeEffect[] | undefined,
+): NodeEffectRenderStyle {
+  const withoutBoxShadows = effects?.filter(
+    (e) => e.type !== "drop-shadow" && e.type !== "inner-shadow",
+  );
+  const base = buildNodeEffectRenderStyle(withoutBoxShadows, undefined);
+  const filterParts = [...dropShadowFilterFragments(effects), base.filter].filter(Boolean);
+  return {
+    ...base,
+    boxShadow: undefined,
+    filter: filterParts.length ? filterParts.join(" ") : undefined,
+  };
 }
 
 export function summarizeEffectsList(effects: NodeEffect[] | undefined): string {

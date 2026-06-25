@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useEffect, useState } from "react";
+import { useCallback, useMemo, useRef, useEffect, useState, useSyncExternalStore } from "react";
 import { CanvasRulers } from "./CanvasRulers";
 import { SelectionBox } from "./SelectionBox";
 import { TextBaselineGuide } from "./TextBaselineGuide";
 import { TextEditOverlay } from "./TextEditOverlay";
+import { TextSceneOverlay } from "./TextSceneOverlay";
 import { CanvasViewportProvider } from "./CanvasViewportContext";
 import { ShapeEditHandlesOverlay } from "./ShapeEditHandlesOverlay";
 import { PathEditHandlesOverlay } from "./PathEditHandlesOverlay";
@@ -31,6 +32,10 @@ import { InspectMeasurementsLayer } from "./InspectMeasurementsLayer";
 import { PresenceLayer } from "./PresenceLayer";
 import { CommentPinLayer } from "./CommentPinLayer";
 import { ComponentPlacementPreview } from "./ComponentPlacementPreview";
+import { ComponentVariantSetBoundary } from "./ComponentVariantSetBoundary";
+import { ComponentSetCanvasLabels } from "./ComponentSetCanvasLabels";
+import { SlotEditOverlay, SlotHoverOutline } from "./SlotEditOverlay";
+import { SlotEditBreadcrumb } from "./SlotEditBreadcrumb";
 import { ROOT, useEditorStore, type EditorNode } from "@/stores/useEditorStore";
 import { cn } from "@/lib/utils";
 import { CanvasToWorldContext } from "./CanvasToWorldContext";
@@ -46,9 +51,14 @@ import { useOptionPointerTracking } from "@/hooks/useOptionPointerTracking";
 import { pickDeepestNodeAtWorldPoint, pickDeepestVisibleNodeAtWorldPoint, worldRect } from "@/lib/tree";
 import { startCanvasMarqueeSession } from "@/lib/canvasMarqueeSession";
 import { canAcceptCanvasFontDrop, handleCanvasFontDrop } from "@/lib/canvasFontImport";
-import { canAcceptCanvasImageDrop } from "@/lib/canvasImageImport";
+import {
+  canAcceptCanvasComponentDrop,
+  canAcceptCanvasImageDrop,
+  resolveCanvasComponentDropKey,
+} from "@/lib/canvasImageImport";
 import { handleCanvasImageDrop, pasteCanvasImageFromClipboard } from "@/lib/canvasImagePlace";
 import { setLastCanvasWorldPoint } from "@/lib/canvasPointerMemory";
+import { svgNativeLinecap } from "@/lib/stroke";
 import { EMPTY_CHILD_IDS } from "@/lib/editorConstants";
 import { registerMarqueeAbortHandler } from "@/lib/canvasMarqueeController";
 import { isPaytmCraftDebugCanvas } from "@/lib/env";
@@ -61,9 +71,22 @@ import {
 } from "@/lib/canvasInteractionGuards";
 import { toolToShapeType, type ShapeType } from "@/lib/shapes";
 import { getRenderedWorldTopLeft, layerPanelChildIds } from "@/lib/editorGraph";
-import { pathToSvgD } from "@/lib/pathGeometry";
-
-const PEN_CURVE_DRAG_THRESHOLD = 4;
+import {
+  PenDrawSession,
+  penCurveDragThresholdWorld,
+  resolvePenClickAnchor,
+  resolvePenHoverPreview,
+  shouldClosePathInsteadOfAddingPoint,
+  type PenPlacement,
+} from "@/lib/penTool";
+import { refreshPenHoverPreview, isPenShiftKeyEvent } from "@/lib/penTool/penShiftPreview";
+import { PenDrawingOverlayHost, penPreviousWorldAnchor } from "@/components/editor/PenDrawingOverlay";
+import { applyPathEditHitSelection } from "@/lib/pathEditSelection";
+import {
+  getPanPreviewSnapshot,
+  PAN_PREVIEW_IDLE,
+  subscribePanPreview,
+} from "@/lib/canvasEphemeralTransform";
 import { wheelZoomFactor, zoomAtScreenPoint } from "@/lib/canvasZoom";
 import { snapPanToDevicePixels } from "@/lib/crispRender";
 import {
@@ -90,109 +113,7 @@ import {
   shouldSuppressCanvasPointer,
   suppressPostCreationPointer,
 } from "@/lib/canvasCreationGuard";
-
-function penPreviewPathD(
-  points: { x: number; y: number; handleIn?: { x: number; y: number }; handleOut?: { x: number; y: number } }[],
-): string {
-  if (points.length === 0) return "";
-  const first = points[0]!;
-  let d = `M ${first.x} ${first.y}`;
-  for (let i = 1; i < points.length; i++) {
-    const p0 = points[i - 1]!;
-    const p1 = points[i]!;
-    const hasCurve = Boolean(p0.handleOut || p1.handleIn);
-    if (hasCurve) {
-      const c1x = p0.x + (p0.handleOut?.x ?? 0);
-      const c1y = p0.y + (p0.handleOut?.y ?? 0);
-      const c2x = p1.x + (p1.handleIn?.x ?? 0);
-      const c2y = p1.y + (p1.handleIn?.y ?? 0);
-      d += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p1.x} ${p1.y}`;
-    } else {
-      d += ` L ${p1.x} ${p1.y}`;
-    }
-  }
-  return d;
-}
-
-function PenStrokePreview({
-  drawId,
-  hover,
-  placement,
-  nodes,
-  childOrder,
-}: {
-  drawId: string;
-  hover: { x: number; y: number };
-  placement: { anchor: { x: number; y: number }; drag: { x: number; y: number } } | null;
-  nodes: Record<string, EditorNode>;
-  childOrder: Record<string, string[]>;
-}) {
-  const n = nodes[drawId];
-  const pts = n?.pathPoints ?? [];
-  if (!pts.length) return null;
-  const origin = getRenderedWorldTopLeft(drawId, nodes, childOrder);
-  const worldPts = pts.map((p) => ({
-    x: origin.x + p.x,
-    y: origin.y + p.y,
-    handleIn: p.handleIn,
-    handleOut: p.handleOut,
-  }));
-  const previewPts = [...worldPts];
-  if (placement) {
-    const hx = placement.drag.x - placement.anchor.x;
-    const hy = placement.drag.y - placement.anchor.y;
-    const last = previewPts[previewPts.length - 1]!;
-    previewPts[previewPts.length - 1] = { ...last, handleOut: { x: hx, y: hy } };
-    previewPts.push({
-      x: placement.anchor.x,
-      y: placement.anchor.y,
-      handleIn: { x: -hx, y: -hy },
-      handleOut: undefined,
-    });
-  }
-  const d = penPreviewPathD(previewPts);
-  const last = worldPts[worldPts.length - 1]!;
-  const target = placement?.drag ?? hover;
-  const first = worldPts[0]!;
-  const canClose =
-    pts.length >= 2 && !placement && Math.hypot(target.x - first.x, target.y - first.y) <= 12;
-  return (
-    <svg className="pointer-events-none absolute inset-0 z-[17] h-full w-full overflow-visible">
-      {d ? (
-        <path
-          d={d}
-          fill="none"
-          stroke={CANVAS_VISUAL.selection}
-          strokeWidth={2}
-          vectorEffect="non-scaling-stroke"
-        />
-      ) : null}
-      {!placement ? (
-        <line
-          x1={last.x}
-          y1={last.y}
-          x2={target.x}
-          y2={target.y}
-          stroke={canClose ? "#22c55e" : CANVAS_VISUAL.selection}
-          strokeWidth={2}
-          strokeDasharray="6 4"
-          vectorEffect="non-scaling-stroke"
-        />
-      ) : null}
-      {canClose ? (
-        <circle
-          cx={first.x}
-          cy={first.y}
-          r={10}
-          fill="none"
-          stroke="#22c55e"
-          strokeWidth={2}
-          vectorEffect="non-scaling-stroke"
-        />
-      ) : null}
-    </svg>
-  );
-}
+import { pathToSvgD } from "@/lib/pathGeometry";
 
 function PencilStrokePreview({
   drawId,
@@ -227,7 +148,7 @@ function PencilStrokePreview({
           fill="none"
           stroke={stroke}
           strokeWidth={sw}
-          strokeLinecap={n.strokeLinecap ?? "round"}
+          strokeLinecap={svgNativeLinecap(n.strokeLinecap ?? "round")}
           strokeLinejoin={n.strokeLinejoin ?? "round"}
           vectorEffect="non-scaling-stroke"
         />
@@ -307,14 +228,12 @@ export function Canvas() {
     [nodes, childOrder],
   );
 
-  const [penHoverWorld, setPenHoverWorld] = useState<{ x: number; y: number } | null>(null);
-  const [penPlacement, setPenPlacement] = useState<{
-    anchor: { x: number; y: number };
-    drag: { x: number; y: number };
-  } | null>(null);
-  const penPlacementRef = useRef<{ anchor: { x: number; y: number }; drag: { x: number; y: number } } | null>(
-    null,
-  );
+  const [penHoverPreview, setPenHoverPreview] = useState<{ x: number; y: number } | null>(null);
+  const [penHoverRaw, setPenHoverRaw] = useState<{ x: number; y: number } | null>(null);
+  const penHoverRawRef = useRef<{ x: number; y: number } | null>(null);
+  const [penShiftKey, setPenShiftKey] = useState(false);
+  const [penPlacement, setPenPlacement] = useState<PenPlacement | null>(null);
+  const penPlacementRef = useRef<PenPlacement | null>(null);
   const [spaceDown, setSpaceDown] = useState(false);
   const [commandDown, setCommandDown] = useState(false);
   const [optionDown, setOptionDown] = useState(false);
@@ -368,6 +287,10 @@ export function Canvas() {
       penSessionCleanupRef.current?.();
       penPlacementRef.current = null;
       setPenPlacement(null);
+      setPenHoverPreview(null);
+      setPenHoverRaw(null);
+      penHoverRawRef.current = null;
+      setPenShiftKey(false);
     }
   }, [penDrawingNodeId]);
 
@@ -376,8 +299,39 @@ export function Canvas() {
       penSessionCleanupRef.current?.();
       penPlacementRef.current = null;
       setPenPlacement(null);
+      setPenHoverPreview(null);
+      setPenHoverRaw(null);
+      penHoverRawRef.current = null;
+      setPenShiftKey(false);
     }
   }, [tool]);
+
+  const refreshPenHoverFromStoredRaw = useCallback((shiftKey: boolean) => {
+    const st = useEditorStore.getState();
+    if (st.tool !== "pen" || !st.penDrawingNodeId || penPlacementRef.current) return;
+    setPenShiftKey(shiftKey);
+    const raw = penHoverRawRef.current;
+    if (!raw) return;
+    const drawId = st.penDrawingNodeId!;
+    const path = st.nodes[drawId];
+    const origin = getRenderedWorldTopLeft(drawId, st.nodes, st.childOrder);
+    const prev = penPreviousWorldAnchor(path?.pathPoints ?? [], origin);
+    setPenHoverPreview(refreshPenHoverPreview(raw, prev, shiftKey));
+  }, []);
+
+  useEffect(() => {
+    if (tool !== "pen") return;
+    const onShiftKey = (ev: KeyboardEvent) => {
+      if (!isPenShiftKeyEvent(ev)) return;
+      refreshPenHoverFromStoredRaw(ev.shiftKey);
+    };
+    window.addEventListener("keydown", onShiftKey);
+    window.addEventListener("keyup", onShiftKey);
+    return () => {
+      window.removeEventListener("keydown", onShiftKey);
+      window.removeEventListener("keyup", onShiftKey);
+    };
+  }, [tool, refreshPenHoverFromStoredRaw]);
 
   useEffect(() => {
     if (tool !== "pencil") {
@@ -426,15 +380,32 @@ export function Canvas() {
     };
   }, []);
 
+  const panPreview = useSyncExternalStore(
+    subscribePanPreview,
+    getPanPreviewSnapshot,
+    () => PAN_PREVIEW_IDLE,
+  );
+  const effectivePan = useMemo(
+    () => ({ x: snappedPan.x + panPreview.dx, y: snappedPan.y + panPreview.dy }),
+    [snappedPan.x, snappedPan.y, panPreview.dx, panPreview.dy],
+  );
+
   const toWorld = useCallback(
     (clientX: number, clientY: number) =>
-      clientToWorld(clientX, clientY, viewportRef.current, { pan, zoom }),
-    [pan, zoom],
+      clientToWorld(clientX, clientY, viewportRef.current, { pan: effectivePan, zoom }),
+    [effectivePan, zoom],
   );
 
   const onCanvasDragOverCapture = useCallback(
     (e: React.DragEvent) => {
       if (editorMode !== "design" || figImportBusy) return;
+      const placingId = useEditorStore.getState().placingComponentMasterId;
+      if (canAcceptCanvasComponentDrop(e.dataTransfer, placingId)) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = "copy";
+        return;
+      }
       if (!canAcceptCanvasImageDrop(e.dataTransfer) && !canAcceptCanvasFontDrop(e.dataTransfer)) {
         return;
       }
@@ -449,12 +420,14 @@ export function Canvas() {
     async (e: React.DragEvent) => {
       if (editorMode !== "design" || figImportBusy) return;
       const dt = e.dataTransfer;
-      const compKey = dt.getData("application/x-pc-component");
+      const placingId = useEditorStore.getState().placingComponentMasterId;
+      const compKey = resolveCanvasComponentDropKey(dt, placingId);
       if (compKey) {
         e.preventDefault();
         e.stopPropagation();
         const w = toWorld(e.clientX, e.clientY);
         createInstance(compKey, w.x, w.y);
+        suppressPostCreationPointer();
         return;
       }
       const assetKey = dt.getData("application/x-pc-asset");
@@ -1003,86 +976,69 @@ export function Canvas() {
       if (activeTool === "pen") {
         creationBranch = "pen";
         if (!st.penDrawingNodeId) {
+          const consumed = applyPathEditHitSelection(w.x, w.y, st, {
+            setPathEditMode: st.setPathEditMode,
+            setSelectedPathPointIds: st.setSelectedPathPointIds,
+            select: (id) => st.select(id, false),
+          });
+          if (consumed) return;
           st.startPathAt(w);
           return;
         }
 
         penSessionCleanupRef.current?.();
-        const anchor = w;
-        const placement0 = { anchor, drag: anchor };
-        penPlacementRef.current = placement0;
-        setPenPlacement(placement0);
+
+        const drawId = st.penDrawingNodeId;
+        const path = st.nodes[drawId];
+        const origin = getRenderedWorldTopLeft(drawId, st.nodes, st.childOrder);
+        const pts = path?.pathPoints ?? [];
+        const prevAnchor = penPreviousWorldAnchor(pts, origin);
+        const first = pts[0];
+        const firstWorld = first
+          ? { x: origin.x + first.x, y: origin.y + first.y }
+          : null;
+        const { anchor, closePath } = resolvePenClickAnchor(
+          w,
+          prevAnchor,
+          firstWorld,
+          pts.length,
+          e.shiftKey,
+          st.zoom,
+        );
+        if (shouldClosePathInsteadOfAddingPoint(closePath)) {
+          st.finishPath(true);
+          return;
+        }
 
         const target = pointerCaptureTarget();
-        const capId = e.pointerId;
-        try {
-          target.setPointerCapture(capId);
-        } catch {
-          /* ignore */
-        }
-        let ended = false;
-
-        const removeListeners = () => {
-          window.removeEventListener("pointermove", onMove);
-          window.removeEventListener("pointerup", onPointerEnd);
-          window.removeEventListener("pointercancel", onPointerEnd);
-        };
-
-        const finish = (commit: boolean) => {
-          if (ended) return;
-          ended = true;
-          penSessionCleanupRef.current = null;
-          removeListeners();
-          const placement = penPlacementRef.current;
-          penPlacementRef.current = null;
-          setPenPlacement(null);
-          try {
-            target.releasePointerCapture(capId);
-          } catch {
-            /* ignore */
-          }
-          if (!commit) return;
-          const drag = placement?.drag ?? anchor;
-          const st2 = useEditorStore.getState();
-          if (!st2.penDrawingNodeId || st2.tool !== "pen") return;
-          const dist = Math.hypot(drag.x - anchor.x, drag.y - anchor.y);
-          if (dist >= PEN_CURVE_DRAG_THRESHOLD) {
-            st2.addPathPointDrag(anchor, drag);
-          } else {
-            st2.addPathPoint(anchor);
-          }
-        };
-
-        penSessionCleanupRef.current = () => finish(false);
-
-        const penPreviewScheduler = createRafPointerScheduler<null>(() => {
-          const placement = penPlacementRef.current;
-          if (placement) setPenPlacement(placement);
+        const session = new PenDrawSession(anchor, w, e.pointerId, target, e.shiftKey, {
+          getPreviousAnchor: () => {
+            const live = useEditorStore.getState();
+            const pid = live.penDrawingNodeId;
+            if (!pid) return null;
+            const p = live.nodes[pid];
+            const o = getRenderedWorldTopLeft(pid, live.nodes, live.childOrder);
+            return penPreviousWorldAnchor(p?.pathPoints ?? [], o);
+          },
+          toWorld,
+          curveDragThresholdWorld: penCurveDragThresholdWorld(st.zoom),
+        }, {
+          onPlacementChange: (placement) => {
+            penPlacementRef.current = placement;
+            setPenPlacement(placement);
+          },
+          commitCornerPoint: (world) => {
+            useEditorStore.getState().addPathPoint(world);
+          },
+          commitSmoothPoint: (anchorWorld, dragWorld) => {
+            useEditorStore.getState().addPathPointDrag(anchorWorld, dragWorld);
+          },
+          onSessionEnd: () => {
+            penSessionCleanupRef.current = null;
+          },
         });
-        const onMove = (ev: PointerEvent) => {
-          if (ev.pointerId !== capId) return;
-          forEachCoalescedPointerEvent(ev, (pe) => {
-            const ww = toWorld(pe.clientX, pe.clientY);
-            penPlacementRef.current = { anchor, drag: ww };
-            penPreviewScheduler.schedule(null);
-          });
-        };
 
-        const onPointerEnd = (ev: PointerEvent) => {
-          if (ev.pointerId !== capId) return;
-          forEachCoalescedPointerEvent(ev, (pe) => {
-            const ww = toWorld(pe.clientX, pe.clientY);
-            penPlacementRef.current = { anchor, drag: ww };
-            penPreviewScheduler.schedule(null);
-          });
-          penPreviewScheduler.flush();
-          penPreviewScheduler.cancel();
-          finish(ev.type === "pointerup");
-        };
-
-        window.addEventListener("pointermove", onMove);
-        window.addEventListener("pointerup", onPointerEnd);
-        window.addEventListener("pointercancel", onPointerEnd);
+        penSessionCleanupRef.current = session.attach();
         return;
       }
       if (activeTool === "comment" && activePlacingComment) {
@@ -1097,6 +1053,10 @@ export function Canvas() {
     if (st.pathEditModeNodeId && activeTool === "move") {
       st.setSelectedPathPointIds([]);
       return;
+    }
+
+    if (st.activeSlotEdit) {
+      st.exitSlotEditMode(true);
     }
 
     clearSelection();
@@ -1209,15 +1169,11 @@ export function Canvas() {
     editorMode !== "inspect" &&
     (tool === "rect" ||
       tool === "ellipse" ||
-      tool === "line" ||
-      tool === "arrow" ||
       tool === "polygon" ||
       tool === "star" ||
       tool === "triangle" ||
-      tool === "pencil" ||
       tool === "frame" ||
-      placingComment ||
-      tool === "pen");
+      placingComment);
   const optionMeasureMode =
     optionDown &&
     editorMode === "design" &&
@@ -1263,14 +1219,19 @@ export function Canvas() {
                 ? "default"
                 : tool === "text"
                   ? "text"
-                  : crosshairTool
-                    ? "crosshair"
-                    : rotateCursorActive
-                      ? canvasViewportRotateCursorCss(
-                          rotateHandleHoverHandle,
-                          selectionRotationDeg,
-                        )
-                      : "default";
+                  : tool === "pen" ||
+                      tool === "line" ||
+                      tool === "arrow" ||
+                      tool === "pencil"
+                    ? "default"
+                    : crosshairTool
+                      ? "crosshair"
+                      : rotateCursorActive
+                        ? canvasViewportRotateCursorCss(
+                            rotateHandleHoverHandle,
+                            selectionRotationDeg,
+                          )
+                        : "default";
 
   return (
     <div
@@ -1290,16 +1251,32 @@ export function Canvas() {
         }
       }}
       onPointerMove={(e) => {
-        setLastCanvasWorldPoint(toWorld(e.clientX, e.clientY));
+        const raw = toWorld(e.clientX, e.clientY);
+        setLastCanvasWorldPoint(raw);
         if (tool !== "pen" || !useEditorStore.getState().penDrawingNodeId) {
-          setPenHoverWorld(null);
+          setPenHoverPreview(null);
+          setPenHoverRaw(null);
+          setPenShiftKey(false);
           return;
         }
-        setPenHoverWorld(toWorld(e.clientX, e.clientY));
+        if (penPlacementRef.current) return;
+        const st = useEditorStore.getState();
+        const drawId = st.penDrawingNodeId!;
+        const path = st.nodes[drawId];
+        const origin = getRenderedWorldTopLeft(drawId, st.nodes, st.childOrder);
+        const prev = penPreviousWorldAnchor(path?.pathPoints ?? [], origin);
+        penHoverRawRef.current = raw;
+        setPenHoverRaw(raw);
+        setPenShiftKey(e.shiftKey);
+        setPenHoverPreview(resolvePenHoverPreview(raw, prev, e.shiftKey));
       }}
       onPointerLeave={() => {
         setLastCanvasWorldPoint(null);
-        setPenHoverWorld(null);
+        if (!useEditorStore.getState().penDrawingNodeId) {
+          setPenHoverPreview(null);
+          setPenHoverRaw(null);
+          penHoverRawRef.current = null;
+        }
       }}
     >
       <CanvasInteractionContext.Provider
@@ -1380,15 +1357,6 @@ export function Canvas() {
               />
             )}
           </div>
-          {editorMode === "design" && tool === "pen" && penDrawingNodeId && (penHoverWorld || penPlacement) ? (
-            <PenStrokePreview
-              drawId={penDrawingNodeId}
-              hover={penPlacement?.drag ?? penHoverWorld!}
-              placement={penPlacement}
-              nodes={nodes}
-              childOrder={childOrder}
-            />
-          ) : null}
           {editorMode === "design" && tool === "pencil" && pencilDrawingNodeId ? (
             <PencilStrokePreview
               drawId={pencilDrawingNodeId}
@@ -1397,6 +1365,8 @@ export function Canvas() {
             />
           ) : null}
           {editorMode === "design" ? <CommentPinLayer /> : null}
+          {editorMode === "design" ? <SlotHoverOutline /> : null}
+          {editorMode === "design" ? <SlotEditOverlay /> : null}
           {marquee ? (
             <div
               className="pointer-events-none absolute z-[19] border bg-[rgba(24,160,251,0.08)] will-change-[left,top,width,height]"
@@ -1410,6 +1380,7 @@ export function Canvas() {
             />
           ) : null}
           <ComponentPlacementPreview />
+          <ComponentVariantSetBoundary />
           <PresenceLayer />
         </div>
       </div>
@@ -1423,10 +1394,24 @@ export function Canvas() {
         data-canvas-screen-overlays
       >
         {figImportBusy ? null : <RootFrameLabels rootIds={rootIds} />}
+        {figImportBusy ? null : <ComponentSetCanvasLabels />}
         <SvgHoverOutline />
         <ShapeDrawAnchorDot />
         <ShapeDrawPreview />
+        {editorMode === "design" && tool === "pen" && penDrawingNodeId ? (
+          <PenDrawingOverlayHost
+            drawId={penDrawingNodeId}
+            hoverPreview={penHoverPreview}
+            hoverRaw={penPlacement?.rawDrag ?? penHoverRaw ?? penHoverPreview}
+            placement={penPlacement}
+            shiftKey={penShiftKey}
+            nodes={nodes}
+            childOrder={childOrder}
+            zoom={zoom}
+          />
+        ) : null}
         <TextBaselineGuide />
+        <TextSceneOverlay rootIds={rootIds} />
         <SelectionBox />
         <AutoLayoutHandlesOverlay />
         <SelectionSpacingHandlesOverlay />
@@ -1445,6 +1430,7 @@ export function Canvas() {
       </div>
 
       <LayoutGuidesOverlay zoom={zoom} pan={pan} viewportRef={viewportRef} />
+      {editorMode === "design" ? <SlotEditBreadcrumb /> : null}
       <AIGenerateCanvasOverlay />
       </CanvasViewportProvider>
       </CanvasToWorldContext.Provider>

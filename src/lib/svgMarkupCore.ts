@@ -19,18 +19,47 @@ import {
   clampCornerRadii,
   cornerRadiiMax,
   getNodeCornerRadii,
-  roundedRectPathD,
+  roundedRectPathDForNode,
 } from "@/lib/cornerRadius";
-import { strokeAttrsForSvgMarkup, strokeIsVisible } from "@/lib/stroke";
-import { shouldUseAlignedPathStroke, shouldUseOutlinedOpenPathStroke } from "@/lib/strokeAlign";
-import { outlineStroke } from "@/lib/outlineStroke";
+import {
+  resolveSvgStrokeLayers,
+  strokeAttrsForSvgMarkup,
+  strokeIsVisible,
+  svgNativeLinecap,
+  svgStrokePresentationFromNode,
+} from "@/lib/stroke";
+import {
+  arrowHeadToStrokeEndpoint,
+  arrowMarkerScale,
+  resolveArrowEndKind,
+  resolveArrowStartKind,
+} from "@/lib/shapes/arrowGeometry";
+import { lineLocalRenderPoints } from "@/lib/shapes/lineGeometry";
+import {
+  centerlineStrokeLinecap,
+  openPathStrokeViewport,
+  resolveStrokeEndPoint,
+  resolveStrokeStartPoint,
+  strokeEndpointMarkerDefs,
+  strokeMarkerRefs,
+} from "@/lib/strokeEndpoints";
+import {
+  shouldUseAlignedPathStroke,
+  shouldUseFilledStrokeRingForNode,
+  shouldUseOutlinedOpenPathStroke,
+  strokeRingLayersBeforeFill,
+} from "@/lib/strokeAlign";
+import { filledStrokeOutlineFromPathD, outlineStroke } from "@/lib/outlineStroke";
 import {
   shouldRenderSvgPerSideStroke,
   svgPerSideStrokeBeforeFill,
   svgPerSideStrokeMarkup,
 } from "@/lib/svgPerSideStroke";
 import { textLayoutForEditorNode, type TextLayoutForRender } from "@/lib/text/canonicalTextLayout";
+import { svgTextTspanY } from "@/lib/text/textBaseline";
+import { resolveTextLayerStroke } from "@/lib/text/textLayerStroke";
 import {
+  SVG_TEXT_DOMINANT_BASELINE,
   TEXT_BOX_PAD_X,
   TEXT_BOX_PAD_Y,
   type TextAlign,
@@ -62,6 +91,49 @@ export function svgSafeId(id: string): string {
   return id.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
+/** Native SVG stroke attrs (solid rgba or gradient/image/video url) on a closed fill path. */
+function nativeClosedShapeStrokeAttr(
+  node: EditorNode,
+  opts: {
+    showStroke: boolean;
+    strokeWidth: number;
+    strokeExtra: string;
+    fallbackColor: string;
+    nodeId?: string;
+    width: number;
+    height: number;
+    registerGradient?: (id: string, markup: string) => void;
+    renderScale?: number;
+    assets?: Record<string, EditorAsset>;
+  },
+): { strokeAttr: string; underlayMarkup: string } {
+  if (!opts.showStroke) {
+    return { strokeAttr: ' stroke="none"', underlayMarkup: "" };
+  }
+  let strokePaint = escXml(opts.fallbackColor);
+  let underlayMarkup = "";
+  if (opts.registerGradient && opts.nodeId) {
+    const strokeLayers = resolveSvgStrokeLayers(node, {
+      gradientId: `pc-sg-${svgSafeId(opts.nodeId)}`,
+      width: opts.width,
+      height: opts.height,
+      registerGradient: opts.registerGradient,
+      renderScale: opts.renderScale,
+      assets: opts.assets,
+    });
+    if (strokeLayers.strokePaint !== "none") {
+      strokePaint = strokeLayers.strokePaint.startsWith("url(")
+        ? strokeLayers.strokePaint
+        : escXml(strokeLayers.strokePaint);
+    }
+    underlayMarkup = strokeLayers.underlayMarkup;
+  }
+  return {
+    strokeAttr: ` stroke="${strokePaint}" stroke-width="${opts.strokeWidth}"${opts.strokeExtra}`,
+    underlayMarkup,
+  };
+}
+
 /** Filled outline ring for gradient/image/video strokes (matches canvas React path). */
 function svgGradientOutlineStrokeMarkup(
   n: EditorNode,
@@ -76,7 +148,11 @@ function svgGradientOutlineStrokeMarkup(
   },
 ): { markup: string; underlay: string } | null {
   if (effectiveStrokeType(n) !== "gradient") return null;
-  const outlined = outlineStroke(n);
+  const fillPathD = resolvePathOutlineD(n, opts.nodeId);
+  const closed = n.type === "polygon" ? true : (n.pathClosed ?? true);
+  if (!shouldUseFilledStrokeRingForNode(n, { closed, showStroke: true })) return null;
+  const outlined =
+    filledStrokeOutlineFromPathD(n, fillPathD, closed) ?? outlineStroke(n);
   if (!outlined?.pathD) return null;
   const stroke = resolveShapeStrokeAttr({
     node: n,
@@ -161,6 +237,7 @@ export function svgRectLike(
   const strokeExtra = showStroke ? ` ${strokeAttrsForSvgMarkup(n)}` : "";
   const nodeId = opts?.nodeId ?? n.id;
   const filterAttr = opts?.filterRef ? ` filter="url(#${opts.filterRef})"` : "";
+  let nativeStrokeUnderlay = "";
 
   const gradientOutlineStroke =
     showStroke && opts?.registerGradient && !opts?.strokeOverride
@@ -205,18 +282,44 @@ export function svgRectLike(
           hasEllipseArcInnerHole(arc.innerRadiusRatio) && isFullEllipseArc(arc.sweepDeg)
             ? ' fill-rule="evenodd"'
             : "";
-        const strokeAttr = showStroke && !alignedStroke
-          ? ` stroke="${escXml(sc)}" stroke-width="${sw}"${strokeExtra}`
-          : ` stroke="none"`;
+        const nativeStroke = !alignedStroke
+          ? nativeClosedShapeStrokeAttr(n, {
+              showStroke,
+              strokeWidth: sw,
+              strokeExtra,
+              fallbackColor: sc,
+              nodeId,
+              width: w,
+              height: h,
+              registerGradient: opts?.registerGradient,
+              renderScale: opts?.renderScale,
+              assets: opts?.assets,
+            })
+          : null;
+        if (nativeStroke) nativeStrokeUnderlay += nativeStroke.underlayMarkup;
+        const strokeAttr = nativeStroke?.strokeAttr ?? ' stroke="none"';
         const fillEl = `<path d="${d}" fill="${fillAttr}"${fillRuleAttr}${strokeAttr}${filter} />`;
         if (!alignedStroke) return fillEl;
         return svgPerSideStrokeBeforeFill(n.strokePosition)
           ? `${alignedStroke}${fillEl}`
           : `${fillEl}${alignedStroke}`;
       }
-      const strokeAttr = showStroke && !alignedStroke
-        ? ` stroke="${escXml(sc)}" stroke-width="${sw}"${strokeExtra}`
-        : ` stroke="none"`;
+      const nativeStroke = !alignedStroke
+        ? nativeClosedShapeStrokeAttr(n, {
+            showStroke,
+            strokeWidth: sw,
+            strokeExtra,
+            fallbackColor: sc,
+            nodeId,
+            width: w,
+            height: h,
+            registerGradient: opts?.registerGradient,
+            renderScale: opts?.renderScale,
+            assets: opts?.assets,
+          })
+        : null;
+      if (nativeStroke) nativeStrokeUnderlay += nativeStroke.underlayMarkup;
+      const strokeAttr = nativeStroke?.strokeAttr ?? ' stroke="none"';
       const fillEl = `<ellipse cx="${w / 2}" cy="${h / 2}" rx="${w / 2}" ry="${h / 2}" fill="${fillAttr}"${strokeAttr}${filter} />`;
       if (!alignedStroke) return fillEl;
       return svgPerSideStrokeBeforeFill(n.strokePosition)
@@ -226,7 +329,7 @@ export function svgRectLike(
     if (n.type === "rectangle" || n.type === "frame" || n.type === "group") {
       if (n.type === "frame" || n.type === "rectangle") {
         const radii = clampCornerRadii(getNodeCornerRadii(n), w, h);
-        const pathD = roundedRectPathD(w, h, radii);
+        const pathD = roundedRectPathDForNode(n, w, h);
         let perSideMarkup: string | null | undefined;
         if (showStroke && shouldRenderSvgPerSideStroke(n) && !perSideMarkup) {
           perSideMarkup = svgPerSideStrokeMarkup(n, {
@@ -247,9 +350,26 @@ export function svgRectLike(
           !usePerSide && (gradientOutlineStroke || shouldUseAlignedPathStroke(n, true))
             ? alignedStrokeMarkup()
             : null;
-        const strokeAttr = showStroke && !usePerSide && !alignedStroke
-          ? ` stroke="${escXml(sc)}" stroke-width="${sw}"${strokeExtra}`
-          : ` stroke="none"`;
+        const nativeStroke =
+          showStroke && !usePerSide && !alignedStroke
+            ? nativeClosedShapeStrokeAttr(n, {
+                showStroke,
+                strokeWidth: sw,
+                strokeExtra,
+                fallbackColor: sc,
+                nodeId,
+                width: w,
+                height: h,
+                registerGradient: opts?.registerGradient,
+                renderScale: opts?.renderScale,
+                assets: opts?.assets,
+              })
+            : null;
+        if (nativeStroke) nativeStrokeUnderlay += nativeStroke.underlayMarkup;
+        const strokeAttr =
+          showStroke && !usePerSide && !alignedStroke
+            ? nativeStroke!.strokeAttr
+            : ' stroke="none"';
         const fillEl =
           cornerRadiiMax(radii) <= 0
             ? `<rect x="0" y="0" width="${w}" height="${h}" fill="${fillAttr}"${strokeAttr}${filter} />`
@@ -266,22 +386,76 @@ export function svgRectLike(
         }
         return `${fillEl}${perSideMarkup}`;
       }
-      const strokeAttr = showStroke
-        ? ` stroke="${escXml(sc)}" stroke-width="${sw}"${strokeExtra}`
-        : ` stroke="none"`;
-      return `<rect x="0" y="0" width="${w}" height="${h}" fill="${fillAttr}"${strokeAttr}${filter} />`;
+      const nativeStroke = nativeClosedShapeStrokeAttr(n, {
+        showStroke,
+        strokeWidth: sw,
+        strokeExtra,
+        fallbackColor: sc,
+        nodeId,
+        width: w,
+        height: h,
+        registerGradient: opts?.registerGradient,
+        renderScale: opts?.renderScale,
+        assets: opts?.assets,
+      });
+      nativeStrokeUnderlay += nativeStroke.underlayMarkup;
+      return `<rect x="0" y="0" width="${w}" height="${h}" fill="${fillAttr}"${nativeStroke.strokeAttr}${filter} />`;
     }
     return "";
   })();
-  return underlay || strokeUnderlay ? `${underlay}${strokeUnderlay}${shape}` : shape;
+  const combinedUnderlay = `${underlay}${strokeUnderlay}${nativeStrokeUnderlay}`;
+  return combinedUnderlay ? `${combinedUnderlay}${shape}` : shape;
 }
 
-export function svgLine(n: EditorNode): string {
+/** SVG markup for line/arrow layers (endpoint coords, caps, arrow markers). */
+export function svgLine(n: EditorNode, nodeId?: string): string {
   const lw = n.strokeWidth ?? 2;
-  const lc = n.strokeColor ?? DEFAULT_SHAPE_STROKE;
-  const y = n.height / 2;
-  const strokeExtra = lw > 0 ? ` ${strokeAttrsForSvgMarkup(n)}` : "";
-  return `<line x1="0" y1="${y}" x2="${n.width}" y2="${y}" stroke="${escXml(lc)}" stroke-width="${lw}"${strokeExtra} />`;
+  if (!strokeIsVisible(n) || lw <= 0) return "";
+
+  const lc = escXml(n.strokeColor ?? DEFAULT_SHAPE_STROKE);
+  const pts = lineLocalRenderPoints(n);
+  const start =
+    n.type === "arrow"
+      ? arrowHeadToStrokeEndpoint(resolveArrowStartKind(n))
+      : resolveStrokeStartPoint(n);
+  const end =
+    n.type === "arrow"
+      ? arrowHeadToStrokeEndpoint(resolveArrowEndKind(n))
+      : resolveStrokeEndPoint(n);
+  const lineCap =
+    n.type === "arrow"
+      ? svgNativeLinecap(n.strokeLinecap ?? "butt")
+      : centerlineStrokeLinecap(start, end);
+
+  const vp = openPathStrokeViewport(n.width, n.height, lw, start, end);
+  const prefix = nodeId ? `pc-stroke-${svgSafeId(nodeId)}` : "pc-stroke-anon";
+  const markerOpts = n.type === "arrow" ? { markerScale: arrowMarkerScale(n) } : undefined;
+  const markers = strokeEndpointMarkerDefs(
+    prefix,
+    start,
+    end,
+    n.strokeColor ?? DEFAULT_SHAPE_STROKE,
+    lw,
+    markerOpts,
+  );
+  const markerRefs = strokeMarkerRefs(start, end, prefix);
+  const pres = svgStrokePresentationFromNode(n);
+  const dashAttr = pres.strokeDasharray ? ` stroke-dasharray="${pres.strokeDasharray}"` : "";
+  const joinAttrs = `stroke-linejoin="${pres.strokeLinejoin}" stroke-miterlimit="${pres.strokeMiterlimit}"`;
+  const markerStart = markerRefs.markerStart ? ` marker-start="${markerRefs.markerStart}"` : "";
+  const markerEnd = markerRefs.markerEnd ? ` marker-end="${markerRefs.markerEnd}"` : "";
+
+  const x1 = pts.x1 - vp.offsetLeft;
+  const y1 = pts.y1 - vp.offsetTop;
+  const x2 = pts.x2 - vp.offsetLeft;
+  const y2 = pts.y2 - vp.offsetTop;
+  const tx =
+    vp.offsetLeft !== 0 || vp.offsetTop !== 0
+      ? ` transform="translate(${vp.offsetLeft} ${vp.offsetTop})"`
+      : "";
+  const defs = markers ? `<defs>${markers}</defs>` : "";
+
+  return `<g${tx}>${defs}<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${lc}" stroke-width="${lw}" stroke-linecap="${lineCap}" ${joinAttrs}${dashAttr}${markerStart}${markerEnd} /></g>`;
 }
 
 function svgTextDecorationAttr(_decoration: TextDecorationMode): string {
@@ -386,18 +560,24 @@ export function svgTextMarkup(n: EditorNode, opts?: SvgTextMarkupOpts): string {
       ? ""
       : ` letter-spacing="${typo.letterSpacing}"`;
   const decorationAttr = svgTextDecorationAttr(style.textDecoration);
+  const markupTypo =
+    style.textCase === "small-caps"
+      ? { ...typo, fontSize: Math.max(1, typo.fontSize * 0.82) }
+      : typo;
+  const toSvgY = (canvasLineTopY: number) => svgTextTspanY(canvasLineTopY, markupTypo);
 
   const tspans: string[] = [];
   for (let i = 0; i < layout.lines.length; i++) {
     const line = layout.lines[i]!;
     const canonicalLine = canonical.lines[i];
     const isLast = i === layout.lines.length - 1;
-    const y = canonicalLine?.y ?? lineTopY(layout, i) + TEXT_BOX_PAD_Y + blockOffsetY;
+    const canvasLineY = canonicalLine?.y ?? lineTopY(layout, i) + TEXT_BOX_PAD_Y + blockOffsetY;
+    const y = toSvgY(canvasLineY);
 
     if (canonicalLine && canonicalLine.segments.length > 1) {
       for (const segment of canonicalLine.segments) {
         tspans.push(
-          `<tspan x="${segment.x}" y="${segment.y}"${decorationAttr}>${escXml(segment.text)}</tspan>`,
+          `<tspan x="${segment.x}" y="${toSvgY(segment.y)}"${decorationAttr}>${escXml(segment.text)}</tspan>`,
         );
       }
       continue;
@@ -420,7 +600,11 @@ export function svgTextMarkup(n: EditorNode, opts?: SvgTextMarkupOpts): string {
   }
 
   const tspansMarkup = tspans.join("");
-  const textAttrs = `font-family="${ff}" font-size="${fontSize}" font-weight="${typo.fontWeight}" dominant-baseline="hanging"${ls}`;
+  const layerStroke = resolveTextLayerStroke(n);
+  const strokeAttrs = layerStroke
+    ? ` stroke="${escXml(layerStroke.color)}" stroke-width="${layerStroke.spec.width}" paint-order="stroke fill" ${layerStroke.svgExtraAttrs}`
+    : "";
+  const textAttrs = `font-family="${ff}" font-size="${fontSize}" font-weight="${typo.fontWeight}" dominant-baseline="${SVG_TEXT_DOMINANT_BASELINE}"${ls}${strokeAttrs}`;
   const w = Math.max(1, n.width);
   const h = Math.max(1, n.height);
   const fillNode = textNodeAsFillPaint(n);
@@ -580,20 +764,25 @@ export function registerClipRect(
   w: number,
   h: number,
   node?: Pick<EditorNode, "cornerRadius" | "cornerRadii">,
+  bleed = 0,
 ): void {
-  const width = Math.max(1, w);
-  const height = Math.max(1, h);
-  if (node) {
-    const radii = clampCornerRadii(getNodeCornerRadii(node), width, height);
+  const x = -bleed;
+  const y = -bleed;
+  const width = Math.max(1, w + bleed * 2);
+  const height = Math.max(1, h + bleed * 2);
+  if (node && bleed <= 0) {
+    const radii = clampCornerRadii(getNodeCornerRadii(node), w, h);
     if (cornerRadiiMax(radii) <= 0) {
       defs.push(`<clipPath id="${clipId}"><rect x="0" y="0" width="${width}" height="${height}" /></clipPath>`);
       return;
     }
-    const d = roundedRectPathD(width, height, radii);
+    const d = roundedRectPathD(w, h, radii);
     defs.push(`<clipPath id="${clipId}"><path d="${d}" /></clipPath>`);
     return;
   }
-  defs.push(`<clipPath id="${clipId}"><rect x="0" y="0" width="${width}" height="${height}" /></clipPath>`);
+  defs.push(
+    `<clipPath id="${clipId}"><rect x="${x}" y="${y}" width="${width}" height="${height}" /></clipPath>`,
+  );
 }
 
 export function registerRootArtboardShadow(defs: string[], nodeId: string): string {
@@ -686,6 +875,7 @@ export function svgPathMarkup(
       ? ` fill-rule="${opts?.fillRule ?? resolved.pathFillRule}"`
       : "";
 
+  const pathClosed = resolved.type === "polygon" ? true : (resolved.pathClosed ?? false);
   const gradientOutlineStroke =
     showStroke && opts?.registerGradient && opts.nodeId
       ? svgGradientOutlineStrokeMarkup(resolved, {
@@ -701,7 +891,10 @@ export function svgPathMarkup(
   if (gradientOutlineStroke) {
     underlay += gradientOutlineStroke.underlay;
     const fillPath = `<path d="${escXml(d)}" fill="${fillAttr}" stroke="none"${fillRuleAttr}${filter} />`;
-    return `${underlay}${gradientOutlineStroke.markup}${fillPath}`;
+    if (strokeRingLayersBeforeFill(resolved.strokePosition)) {
+      return `${underlay}${gradientOutlineStroke.markup}${fillPath}`;
+    }
+    return `${underlay}${fillPath}${gradientOutlineStroke.markup}`;
   }
 
   const closed = resolved.pathClosed ?? false;
@@ -723,9 +916,36 @@ export function svgPathMarkup(
     return underlay ? `${underlay}${fillPath}${strokePath}` : `${fillPath}${strokePath}`;
   }
 
-  const sc = escXml(resolved.strokeColor ?? DEFAULT_SHAPE_STROKE);
+  const alignedOutline =
+    showStroke && shouldUseFilledStrokeRingForNode(resolved, { closed: pathClosed, showStroke: true })
+      ? filledStrokeOutlineFromPathD(resolved, d, pathClosed)
+      : null;
+  if (alignedOutline?.pathD) {
+    const strokeFill = escXml(
+      effectColorToRgba(resolved.strokeColor ?? DEFAULT_SHAPE_STROKE, resolved.strokeOpacity ?? 1),
+    );
+    const outlineRule =
+      alignedOutline.fillRule !== "nonzero" ? ` fill-rule="${alignedOutline.fillRule}"` : "";
+    const fillPath = `<path d="${escXml(d)}" fill="${fillAttr}" stroke="none"${fillRuleAttr}${filter} />`;
+    const strokePath = `<path d="${escXml(alignedOutline.pathD)}" fill="${strokeFill}" stroke="none"${outlineRule}${filter} />`;
+    return underlay ? `${underlay}${fillPath}${strokePath}` : `${fillPath}${strokePath}`;
+  }
+
+  const nativeStroke = nativeClosedShapeStrokeAttr(resolved, {
+    showStroke,
+    strokeWidth: sw,
+    strokeExtra,
+    fallbackColor: resolved.strokeColor ?? DEFAULT_SHAPE_STROKE,
+    nodeId: opts?.nodeId,
+    width: w,
+    height: h,
+    registerGradient: opts?.registerGradient,
+    renderScale: opts?.renderScale,
+    assets: opts?.assets,
+  });
+  underlay += nativeStroke.underlayMarkup;
   const path = showStroke
-    ? `<path d="${escXml(d)}" fill="${fillAttr}" stroke="${sc}" stroke-width="${sw}"${strokeExtra}${fillRuleAttr}${filter} />`
+    ? `<path d="${escXml(d)}" fill="${fillAttr}"${nativeStroke.strokeAttr}${fillRuleAttr}${filter} />`
     : `<path d="${escXml(d)}" fill="${fillAttr}" stroke="none"${fillRuleAttr}${filter} />`;
   return underlay ? `${underlay}${path}` : path;
 }

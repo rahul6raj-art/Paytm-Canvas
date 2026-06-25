@@ -5,6 +5,7 @@ import {
 import { screenPxToWorld, TEXT_CARET_SCREEN_PX } from "@/lib/canvasVisual";
 import { effectiveFillType } from "@/lib/fillGradient";
 import { textNodeAsFillPaint } from "@/lib/text/textFillPaint";
+import { applyCanvasTextLayerStroke, resolveTextLayerStroke } from "@/lib/text/textLayerStroke";
 import type { ResolvedTextTypo } from "@/lib/textTypography";
 
 /** Canvas caret color (must be a concrete color — CSS vars do not resolve on canvas). */
@@ -67,6 +68,8 @@ export type TextCanvasRenderOptions = {
   mediaFill?: { source: CanvasImageSource; width: number; height: number } | null;
   /** Precomputed canonical layout — avoids a second layout pass. */
   prepared?: TextLayoutForRender | null;
+  /** Multiplier for box padding when the canvas is rendered in screen pixels. */
+  layoutScale?: number;
 };
 
 const MAX_TEXT_BITMAP_EDGE = 8192;
@@ -106,6 +109,9 @@ export function paintTextLayoutToContext(
 ): TextLayout {
   const w = Math.max(1, opts.width);
   const h = Math.max(1, opts.height);
+  const layoutScale = opts.layoutScale ?? 1;
+  const padX = TEXT_BOX_PAD_X * layoutScale;
+  const padY = TEXT_BOX_PAD_Y * layoutScale;
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, 0, w, h);
@@ -120,8 +126,8 @@ export function paintTextLayoutToContext(
   ctx.font = buildFontString(opts.typo);
   ctx.textBaseline = "top";
 
-  const boxInnerW = Math.max(1, w - TEXT_BOX_PAD_X * 2);
-  const boxInnerH = Math.max(1, h - TEXT_BOX_PAD_Y * 2);
+  const boxInnerW = Math.max(1, w - padX * 2);
+  const boxInnerH = Math.max(1, h - padY * 2);
   const wrapWidth =
     opts.wrapWidth === Number.POSITIVE_INFINITY
       ? Number.POSITIVE_INFINITY
@@ -152,8 +158,8 @@ export function paintTextLayoutToContext(
       opts.typo,
       opts.textAlign,
       innerW,
-      TEXT_BOX_PAD_X,
-      TEXT_BOX_PAD_Y + blockOffsetY,
+      padX,
+      padY + blockOffsetY,
       displayStart,
       displayEnd,
       opts.prepared?.canonical.lines,
@@ -164,12 +170,27 @@ export function paintTextLayoutToContext(
   const fillKind = fillPaint ? effectiveFillType(fillPaint) : "solid";
   const useMaskedFill =
     fillPaint != null && fillPaint.fillEnabled !== false && fillKind !== "solid";
+  const layerStroke = opts.gradientNode ? resolveTextLayerStroke(opts.gradientNode) : null;
+  const paintFill = opts.gradientNode?.fillEnabled !== false;
+
+  const paintStrokeGlyphs = () => {
+    if (!layerStroke) return;
+    applyCanvasTextLayerStroke(ctx, layerStroke);
+    paintTextGlyphs(ctx, opts, layout, innerW, blockOffsetY, padX, padY, style, "stroke");
+    ctx.setLineDash([]);
+  };
 
   if (useMaskedFill) {
-    paintMaskedTextFill(ctx, opts, layout, innerW, blockOffsetY, style, fillPaint);
+    paintStrokeGlyphs();
+    paintMaskedTextFill(ctx, opts, layout, innerW, blockOffsetY, padX, padY, style, fillPaint, paintFill);
   } else {
-    ctx.fillStyle = opts.typo.color;
-    paintTextLinesAndDecorations(ctx, opts, layout, innerW, blockOffsetY, style);
+    paintStrokeGlyphs();
+    if (paintFill) {
+      ctx.fillStyle = opts.typo.color;
+      paintTextLinesAndDecorations(ctx, opts, layout, innerW, blockOffsetY, padX, padY, style);
+    } else {
+      paintTextDecorations(ctx, opts, layout, innerW, blockOffsetY, padX, padY, style);
+    }
   }
 
   if (opts.caretVisible && opts.caretIndex != null) {
@@ -180,11 +201,14 @@ export function paintTextLayoutToContext(
       opts.typo,
       innerW,
       opts.textAlign,
-      TEXT_BOX_PAD_X,
-      TEXT_BOX_PAD_Y,
+      padX,
+      padY,
       blockOffsetY,
     );
-    const caretWidth = screenPxToWorld(TEXT_CARET_SCREEN_PX, opts.zoom ?? 1);
+    const caretWidth =
+      layoutScale !== 1
+        ? TEXT_CARET_SCREEN_PX * layoutScale
+        : screenPxToWorld(TEXT_CARET_SCREEN_PX, opts.zoom ?? 1);
     ctx.fillStyle = TEXT_CARET_COLOR;
     ctx.fillRect(caret.x, caret.y, Math.max(0.5, caretWidth), caret.height);
   }
@@ -226,14 +250,17 @@ function paintTextGlyphs(
   layout: TextLayout,
   innerW: number,
   blockOffsetY: number,
+  padX: number,
+  padY: number,
   style: TextLayoutStyleOptions,
+  mode: "fill" | "stroke" = "fill",
 ): void {
   const canonical = opts.prepared?.canonical;
   for (let i = 0; i < layout.lines.length; i++) {
     const line = layout.lines[i]!;
     const isLast = i === layout.lines.length - 1;
     const canonicalLine = canonical?.lines[i];
-    const y = canonicalLine?.y ?? lineTopY(layout, i) + TEXT_BOX_PAD_Y + blockOffsetY;
+    const y = canonicalLine?.y ?? lineTopY(layout, i) + padY + blockOffsetY;
 
     if (canonicalLine && canonicalLine.segments.length > 1) {
       for (const segment of canonicalLine.segments) {
@@ -244,6 +271,7 @@ function paintTextGlyphs(
           segment.y,
           opts.typo,
           style.textCase === "small-caps",
+          mode,
         );
       }
       continue;
@@ -255,12 +283,12 @@ function paintTextGlyphs(
         isLastLine: isLast,
         fullLineText: line.text,
         letterSpacing: opts.typo.letterSpacing,
-      }) + TEXT_BOX_PAD_X;
+      }) + padX;
 
     if (opts.textAlign === "justify" && !isLast && !canonicalLine) {
-      drawJustifiedLine(ctx, line.text, x, y, innerW, opts.typo);
+      drawJustifiedLine(ctx, line.text, x, y, innerW, opts.typo, mode);
     } else {
-      drawLineWithSpacing(ctx, line.text, x, y, opts.typo, style.textCase === "small-caps");
+      drawLineWithSpacing(ctx, line.text, x, y, opts.typo, style.textCase === "small-caps", mode);
     }
   }
 }
@@ -271,6 +299,8 @@ function paintTextDecorations(
   layout: TextLayout,
   innerW: number,
   blockOffsetY: number,
+  padX: number,
+  padY: number,
   style: TextLayoutStyleOptions,
 ): void {
   if (style.textDecoration === "none") return;
@@ -280,14 +310,14 @@ function paintTextDecorations(
     if (!line.text) continue;
     const isLast = i === layout.lines.length - 1;
     const canonicalLine = canonical?.lines[i];
-    const y = canonicalLine?.y ?? lineTopY(layout, i) + TEXT_BOX_PAD_Y + blockOffsetY;
+    const y = canonicalLine?.y ?? lineTopY(layout, i) + padY + blockOffsetY;
     const x =
       canonicalLine?.x ??
       lineOffsetX(line.width, innerW, opts.textAlign, {
         isLastLine: isLast,
         fullLineText: line.text,
         letterSpacing: opts.typo.letterSpacing,
-      }) + TEXT_BOX_PAD_X;
+      }) + padX;
     drawLineDecorations(ctx, line.text, x, y, opts.typo, style.textDecoration);
   }
 }
@@ -298,10 +328,12 @@ function paintTextLinesAndDecorations(
   layout: TextLayout,
   innerW: number,
   blockOffsetY: number,
+  padX: number,
+  padY: number,
   style: TextLayoutStyleOptions,
 ): void {
-  paintTextGlyphs(ctx, opts, layout, innerW, blockOffsetY, style);
-  paintTextDecorations(ctx, opts, layout, innerW, blockOffsetY, style);
+  paintTextGlyphs(ctx, opts, layout, innerW, blockOffsetY, padX, padY, style);
+  paintTextDecorations(ctx, opts, layout, innerW, blockOffsetY, padX, padY, style);
 }
 
 /** Paint fill (gradient/media/solid+opacity) into text glyph shapes via destination-in compositing. */
@@ -311,32 +343,37 @@ function paintMaskedTextFill(
   layout: TextLayout,
   innerW: number,
   blockOffsetY: number,
+  padX: number,
+  padY: number,
   style: TextLayoutStyleOptions,
   fillPaint: ReturnType<typeof textNodeAsFillPaint>,
+  paintFill: boolean,
 ): void {
   const w = Math.max(1, opts.width);
   const h = Math.max(1, opts.height);
 
   ctx.save();
-  if (!paintNodeFillInBox(ctx, fillPaint, w, h, opts.mediaFill)) {
-    const grad = createGradientPaintStyle(ctx, fillPaint, w, h);
-    if (grad) {
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, w, h);
-    } else {
-      ctx.fillStyle = opts.typo.color;
-      ctx.fillRect(0, 0, w, h);
+  if (paintFill) {
+    if (!paintNodeFillInBox(ctx, fillPaint, w, h, opts.mediaFill)) {
+      const grad = createGradientPaintStyle(ctx, fillPaint, w, h);
+      if (grad) {
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, w, h);
+      } else {
+        ctx.fillStyle = opts.typo.color;
+        ctx.fillRect(0, 0, w, h);
+      }
     }
-  }
 
-  const prevAlpha = ctx.globalAlpha;
-  ctx.globalCompositeOperation = "destination-in";
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = "#000000";
-  paintTextGlyphs(ctx, opts, layout, innerW, blockOffsetY, style);
-  ctx.globalAlpha = prevAlpha;
-  ctx.globalCompositeOperation = "source-over";
-  paintTextDecorations(ctx, opts, layout, innerW, blockOffsetY, style);
+    const prevAlpha = ctx.globalAlpha;
+    ctx.globalCompositeOperation = "destination-in";
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#000000";
+    paintTextGlyphs(ctx, opts, layout, innerW, blockOffsetY, padX, padY, style, "fill");
+    ctx.globalAlpha = prevAlpha;
+    ctx.globalCompositeOperation = "source-over";
+  }
+  paintTextDecorations(ctx, opts, layout, innerW, blockOffsetY, padX, padY, style);
   ctx.restore();
 }
 
@@ -347,12 +384,13 @@ function drawJustifiedLine(
   y: number,
   boxWidth: number,
   typo: ResolvedTextTypo,
+  mode: "fill" | "stroke" = "fill",
 ): void {
   const words = text.split(/(\s+)/);
   const gaps = words.filter((w) => /^\s+$/.test(w)).length;
   const wordCount = words.filter((w) => w && !/^\s+$/.test(w)).length;
   if (wordCount < 2) {
-    drawLineWithSpacing(ctx, text, x, y, typo);
+    drawLineWithSpacing(ctx, text, x, y, typo, false, mode);
     return;
   }
   let total = 0;
@@ -367,7 +405,7 @@ function drawJustifiedLine(
       cx += extra;
       continue;
     }
-    drawLineWithSpacing(ctx, token, cx, y, typo);
+    drawLineWithSpacing(ctx, token, cx, y, typo, false, mode);
     cx += measureStringWidth(getTextMeasureContext(), token, typo.letterSpacing);
   }
 }
@@ -379,19 +417,21 @@ function drawLineWithSpacing(
   y: number,
   typo: ResolvedTextTypo,
   smallCaps = false,
+  mode: "fill" | "stroke" = "fill",
 ): void {
   const prev = ctx.font;
   if (smallCaps) {
     ctx.font = buildFontString({ ...typo, fontSize: Math.max(1, typo.fontSize * 0.82) });
   }
+  const draw = mode === "stroke" ? (s: string, px: number, py: number) => ctx.strokeText(s, px, py) : (s: string, px: number, py: number) => ctx.fillText(s, px, py);
   if (!typo.letterSpacing) {
-    ctx.fillText(text, x, y);
+    draw(text, x, y);
     if (smallCaps) ctx.font = prev;
     return;
   }
   let cx = x;
   for (const ch of text) {
-    ctx.fillText(ch, cx, y);
+    draw(ch, cx, y);
     cx += ctx.measureText(ch).width + typo.letterSpacing;
   }
   if (smallCaps) ctx.font = prev;

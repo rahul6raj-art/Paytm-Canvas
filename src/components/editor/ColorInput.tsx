@@ -24,15 +24,13 @@ export type ColorCommitOptions = { skipHistory?: boolean };
 
 const inspectorColorFieldActiveClass = "border-app-panel-edge ring-1 ring-app-panel-edge";
 
-const inspectorColorMainSegmentClass = cn(
-  appFieldShellClass,
-  "min-w-0 flex-1 basis-0 rounded-r-none border-r-0",
-);
-
-const inspectorColorMainSegmentCompactClass = cn(
-  appFieldShellClassCompact,
-  "min-w-0 flex-1 basis-0 rounded-r-none border-r-0",
-);
+function colorMainSegmentShellClass(opts: { compact?: boolean; attachOpacity: boolean }) {
+  return cn(
+    opts.compact ? appFieldShellClassCompact : appFieldShellClass,
+    "min-w-0 flex-1 basis-0 overflow-visible",
+    opts.attachOpacity && "rounded-r-none border-r-0",
+  );
+}
 
 type ColorInputProps = {
   variant?: "default" | "inspectorRow";
@@ -190,6 +188,7 @@ export function ColorInput({
   const pickerTitleText = pickerTitle ?? (label ? `${label} color` : "Color");
 
   const libraryDialogTitle = libraryName ?? "Color library";
+  const attachOpacitySegment = Boolean(onCommitOpacity);
 
   if (variant === "inspectorRow") {
     const rowDisabled = disabled || !visible;
@@ -254,7 +253,12 @@ export function ColorInput({
         ) : null}
         <div className={cn("flex items-center", inspectorRowGapClass)}>
           <div className="flex min-w-0 flex-1 basis-0 items-stretch overflow-visible">
-            <div className={cn(inspectorColorMainSegmentClass, fieldShellStateClass)}>
+            <div
+              className={cn(
+                colorMainSegmentShellClass({ attachOpacity: attachOpacitySegment }),
+                fieldShellStateClass,
+              )}
+            >
               <button
                 ref={swatchRef}
                 type="button"
@@ -419,7 +423,7 @@ export function ColorInput({
       <div className="flex min-w-0 items-stretch overflow-visible focus-within:[&_input]:border-accent">
         <div
           className={cn(
-            inspectorColorMainSegmentCompactClass,
+            colorMainSegmentShellClass({ compact: true, attachOpacity: attachOpacitySegment }),
             "focus-within:border-accent focus-within:ring-1 focus-within:ring-accent",
             compactFieldShellStateClass,
           )}

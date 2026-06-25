@@ -37,6 +37,7 @@ import {
   swapCandidatesForMultiSelect,
   swapNodeWorldPositions,
 } from "@/lib/canvasSwapDrag";
+import { resolveCanvasDragNodeId } from "@/lib/containerSelection";
 import { pickDeepestFrameAtWorldPoint } from "@/lib/tree";
 import { createRafPointerScheduler, forEachCoalescedPointerEvent } from "@/lib/smoothPointer";
 import { commitWasmFirstGeometryPatches } from "@/engine/craftEngineWasmFirstMutation";
@@ -271,6 +272,7 @@ export function beginCanvasNodeDrag(opts: {
   if (isSelectionSpacingDragActive()) return false;
 
   const s1 = useEditorStore.getState();
+  const dragNodeId = resolveCanvasDragNodeId(opts.nodeId, s1.selectedIds, s1.nodes);
   const dragTargets = s1.selectedIds.filter((sid) => {
     const n = s1.nodes[sid];
     return n && !n.locked && n.visible;
@@ -278,7 +280,7 @@ export function beginCanvasNodeDrag(opts: {
   if (dragTargets.length === 0) return false;
 
   const swapCandidates = swapCandidatesForMultiSelect(
-    opts.nodeId,
+    dragNodeId,
     s1.selectedIds,
     s1.nodes,
     s1.childOrder,
@@ -287,19 +289,19 @@ export function beginCanvasNodeDrag(opts: {
 
   if (opts.forceSwapDrag && swapCandidates.length === 0) return false;
 
-  const primaryId = dragTargets.includes(opts.nodeId) ? opts.nodeId : dragTargets[0]!;
-  const movingIds = swapMode ? [opts.nodeId] : dragTargets;
+  const primaryId = dragTargets.includes(dragNodeId) ? dragNodeId : dragTargets[0]!;
+  const movingIds = swapMode ? [dragNodeId] : dragTargets;
 
-  const dragNode = s1.nodes[opts.nodeId];
+  const dragNode = s1.nodes[dragNodeId];
   const dragContainerUnit =
     dragNode?.type === "frame" || dragNode?.type === "group";
   // Multi-select always moves the whole selection; in-flow reorder is single-layer only.
   const alContext =
     swapMode || dragContainerUnit || dragTargets.length > 1
       ? null
-      : getAutoLayoutReorderContext([opts.nodeId], s1.nodes, s1.nodes);
+      : getAutoLayoutReorderContext([dragNodeId], s1.nodes, s1.nodes);
 
-  const dragMovingIds = alContext ? [opts.nodeId] : movingIds;
+  const dragMovingIds = alContext ? [dragNodeId] : movingIds;
   const swapCandidateIds = swapMode ? swapCandidates : undefined;
 
   const st = useEditorStore.getState();

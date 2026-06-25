@@ -4,6 +4,7 @@
  */
 
 import { parseSvgPathToAbsolute } from "@/lib/svgImport/parseSvgPath";
+import { cubicControlPoints, cubicPathD, segmentUsesCubicBezier } from "@/lib/vector/bezierGeometry";
 
 export interface PathPoint {
   id: string;
@@ -11,12 +12,35 @@ export interface PathPoint {
   y: number;
   handleIn?: { x: number; y: number };
   handleOut?: { x: number; y: number };
+  /** Corner vs smooth (Figma-style anchor type). */
+  pointType?: "corner" | "smooth";
   /** Per-node corner radius for straight-segment vector paths. */
   cornerRadius?: number;
 }
 
 export function newPathPointId(): string {
   return `pt-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+/** Deep-copy path anchors for resize drag snapshots (live preview must not mutate). */
+export function clonePathPoints(points: PathPoint[] | undefined): PathPoint[] | undefined {
+  if (!points?.length) return undefined;
+  return points.map((p) => ({
+    ...p,
+    handleIn: p.handleIn ? { ...p.handleIn } : undefined,
+    handleOut: p.handleOut ? { ...p.handleOut } : undefined,
+  }));
+}
+
+/** Scale path anchors and Bézier handles when the path node's frame is resized. */
+export function scalePathPoints(points: PathPoint[], sx: number, sy: number): PathPoint[] {
+  return points.map((p) => ({
+    ...p,
+    x: p.x * sx,
+    y: p.y * sy,
+    handleIn: p.handleIn ? { x: p.handleIn.x * sx, y: p.handleIn.y * sy } : undefined,
+    handleOut: p.handleOut ? { x: p.handleOut.x * sx, y: p.handleOut.y * sy } : undefined,
+  }));
 }
 
 /** Parse SVG path `d` (M/L/H/V/C/S/Q/T/A/Z) into editable path points for import. */
@@ -44,8 +68,12 @@ export function svgPathDToPathPoints(svgPath: string): PathPoint[] {
   return points;
 }
 
-export function pathBounds(points: PathPoint[]): { x: number; y: number; width: number; height: number } {
+export function pathBounds(
+  points: PathPoint[],
+  opts?: { includeHandles?: boolean },
+): { x: number; y: number; width: number; height: number } {
   if (points.length === 0) return { x: 0, y: 0, width: 1, height: 1 };
+  const includeHandles = opts?.includeHandles ?? true;
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -58,21 +86,53 @@ export function pathBounds(points: PathPoint[]): { x: number; y: number; width: 
   };
   for (const p of points) {
     bump(p.x, p.y);
-    if (p.handleIn) bump(p.x + p.handleIn.x, p.y + p.handleIn.y);
-    if (p.handleOut) bump(p.x + p.handleOut.x, p.y + p.handleOut.y);
+    if (includeHandles) {
+      if (p.handleIn) bump(p.x + p.handleIn.x, p.y + p.handleIn.y);
+      if (p.handleOut) bump(p.x + p.handleOut.x, p.y + p.handleOut.y);
+    }
   }
-  const width = Math.max(1, maxX - minX);
-  const height = Math.max(1, maxY - minY);
+  const width = Math.max(0, maxX - minX);
+  const height = Math.max(0, maxY - minY);
   return { x: minX, y: minY, width, height };
 }
 
-/** Translate path points so min is (0,0) and expand node x/y/width/height accordingly. */
+/** Collapse sub-pixel axis span so straight pen strokes get 0 width/height (Figma-style). */
+const PATH_AXIS_FLATTEN_PX = 1;
+
+export function flattenNearAxisPathPoints(points: PathPoint[]): PathPoint[] {
+  if (points.length < 2) return points;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const p of points) {
+    minX = Math.min(minX, p.x);
+    maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y);
+    maxY = Math.max(maxY, p.y);
+  }
+  const spanX = maxX - minX;
+  const spanY = maxY - minY;
+  let out = points;
+  if (spanY > 0 && spanY < PATH_AXIS_FLATTEN_PX) {
+    const y = minY;
+    out = out.map((p) => ({ ...p, y }));
+  }
+  if (spanX > 0 && spanX < PATH_AXIS_FLATTEN_PX) {
+    const x = minX;
+    out = out.map((p) => ({ ...p, x }));
+  }
+  return out;
+}
+
 export function normalizePathNode<T extends { type: string; x: number; y: number; width: number; height: number; pathPoints?: PathPoint[] }>(
   node: T,
 ): T {
   if (node.type !== "path" || !node.pathPoints?.length) return node;
-  const b = pathBounds(node.pathPoints);
-  const translated = node.pathPoints.map((p) => ({
+  const flattened = flattenNearAxisPathPoints(node.pathPoints);
+  // Anchor-only bounds: dragging Bézier handles must not rebase the path origin each frame.
+  const b = pathBounds(flattened, { includeHandles: false });
+  const translated = flattened.map((p) => ({
     ...p,
     x: p.x - b.x,
     y: p.y - b.y,
@@ -81,8 +141,8 @@ export function normalizePathNode<T extends { type: string; x: number; y: number
     ...node,
     x: node.x + b.x,
     y: node.y + b.y,
-    width: Math.max(1, b.width),
-    height: Math.max(1, b.height),
+    width: b.width,
+    height: b.height,
     pathPoints: translated,
   };
 }
@@ -130,15 +190,12 @@ function distPointToBezier(
   p1: PathPoint,
   samples = 24,
 ): number {
-  const c1x = p0.x + (p0.handleOut?.x ?? 0);
-  const c1y = p0.y + (p0.handleOut?.y ?? 0);
-  const c2x = p1.x + (p1.handleIn?.x ?? 0);
-  const c2y = p1.y + (p1.handleIn?.y ?? 0);
+  const { c1, c2, end } = cubicControlPoints(p0, p1);
   let minD = Infinity;
   let prev = { x: p0.x, y: p0.y };
   for (let i = 1; i <= samples; i++) {
     const t = i / samples;
-    const cur = cubicPoint(t, { x: p0.x, y: p0.y }, { x: c1x, y: c1y }, { x: c2x, y: c2y }, { x: p1.x, y: p1.y });
+    const cur = cubicPoint(t, { x: p0.x, y: p0.y }, c1, c2, end);
     minD = Math.min(minD, distPointToSegment(px, py, prev.x, prev.y, cur.x, cur.y));
     prev = cur;
   }
@@ -146,25 +203,7 @@ function distPointToBezier(
 }
 
 export function pathToSvgD(points: PathPoint[], closed: boolean): string {
-  if (points.length === 0) return "";
-  const first = points[0]!;
-  let d = `M ${first.x} ${first.y}`;
-  for (let i = 1; i < points.length; i++) {
-    const p0 = points[i - 1]!;
-    const p1 = points[i]!;
-    const hasCurve = Boolean(p0.handleOut || p1.handleIn);
-    if (hasCurve) {
-      const c1x = p0.x + (p0.handleOut?.x ?? 0);
-      const c1y = p0.y + (p0.handleOut?.y ?? 0);
-      const c2x = p1.x + (p1.handleIn?.x ?? 0);
-      const c2y = p1.y + (p1.handleIn?.y ?? 0);
-      d += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p1.x} ${p1.y}`;
-    } else {
-      d += ` L ${p1.x} ${p1.y}`;
-    }
-  }
-  if (closed && points.length >= 2) d += " Z";
-  return d;
+  return cubicPathD(points, closed);
 }
 
 /** Local-space hit test: anchor hit (square half-size ≈ threshold). */
@@ -191,14 +230,14 @@ export function hitTestPathStroke(
   for (let i = 0; i < points.length - 1; i++) {
     const a = points[i]!;
     const b = points[i + 1]!;
-    const hasCurve = Boolean(a.handleOut || b.handleIn);
+    const hasCurve = segmentUsesCubicBezier(a, b);
     const d = hasCurve ? distPointToBezier(localX, localY, a, b) : distPointToSegment(localX, localY, a.x, a.y, b.x, b.y);
     if (d <= tol) return true;
   }
   if (closed && points.length >= 2) {
     const a = points[points.length - 1]!;
     const b = points[0]!;
-    const hasCurve = Boolean(a.handleOut || b.handleIn);
+    const hasCurve = segmentUsesCubicBezier(a, b);
     const d = hasCurve ? distPointToBezier(localX, localY, a, b) : distPointToSegment(localX, localY, a.x, a.y, b.x, b.y);
     if (d <= tol) return true;
   }

@@ -11,6 +11,7 @@ export function placeholderSizeForComponent(tag: string): { width: number; heigh
     NewsWidget: { width: 390, height: 220 },
     BottomNav: { width: 390, height: 88 },
     Card: { width: 390, height: 96 },
+    ListItem: { width: 390, height: 88 },
     IPOHomePage: { width: 390, height: 640 },
     Badge: { width: 160, height: 28 },
     Icon: { width: 24, height: 24 },

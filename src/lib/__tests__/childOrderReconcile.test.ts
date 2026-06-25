@@ -222,6 +222,15 @@ describe("childOrderReconcile", () => {
     assert.deepEqual(layerPanelChildIds("f1", nodes, childOrder), ["r1"]);
   });
 
+  it("layerPanelChildIds dedupes duplicate childOrder entries", () => {
+    const nodes = { f1: frame("f1", 0, 0) };
+    const childOrder = {
+      [EDITOR_ROOT_KEY]: ["f1", "f1"],
+      f1: [],
+    };
+    assert.deepEqual(layerPanelChildIds(EDITOR_ROOT_KEY, nodes, childOrder), ["f1"]);
+  });
+
   it("needsNodeGeometryRepair ignores rotated local transform boxes", () => {
     const r1 = { ...rect("r1", null, 100, 80), width: 200, height: 120, rotation: 24 };
     const nodes = { r1 };

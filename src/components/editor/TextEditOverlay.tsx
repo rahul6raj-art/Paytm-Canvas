@@ -5,9 +5,9 @@ import { getNodeWorldMatrixFromChildOrder } from "@/lib/editorGraph";
 import { orientedBoxOverlayStyle } from "@/lib/canvasOverlaySpace";
 import { isNativeRendererEnabled } from "@/lib/rendererMode";
 import { matrixIsFinite } from "@/lib/transformMath";
-import { TEXT_BOX_PAD_Y, textTypoFromModel, toTextNodeModel } from "@/lib/text/textNodeModel";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { TextCanvasView } from "./TextCanvasView";
+import { TextNodeCanvasShell } from "./TextNodeCanvasShell";
 import { useCanvasOverlaySpace } from "./useCanvasOverlaySpace";
 
 /** Native path: live text + caret overlay while the GPU compositor paints the scene. */
@@ -16,6 +16,7 @@ export function TextEditOverlay() {
   const textEditSelection = useEditorStore((s) => s.textEditSelection);
   const nodes = useEditorStore((s) => s.nodes);
   const childOrder = useEditorStore((s) => s.childOrder);
+  const designTokens = useEditorStore((s) => s.designTokens);
   const overlay = useCanvasOverlaySpace();
 
   const node = editingTextId ? nodes[editingTextId] : null;
@@ -24,15 +25,14 @@ export function TextEditOverlay() {
     if (!editingTextId || !node || node.type !== "text") return null;
     const worldMatrix = getNodeWorldMatrixFromChildOrder(editingTextId, nodes, childOrder);
     if (!worldMatrix || !matrixIsFinite(worldMatrix)) return null;
-    const model = toTextNodeModel(node, true);
-    const typo = model ? textTypoFromModel(model) : null;
-    const lineHeightPx = typo ? typo.fontSize * typo.lineHeight + TEXT_BOX_PAD_Y * 2 : node.height;
-    const overlayW = Math.max(2, node.width);
-    const overlayH = Math.max(lineHeightPx, node.height);
-    return orientedBoxOverlayStyle(worldMatrix, overlayW, overlayH, overlay, {
-      dx: 0,
-      dy: 0,
-    });
+    return orientedBoxOverlayStyle(
+      worldMatrix,
+      Math.max(2, node.width),
+      Math.max(2, node.height),
+      overlay,
+      { dx: 0, dy: 0 },
+      { contentAtScreenSize: overlay.screenSpace },
+    );
   }, [editingTextId, node, nodes, childOrder, overlay]);
 
   if (!isNativeRendererEnabled() || !editingTextId || !node || node.type !== "text" || !boxStyle) {
@@ -52,12 +52,23 @@ export function TextEditOverlay() {
           transformOrigin: boxStyle.transformOrigin,
         }}
       >
-        <TextCanvasView
+        <TextNodeCanvasShell
+          nodeId={editingTextId}
           node={node}
-          isEditing
-          selection={textEditSelection}
+          nodes={nodes}
+          childOrder={childOrder}
+          designTokens={designTokens}
           className="h-full w-full"
-        />
+        >
+          <TextCanvasView
+            node={node}
+            isEditing
+            selection={textEditSelection}
+            className="h-full w-full"
+            contentScaleX={boxStyle.contentScaleX}
+            contentScaleY={boxStyle.contentScaleY}
+          />
+        </TextNodeCanvasShell>
       </div>
     </div>
   );

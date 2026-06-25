@@ -2,14 +2,14 @@ import { finiteDimension } from "@/lib/transformMath";
 import {
   clampCornerRadii,
   getNodeCornerRadii,
-  roundedRectPathD,
-  type CornerRadii,
+  roundedRectPathDForNode,
 } from "@/lib/cornerRadius";
 import { newPathPointId, normalizePathNode, pathToSvgD, type PathPoint } from "@/lib/pathGeometry";
 import type { EditorNode } from "@/stores/useEditorStore";
 import {
   effectiveEllipseArc,
   ellipsePointAtDeg,
+  fullEllipseBezierPathPoints,
   hasEllipseArcInnerHole,
   isFullEllipseArc,
 } from "@/lib/shapes/ellipseArc";
@@ -104,6 +104,14 @@ export function isVectorEditableShape(
   );
 }
 
+/** True when Enter / vector edit must flatten parametric shapes into editable path anchors. */
+export function needsVectorPathConversion(node: EditorNode | null | undefined): boolean {
+  if (!isVectorEditableShape(node)) return false;
+  if (node.type !== "path") return true;
+  if (isStarNode(node) || isPolygonNode(node)) return true;
+  return !node.pathPoints?.length;
+}
+
 export function shapeToPathPoints(
   node: Pick<
     EditorNode,
@@ -124,7 +132,27 @@ export function shapeToPathPoints(
   const h = Math.max(1, node.height);
 
   if (node.type === "polygon") {
-    const sides = node.polygonSides ?? 6;
+    const sides = node.polygonSides ?? DEFAULT_POLYGON_SIDES;
+    return {
+      pathPoints: generatePolygonPoints(sides, w, h),
+      pathClosed: true,
+    };
+  }
+
+  if (isStarNode(node)) {
+    return {
+      pathPoints: starPathPoints(
+        node.starPoints ?? DEFAULT_STAR_POINTS,
+        node.starInnerRadius ?? DEFAULT_STAR_INNER_RATIO,
+        w,
+        h,
+      ),
+      pathClosed: true,
+    };
+  }
+
+  if (isPolygonNode(node)) {
+    const sides = node.polygonSides ?? DEFAULT_POLYGON_SIDES;
     return {
       pathPoints: generatePolygonPoints(sides, w, h),
       pathClosed: true,
@@ -149,7 +177,7 @@ export function shapeToPathPoints(
     const arc = effectiveEllipseArc(node);
     if (isFullEllipseArc(arc.sweepDeg) && !hasEllipseArcInnerHole(arc.innerRadiusRatio)) {
       return {
-        pathPoints: generatePolygonPoints(64, w, h),
+        pathPoints: fullEllipseBezierPathPoints(w, h),
         pathClosed: true,
       };
     }
@@ -230,7 +258,7 @@ export function isFourCornerClosedPath(
 export function isCornerRoundablePath(
   node: Pick<EditorNode, "type" | "pathPoints" | "pathClosed">,
 ): boolean {
-  if (node.type !== "path" || node.pathClosed === false) return false;
+  if ((node.type !== "path" && node.type !== "polygon") || node.pathClosed === false) return false;
   const pts = node.pathPoints ?? [];
   return pts.length >= 3 && !pathHasCurveHandles(pts);
 }
@@ -372,31 +400,71 @@ export function resolvePathOutlineD(
   if (node.type === "path" && baked) {
     return baked;
   }
-  if (node.type === "path" && (node.pathPoints?.length ?? 0) > 0) {
+  if (
+    (node.type === "path" || node.type === "polygon") &&
+    (node.pathPoints?.length ?? 0) > 0
+  ) {
     return vectorShapeOutlineD(node, nodeId);
   }
   return baked ?? vectorShapeOutlineD(node, nodeId);
 }
 
+type VectorShapeOutlineNode = Pick<
+  EditorNode,
+  | "type"
+  | "width"
+  | "height"
+  | "pathPoints"
+  | "pathClosed"
+  | "cornerRadius"
+  | "cornerRadii"
+  | "polygonSides"
+  | "starPoints"
+  | "starInnerRadius"
+  | "starOuterCornerRadius"
+  | "starInnerCornerRadius"
+  | "flattenedPathData"
+>;
+
+/** SVG path `d` from live path anchors (vector edit, pen, corner fillets, Bézier handles). */
+function pathPointsOutlineD(node: VectorShapeOutlineNode): string {
+  const pts = node.pathPoints ?? [];
+  if (isRoundedRectPath(node)) {
+    return roundedRectPathDForNode(
+      node,
+      Math.max(1, node.width),
+      Math.max(1, node.height),
+    );
+  }
+  if (isCornerRoundablePath(node)) {
+    const radii = getPathVertexCornerRadii(node);
+    if (radii.some((r) => r > 0)) {
+      const clamped = clampPathCornerRadii(pts, radii);
+      const roundedPts = pts.map((p, i) => ({
+        ...p,
+        cornerRadius: clamped[i] ?? 0,
+      }));
+      return createRoundedVectorPathSvgD({
+        points: roundedPts,
+        closed: node.pathClosed ?? false,
+      });
+    }
+  }
+  return pathToSvgD(pts, node.pathClosed ?? false);
+}
+
 /** SVG path `d` for vector shapes (polygon, star, path). */
-export function vectorShapeOutlineD(
-  node: Pick<
-    EditorNode,
-    | "type"
-    | "width"
-    | "height"
-    | "pathPoints"
-    | "pathClosed"
-    | "cornerRadius"
-    | "cornerRadii"
-    | "polygonSides"
-    | "starPoints"
-    | "starInnerRadius"
-    | "starOuterCornerRadius"
-    | "starInnerCornerRadius"
-  >,
-  nodeId?: string,
-): string {
+export function vectorShapeOutlineD(node: VectorShapeOutlineNode, nodeId?: string): string {
+  const baked = node.flattenedPathData?.trim();
+  if (node.type === "path" && baked) {
+    return baked;
+  }
+  if (
+    (node.type === "path" || node.type === "polygon") &&
+    (node.pathPoints?.length ?? 0) > 0
+  ) {
+    return pathPointsOutlineD(node);
+  }
   if (isPolygonNode(node)) {
     const preview = nodeId ? getPolygonPreview() : null;
     if (preview && preview.nodeId === nodeId) {
@@ -421,29 +489,7 @@ export function vectorShapeOutlineD(
     }
     return starPathDForNode(node);
   }
-  const pts = node.pathPoints ?? [];
-  if (isRoundedRectPath(node)) {
-    return roundedRectPathD(
-      Math.max(1, node.width),
-      Math.max(1, node.height),
-      getNodeCornerRadii(node),
-    );
-  }
-  if (isCornerRoundablePath(node)) {
-    const radii = getPathVertexCornerRadii(node);
-    if (radii.some((r) => r > 0)) {
-      const clamped = clampPathCornerRadii(pts, radii);
-      const roundedPts = pts.map((p, i) => ({
-        ...p,
-        cornerRadius: clamped[i] ?? 0,
-      }));
-      return createRoundedVectorPathSvgD({
-        points: roundedPts,
-        closed: node.pathClosed ?? false,
-      });
-    }
-  }
-  return pathToSvgD(pts, node.pathClosed ?? false);
+  return "";
 }
 
 /** @deprecated Prefer vectorShapeOutlineD */
@@ -734,7 +780,8 @@ export function ensureRoundedRectPathPoints(node: EditorNode): EditorNode {
   }
   if (isRoundedRectPath(node)) return node;
   const pts = node.pathPoints ?? [];
-  if (pts.length < 4) return node;
+  // Only normalize four-corner quads (e.g. rectangles). Ellipses and polygons have more anchors.
+  if (pts.length !== 4) return node;
   return {
     ...node,
     pathPoints: rectCornerPathPoints(node.width, node.height, pts),
@@ -743,7 +790,7 @@ export function ensureRoundedRectPathPoints(node: EditorNode): EditorNode {
 
 export function convertNodeToPath(node: EditorNode): EditorNode | null {
   if (!isVectorEditableShape(node)) return null;
-  if (node.type === "path" && node.pathPoints?.length) {
+  if (node.type === "path" && node.pathPoints?.length && !needsVectorPathConversion(node)) {
     return node;
   }
   const built = shapeToPathPoints(node);
@@ -757,6 +804,8 @@ export function convertNodeToPath(node: EditorNode): EditorNode | null {
     polygonSides: undefined,
     starPoints: undefined,
     starInnerRadius: undefined,
+    starOuterCornerRadius: undefined,
+    starInnerCornerRadius: undefined,
     arrowHead: undefined,
     arcStartDeg: undefined,
     arcSweepDeg: undefined,

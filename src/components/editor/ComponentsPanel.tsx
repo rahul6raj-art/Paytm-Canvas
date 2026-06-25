@@ -1,32 +1,51 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { Component, Package, Plus, Search, X } from "lucide-react";
+import { Component, Grid3X3, LayoutList, Package, Plus, Search, X } from "lucide-react";
 import { useEditorStore, type EditorNode } from "@/stores/useEditorStore";
 import {
   canCreateComponentFromSelection,
   filterComponentLibraryGroups,
-  flattenComponentLibraryGroups,
   groupComponentMasters,
-  listComponentMasters,
+  primaryMasterForGroup,
   type ComponentLibraryGroup,
 } from "@/lib/componentModel";
+import {
+  buildComponentFolderTree,
+  componentDisplayName,
+  localComponentMasters,
+  localComponentPanelMasters,
+  type ComponentFolderNode,
+} from "@/lib/components/folders";
 import { trySelectAllPanelField } from "@/lib/panelFieldKeyboard";
+import { recordRecentComponent } from "@/lib/componentUx";
 import { cn } from "@/lib/utils";
 
-function ComponentPreview({ width, height }: { width: number; height: number }) {
+function ComponentPreview({
+  width,
+  height,
+  compact = false,
+}: {
+  width: number;
+  height: number;
+  compact?: boolean;
+}) {
   const w = Math.max(1, width);
   const h = Math.max(1, height);
   const ar = w / h;
-  const boxW = ar >= 1 ? 56 : 56 * ar;
-  const boxH = ar >= 1 ? 56 / ar : 56;
+  const max = compact ? 18 : 56;
+  const boxW = ar >= 1 ? max : max * ar;
+  const boxH = ar >= 1 ? max / ar : max;
   return (
     <div
-      className="flex h-14 w-full items-center justify-center rounded border border-violet-500/25 bg-violet-500/[0.08]"
+      className={cn(
+        "flex shrink-0 items-center justify-center rounded border border-violet-400/30 bg-violet-400/[0.1]",
+        compact ? "h-7 w-7" : "h-14 w-full",
+      )}
       aria-hidden
     >
       <div
-        className="rounded-sm border border-violet-400/40 bg-violet-400/20"
+        className="rounded-sm border border-violet-300/45 bg-violet-300/25"
         style={{ width: boxW, height: boxH }}
       />
     </div>
@@ -41,62 +60,169 @@ function variantSubtitle(node: EditorNode): string | null {
     .join(" · ");
 }
 
+function panelMasterLabel(group: ComponentLibraryGroup, master: EditorNode): string {
+  if (group.variants.length > 1) return group.label;
+  return componentDisplayName(master.name);
+}
+
 function ComponentCard({
   master,
   group,
   active,
+  listView,
   onActivate,
   onDragStart,
+  onDragEnd,
+  onContextMenu,
 }: {
   master: EditorNode;
   group: ComponentLibraryGroup;
   active: boolean;
+  listView?: boolean;
   onActivate: () => void;
   onDragStart: (e: React.DragEvent) => void;
+  onDragEnd?: (e: React.DragEvent) => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   const select = useEditorStore((s) => s.select);
+  const didDragRef = useRef(false);
   const subtitle = variantSubtitle(master);
-  const showGroupContext = group.variants.length > 1;
+  const variantCount = group.variants.length;
+  const displayName = panelMasterLabel(group, master);
 
   return (
     <button
       type="button"
       draggable
       data-component-id={master.id}
-      onDragStart={onDragStart}
-      onClick={onActivate}
+      onDragStart={(e) => {
+        didDragRef.current = true;
+        onDragStart(e);
+      }}
+      onDragEnd={(e) => {
+        onDragEnd?.(e);
+        requestAnimationFrame(() => {
+          didDragRef.current = false;
+        });
+      }}
+      onClick={() => {
+        if (didDragRef.current) return;
+        onActivate();
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onContextMenu?.(e);
+      }}
       onDoubleClick={(e) => {
         e.preventDefault();
         select(master.id, false);
       }}
       className={cn(
-        "w-full rounded-md border p-2 text-left transition-colors",
+        "w-full rounded-md border text-left transition-colors",
+        listView ? "flex items-center gap-2 p-1.5" : "p-2",
         active
           ? "border-accent/50 bg-accent/10 ring-1 ring-accent/30"
-          : "border-app-border bg-app-panel hover:border-violet-500/35 hover:bg-violet-500/10",
+          : "border-app-border bg-app-panel hover:border-violet-400/35 hover:bg-violet-400/10",
       )}
     >
-      <ComponentPreview width={master.width} height={master.height} />
-      <div className="mt-1.5 flex items-center gap-1.5">
-        <Component className="h-3.5 w-3.5 shrink-0 text-violet-300" strokeWidth={1.75} />
-        <span className="min-w-0 flex-1 truncate text-ui font-medium text-app-fg">
-          {showGroupContext ? master.name : group.label}
-        </span>
-        {showGroupContext ? (
-          <span className="shrink-0 rounded bg-app-hover px-1 py-0.5 text-ui font-semibold uppercase text-app-muted">
-            Var
-          </span>
-        ) : null}
-      </div>
-      {subtitle ? (
-        <p className="mt-0.5 truncate text-ui text-app-subtle" title={subtitle}>
-          {subtitle}
-        </p>
-      ) : null}
-      <p className="mt-0.5 truncate font-mono text-ui text-[#737373]">
-        {Math.round(master.width)}×{Math.round(master.height)}
-      </p>
+      {listView ? (
+        <>
+          <ComponentPreview width={master.width} height={master.height} compact />
+          <span className="min-w-0 flex-1 truncate text-ui font-medium text-app-fg">{displayName}</span>
+          {variantCount > 1 ? (
+            <span className="shrink-0 rounded bg-app-hover px-1 py-0.5 text-ui text-app-muted">
+              {variantCount} variants
+            </span>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <ComponentPreview width={master.width} height={master.height} />
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <Component className="h-3.5 w-3.5 shrink-0 text-violet-200" strokeWidth={1.75} />
+            <span className="min-w-0 flex-1 truncate text-ui font-medium text-app-fg">{displayName}</span>
+            {variantCount > 1 ? (
+              <span className="shrink-0 rounded bg-app-hover px-1 py-0.5 text-ui text-app-muted">
+                {variantCount} variants
+              </span>
+            ) : null}
+          </div>
+          {variantCount <= 1 && subtitle ? (
+            <p className="mt-0.5 truncate text-ui text-app-subtle" title={subtitle}>
+              {subtitle}
+            </p>
+          ) : null}
+        </>
+      )}
     </button>
+  );
+}
+
+function FolderSection({
+  folder,
+  depth,
+  groupsByMasterId,
+  listView,
+  activeMasterId,
+  startPlacement,
+  onDragStart,
+  onDragEnd,
+  onContextMenu,
+}: {
+  folder: ComponentFolderNode;
+  depth: number;
+  groupsByMasterId: Map<string, ComponentLibraryGroup>;
+  listView: boolean;
+  activeMasterId: string | null;
+  startPlacement: (id: string) => void;
+  onDragStart: (masterId: string, name: string) => (e: React.DragEvent) => void;
+  onDragEnd: (masterId: string) => () => void;
+  onContextMenu: (master: EditorNode, e: React.MouseEvent) => void;
+}) {
+  return (
+    <>
+      {folder.components.map((master) => {
+        const group = groupsByMasterId.get(master.id) ?? {
+          id: master.id,
+          label: componentDisplayName(master.name),
+          variants: [master],
+        };
+        return (
+          <li key={master.id} style={{ paddingLeft: depth * 8 }}>
+            <ComponentCard
+              master={master}
+              group={group}
+              active={activeMasterId === master.id}
+              listView={listView}
+              onActivate={() => startPlacement(master.id)}
+              onDragStart={onDragStart(master.id, master.name)}
+              onDragEnd={onDragEnd(master.id)}
+              onContextMenu={(e) => onContextMenu(master, e)}
+            />
+          </li>
+        );
+      })}
+      {folder.children.map((child) => (
+        <li key={child.path || child.name}>
+          <p className="mb-1 truncate px-0.5 section-heading" style={{ paddingLeft: depth * 8 }}>
+            {child.name}
+          </p>
+          <ul className="space-y-1.5">
+            <FolderSection
+              folder={child}
+              depth={depth + 1}
+              groupsByMasterId={groupsByMasterId}
+              listView={listView}
+              activeMasterId={activeMasterId}
+              startPlacement={startPlacement}
+              onDragStart={onDragStart}
+              onDragEnd={onDragEnd}
+              onContextMenu={onContextMenu}
+            />
+          </ul>
+        </li>
+      ))}
+    </>
   );
 }
 
@@ -107,22 +233,39 @@ export function ComponentsPanel({ embedded = false }: { embedded?: boolean } = {
   const createComponentFromSelection = useEditorStore((s) => s.createComponentFromSelection);
   const setPlacingComponentMasterId = useEditorStore((s) => s.setPlacingComponentMasterId);
   const setTool = useEditorStore((s) => s.setTool);
+  const select = useEditorStore((s) => s.select);
+  const deleteSingle = useEditorStore((s) => s.deleteSingle);
+  const updateNode = useEditorStore((s) => s.updateNode);
 
   const [query, setQuery] = useState("");
   const [activeMasterId, setActiveMasterId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; master: EditorNode } | null>(
+    null,
+  );
   const searchRef = useRef<HTMLInputElement>(null);
 
-  const masters = useMemo(() => listComponentMasters(nodes), [nodes]);
-  const groups = useMemo(() => groupComponentMasters(masters), [masters]);
+  const localGroups = useMemo(
+    () => groupComponentMasters(localComponentMasters(nodes), nodes),
+    [nodes],
+  );
   const filteredGroups = useMemo(
-    () => filterComponentLibraryGroups(groups, query),
-    [groups, query],
+    () => filterComponentLibraryGroups(localGroups, query),
+    [localGroups, query],
   );
   const flatFiltered = useMemo(
-    () => flattenComponentLibraryGroups(filteredGroups),
+    () => filteredGroups.map((g) => primaryMasterForGroup(g)),
     [filteredGroups],
   );
-
+  const panelMasters = useMemo(() => localComponentPanelMasters(nodes), [nodes]);
+  const folderTree = useMemo(() => buildComponentFolderTree(panelMasters), [panelMasters]);
+  const groupsByMasterId = useMemo(() => {
+    const map = new Map<string, ComponentLibraryGroup>();
+    for (const g of localGroups) {
+      for (const v of g.variants) map.set(v.id, g);
+    }
+    return map;
+  }, [localGroups]);
   const canCreate = useMemo(
     () => canCreateComponentFromSelection(selectedIds, nodes),
     [selectedIds, nodes],
@@ -133,23 +276,54 @@ export function ComponentsPanel({ embedded = false }: { embedded?: boolean } = {
       setTool("move");
       setPlacingComponentMasterId(masterId);
       setActiveMasterId(masterId);
+      recordRecentComponent(masterId);
     },
     [setPlacingComponentMasterId, setTool],
   );
 
   const onDragStart = (masterId: string, name: string) => (e: React.DragEvent) => {
+    e.stopPropagation();
+    setTool("move");
+    setPlacingComponentMasterId(masterId);
+    setActiveMasterId(masterId);
+    recordRecentComponent(masterId);
     e.dataTransfer.setData("application/x-pc-component", masterId);
+    e.dataTransfer.setData("text/plain", masterId);
     e.dataTransfer.effectAllowed = "copy";
     const ghost = document.createElement("div");
     ghost.className =
-      "rounded border border-violet-400/50 bg-violet-500/20 px-2 py-1 text-ui font-medium text-violet-100 shadow-lg";
-    ghost.textContent = name;
+      "rounded border border-violet-300/50 bg-violet-400/20 px-2 py-1 text-ui font-medium text-violet-50 shadow-lg";
+    ghost.textContent = componentDisplayName(name);
     ghost.style.position = "absolute";
     ghost.style.top = "-1000px";
     document.body.appendChild(ghost);
     e.dataTransfer.setDragImage(ghost, 0, 0);
     requestAnimationFrame(() => ghost.remove());
   };
+
+  const onDragEnd = (masterId: string) => () => {
+    requestAnimationFrame(() => {
+      const st = useEditorStore.getState();
+      if (st.placingComponentMasterId === masterId) {
+        setPlacingComponentMasterId(null);
+      }
+    });
+  };
+
+  const openContextMenu = (master: EditorNode, e: React.MouseEvent) => {
+    setContextMenu({ x: e.clientX, y: e.clientY, master });
+  };
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [contextMenu]);
 
   useEffect(() => {
     if (leftTab !== "components") return;
@@ -204,7 +378,7 @@ export function ComponentsPanel({ embedded = false }: { embedded?: boolean } = {
     }
   };
 
-  const totalCount = masters.length;
+  const totalCount = localGroups.length;
   const resultCount = flatFiltered.length;
   const searching = query.trim().length > 0;
 
@@ -251,24 +425,51 @@ export function ComponentsPanel({ embedded = false }: { embedded?: boolean } = {
           </p>
         ) : totalCount > 0 ? (
           <p className="mt-1.5 px-0.5 text-ui text-app-subtle">
-            {totalCount} component{totalCount === 1 ? "" : "s"} in this file
+            {totalCount} local component{totalCount === 1 ? "" : "s"}
           </p>
         ) : null}
 
-        <button
-          type="button"
-          disabled={!canCreate}
-          onClick={() => createComponentFromSelection()}
-          className={cn(
-            "mt-2 flex h-8 w-full items-center justify-center gap-1.5 rounded-md border text-ui font-semibold transition-colors",
-            canCreate
-              ? "border-violet-500/40 bg-violet-500/15 text-violet-100 hover:bg-violet-500/25"
-              : "cursor-not-allowed border-app-border-subtle text-app-subtle",
-          )}
-        >
-          <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-          Create component
-        </button>
+        <div className="mt-2 flex items-center gap-1">
+          <button
+            type="button"
+            disabled={!canCreate}
+            data-testid="create-component-panel"
+            onClick={() => createComponentFromSelection()}
+            className={cn(
+              "flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border text-ui font-semibold transition-colors",
+              canCreate
+                ? "border-violet-400/40 bg-violet-400/15 text-violet-50 hover:bg-violet-400/25"
+                : "cursor-not-allowed border-app-border-subtle text-app-subtle",
+            )}
+          >
+            <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+            Create component
+          </button>
+          <button
+            type="button"
+            aria-label="Grid view"
+            aria-pressed={viewMode === "grid"}
+            onClick={() => setViewMode("grid")}
+            className={cn(
+              "flex h-8 w-8 items-center justify-center rounded-md border border-app-border",
+              viewMode === "grid" ? "bg-app-hover text-app-fg" : "text-app-subtle hover:bg-app-hover",
+            )}
+          >
+            <Grid3X3 className="h-3.5 w-3.5" strokeWidth={2} />
+          </button>
+          <button
+            type="button"
+            aria-label="List view"
+            aria-pressed={viewMode === "list"}
+            onClick={() => setViewMode("list")}
+            className={cn(
+              "flex h-8 w-8 items-center justify-center rounded-md border border-app-border",
+              viewMode === "list" ? "bg-app-hover text-app-fg" : "text-app-subtle hover:bg-app-hover",
+            )}
+          >
+            <LayoutList className="h-3.5 w-3.5" strokeWidth={2} />
+          </button>
+        </div>
       </div>
 
       <div className="thin-scroll min-h-0 flex-1 overflow-y-auto p-2">
@@ -288,42 +489,98 @@ export function ComponentsPanel({ embedded = false }: { embedded?: boolean } = {
             <p className="mt-1 text-ui text-app-subtle">Try another name or variant label.</p>
           </div>
         ) : (
-          <div className="space-y-3">
-            {filteredGroups.map((group) => (
-              <div key={group.id}>
-                {group.variants.length > 1 ? (
-                  <p className="mb-1 truncate px-0.5 section-heading">
-                    {group.label}
-                    <span className="ml-1 font-normal normal-case text-app-subtle">
-                      · {group.variants.length} variants
-                    </span>
-                  </p>
-                ) : null}
-                <ul className={cn("space-y-1.5", group.variants.length > 1 && "pl-1")}>
-                  {group.variants.map((m) => (
-                    <li key={m.id}>
-                      <ComponentCard
-                        master={m}
-                        group={group}
-                        active={activeMasterId === m.id}
-                        onActivate={() => startPlacement(m.id)}
-                        onDragStart={onDragStart(m.id, m.name)}
-                      />
-                    </li>
-                  ))}
+          <div className="space-y-4">
+            <div>
+              <p className="mb-1.5 px-0.5 section-heading">Local components</p>
+              {searching ? (
+                <ul className="space-y-1.5">
+                  {filteredGroups.map((group) => {
+                    const master = primaryMasterForGroup(group);
+                    return (
+                      <li key={group.id}>
+                        <ComponentCard
+                          master={master}
+                          group={group}
+                          active={activeMasterId === master.id}
+                          listView={viewMode === "list"}
+                          onActivate={() => startPlacement(master.id)}
+                          onDragStart={onDragStart(master.id, master.name)}
+                          onDragEnd={onDragEnd(master.id)}
+                          onContextMenu={(e) => openContextMenu(master, e)}
+                        />
+                      </li>
+                    );
+                  })}
                 </ul>
-              </div>
-            ))}
+              ) : (
+                <ul className="space-y-1.5">
+                  <FolderSection
+                    folder={folderTree}
+                    depth={0}
+                    groupsByMasterId={groupsByMasterId}
+                    listView={viewMode === "list"}
+                    activeMasterId={activeMasterId}
+                    startPlacement={startPlacement}
+                    onDragStart={onDragStart}
+                    onDragEnd={onDragEnd}
+                    onContextMenu={openContextMenu}
+                  />
+                </ul>
+              )}
+            </div>
           </div>
         )}
-
-        {resultCount > 0 ? (
-          <p className="mt-3 px-1 text-ui leading-relaxed text-app-subtle">
-            Drag onto the canvas, click to place with the cursor, or double-click a master to select it on
-            the canvas.
-          </p>
-        ) : null}
       </div>
+
+      {contextMenu ? (
+        <div
+          className="fixed z-[100] min-w-[180px] rounded-lg border border-app-border bg-app-panel p-1 shadow-xl"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="editor-menu-dropdown-item w-full"
+            onClick={() => {
+              startPlacement(contextMenu.master.id);
+              setContextMenu(null);
+            }}
+          >
+            Insert instance
+          </button>
+          <button
+            type="button"
+            className="editor-menu-dropdown-item w-full"
+            onClick={() => {
+              select(contextMenu.master.id, false);
+              setContextMenu(null);
+            }}
+          >
+            Go to main component
+          </button>
+          <button
+            type="button"
+            className="editor-menu-dropdown-item w-full"
+            onClick={() => {
+              const next = window.prompt("Rename component", contextMenu.master.name);
+              if (next?.trim()) updateNode(contextMenu.master.id, { name: next.trim() });
+              setContextMenu(null);
+            }}
+          >
+            Rename
+          </button>
+          <button
+            type="button"
+            className="editor-menu-dropdown-item w-full text-red-300"
+            onClick={() => {
+              deleteSingle(contextMenu.master.id);
+              setContextMenu(null);
+            }}
+          >
+            Delete local component
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

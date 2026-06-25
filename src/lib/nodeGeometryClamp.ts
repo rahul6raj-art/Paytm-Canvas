@@ -31,17 +31,18 @@ export function clampNodeDimensions(
   height: number,
   refWidth: number,
   refHeight: number,
-  min = 1,
+  minWidth = 1,
+  minHeight = minWidth,
 ): { width: number; height: number } {
-  const refW = Math.max(min, refWidth);
-  const refH = Math.max(min, refHeight);
+  const refW = Math.max(minWidth, refWidth);
+  const refH = Math.max(minHeight, refHeight);
   const maxW = Math.max(MAX_NODE_DIMENSION, refW * 50);
   const maxH = Math.max(MAX_NODE_DIMENSION, refH * 50);
-  const w = Number.isFinite(width) ? Math.min(Math.max(min, width), maxW) : refW;
-  const h = Number.isFinite(height) ? Math.min(Math.max(min, height), maxH) : refH;
+  const w = Number.isFinite(width) ? Math.min(Math.max(minWidth, width), maxW) : refW;
+  const h = Number.isFinite(height) ? Math.min(Math.max(minHeight, height), maxH) : refH;
   return {
-    width: finiteDimension(w, min),
-    height: finiteDimension(h, min),
+    width: finiteDimension(w, minWidth),
+    height: finiteDimension(h, minHeight),
   };
 }
 
@@ -63,10 +64,18 @@ export function sanitizeNodeGeometry(
   ref?: Pick<EditorNode, "width" | "height">,
   opts?: { minDimension?: number },
 ): EditorNode {
-  const min = opts?.minDimension ?? 1;
-  const refW = ref?.width ?? (Number.isFinite(node.width) && node.width > 0 ? node.width : min);
-  const refH = ref?.height ?? (Number.isFinite(node.height) && node.height > 0 ? node.height : min);
-  const { width, height } = clampNodeDimensions(node.width, node.height, refW, refH, min);
+  const baseMin = opts?.minDimension ?? 1;
+  let minW = baseMin;
+  let minH = baseMin;
+  if (node.type === "path") {
+    minW = 0;
+    minH = 0;
+  } else if (node.type === "line" || node.type === "arrow") {
+    minH = 0;
+  }
+  const refW = ref?.width ?? (Number.isFinite(node.width) && node.width > 0 ? node.width : minW);
+  const refH = ref?.height ?? (Number.isFinite(node.height) && node.height > 0 ? node.height : minH);
+  const { width, height } = clampNodeDimensions(node.width, node.height, refW, refH, minW, minH);
   const { x, y } = clampNodePosition(node.x, node.y, { x: node.x, y: node.y });
   if (node.x === x && node.y === y && node.width === width && node.height === height) return node;
   return { ...node, x, y, width, height };

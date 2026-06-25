@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
+import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/useEditorStore";
 import {
   useCanExportToLinkedSource,
@@ -9,10 +10,11 @@ import {
 } from "@/lib/craftBridge/useExportToLinkedSource";
 import { topLevelSelectedIds } from "@/lib/editorGraph";
 import { hasEditorClipboardContent } from "@/lib/editorClipboardAvailability";
-import {
-  canCreateComponentFromSelection,
-  findInstanceRoot,
-} from "@/lib/componentModel";
+import { canCreateComponentFromSelection, findInstanceRoot } from "@/lib/componentModel";
+import { buildSlotTextContentSnapshot } from "@/lib/components/componentSlots";
+import { findSlotPropertyForHit, resolveInstanceDropParentId } from "@/lib/slotEditScope";
+import { canCreateComponentSetFromSelection } from "@/lib/componentUx";
+import { canUngroupSelection } from "@/lib/ungroupSelection";
 import { canAddAutoLayoutToSelection } from "@/lib/autoLayoutSelection";
 import { canAlignSelection } from "@/lib/alignSelection";
 import {
@@ -20,13 +22,15 @@ import {
   isMaskGroup,
 } from "@/lib/booleanGeometry";
 import { canOutlineStroke } from "@/lib/outlineStroke";
+import {
+  editorMenuDividerClass,
+  editorMenuItemClass,
+  editorMenuPanelScrollClass,
+} from "@/lib/editorMenuChrome";
 
 type Item =
   | { type: "item"; id: string; label: string; hint?: string; disabled?: boolean; onSelect: () => void }
   | { type: "sep" };
-
-const rowCls =
-  "flex w-full items-center justify-between gap-3 px-2 py-[5px] text-left text-ui leading-4 text-app-fg hover:bg-app-hover disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent";
 
 export function EditorContextMenu() {
   const contextMenu = useEditorStore((s) => s.contextMenu);
@@ -37,6 +41,7 @@ export function EditorContextMenu() {
   const setLayerRenameId = useEditorStore((s) => s.setLayerRenameId);
   const duplicateSingle = useEditorStore((s) => s.duplicateSingle);
   const deleteSingle = useEditorStore((s) => s.deleteSingle);
+  const deleteSelection = useEditorStore((s) => s.deleteSelection);
   const bringForward = useEditorStore((s) => s.bringForward);
   const sendBackward = useEditorStore((s) => s.sendBackward);
   const bringToFront = useEditorStore((s) => s.bringToFront);
@@ -44,6 +49,7 @@ export function EditorContextMenu() {
   const groupSelection = useEditorStore((s) => s.groupSelection);
   const ungroupSelection = useEditorStore((s) => s.ungroupSelection);
   const addAutoLayoutToSelection = useEditorStore((s) => s.addAutoLayoutToSelection);
+  const wrapSelectionInFrame = useEditorStore((s) => s.wrapSelectionInFrame);
   const toggleLock = useEditorStore((s) => s.toggleLock);
   const toggleVisible = useEditorStore((s) => s.toggleVisible);
   const editorMode = useEditorStore((s) => s.editorMode);
@@ -53,13 +59,21 @@ export function EditorContextMenu() {
   const alignSelection = useEditorStore((s) => s.alignSelection);
   const distributeSelection = useEditorStore((s) => s.distributeSelection);
   const createComponentFromSelection = useEditorStore((s) => s.createComponentFromSelection);
+  const combineAsVariants = useEditorStore((s) => s.combineAsVariants);
+  const createComponentSetFromSelection = useEditorStore((s) => s.createComponentSetFromSelection);
   const setPlacingComponentMasterId = useEditorStore((s) => s.setPlacingComponentMasterId);
   const detachInstance = useEditorStore((s) => s.detachInstance);
+  const goToMainComponent = useEditorStore((s) => s.goToMainComponent);
+  const resetInstanceOverrides = useEditorStore((s) => s.resetInstanceOverrides);
   const createBooleanGroup = useEditorStore((s) => s.createBooleanGroup);
   const updateBooleanOperation = useEditorStore((s) => s.updateBooleanOperation);
   const flattenSelection = useEditorStore((s) => s.flattenSelection);
   const outlineStrokeSelection = useEditorStore((s) => s.outlineStrokeSelection);
   const enterObjectEditMode = useEditorStore((s) => s.enterObjectEditMode);
+  const enterSlotEditMode = useEditorStore((s) => s.enterSlotEditMode);
+  const resetSlotContent = useEditorStore((s) => s.resetSlotContent);
+  const setSlotContent = useEditorStore((s) => s.setSlotContent);
+  const pasteIntoActiveSlot = useEditorStore((s) => s.pasteIntoActiveSlot);
   const useSelectionAsMask = useEditorStore((s) => s.useSelectionAsMask);
   const releaseMask = useEditorStore((s) => s.releaseMask);
   const canUpdateSource = useCanExportToLinkedSource();
@@ -79,7 +93,10 @@ export function EditorContextMenu() {
     if (!nodeId || !node) return [];
 
     const tops = topLevelSelectedIds(selectedIds, nodes);
-    const canDupDel = !node.locked && node.visible;
+    const canDupDel = tops.some((id) => {
+      const n = nodes[id];
+      return n && !n.locked && n.visible;
+    });
     const canArrange = tops.some((id) => {
       const n = nodes[id];
       return n && !n.locked && n.visible;
@@ -91,7 +108,7 @@ export function EditorContextMenu() {
         return n && !n.locked && n.visible && n.parentId === nodes[tops[0]!]?.parentId;
       });
     const ungroupOk =
-      selectedIds.length === 1 && node.type === "group" && !node.locked && node.visible;
+      editorMode === "design" && canUngroupSelection({ selectedIds, nodes, childOrder });
     const autoLayoutOk =
       editorMode === "design" && canAddAutoLayoutToSelection(selectedIds, nodes);
 
@@ -108,8 +125,11 @@ export function EditorContextMenu() {
       });
 
     const instRoot = findInstanceRoot(nodes, nodeId);
+    const slotScope = findSlotPropertyForHit(nodes, childOrder, nodeId);
     const canCreateComponent =
       editorMode === "design" && canCreateComponentFromSelection(selectedIds, nodes);
+    const canCreateComponentSet =
+      editorMode === "design" && canCreateComponentSetFromSelection(selectedIds, nodes);
     const isMaster = node.isComponent && (node.type === "frame" || node.type === "group");
 
     const canBoolean = getBooleanEligibleSelection(selectedIds, nodes).length >= 2;
@@ -126,10 +146,7 @@ export function EditorContextMenu() {
         ] satisfies Item[])
       : [];
 
-    const canOutline =
-      editorMode === "design" &&
-      selectedIds.length === 1 &&
-      canOutlineStroke(node);
+    const canOutline = editorMode === "design" && canOutlineStroke(node);
 
     const outlineItems: Item[] = canOutline
       ? [
@@ -138,7 +155,7 @@ export function EditorContextMenu() {
             id: "outline-stroke",
             label: "Outline stroke",
             hint: "⌘⌥O",
-            onSelect: () => outlineStrokeSelection(),
+            onSelect: () => outlineStrokeSelection(nodeId),
           },
         ]
       : [];
@@ -183,8 +200,58 @@ export function EditorContextMenu() {
         ]
       : [];
 
+    const slotItems: Item[] =
+      slotScope && editorMode === "design"
+        ? [
+            {
+              type: "item",
+              id: "slot-edit",
+              label: "Edit slot",
+              onSelect: () => enterSlotEditMode(slotScope.instanceRootId, slotScope.propertyKey),
+            },
+            {
+              type: "item",
+              id: "slot-replace",
+              label: "Replace slot content",
+              onSelect: () =>
+                setSlotContent(
+                  slotScope.instanceRootId,
+                  slotScope.propertyKey,
+                  buildSlotTextContentSnapshot("Slot text"),
+                ),
+            },
+            {
+              type: "item",
+              id: "slot-reset",
+              label: "Reset slot",
+              onSelect: () => resetSlotContent(slotScope.instanceRootId, slotScope.propertyKey),
+            },
+            {
+              type: "item",
+              id: "slot-copy",
+              label: "Copy slot content",
+              onSelect: () => {
+                setSelection([slotScope.containerId]);
+                copySelection();
+              },
+            },
+            {
+              type: "item",
+              id: "slot-paste",
+              label: "Paste into slot",
+              disabled: !clipboardReady,
+              onSelect: () => {
+                enterSlotEditMode(slotScope.instanceRootId, slotScope.propertyKey);
+                pasteIntoActiveSlot();
+              },
+            },
+            { type: "sep" },
+          ]
+        : [];
+
     const items: Item[] = [
       ...codeItems,
+      ...slotItems,
       {
         type: "item",
         id: "rename",
@@ -296,10 +363,13 @@ export function EditorContextMenu() {
       {
         type: "item",
         id: "del",
-        label: "Delete",
+        label: selectedIds.length > 1 ? `Delete ${selectedIds.length} layers` : "Delete",
         hint: "Del",
         disabled: !canDupDel,
-        onSelect: () => deleteSingle(nodeId),
+        onSelect: () => {
+          if (selectedIds.length > 1) deleteSelection();
+          else deleteSingle(nodeId);
+        },
       },
       { type: "sep" },
       {
@@ -353,6 +423,14 @@ export function EditorContextMenu() {
       },
       {
         type: "item",
+        id: "frame-selection",
+        label: "Frame selection",
+        hint: "⌘⌥G",
+        disabled: !autoLayoutOk,
+        onSelect: () => wrapSelectionInFrame(),
+      },
+      {
+        type: "item",
         id: "autolayout",
         label: "Add auto layout",
         hint: "⇧A",
@@ -393,6 +471,15 @@ export function EditorContextMenu() {
       });
     }
 
+    if (canCreateComponentSet) {
+      items.splice(canCreateComponent ? 2 : 1, 0, {
+        type: "item",
+        id: "create-component-set",
+        label: "Create component set",
+        onSelect: () => createComponentSetFromSelection(),
+      });
+    }
+
     if (isMaster && editorMode === "design") {
       items.splice(canCreateComponent ? 2 : 1, 0, {
         type: "item",
@@ -404,6 +491,18 @@ export function EditorContextMenu() {
 
     if (instRoot && editorMode === "design") {
       items.splice(1, 0, {
+        type: "item",
+        id: "go-main",
+        label: "Go to main component",
+        onSelect: () => goToMainComponent(instRoot),
+      });
+      items.splice(2, 0, {
+        type: "item",
+        id: "reset-overrides",
+        label: "Reset all overrides",
+        onSelect: () => resetInstanceOverrides(instRoot),
+      });
+      items.splice(3, 0, {
         type: "item",
         id: "detach-inst",
         label: "Detach instance",
@@ -421,12 +520,14 @@ export function EditorContextMenu() {
     setLayerRenameId,
     duplicateSingle,
     deleteSingle,
+    deleteSelection,
     bringForward,
     sendBackward,
     bringToFront,
     sendToBack,
     groupSelection,
     ungroupSelection,
+    wrapSelectionInFrame,
     toggleLock,
     toggleVisible,
     editorMode,
@@ -436,12 +537,21 @@ export function EditorContextMenu() {
     alignSelection,
     distributeSelection,
     createComponentFromSelection,
+    combineAsVariants,
+    createComponentSetFromSelection,
     setPlacingComponentMasterId,
     detachInstance,
+    goToMainComponent,
+    resetInstanceOverrides,
     createBooleanGroup,
     updateBooleanOperation,
     flattenSelection,
     enterObjectEditMode,
+    enterSlotEditMode,
+    resetSlotContent,
+    setSlotContent,
+    pasteIntoActiveSlot,
+    copySelection,
     useSelectionAsMask,
     releaseMask,
     clipboardReady,
@@ -479,7 +589,11 @@ export function EditorContextMenu() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") closeContextMenu();
     };
-    const onScroll = () => closeContextMenu();
+    const onScroll = (e: Event) => {
+      const target = e.target;
+      if (target instanceof Node && menuRef.current?.contains(target)) return;
+      closeContextMenu();
+    };
     const onResize = () => closeContextMenu();
     window.addEventListener("mousedown", onDown, true);
     window.addEventListener("keydown", onKey, true);
@@ -498,28 +612,31 @@ export function EditorContextMenu() {
   return createPortal(
     <div
       ref={menuRef}
-      className="fixed z-[200] min-w-[200px] editor-floating-menu border border-app-border bg-app-panel py-0.5 shadow-xl"
+      data-editor-shell
+      className={cn(editorMenuPanelScrollClass, "z-[200] min-w-[220px] max-h-[min(80vh,520px)]")}
       style={{ left: 0, top: 0 }}
       role="menu"
     >
       {items.map((it, i) =>
         it.type === "sep" ? (
-          <div key={`s-${i}`} className="my-0.5 h-px bg-app-hover" />
+          <div key={`s-${i}`} className={editorMenuDividerClass} role="separator" />
         ) : (
           <button
             key={it.id}
             type="button"
             role="menuitem"
             disabled={it.disabled}
-            className={rowCls}
+            className={cn(editorMenuItemClass, it.disabled && "opacity-35")}
             onClick={() => {
               if (it.disabled) return;
               closeContextMenu();
               it.onSelect();
             }}
           >
-            <span>{it.label}</span>
-            {it.hint ? <span className="shrink-0 font-mono text-ui text-app-subtle">{it.hint}</span> : null}
+            <span className="min-w-0 truncate">{it.label}</span>
+            {it.hint ? (
+              <span className="editor-menu-dropdown-shortcut">{it.hint}</span>
+            ) : null}
           </button>
         ),
       )}

@@ -112,6 +112,8 @@ describe("phoneShellBottomChrome", () => {
     assert.equal(isPhoneShellBottomChrome("pml-home__bottom-nav"), true);
     assert.equal(isPhoneShellBottomChrome("pml-signup__home-indicator"), true);
     assert.equal(isPhoneShellBottomChrome(undefined, "BottomNav"), true);
+    assert.equal(isPhoneShellBottomChrome("bn"), true);
+    assert.equal(isPhoneShellBottomChrome("bn__label body-medium"), true);
     assert.equal(isPhoneShellBottomChrome("pml-home__scroll"), false);
   });
 

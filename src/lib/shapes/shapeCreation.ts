@@ -3,6 +3,7 @@ import { defaultCanvasForegroundColor } from "@/lib/canvasForeground";
 import { normalizePathNode } from "@/lib/pathGeometry";
 import { RESIZE_MIN_DIMENSION } from "@/lib/resize";
 import {
+  DEFAULT_LINE_STROKE_WIDTH,
   DEFAULT_SHAPE_FILL,
   editorNodeKindForShapeType,
   shapeTypeLabel,
@@ -152,10 +153,10 @@ export function lineGeometryFromDrag(
   const dy = e.y - s.y;
   const length = Math.max(minSize, Math.hypot(dx, dy));
   const rotation = (Math.atan2(dy, dx) * 180) / Math.PI;
-  const height = 8;
+  const height = 0;
   return {
     x: s.x,
-    y: s.y - height / 2,
+    y: s.y,
     width: length,
     height,
     rotation,
@@ -194,7 +195,7 @@ export function createShapeNode(
 
   if (shapeType === "line" || shapeType === "arrow") {
     const { start: ls, end: le } = resolveLineEndpoints(startPoint, endPoint, modifiers);
-    const sw = style?.strokeWidth ?? 3;
+    const sw = style?.strokeWidth ?? (shapeType === "line" ? DEFAULT_LINE_STROKE_WIDTH : 3);
     const layout = layoutFromLineEndpoints(ls.x, ls.y, le.x, le.y, sw, minSize);
     if (shapeType === "arrow") {
       return {
@@ -211,7 +212,7 @@ export function createShapeNode(
         fillOpacity: 0,
         strokeColor: style?.strokeColor ?? defaultCanvasForegroundColor(),
         strokeWidth: sw,
-        strokeLinecap: "butt",
+        strokeLinecap: "round",
       };
     }
     return {

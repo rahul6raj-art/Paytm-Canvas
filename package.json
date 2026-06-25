@@ -7,6 +7,7 @@
   },
   "workspaces": [
     "packages/craft-api",
+    "packages/craft-oauth",
     "packages/craft-bridge",
     "packages/craft-bridge-vscode",
     "packages/craft-realtime"
@@ -39,6 +40,7 @@
     "verify:deploy": "node scripts/verify-deploy.mjs",
     "verify:production": "node scripts/verify-production-deploy.mjs",
     "verify:canvas-chrome": "node scripts/verify-canvas-chrome.mjs",
+    "verify:component-ux": "node scripts/verify-component-ux.mjs",
     "verify:legacy-cleanup": "node scripts/verify-legacy-cleanup.mjs",
     "verify:ci": "node scripts/verify-ci.mjs",
     "verify:ci-gate": "node scripts/verify-ci-gate.mjs",
@@ -65,6 +67,7 @@
     "bundle:dom-extractor": "esbuild src/lib/webImport/domExtractor.ts --bundle --platform=browser --format=iife --global-name=__craftDomExtract --outfile=src/lib/webImport/server/domExtractor.bundle.js",
     "craft-bridge": "node packages/craft-bridge/cli.mjs",
     "craft:setup": "bash scripts/craft-setup.sh",
+    "setup:google-oauth": "node scripts/setup-google-oauth.mjs",
     "bridge:pack": "npm run pack:check -w @paytm-craft/bridge",
     "bridge:publish": "node scripts/publish-bridge.mjs",
     "bridge:publish:live": "node scripts/publish-bridge.mjs --publish",
@@ -83,6 +86,7 @@
     "next": "^15.3.2",
     "node-html-parser": "^7.1.0",
     "openfig-core": "^0.3.7",
+    "opentype.js": "^2.0.0",
     "playwright": "^1.52.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

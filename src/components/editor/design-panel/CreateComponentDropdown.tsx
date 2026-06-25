@@ -2,14 +2,20 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, Component } from "lucide-react";
+import { ChevronDown, Component, Layers } from "lucide-react";
 import { canCreateComponentFromSelection } from "@/lib/componentModel";
+import { canCreateComponentSetFromSelection } from "@/lib/componentUx";
 import { formatShortcutLabel } from "@/lib/commands";
+import {
+  editorMenuItemClass,
+  editorMenuPanelClass,
+} from "@/lib/editorMenuChrome";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { cn } from "@/lib/utils";
 import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
 import {
-  inspectorHeaderActionBtnClass,
+  inspectorHeaderDropdownAnchorClass,
+  inspectorHeaderDropdownBtnClass,
   inspectorIconClass,
   inspectorIconStroke,
   inspectorLucideProps,
@@ -17,10 +23,8 @@ import {
 import {
   useAnchoredDropdownPosition,
   useDismissAnchoredDropdown,
+  anchoredMenuStyle,
 } from "../useAnchoredDropdown";
-
-const menuRow =
-  "flex w-full items-center justify-between gap-3 px-2.5 py-1.5 text-left text-ui text-app-fg hover:bg-app-hover disabled:cursor-not-allowed disabled:opacity-35";
 
 export function CreateComponentDropdown({ disabled }: { disabled?: boolean }) {
   const [open, setOpen] = useState(false);
@@ -30,8 +34,10 @@ export function CreateComponentDropdown({ disabled }: { disabled?: boolean }) {
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const nodes = useEditorStore((s) => s.nodes);
   const createComponentFromSelection = useEditorStore((s) => s.createComponentFromSelection);
+  const createComponentSetFromSelection = useEditorStore((s) => s.createComponentSetFromSelection);
 
   const canCreate = !disabled && canCreateComponentFromSelection(selectedIds, nodes);
+  const canCreateSet = !disabled && canCreateComponentSetFromSelection(selectedIds, nodes);
 
   const position = useAnchoredDropdownPosition(anchorRef, open, 4, {
     viewportClamp: true,
@@ -46,43 +52,59 @@ export function CreateComponentDropdown({ disabled }: { disabled?: boolean }) {
       <div
         ref={menuRef}
         role="menu"
-        className="fixed z-[120] overflow-hidden editor-floating-menu"
-        style={{ left: position.left, top: position.top }}
+        data-editor-shell
+        className={cn(editorMenuPanelClass, "z-[120] min-w-[220px]")}
+        style={anchoredMenuStyle(position)}
       >
-        <div className="section-heading px-2.5 py-1">Component</div>
+        <div className="section-heading">Component</div>
         <button
           type="button"
           role="menuitem"
           disabled={!canCreate}
-          className={menuRow}
+          className={cn(editorMenuItemClass, "!justify-start gap-2.5")}
           onClick={() => {
             createComponentFromSelection();
             setOpen(false);
           }}
         >
-          <span className="inline-flex items-center gap-2">
+          <span className="inline-flex min-w-0 flex-1 items-center gap-2.5">
             <Component className={inspectorIconClass} strokeWidth={inspectorIconStroke} />
-            Create component
+            <span className="truncate">Create component</span>
           </span>
-          <span className="font-mono text-ui text-app-subtle">{formatShortcutLabel("⌘⌥K")}</span>
+          <span className="editor-menu-dropdown-shortcut">{formatShortcutLabel("⌘⌥K")}</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={!canCreateSet}
+          data-testid="create-component-set-dropdown"
+          className={cn(editorMenuItemClass, "!justify-start gap-2.5")}
+          onClick={() => {
+            createComponentSetFromSelection();
+            setOpen(false);
+          }}
+        >
+          <span className="inline-flex min-w-0 flex-1 items-center gap-2.5">
+            <Layers className={inspectorIconClass} strokeWidth={inspectorIconStroke} />
+            <span className="truncate">Create component set</span>
+          </span>
         </button>
       </div>
     ) : null;
 
   return (
     <>
-      <div ref={anchorRef} className="inline-flex -m-1.5 p-1.5">
-        <EditorHintWrap title="Create component" disabled={!canCreate}>
+      <div ref={anchorRef} className={inspectorHeaderDropdownAnchorClass}>
+        <EditorHintWrap title="Component actions" disabled={!canCreate && !canCreateSet}>
           <button
             type="button"
-            aria-label="Create component"
+            aria-label="Component actions"
             aria-expanded={open}
             aria-haspopup="menu"
-            disabled={!canCreate}
+            disabled={!canCreate && !canCreateSet}
             onClick={() => setOpen((v) => !v)}
             className={cn(
-              inspectorHeaderActionBtnClass,
-              "h-8 min-h-8 w-auto min-w-9 shrink-0 gap-0.5 px-1.5",
+              inspectorHeaderDropdownBtnClass,
               "text-violet-200 hover:bg-violet-500/15 hover:text-violet-100",
               open && "bg-violet-500/15 text-violet-100",
             )}

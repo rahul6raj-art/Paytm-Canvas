@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Component } from "lucide-react";
 import { cancelCanvasMarqueeSession } from "@/lib/canvasMarqueeSession";
 import { useCanvasChromeForeground } from "@/hooks/useCanvasChromeForeground";
 import type { CanvasChromeForeground } from "@/lib/canvasForeground";
@@ -23,7 +24,8 @@ import {
   getDragPreviewSnapshot,
   subscribeDragPreview,
 } from "@/lib/canvasEphemeralTransform";
-import { getRenderedWorldTopLeft } from "@/lib/editorGraph";
+import { dedupeOrderedIds, getRenderedWorldTopLeft } from "@/lib/editorGraph";
+import { shouldShowCanvasFrameLabel } from "@/lib/components/componentSet";
 import { applyMoveToolPointerSelection, isAdditiveSelectionClick } from "@/lib/containerSelection";
 import { releaseFieldFocusForCanvas } from "@/lib/editorKeyboardFocus";
 import { cn } from "@/lib/utils";
@@ -78,9 +80,13 @@ export function RootFrameLabels({ rootIds }: RootFrameLabelsProps) {
   const labelIds = useMemo(() => frameLabelIds(nodes, childOrder), [nodes, childOrder]);
   const orderedLabelIds = useMemo(() => {
     const rootSet = new Set(rootIds);
-    const roots = rootIds.filter((id) => nodes[id]?.type === "frame" && nodes[id]?.visible);
-    const nested = labelIds.filter((id) => !rootSet.has(id));
-    return [...roots, ...nested];
+    const roots = rootIds.filter(
+      (id) => nodes[id]?.type === "frame" && nodes[id]?.visible && shouldShowCanvasFrameLabel(nodes, id),
+    );
+    const nested = labelIds.filter(
+      (id) => !rootSet.has(id) && shouldShowCanvasFrameLabel(nodes, id),
+    );
+    return dedupeOrderedIds([...roots, ...nested]);
   }, [rootIds, labelIds, nodes]);
 
   return (
@@ -105,6 +111,7 @@ export function RootFrameLabels({ rootIds }: RootFrameLabelsProps) {
             key={rid}
             frameId={rid}
             name={node.name}
+            isComponent={Boolean(node.isComponent)}
             left={labelPos.x}
             top={labelPos.y - labelOffset}
             fontSize={labelFontSize}
@@ -128,6 +135,7 @@ export function RootFrameLabels({ rootIds }: RootFrameLabelsProps) {
 function FrameLabel({
   frameId,
   name,
+  isComponent,
   left,
   top,
   fontSize,
@@ -141,6 +149,7 @@ function FrameLabel({
 }: {
   frameId: string;
   name: string;
+  isComponent: boolean;
   left: number;
   top: number;
   fontSize: number;
@@ -264,6 +273,14 @@ function FrameLabel({
     else onCancelRename();
   };
 
+  const labelColor = isComponent
+    ? selected
+      ? chrome.componentFrameLabelSelected
+      : chrome.componentFrameLabel
+    : selected
+      ? CANVAS_VISUAL.selection
+      : chrome.frameLabel;
+
   return (
     <div
       className="pointer-events-auto absolute z-[8] max-w-[320px]"
@@ -277,12 +294,13 @@ function FrameLabel({
           type="text"
           value={draft}
           aria-label="Frame name"
-          className="m-0 w-full min-w-[80px] max-w-[320px] rounded border px-1 py-0.5 font-medium leading-none shadow-sm outline-none ring-1 ring-[rgba(13,153,255,0.35)]"
+          className="m-0 w-full min-w-[80px] max-w-[320px] rounded border px-1 py-0.5 font-medium leading-none shadow-sm outline-none ring-1"
           style={{
             fontSize,
             backgroundColor: chrome.renameInputBg,
-            color: chrome.renameInputText,
-            borderColor: chrome.renameInputBorder,
+            color: isComponent ? chrome.componentFrameLabelSelected : chrome.renameInputText,
+            borderColor: isComponent ? "rgba(167, 139, 250, 0.55)" : chrome.renameInputBorder,
+            boxShadow: isComponent ? "0 0 0 1px rgba(167, 139, 250, 0.35)" : undefined,
           }}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}
@@ -325,19 +343,24 @@ function FrameLabel({
               }
             }}
             className={cn(
-              "block truncate font-medium leading-none select-none",
+              "inline-flex max-w-full items-center gap-1 truncate font-medium leading-none select-none",
               locked
                 ? "cursor-default"
                 : tool === "move" || tool === "frame"
                 ? "cursor-grab active:cursor-grabbing"
                 : "cursor-pointer",
           )}
-          style={{
-            fontSize,
-            color: selected ? CANVAS_VISUAL.selection : chrome.frameLabel,
-          }}
+          style={{ fontSize, color: labelColor }}
         >
-          {name}
+          {isComponent ? (
+            <Component
+              className="shrink-0"
+              style={{ width: fontSize, height: fontSize }}
+              strokeWidth={1.75}
+              aria-hidden
+            />
+          ) : null}
+          <span className="min-w-0 truncate">{name}</span>
         </span>
         </EditorHintWrap>
       )}

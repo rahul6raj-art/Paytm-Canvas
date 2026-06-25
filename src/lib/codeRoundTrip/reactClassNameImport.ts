@@ -25,8 +25,17 @@ export function classNameToNodePatch(className: string | undefined): Partial<Edi
     patch.fillEnabled = true;
   }
 
+  if (className.includes("pml-more") && !className.includes("__")) {
+    patch.width = 390;
+    patch.height = 844;
+    patch.layoutMode = "vertical" as LayoutMode;
+    patch.layoutGap = 0;
+    patch.fill = "#0f1117";
+    patch.fillEnabled = true;
+  }
+
   for (const t of tokens) {
-    if (t === "pml-home__scroll" || t === "pml-home-scroll" || t === "pml-signup__scroll") {
+    if (t === "pml-home__scroll" || t === "pml-home-scroll" || t === "pml-signup__scroll" || t === "pml-more__scroll") {
       patch.layoutMode = "vertical" as LayoutMode;
       patch.layoutGap = patch.layoutGap ?? 0;
       patch.height = patch.height ?? 640;
@@ -59,8 +68,27 @@ export function classNameToNodePatch(className: string | undefined): Partial<Edi
       patch.width = patch.width ?? 390;
       patch.layoutGap = patch.layoutGap ?? 12;
     }
-    if (t.startsWith("pml-home__") || t.startsWith("pml-signup__") || t.startsWith("sh-section")) {
+    if (t.startsWith("pml-home__") || t.startsWith("pml-signup__") || t.startsWith("pml-more__") || t.startsWith("sh-section")) {
       patch.width = patch.width ?? 390;
+    }
+    if (t === "bn" || t === "bn__tabs") {
+      patch.layoutMode = "horizontal";
+      patch.width = patch.width ?? 390;
+      patch.layoutGap = patch.layoutGap ?? 0;
+      patch.counterAxisAlign = "stretch";
+    }
+    if (t === "bn__tab") {
+      patch.layoutMode = "vertical";
+      patch.layoutSizingHorizontal = "fill";
+      patch.counterAxisAlign = "center";
+      patch.primaryAxisAlign = "center";
+      patch.width = patch.width ?? 78;
+    }
+    if (t === "bn__label") {
+      patch.textAlign = "center";
+      patch.textResizeMode = "auto-width";
+      patch.width = Math.max(patch.width ?? 0, 56);
+      patch.height = Math.max(patch.height ?? 0, 16);
     }
     if (t === "flex" || t === "inline-flex") {
       patch.layoutMode = patch.layoutMode ?? "horizontal";

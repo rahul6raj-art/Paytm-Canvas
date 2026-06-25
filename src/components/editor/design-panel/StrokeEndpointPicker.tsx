@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import {
   STROKE_ENDPOINT_ARROW_OPTIONS,
   STROKE_ENDPOINT_CAP_OPTIONS,
@@ -10,6 +10,16 @@ import {
   type StrokeEndpoint,
 } from "@/lib/strokeEndpoints";
 import { appFieldShellClass } from "@/lib/appFieldStyles";
+import {
+  editorMenuDividerClass,
+  editorMenuItemClass,
+  editorMenuPanelScrollClass,
+} from "@/lib/editorMenuChrome";
+import {
+  inspectorFieldIconSlotClass,
+  inspectorIconClass,
+  inspectorIconStroke,
+} from "@/lib/inspectorIconStyles";
 import { cn } from "@/lib/utils";
 import {
   anchoredMenuStyle,
@@ -35,6 +45,7 @@ export function StrokeEndpointPicker({
   const menuRef = useRef<HTMLDivElement>(null);
   const position = useAnchoredDropdownPosition(anchorRef, open, 4, {
     viewportClamp: true,
+    maxHeight: 420,
     width: 200,
   });
   useDismissAnchoredDropdown(open, () => setOpen(false), anchorRef, menuRef);
@@ -43,11 +54,21 @@ export function StrokeEndpointPicker({
     setMounted(true);
   }, []);
 
+  const pick = (next: StrokeEndpoint) => {
+    onChange(next);
+    setOpen(false);
+  };
+
   const menu = open && mounted ? (
     <div
       ref={menuRef}
       role="listbox"
-      className="fixed z-[120] overflow-hidden editor-floating-menu"
+      aria-label={label}
+      data-editor-shell
+      className={cn(
+        editorMenuPanelScrollClass,
+        "pointer-events-auto z-[120] min-w-[200px] border border-app-border bg-app-surface py-1 shadow-xl thin-scroll",
+      )}
       style={anchoredMenuStyle(position)}
     >
       {STROKE_ENDPOINT_CAP_OPTIONS.map((opt) => (
@@ -56,23 +77,17 @@ export function StrokeEndpointPicker({
           option={opt}
           selected={value === opt.value}
           disabled={disabled}
-          onPick={() => {
-            onChange(opt.value);
-            setOpen(false);
-          }}
+          onPick={() => pick(opt.value)}
         />
       ))}
-      <div className="my-1 border-t border-app-border-subtle" />
+      <div className={editorMenuDividerClass} role="separator" />
       {STROKE_ENDPOINT_ARROW_OPTIONS.map((opt) => (
         <EndpointMenuItem
           key={opt.value}
           option={opt}
           selected={value === opt.value}
           disabled={disabled}
-          onPick={() => {
-            onChange(opt.value);
-            setOpen(false);
-          }}
+          onPick={() => pick(opt.value)}
         />
       ))}
     </div>
@@ -88,14 +103,25 @@ export function StrokeEndpointPicker({
         onClick={() => setOpen((o) => !o)}
         className={cn(
           appFieldShellClass,
-          "w-full gap-2 px-1.5 text-left hover:bg-app-hover disabled:opacity-40",
+          "w-full gap-1.5 px-1.5 text-left hover:bg-app-hover disabled:opacity-40",
           open && "border-app-panel-edge ring-1 ring-app-panel-edge",
         )}
         aria-expanded={open}
         aria-haspopup="listbox"
       >
-        <EndpointPreviewIcon endpoint={value} className="shrink-0 text-app-muted" />
-        <span className="min-w-0 flex-1 truncate">{strokeEndpointLabel(value)}</span>
+        <span className={cn(inspectorFieldIconSlotClass, "border-r border-app-border px-1")}>
+          <EndpointPreviewIcon endpoint={value} className="shrink-0 text-app-muted" />
+        </span>
+        <span className="min-w-0 flex-1 truncate text-app-fg">{strokeEndpointLabel(value)}</span>
+        <ChevronDown
+          className={cn(
+            inspectorIconClass,
+            "mr-0.5 shrink-0 text-app-muted transition-transform",
+            open && "rotate-180",
+          )}
+          strokeWidth={inspectorIconStroke}
+          aria-hidden
+        />
       </button>
       {mounted && menu ? createPortal(menu, document.body) : null}
     </div>
@@ -119,17 +145,24 @@ function EndpointMenuItem({
       role="option"
       aria-selected={selected}
       disabled={disabled}
-      onClick={onPick}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (disabled) return;
+        onPick();
+      }}
       className={cn(
-        "flex w-full items-center gap-2 px-2 py-1.5 text-left text-ui text-app-fg hover:bg-app-hover disabled:opacity-40",
-        selected && "bg-app-inset",
+        editorMenuItemClass,
+        "!justify-start gap-2.5 px-2.5 py-1.5",
+        selected && "bg-app-inset font-medium text-app-fg",
       )}
     >
-      <span className="flex w-4 shrink-0 justify-center">
-        {selected ? <Check className="h-3.5 w-3.5 text-app-fg" strokeWidth={2} /> : null}
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+        {selected ? (
+          <Check className={cn(inspectorIconClass, "text-app-fg")} strokeWidth={inspectorIconStroke} />
+        ) : null}
       </span>
       <EndpointPreviewIcon endpoint={option.value} className="shrink-0 text-app-muted" />
-      <span>{option.label}</span>
+      <span className="min-w-0 flex-1 truncate">{option.label}</span>
     </button>
   );
 }

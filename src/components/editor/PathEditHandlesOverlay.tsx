@@ -9,15 +9,17 @@ import {
 import {
   getNodeWorldInverseMatrixFromChildOrder,
   getNodeWorldMatrixFromChildOrder,
-  getRenderedWorldBounds,
+  getRenderedWorldTopLeft,
 } from "@/lib/editorGraph";
-import { pathHandleMirroring } from "@/lib/pathHandles";
+import { togglePathPointType, type PenPointerState } from "@/lib/penTool";
 import { isRoundedRectPath } from "@/lib/shapes/shapeToPath";
 import { PathEditPathOutline } from "@/components/editor/PathEditPathOutline";
 import {
   pathEditAnchorOverlayStyle,
   pathEditBezierHandleOverlayStyle,
-  selectedPathPoints,
+  PATH_EDIT_HANDLE_LINE_STROKE,
+  pathPointForBezierHandleDisplay,
+  pathPointHandleAffordances,
 } from "@/lib/pathEditAnchors";
 import {
   orientedBoxOverlayStyle,
@@ -45,13 +47,28 @@ function pathLocalToWorld(
 ): { x: number; y: number } {
   const matrix = getNodeWorldMatrixFromChildOrder(nodeId, nodes, childOrder);
   if (matrix) return applyMatrixToPoint(matrix, local);
-  const b = getRenderedWorldBounds(nodeId, nodes, childOrder);
-  return { x: b.x + local.x, y: b.y + local.y };
+  const origin = getRenderedWorldTopLeft(nodeId, nodes, childOrder);
+  return { x: origin.x + local.x, y: origin.y + local.y };
+}
+
+function worldToPathLocal(
+  nodeId: string,
+  worldX: number,
+  worldY: number,
+  nodes: Record<string, import("@/stores/useEditorStore").EditorNode>,
+  childOrder: Record<string, string[]>,
+): { x: number; y: number } {
+  const inv = getNodeWorldInverseMatrixFromChildOrder(nodeId, nodes, childOrder);
+  if (inv) return applyMatrixToPoint(inv, { x: worldX, y: worldY });
+  const origin = getRenderedWorldTopLeft(nodeId, nodes, childOrder);
+  return { x: worldX - origin.x, y: worldY - origin.y };
 }
 
 /** Figma-style vector edit anchors and bezier handles (viewport screen space, above hit layer). */
 export function PathEditHandlesOverlay() {
   const pathEditModeNodeId = useEditorStore((s) => s.pathEditModeNodeId);
+  const penDrawingNodeId = useEditorStore((s) => s.penDrawingNodeId);
+  const selectedIds = useEditorStore((s) => s.selectedIds);
   const nodes = useEditorStore((s) => s.nodes);
   const childOrder = useEditorStore((s) => s.childOrder);
   const zoom = useEditorStore((s) => s.zoom);
@@ -67,24 +84,34 @@ export function PathEditHandlesOverlay() {
   const overlay = useCanvasOverlaySpace();
   const dragPreview = useSyncExternalStore(subscribeDragPreview, getDragPreviewSnapshot, () => null);
 
-  const nodeId = pathEditModeNodeId;
+  const nodeId = useMemo(() => {
+    if (pathEditModeNodeId) return pathEditModeNodeId;
+    if (penDrawingNodeId) return null;
+    if (selectedIds.length !== 1) return null;
+    const candidate = selectedIds[0]!;
+    const n = nodes[candidate];
+    if (!n || n.type !== "path") return null;
+    if (tool !== "move" && tool !== "pen") return null;
+    return candidate;
+  }, [pathEditModeNodeId, penDrawingNodeId, selectedIds, nodes, tool]);
+
   const pathPointDragRef = useRef<{
     pointerId: number;
     pointIds: string[];
     kind: "anchor" | "handle-in" | "handle-out";
     startWorld: { x: number; y: number };
+    startPointerLocal: { x: number; y: number };
     startPts: Record<string, { x: number; y: number }>;
     startHandle?: { x: number; y: number };
     handlePointId?: string;
+    breakMirror: boolean;
   } | null>(null);
+  const penPointerStateRef = useRef<PenPointerState>("idle");
 
   const worldToNodeLocal = useCallback(
     (worldX: number, worldY: number) => {
       if (!nodeId) return { x: worldX, y: worldY };
-      const inv = getNodeWorldInverseMatrixFromChildOrder(nodeId, nodes, childOrder);
-      if (inv) return applyMatrixToPoint(inv, { x: worldX, y: worldY });
-      const n = nodes[nodeId];
-      return { x: worldX - (n?.x ?? 0), y: worldY - (n?.y ?? 0) };
+      return worldToPathLocal(nodeId, worldX, worldY, nodes, childOrder);
     },
     [nodeId, nodes, childOrder],
   );
@@ -103,7 +130,7 @@ export function PathEditHandlesOverlay() {
     Boolean(nodeId) &&
     node?.type === "path" &&
     editorMode === "design" &&
-    tool === "move";
+    (tool === "move" || tool === "pen");
 
   const dragOffset = useMemo(
     () => (nodeId ? getDragPreviewOffsetForIds([nodeId]) : { dx: 0, dy: 0 }),
@@ -136,9 +163,16 @@ export function PathEditHandlesOverlay() {
     e.preventDefault();
     pushHistory();
     const w = clientToWorld(e.clientX, e.clientY);
+    const startPointerLocal = worldToPathLocal(nodeId, w.x, w.y, nodes, childOrder);
     const pt = nodes[nodeId]?.pathPoints?.find((p) => p.id === pointId);
     if (!pt) return;
-    setPathEditMode(nodeId);
+    const livePathEditMode = useEditorStore.getState().pathEditModeNodeId;
+    if (livePathEditMode !== nodeId) {
+      setPathEditMode(nodeId);
+    }
+    const dragKind =
+      kind === "anchor" ? "draggingAnchor" : kind === "handle-in" ? "draggingInHandle" : "draggingOutHandle";
+    penPointerStateRef.current = dragKind;
     const moveIds =
       kind === "anchor"
         ? (dragPointIds ?? (selectedPathPointIds.includes(pointId) ? selectedPathPointIds : [pointId]))
@@ -153,8 +187,10 @@ export function PathEditHandlesOverlay() {
       pointIds: moveIds,
       kind,
       startWorld: w,
+      startPointerLocal,
       startPts,
       handlePointId: pointId,
+      breakMirror: e.altKey,
       startHandle:
         kind === "handle-in"
           ? pt.handleIn
@@ -168,15 +204,17 @@ export function PathEditHandlesOverlay() {
     };
     captureEl.setPointerCapture(e.pointerId);
 
-    const applyMove = (clientX: number, clientY: number) => {
+    const applyMove = (clientX: number, clientY: number, altKey: boolean) => {
       const d = pathPointDragRef.current;
       if (!d) return;
+
+      const live = useEditorStore.getState();
       const nw = clientToWorld(clientX, clientY);
-      const startLocal = worldToNodeLocal(d.startWorld.x, d.startWorld.y);
-      const nowLocal = worldToNodeLocal(nw.x, nw.y);
-      const dx = nowLocal.x - startLocal.x;
-      const dy = nowLocal.y - startLocal.y;
+      const nowLocal = worldToPathLocal(nodeId, nw.x, nw.y, live.nodes, live.childOrder);
+
       if (d.kind === "anchor") {
+        const dx = nowLocal.x - d.startPointerLocal.x;
+        const dy = nowLocal.y - d.startPointerLocal.y;
         const patches: Record<string, { x: number; y: number }> = {};
         for (const id of d.pointIds) {
           const start = d.startPts[id];
@@ -184,35 +222,47 @@ export function PathEditHandlesOverlay() {
           patches[id] = { x: start.x + dx, y: start.y + dy };
         }
         updatePathPoints(nodeId, patches, { skipHistory: true });
-      } else if (d.startHandle && d.handlePointId) {
-        const patch =
-          d.kind === "handle-in"
-            ? { handleIn: { x: d.startHandle.x + dx, y: d.startHandle.y + dy } }
-            : { handleOut: { x: d.startHandle.x + dx, y: d.startHandle.y + dy } };
-        updatePathPoint(nodeId, d.handlePointId, patch, { skipHistory: true });
+        return;
       }
+
+      if (!d.handlePointId || (d.kind !== "handle-in" && d.kind !== "handle-out")) return;
+      const startHandle = d.startHandle ?? { x: 0, y: 0 };
+      const relative = {
+        x: startHandle.x + (nowLocal.x - d.startPointerLocal.x),
+        y: startHandle.y + (nowLocal.y - d.startPointerLocal.y),
+      };
+      const patch =
+        d.kind === "handle-in" ? { handleIn: relative } : { handleOut: relative };
+
+      updatePathPoint(nodeId, d.handlePointId, patch, {
+        skipHistory: true,
+        breakHandleMirror: altKey,
+      });
     };
 
-    const pathScheduler = createRafPointerScheduler<{ clientX: number; clientY: number }>(
-      ({ clientX, clientY }) => applyMove(clientX, clientY),
+    const pathScheduler = createRafPointerScheduler<{ clientX: number; clientY: number; altKey: boolean }>(
+      ({ clientX, clientY, altKey }) => {
+        applyMove(clientX, clientY, altKey);
+      },
     );
 
     const onMove = (ev: PointerEvent) => {
       const d = pathPointDragRef.current;
       if (!d || ev.pointerId !== d.pointerId) return;
       forEachCoalescedPointerEvent(ev, (pe) => {
-        pathScheduler.schedule({ clientX: pe.clientX, clientY: pe.clientY });
+        pathScheduler.schedule({ clientX: pe.clientX, clientY: pe.clientY, altKey: pe.altKey });
       });
     };
     const onUp = (ev: PointerEvent) => {
       const d = pathPointDragRef.current;
       if (!d || ev.pointerId !== d.pointerId) return;
       forEachCoalescedPointerEvent(ev, (pe) => {
-        pathScheduler.schedule({ clientX: pe.clientX, clientY: pe.clientY });
+        pathScheduler.schedule({ clientX: pe.clientX, clientY: pe.clientY, altKey: pe.altKey });
       });
       pathScheduler.flush();
       pathScheduler.cancel();
       pathPointDragRef.current = null;
+      penPointerStateRef.current = "idle";
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
@@ -224,6 +274,9 @@ export function PathEditHandlesOverlay() {
 
   const onAnchorDown = (pointId: string, e: React.PointerEvent) => {
     e.stopPropagation();
+    if (nodeId && pathEditModeNodeId !== nodeId) {
+      setPathEditMode(nodeId);
+    }
     let dragIds: string[];
     if (e.shiftKey) {
       if (selectedPathPointIds.includes(pointId)) {
@@ -248,24 +301,25 @@ export function PathEditHandlesOverlay() {
     e: React.PointerEvent,
   ) => {
     e.stopPropagation();
+    if (nodeId && pathEditModeNodeId !== nodeId) {
+      setPathEditMode(nodeId);
+    }
     togglePathPointSelection(pointId, e.shiftKey);
     if (isRoundedRectPath(node)) return;
     startPathDrag(pointId, kind, e, e.currentTarget as HTMLElement);
   };
 
-  const selectedPts = selectedPathPoints(pts, selectedPathPointIds);
-  const primarySelectedId = selectedPathPointIds[0] ?? null;
-  const selectedPt = pts.find((p) => p.id === primarySelectedId);
-  const mirroring = pathHandleMirroring(node);
   const roundedRect = isRoundedRectPath(node);
-  const showBezierHandles = selectedPts.length === 1 && selectedPt && !roundedRect;
+  const selectedPt = pathPointForBezierHandleDisplay(pts, selectedPathPointIds, {
+    roundedRect,
+  });
+  const showBezierHandles = selectedPt != null;
 
   const lineStroke = screenPxToOverlay(1, overlay);
 
   const bezierLines = showBezierHandles && selectedPt
-    ? (["handle-in", "handle-out"] as const).flatMap((kind) => {
-        const h = kind === "handle-in" ? selectedPt.handleIn : selectedPt.handleOut;
-        if (!h) return [];
+    ? pathPointHandleAffordances(selectedPt, true).flatMap(({ kind, vec }) => {
+        if (Math.hypot(vec.x, vec.y) < 1e-3) return [];
         const anchorWorld = pathLocalToWorld(
           nodeId,
           { x: selectedPt.x, y: selectedPt.y },
@@ -274,7 +328,7 @@ export function PathEditHandlesOverlay() {
         );
         const handleWorld = pathLocalToWorld(
           nodeId,
-          { x: selectedPt.x + h.x, y: selectedPt.y + h.y },
+          { x: selectedPt.x + vec.x, y: selectedPt.y + vec.y },
           nodes,
           childOrder,
         );
@@ -310,7 +364,7 @@ export function PathEditHandlesOverlay() {
               y1={line.y1}
               x2={line.x2}
               y2={line.y2}
-              stroke="var(--pc-canvas-selection)"
+              stroke={PATH_EDIT_HANDLE_LINE_STROKE}
               strokeWidth={lineStroke}
             />
           ))}
@@ -318,12 +372,10 @@ export function PathEditHandlesOverlay() {
       ) : null}
 
       {showBezierHandles && selectedPt
-        ? (["handle-in", "handle-out"] as const).map((kind) => {
-            const h = kind === "handle-in" ? selectedPt.handleIn : selectedPt.handleOut;
-            if (!h) return null;
+        ? pathPointHandleAffordances(selectedPt, true).map(({ kind, vec, virtual }) => {
             const handleWorld = pathLocalToWorld(
               nodeId,
-              { x: selectedPt.x + h.x, y: selectedPt.y + h.y },
+              { x: selectedPt.x + vec.x, y: selectedPt.y + vec.y },
               nodes,
               childOrder,
             );
@@ -334,7 +386,7 @@ export function PathEditHandlesOverlay() {
             );
             return (
               <button
-                key={kind}
+                key={`${kind}-${virtual ? "virtual" : "stored"}`}
                 type="button"
                 aria-label={kind === "handle-in" ? "Handle in" : "Handle out"}
                 className="pointer-events-auto absolute touch-none"
@@ -342,6 +394,7 @@ export function PathEditHandlesOverlay() {
                   ...pathEditBezierHandleOverlayStyle(overlay),
                   left: pos.x,
                   top: pos.y,
+                  opacity: virtual && Math.hypot(vec.x, vec.y) < 1e-3 ? 0.55 : 1,
                 }}
                 onPointerDown={(ev) => onHandleDown(selectedPt.id, kind, ev)}
               />
@@ -372,16 +425,8 @@ export function PathEditHandlesOverlay() {
             onDoubleClick={(ev) => {
               ev.stopPropagation();
               pushHistory();
-              const hasHandles = pt.handleIn || pt.handleOut;
-              if (hasHandles) {
-                updatePathPoint(nodeId, pt.id, { handleIn: undefined, handleOut: undefined });
-              } else {
-                const len = Math.min(node.width, node.height) * 0.15;
-                updatePathPoint(nodeId, pt.id, {
-                  handleOut: { x: len, y: 0 },
-                  handleIn: mirroring === "none" ? undefined : { x: -len, y: 0 },
-                });
-              }
+              const defaultLen = Math.min(node.width, node.height) * 0.15;
+              updatePathPoint(nodeId, pt.id, togglePathPointType(pt, defaultLen));
             }}
           />
         );

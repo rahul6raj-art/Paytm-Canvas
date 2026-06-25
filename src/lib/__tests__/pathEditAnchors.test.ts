@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  pathPointForBezierHandleDisplay,
   pathPointSelectionPosition,
   togglePathPointInSelection,
 } from "@/lib/pathEditAnchors";
@@ -23,5 +24,16 @@ describe("pathEditAnchors", () => {
     assert.equal(pos?.x, 5);
     assert.equal(pos?.y, 10);
     assert.equal(pos?.mixed, true);
+  });
+
+  it("shows bezier handles only for a single selected anchor", () => {
+    const points = [
+      { id: "a", x: 0, y: 0, handleOut: { x: 10, y: 0 } },
+      { id: "b", x: 100, y: 0 },
+    ];
+    assert.equal(pathPointForBezierHandleDisplay(points, []), null);
+    assert.equal(pathPointForBezierHandleDisplay(points, ["a", "b"]), null);
+    assert.equal(pathPointForBezierHandleDisplay(points, ["a"])?.id, "a");
+    assert.equal(pathPointForBezierHandleDisplay(points, ["a"], { roundedRect: true }), null);
   });
 });

@@ -2,9 +2,6 @@
 
 import { useMemo, type ReactNode } from "react";
 import {
-  Eye,
-  EyeOff,
-  Grid2x2,
   Minus,
   Plus,
 } from "lucide-react";
@@ -35,6 +32,7 @@ import { PropertyNumberInput } from "./PropertyInput";
 import { PropertiesSection } from "./PropertiesSection";
 import { EditorHintWrap } from "./EditorHoverHint";
 import { InspectorHintIconButton } from "./design-panel/InspectorPrimitives";
+import { FillSection } from "./design-panel/FillSection";
 
 function MirroringButton({
   mode,
@@ -110,7 +108,9 @@ export function VectorInspector({ node }: { node: EditorNode }) {
   const updateNode = useEditorStore((s) => s.updateNode);
   const updateNodeStyle = useEditorStore((s) => s.updateNodeStyle);
   const setPathHandleMirroring = useEditorStore((s) => s.setPathHandleMirroring);
-  const pushHistory = useEditorStore((s) => s.pushHistory);
+  const togglePathClosed = useEditorStore((s) => s.togglePathClosed);
+  const detachTokenFromSelection = useEditorStore((s) => s.detachTokenFromSelection);
+  const updateDesignToken = useEditorStore((s) => s.updateDesignToken);
 
   const display = useMemo(() => resolveNodeWithDesignTokens(node, designTokens), [node, designTokens]);
   const locked = node.locked;
@@ -122,8 +122,8 @@ export function VectorInspector({ node }: { node: EditorNode }) {
 
   const mirroring = node.pathHandleMirroring ?? "none";
   const fillEnabled = node.fillEnabled !== false;
-  const fillHex = normalizeHex(display.fill ?? "#d9d9d9") ?? "#d9d9d9";
   const fillOpacity = display.fillOpacity ?? 1;
+  const fillToken = node.fillTokenId ? designTokens[node.fillTokenId] : undefined;
   const strokeWidth = node.strokeWidth ?? 0;
   const hasStroke = strokeWidth > 0;
   const selectedPathPointIds = useEditorStore((s) => s.selectedPathPointIds);
@@ -299,110 +299,43 @@ export function VectorInspector({ node }: { node: EditorNode }) {
         />
       </PropertiesSection>
 
-      <section className="border-b border-app-panel-edge px-2 py-2">
-        <div className="mb-1.5 flex items-center justify-between">
-          <span className="text-ui font-semibold text-app-fg">Fill</span>
-          <div className="flex items-center gap-0.5">
-            <InspectorHintIconButton
-              title="Color styles"
-              className={cn(inspectorHeaderActionBtnClass, "inspector-icon-btn")}
-            >
-              <Grid2x2 {...inspectorLucideProps()} />
-            </InspectorHintIconButton>
-            <InspectorHintIconButton
-              title="Add fill"
-              disabled={locked}
-              className={cn(inspectorHeaderActionBtnClass, "inspector-icon-btn")}
-              onClick={() => style({ fillEnabled: true, fill: fillHex, fillType: "solid" })}
-            >
-              <Plus {...inspectorLucideProps()} />
-            </InspectorHintIconButton>
-          </div>
-        </div>
-        <div className="flex items-center gap-1">
+      <PropertiesSection title="Path" defaultOpen>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-ui font-medium text-app-subtle">Closed path</span>
           <button
             type="button"
             disabled={locked}
-            className="h-6 w-6 shrink-0 rounded border border-app-border"
-            style={{ backgroundColor: fillEnabled ? fillHex : "transparent" }}
-            aria-label="Fill color"
-            onClick={() => {
-              const input = document.createElement("input");
-              input.type = "color";
-              input.value = fillHex;
-              input.onchange = () => {
-                const n = normalizeHex(input.value);
-                if (n) style({ fill: n, fillType: "solid", fillEnabled: true });
-              };
-              input.click();
-            }}
-          />
-          <input
-            type="text"
-            disabled={locked || !fillEnabled}
-            className="h-6 min-w-0 flex-1 rounded border border-app-border bg-app-panel px-1.5 font-mono text-ui uppercase text-app-fg disabled:opacity-40"
-            value={fillHex.replace("#", "")}
-            onChange={(e) => {
-              const raw = e.target.value.replace(/[^0-9a-f]/gi, "").slice(0, 6);
-              e.target.value = raw;
-            }}
-            onBlur={(e) => {
-              const n = normalizeHex(`#${e.target.value}`);
-              if (n) style({ fill: n, fillType: "solid", fillEnabled: true });
-            }}
-            onKeyDown={(e) => {
-              handlePanelFieldKeyDown(e, {
-                onEnter: () => e.currentTarget.blur(),
-              });
-            }}
-          />
-          <input
-            type="text"
-            disabled={locked || !fillEnabled}
-            className="h-6 w-12 shrink-0 rounded border border-app-border bg-app-panel px-1 text-center text-ui text-app-fg disabled:opacity-40"
-            defaultValue={`${Math.round(fillOpacity * 100)} %`}
-            key={`${key}-fo-${Math.round(fillOpacity * 100)}`}
-            onBlur={(e) => {
-              const v = parseInt(e.target.value.replace(/%/g, "").trim(), 10);
-              if (Number.isFinite(v)) {
-                style({ fillOpacity: Math.min(1, Math.max(0, v / 100)) });
-              }
-            }}
-            onKeyDown={(e) => {
-              handlePanelFieldKeyDown(e, {
-                onEnter: () => e.currentTarget.blur(),
-                onArrowNudge: (dir, shift, alt) => {
-                  const step = keyboardNudgeStep(1, 0, shift, alt) * dir;
-                  const v = parseInt(e.currentTarget.value.replace(/%/g, "").trim(), 10);
-                  const base = Number.isFinite(v) ? v : Math.round(fillOpacity * 100);
-                  const next = Math.min(100, Math.max(0, base + step));
-                  e.currentTarget.value = `${next} %`;
-                  style({ fillOpacity: next / 100 });
-                },
-              });
-            }}
-          />
-          <InspectorHintIconButton
-            title={fillEnabled ? "Hide fill" : "Show fill"}
-            disabled={locked}
-            className={cn(inspectorRowActionBtnClass, "inspector-icon-btn")}
-            onClick={() => style({ fillEnabled: !fillEnabled })}
+            onClick={() => togglePathClosed(id)}
+            className={cn(
+              "rounded border px-2 py-0.5 text-ui font-medium transition-colors disabled:opacity-40",
+              node.pathClosed
+                ? "border-accent/40 bg-accent/15 text-accent"
+                : "border-app-border text-app-muted hover:bg-app-hover",
+            )}
           >
-            {fillEnabled ? <Eye {...inspectorLucideProps()} /> : <EyeOff {...inspectorLucideProps()} />}
-          </InspectorHintIconButton>
-          <InspectorHintIconButton
-            title="Remove fill"
-            disabled={locked}
-            className={cn(inspectorRowActionBtnClass, "inspector-icon-btn")}
-            onClick={() => {
-              pushHistory();
-              style({ fillEnabled: false });
-            }}
-          >
-            <Minus className={inspectorIconClass} strokeWidth={inspectorIconStroke} />
-          </InspectorHintIconButton>
+            {node.pathClosed ? "Closed" : "Open"}
+          </button>
         </div>
-      </section>
+        {!node.pathClosed ? (
+          <p className="mt-1.5 inspector-helper-text text-app-subtle">
+            Close the path to show fill on the canvas.
+          </p>
+        ) : null}
+      </PropertiesSection>
+
+      <FillSection
+        node={node}
+        display={display}
+        instanceKey={key}
+        locked={locked}
+        fillEnabled={fillEnabled}
+        fillOpacity={fillOpacity}
+        fillToken={fillToken}
+        designTokens={designTokens}
+        onStyle={style}
+        onDetachToken={(kind) => detachTokenFromSelection(kind)}
+        onUpdateDesignToken={(tokenId, patch) => updateDesignToken(tokenId, patch)}
+      />
 
       <section className="border-b border-app-panel-edge px-2 py-2">
         <div className="mb-1.5 flex items-center justify-between">

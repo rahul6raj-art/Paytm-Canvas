@@ -1,16 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { createPortal } from "react-dom";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, Code2, LogOut, Play, Settings, Share2 } from "lucide-react";
 import { useEditorStore } from "@/stores/useEditorStore";
-import {
-  getMockCurrentUser,
-  subscribeMockAuth,
-} from "@/lib/mockAuth";
-import { isPaytmCraftRemoteMode } from "@/lib/env";
-import { signOutRemoteSession } from "@/lib/remoteAuthSession";
+import { useCraftAuth } from "@/components/auth/CraftAuthProvider";
+import { signOutCraftSession } from "@/lib/craftAuthSession";
+import { isPaytmCraftHttpApiMode } from "@/lib/env";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { UserAvatar } from "@/components/UserAvatar";
 import {
@@ -20,20 +18,21 @@ import {
 } from "./useAnchoredDropdown";
 import { EditorHintWrap } from "./EditorHoverHint";
 import { cn } from "@/lib/utils";
+import { getMockCurrentUser } from "@/lib/mockAuth";
+import { profileSettingsHref } from "@/lib/profileSettingsNavigation";
 
 export function EditorRightActionsCard() {
   const router = useRouter();
   const pathname = usePathname();
+  const pageSearchParams = useSearchParams();
   const isDashboard = pathname === "/";
+  const profileSettingsPath = profileSettingsHref(
+    `${pathname}${pageSearchParams.toString() ? `?${pageSearchParams.toString()}` : ""}`,
+  );
   const openPrototypePreview = useEditorStore((s) => s.openPrototypePreview);
   const openShareModal = useEditorStore((s) => s.openShareModal);
   const openCodeRoundTrip = useEditorStore((s) => s.openCodeRoundTrip);
-
-  const currentUser = useSyncExternalStore(
-    subscribeMockAuth,
-    () => getMockCurrentUser(),
-    () => getMockCurrentUser(),
-  );
+  const { user, authEnabled } = useCraftAuth();
 
   const [accountOpen, setAccountOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -49,6 +48,8 @@ export function EditorRightActionsCard() {
 
   useEffect(() => setMounted(true), []);
 
+  const displayUser = user ?? getMockCurrentUser();
+
   const accountMenu =
     accountOpen && mounted ? (
       <div
@@ -62,27 +63,41 @@ export function EditorRightActionsCard() {
         <div className="border-b border-app-border-subtle px-3.5 py-2.5">
           <div className="flex items-center gap-2.5">
             <UserAvatar
-              name={currentUser.name}
-              initials={currentUser.initials}
-              avatarUrl={currentUser.avatarUrl}
-              avatarHue={currentUser.avatarHue}
+              name={displayUser.name}
+              initials={displayUser.initials}
+              avatarUrl={displayUser.avatarUrl}
+              avatarHue={displayUser.avatarHue}
               size="md"
             />
             <div className="min-w-0">
-              <p className="truncate text-ui font-semibold text-app-fg">{currentUser.name}</p>
-              <p className="truncate text-ui text-app-muted">{currentUser.email}</p>
+              <p className="truncate text-ui font-semibold text-app-fg">{displayUser.name}</p>
+              {displayUser.email ? (
+                <p className="truncate text-ui text-app-muted">{displayUser.email}</p>
+              ) : null}
             </div>
           </div>
         </div>
-        <button
-          type="button"
-          role="menuitem"
-          className="editor-menu-dropdown-item !justify-start gap-2.5"
-          onClick={() => setAccountOpen(false)}
-        >
-          <Settings className="size-icon-ui shrink-0 text-app-muted" strokeWidth={1.75} />
-          Settings
-        </button>
+        {authEnabled && user ? (
+          <Link
+            href={profileSettingsPath}
+            role="menuitem"
+            className="editor-menu-dropdown-item !justify-start gap-2.5"
+            onClick={() => setAccountOpen(false)}
+          >
+            <Settings className="size-icon-ui shrink-0 text-app-muted" strokeWidth={1.75} />
+            Profile &amp; settings
+          </Link>
+        ) : (
+          <button
+            type="button"
+            role="menuitem"
+            className="editor-menu-dropdown-item !justify-start gap-2.5"
+            onClick={() => setAccountOpen(false)}
+          >
+            <Settings className="size-icon-ui shrink-0 text-app-muted" strokeWidth={1.75} />
+            Settings
+          </button>
+        )}
         <button
           type="button"
           role="menuitem"
@@ -90,21 +105,24 @@ export function EditorRightActionsCard() {
           onClick={() => {
             setAccountOpen(false);
             void (async () => {
-              if (isPaytmCraftRemoteMode()) {
+              if (isPaytmCraftHttpApiMode() && user) {
                 try {
-                  await signOutRemoteSession();
-                  router.push("/");
+                  await signOutCraftSession();
+                  router.replace("/login");
+                  router.refresh();
                 } catch (e) {
                   window.alert(e instanceof Error ? e.message : "Sign out failed.");
                 }
                 return;
               }
-              window.alert("Sign out is a mock action — no session exists.");
+              if (!isPaytmCraftHttpApiMode()) {
+                window.alert("Sign out is a mock action — no session exists.");
+              }
             })();
           }}
         >
           <LogOut className="size-icon-ui shrink-0 text-app-muted" strokeWidth={1.75} />
-          Sign out
+          {isPaytmCraftHttpApiMode() && user ? "Sign out" : "Sign out (mock)"}
         </button>
       </div>
     ) : null;
@@ -163,10 +181,10 @@ export function EditorRightActionsCard() {
               )}
             >
               <UserAvatar
-                name={currentUser.name}
-                initials={currentUser.initials}
-                avatarUrl={currentUser.avatarUrl}
-                avatarHue={currentUser.avatarHue}
+                name={displayUser.name}
+                initials={displayUser.initials}
+                avatarUrl={displayUser.avatarUrl}
+                avatarHue={displayUser.avatarHue}
                 size="sm"
               />
               <ChevronDown

@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import {
   convertNodeToPath,
   cornerRadiiStylePatch,
+  ensureRoundedRectPathPoints,
   isCornerRoundablePath,
   isFourCornerClosedPath,
   isRoundedRectPath,
   isVectorEditableShape,
+  needsVectorPathConversion,
+  pathHasCurveHandles,
   pathNodeUsesFillHit,
   pathOutlineD,
   pathPointCornerIndex,
@@ -64,10 +67,77 @@ describe("shapeToPath", () => {
     assert.equal(built?.pathPoints.length, 2);
   });
 
-  it("convertNodeToPath changes type to path", () => {
-    const next = convertNodeToPath(baseNode({ type: "ellipse" }));
+  it("convertNodeToPath changes ellipse to four smooth bezier anchors", () => {
+    const next = convertNodeToPath(baseNode({ type: "ellipse", width: 80, height: 80 }));
     assert.equal(next?.type, "path");
-    assert.ok((next?.pathPoints?.length ?? 0) > 3);
+    assert.equal(next?.pathPoints?.length, 4);
+    assert.equal(pathHasCurveHandles(next?.pathPoints), true);
+    assert.equal(next?.pathPoints?.every((p) => p.pointType === "smooth"), true);
+    const d = pathOutlineD(next!);
+    assert.ok(d.includes(" C "), "ellipse outline uses cubic beziers");
+  });
+
+  it("ensureRoundedRectPathPoints does not collapse ellipse to rectangle corners", () => {
+    const ellipsePath = convertNodeToPath(baseNode({ type: "ellipse", width: 80, height: 80 }));
+    assert.ok(ellipsePath);
+    assert.equal(ellipsePath!.pathPoints?.length, 4);
+    const normalized = ensureRoundedRectPathPoints(ellipsePath!);
+    assert.equal(normalized.pathPoints?.length, 4);
+    assert.equal(isRoundedRectPath(normalized), false);
+  });
+
+  it("convertNodeToPath flattens star and polygon parametric shapes", () => {
+    const star = convertNodeToPath(
+      baseNode({
+        type: "path",
+        width: 100,
+        height: 100,
+        pathClosed: true,
+        starPoints: 5,
+        starInnerRadius: 0.4,
+        pathPoints: [{ id: newPathPointId(), x: 0, y: 0 }],
+      }),
+    );
+    assert.equal(star?.type, "path");
+    assert.equal(star?.starPoints, undefined);
+    assert.equal(star?.pathPoints?.length, 10);
+
+    const polygon = convertNodeToPath(
+      baseNode({ type: "polygon", width: 100, height: 100, polygonSides: 6 }),
+    );
+    assert.equal(polygon?.type, "path");
+    assert.equal(polygon?.polygonSides, undefined);
+    assert.equal(polygon?.pathPoints?.length, 6);
+
+    const triangle = convertNodeToPath(
+      baseNode({ type: "polygon", width: 100, height: 100, polygonSides: 3 }),
+    );
+    assert.equal(triangle?.pathPoints?.length, 3);
+  });
+
+  it("needsVectorPathConversion covers parametric star, polygon, and triangle", () => {
+    assert.equal(
+      needsVectorPathConversion(
+        baseNode({ type: "path", starPoints: 5, pathPoints: [{ id: "a", x: 0, y: 0 }] }),
+      ),
+      true,
+    );
+    assert.equal(needsVectorPathConversion(baseNode({ type: "polygon", polygonSides: 6 })), true);
+    assert.equal(needsVectorPathConversion(baseNode({ type: "polygon", polygonSides: 3 })), true);
+    assert.equal(
+      needsVectorPathConversion(
+        baseNode({
+          type: "path",
+          pathClosed: true,
+          pathPoints: [
+            { id: "a", x: 0, y: 0 },
+            { id: "b", x: 10, y: 0 },
+            { id: "c", x: 5, y: 8 },
+          ],
+        }),
+      ),
+      false,
+    );
   });
 
   it("detects rect-like paths with bezier handles and out-of-order corners", () => {

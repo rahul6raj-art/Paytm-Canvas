@@ -3,6 +3,7 @@
 import { useMemo, useSyncExternalStore } from "react";
 import { useEditorStore } from "@/stores/useEditorStore";
 import type { OverlaySpace } from "@/lib/canvasOverlaySpace";
+import { snapPanToDevicePixels } from "@/lib/crispRender";
 import {
   getPanPreviewSnapshot,
   PAN_PREVIEW_IDLE,
@@ -18,12 +19,12 @@ export function useCanvasOverlaySpace(): OverlaySpace {
     getPanPreviewSnapshot,
     () => PAN_PREVIEW_IDLE,
   );
-  return useMemo(
-    () => ({
+  return useMemo(() => {
+    const snappedPan = snapPanToDevicePixels(pan);
+    return {
       screenSpace: true,
-      pan: { x: pan.x + panPreview.dx, y: pan.y + panPreview.dy },
+      pan: { x: snappedPan.x + panPreview.dx, y: snappedPan.y + panPreview.dy },
       zoom,
-    }),
-    [pan.x, pan.y, panPreview.dx, panPreview.dy, zoom],
-  );
+    };
+  }, [pan.x, pan.y, panPreview.dx, panPreview.dy, zoom]);
 }

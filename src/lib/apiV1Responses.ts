@@ -11,8 +11,11 @@ export type ApiV1SuccessBody<T> = {
   data: T;
 };
 
-export function jsonV1Data<T>(data: T, init?: { status?: number }): NextResponse<ApiV1SuccessBody<T>> {
-  return NextResponse.json({ data }, { status: init?.status ?? 200 });
+export function jsonV1Data<T>(
+  data: T,
+  init?: { status?: number; headers?: HeadersInit },
+): NextResponse<ApiV1SuccessBody<T>> {
+  return NextResponse.json({ data }, { status: init?.status ?? 200, headers: init?.headers });
 }
 
 export function jsonV1Error(code: string, message: string, status: number): NextResponse<ApiV1ErrorBody> {

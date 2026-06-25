@@ -15,8 +15,7 @@ describe("aiGenerateSkeleton", () => {
       model: "ollama:llama3.2",
     });
     assert.equal(bounds.width, 376);
-    assert.notEqual(bounds.height, 812);
-    assert.ok(bounds.height >= 280);
+    assert.ok(bounds.height >= 812, "mobile skeleton should be at least device shell height");
   });
 
   it("uses desktop dimensions for dashboard prompts", () => {

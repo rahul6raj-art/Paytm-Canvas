@@ -1,7 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { apiClient, ApiRequestError } from "@/lib/apiClient";
+import { authSecondaryLinkClassName } from "@/components/auth/AuthFormShell";
+import { OAuthButtons } from "@/components/auth/OAuthButtons";
 
 export function RemoteAuthLoginModal({
   open,
@@ -61,6 +64,10 @@ export function RemoteAuthLoginModal({
           Uses your <code className="text-ui">craft-api</code> account (session cookie).
         </p>
 
+        <div className="mt-4">
+          <OAuthButtons nextPath="/" />
+        </div>
+
         <label className="mt-4 block text-ui font-medium text-app-fg">
           Email
           <input
@@ -108,6 +115,10 @@ export function RemoteAuthLoginModal({
 
         <p className="mt-4 text-ui text-app-subtle">
           Dev seed: <span className="font-medium">rahul.verma@paytm.com</span> / <span className="font-medium">craft-dev</span>
+          {" · "}
+          <Link href="/signup" className={authSecondaryLinkClassName}>
+            Create account
+          </Link>
         </p>
       </form>
     </div>

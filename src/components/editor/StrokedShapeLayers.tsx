@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { svgSafeId } from "@/lib/svgMarkupCore";
 import { roundedRectBorderFills } from "@/lib/borderGeometry";
 import { effectiveStrokeType } from "@/lib/fillGradient";
@@ -11,7 +11,10 @@ import {
   resolveStrokeSides,
   resolveStrokeSidePaint,
   shouldUseAlignedPathStroke,
+  shouldUseFilledStrokeRingForNode,
   strokeEdgeRects,
+  strokeFillLayerBeforeStrokeLayer,
+  strokeRingLayersBeforeFill,
   strokeUsesAxisAlignedRects,
   usesPerEdgeStroke,
   type StrokeEdgeRect,
@@ -22,8 +25,10 @@ import { resolveSvgStrokeLayers } from "@/lib/stroke";
 import {
   buildTaperedStrokeFillD,
 } from "@/lib/taperedStrokePath";
-import { outlineStroke } from "@/lib/outlineStroke";
+import { filledStrokeOutlineFromPathD, outlineStroke } from "@/lib/outlineStroke";
 import type { StrokePosition, EditorNode } from "@/stores/useEditorStore";
+import { ROUNDED_RECT_SIDE_STROKE_DEBUG, buildRoundedRectStrokeSegments } from "@/lib/vector/roundedRectStrokeSegments";
+import { getNodeCornerRadii } from "@/lib/cornerRadius";
 
 function EdgeStrokeRects({
   rects,
@@ -77,7 +82,6 @@ export function StrokedClosedPath({
   strokeWidth,
   strokePosition,
   strokePresentation,
-  uniformRect,
   contour,
 }: {
   nodeId: string;
@@ -88,131 +92,43 @@ export function StrokedClosedPath({
   strokeWidth: number;
   strokePosition: StrokePosition;
   strokePresentation: SvgStrokePresentation;
-  /** When set, use <rect> for center stroke instead of path (rounded rects). */
-  uniformRect?: { width: number; height: number; rx: number };
   contour?: ShapeContour | null;
 }) {
   const pos = strokePosition ?? "center";
   const sw = Math.max(0, strokeWidth);
-  const useOffset = contour != null && pos !== "center";
+  const roundedRect = contour?.kind === "roundedRect";
   const { fillPathD, strokePathD } = strokeRenderPaths(contour ?? null, pathD, {
     align: pos,
     width: sw,
-    join: strokePresentation.strokeLinejoin,
+    join: roundedRect ? "round" : strokePresentation.strokeLinejoin,
   });
-
-  if (!useOffset && pos !== "center") {
-    const safeId = svgSafeId(nodeId);
-    const clipId = `pc-stroke-in-${safeId}`;
-    const strokeW = alignedPathStrokeWidth(pos, sw);
-    const strokeOnly = {
-      fill: "none" as const,
-      stroke: strokeColor,
-      strokeWidth: strokeW,
-      strokeDasharray: strokePresentation.strokeDasharray,
-      strokeLinecap: strokePresentation.strokeLinecap,
-      strokeLinejoin: strokePresentation.strokeLinejoin,
-      strokeMiterlimit: strokePresentation.strokeMiterlimit,
-    };
-    const fillEl = uniformRect ? (
-      <rect
-        x={0}
-        y={0}
-        width={uniformRect.width}
-        height={uniformRect.height}
-        rx={uniformRect.rx}
-        ry={uniformRect.rx}
-        fill={fill}
-      />
-    ) : (
-      <path d={pathD} fill={fill} />
-    );
-    if (!showStroke || sw <= 0) return fillEl;
-    if (pos === "inside") {
-      return (
-        <>
-          <defs>
-            <clipPath id={clipId}>
-              {uniformRect ? (
-                <rect
-                  x={0}
-                  y={0}
-                  width={uniformRect.width}
-                  height={uniformRect.height}
-                  rx={uniformRect.rx}
-                  ry={uniformRect.rx}
-                />
-              ) : (
-                <path d={pathD} />
-              )}
-            </clipPath>
-          </defs>
-          {fillEl}
-          <path d={pathD} clipPath={`url(#${clipId})`} {...strokeOnly} />
-        </>
-      );
-    }
-    return (
-      <>
-        <path d={pathD} {...strokeOnly} />
-        {fillEl}
-      </>
-    );
-  }
 
   const strokeOnly = {
     fill: "none" as const,
     stroke: strokeColor,
     strokeWidth: sw,
     strokeDasharray: strokePresentation.strokeDasharray,
-    strokeLinecap: strokePresentation.strokeLinecap,
-    strokeLinejoin: strokePresentation.strokeLinejoin,
+    strokeLinecap: (roundedRect ? "round" : strokePresentation.strokeLinecap) as "butt" | "round" | "square",
+    strokeLinejoin: (roundedRect ? "round" : strokePresentation.strokeLinejoin) as "miter" | "round" | "bevel",
     strokeMiterlimit: strokePresentation.strokeMiterlimit,
   };
 
-  const fillEl = uniformRect ? (
-    <rect
-      x={0}
-      y={0}
-      width={uniformRect.width}
-      height={uniformRect.height}
-      rx={uniformRect.rx}
-      ry={uniformRect.rx}
-      fill={fill}
-    />
-  ) : (
-    <path d={fillPathD} fill={fill} />
-  );
+  const fillEl = <path d={fillPathD} fill={fill} />;
 
   if (!showStroke || sw <= 0) {
     return fillEl;
   }
 
-  if (pos === "center" && uniformRect) {
-    return (
-      <rect
-        x={0}
-        y={0}
-        width={uniformRect.width}
-        height={uniformRect.height}
-        rx={uniformRect.rx}
-        ry={uniformRect.rx}
-        fill={fill}
-        stroke={strokeColor}
-        strokeWidth={sw}
-        strokeDasharray={strokePresentation.strokeDasharray}
-        strokeLinecap={strokePresentation.strokeLinecap}
-        strokeLinejoin={strokePresentation.strokeLinejoin}
-        strokeMiterlimit={strokePresentation.strokeMiterlimit}
-      />
-    );
-  }
+  const strokeEl = <path d={strokePathD} {...strokeOnly} />;
 
   if (pos === "center") {
-    return <path d={strokePathD} {...strokeOnly} fill={fill} />;
+    return (
+      <>
+        {fillEl}
+        {strokeEl}
+      </>
+    );
   }
-
-  const strokeEl = <path d={strokePathD} {...strokeOnly} />;
 
   if (pos === "inside") {
     return (
@@ -234,27 +150,14 @@ export function StrokedClosedPath({
 function PartialSideClipDef({
   clipId,
   clipPathD,
-  uniformRect,
 }: {
   clipId: string;
   clipPathD: string;
-  uniformRect?: { width: number; height: number; rx: number };
 }) {
   return (
     <defs>
       <clipPath id={clipId}>
-        {uniformRect ? (
-          <rect
-            x={0}
-            y={0}
-            width={uniformRect.width}
-            height={uniformRect.height}
-            rx={uniformRect.rx}
-            ry={uniformRect.rx}
-          />
-        ) : (
-          <path d={clipPathD} />
-        )}
+        <path d={clipPathD} />
       </clipPath>
     </defs>
   );
@@ -276,7 +179,6 @@ function StrokedPartialSidesPath({
   strokeWidthProfileFlipped,
   shapeWidth,
   shapeHeight,
-  uniformRect,
   useTaper,
   taperProfile = "symmetric",
 }: {
@@ -291,41 +193,22 @@ function StrokedPartialSidesPath({
   strokeWidthProfileFlipped?: boolean;
   shapeWidth: number;
   shapeHeight: number;
-  uniformRect?: { width: number; height: number; rx: number };
   useTaper: boolean;
   taperProfile?: "uniform" | "symmetric" | "start" | "end";
 }) {
-  const [taperFillD, setTaperFillD] = useState<string | null>(null);
-
   const pos = strokePosition ?? "center";
   const sw = Math.max(0, strokeWidth);
   const taperEnabled = useTaper && !strokePresentation.strokeDasharray;
-
-  useLayoutEffect(() => {
-    if (!taperEnabled || !showStroke || sw <= 0) {
-      setTaperFillD(null);
-      return;
-    }
-    setTaperFillD(
-      buildTaperedStrokeFillD(edgePathD, {
-        maxWidth: sw,
-        flipped: strokeWidthProfileFlipped,
-        position: pos,
-        bounds: { width: shapeWidth, height: shapeHeight },
-        taperProfile,
-      }),
-    );
-  }, [
-    edgePathD,
-    sw,
-    pos,
-    strokeWidthProfileFlipped,
-    shapeWidth,
-    shapeHeight,
-    taperEnabled,
-    taperProfile,
-    showStroke,
-  ]);
+  const taperFillD =
+    taperEnabled && showStroke && sw > 0
+      ? buildTaperedStrokeFillD(edgePathD, {
+          maxWidth: sw,
+          flipped: strokeWidthProfileFlipped,
+          position: pos,
+          bounds: { width: shapeWidth, height: shapeHeight },
+          taperProfile,
+        })
+      : null;
 
   if (!showStroke || sw <= 0) return null;
 
@@ -338,7 +221,7 @@ function StrokedPartialSidesPath({
     return (
       <>
         {needsClip ? (
-          <PartialSideClipDef clipId={clipId} clipPathD={clipPathD} uniformRect={uniformRect} />
+          <PartialSideClipDef clipId={clipId} clipPathD={clipPathD} />
         ) : null}
         <path d={taperFillD} fill={strokeColor} clipPath={clipPathAttr} />
       </>
@@ -359,7 +242,7 @@ function StrokedPartialSidesPath({
   if (needsClip) {
     return (
       <>
-        <PartialSideClipDef clipId={clipId} clipPathD={clipPathD} uniformRect={uniformRect} />
+        <PartialSideClipDef clipId={clipId} clipPathD={clipPathD} />
         <path d={edgePathD} clipPath={clipPathAttr} {...strokeProps} />
       </>
     );
@@ -385,10 +268,10 @@ function strokePaintWithDefs(
   >,
   showStroke: boolean,
   assets?: Record<string, EditorAsset>,
-): { strokePaint: string; defsEl: ReactNode; underlayEl: ReactNode } {
+): { strokePaint: string; defsEl: ReactNode; underlayEl: ReactNode; underlayMarkup: string } {
   const strokeDefs: string[] = [];
   if (!showStroke) {
-    return { strokePaint: "none", defsEl: null, underlayEl: null };
+    return { strokePaint: "none", defsEl: null, underlayEl: null, underlayMarkup: "" };
   }
   const { strokePaint, underlayMarkup } = resolveSvgStrokeLayers(node, {
     gradientId: `pc-sg-${svgSafeId(node.id)}`,
@@ -404,7 +287,57 @@ function strokePaintWithDefs(
   const underlayEl = underlayMarkup ? (
     <g dangerouslySetInnerHTML={{ __html: underlayMarkup }} />
   ) : null;
-  return { strokePaint, defsEl, underlayEl };
+  return { strokePaint, defsEl, underlayEl, underlayMarkup };
+}
+
+function strokeRingUnderlayEl(
+  nodeId: string,
+  ringPathD: string,
+  fillRule: "evenodd" | "nonzero" | undefined,
+  underlayMarkup: string,
+): ReactNode {
+  if (!underlayMarkup.trim()) return null;
+  const clipId = `pc-stroke-ring-clip-${svgSafeId(nodeId)}`;
+  return (
+    <>
+      <defs>
+        <clipPath id={clipId}>
+          <path
+            d={ringPathD}
+            fillRule={fillRule && fillRule !== "nonzero" ? fillRule : undefined}
+          />
+        </clipPath>
+      </defs>
+      <g clipPath={`url(#${clipId})`} dangerouslySetInnerHTML={{ __html: underlayMarkup }} />
+    </>
+  );
+}
+
+function composeStrokeRingLayers(
+  nodeId: string,
+  outlined: { pathD: string; fillRule?: "evenodd" | "nonzero" },
+  strokePaint: string,
+  underlayMarkup: string,
+): ReactNode {
+  const strokeEl = (
+    <path
+      d={outlined.pathD}
+      fill={strokePaint}
+      fillRule={outlined.fillRule && outlined.fillRule !== "nonzero" ? outlined.fillRule : undefined}
+    />
+  );
+  const clippedUnderlay = strokeRingUnderlayEl(
+    nodeId,
+    outlined.pathD,
+    outlined.fillRule,
+    underlayMarkup,
+  );
+  return (
+    <>
+      {clippedUnderlay}
+      {strokeEl}
+    </>
+  );
 }
 
 function wrapStrokeLayers(defsEl: ReactNode, underlayEl: ReactNode, layers: ReactNode): ReactNode {
@@ -416,6 +349,40 @@ function wrapStrokeLayers(defsEl: ReactNode, underlayEl: ReactNode, layers: Reac
       {layers}
     </>
   );
+}
+
+/** Whether closed shapes should render stroke as a filled even-odd ring (not native SVG stroke). */
+export function shouldUseFilledStrokeRing(
+  node: Pick<
+    EditorNode,
+    | "type"
+    | "width"
+    | "height"
+    | "strokePosition"
+    | "strokeSides"
+    | "strokeSidesCustom"
+    | "cornerRadius"
+    | "cornerRadii"
+    | "cornerSmoothing"
+    | "pathPoints"
+    | "pathClosed"
+    | "polygonSides"
+    | "starPoints"
+    | "starInnerRadius"
+    | "starOuterCornerRadius"
+    | "starInnerCornerRadius"
+    | "strokeType"
+  >,
+  opts: { showStroke: boolean; closed: boolean },
+): boolean {
+  return shouldUseFilledStrokeRingForNode(node, opts);
+}
+
+export function resolveShapeStrokeLayerOrder(
+  position: StrokePosition | undefined,
+  usesFilledRing: boolean,
+): { fillBeforeStroke: boolean } {
+  return { fillBeforeStroke: strokeFillLayerBeforeStrokeLayer(position, usesFilledRing) };
 }
 
 export function renderShapeStrokeLayers(
@@ -431,6 +398,7 @@ export function renderShapeStrokeLayers(
     | "strokeSidesCustomColors"
     | "cornerRadius"
     | "cornerRadii"
+    | "cornerSmoothing"
     | "strokeWidthProfile"
     | "strokeWidthProfileFlipped"
     | "strokeColor"
@@ -449,43 +417,60 @@ export function renderShapeStrokeLayers(
     strokeColor: string;
     strokeWidth: number;
     strokePresentation: SvgStrokePresentation;
-    uniformRect?: { width: number; height: number; rx: number };
     closed?: boolean;
     assets?: Record<string, EditorAsset>;
   },
 ): ReactNode {
   const closed = opts.closed ?? true;
   const position = node.strokePosition ?? "center";
-  const { strokePaint, defsEl, underlayEl } = strokePaintWithDefs(node, opts.showStroke, opts.assets);
+  const { strokePaint, defsEl, underlayEl, underlayMarkup } = strokePaintWithDefs(node, opts.showStroke, opts.assets);
 
   const borderFills = usesPerEdgeStroke(node) ? roundedRectBorderFills(node) : null;
   if (borderFills?.length) {
     const fillLayer =
-      opts.fill !== "none" ? (
-        opts.uniformRect ? (
-          <rect
-            x={0}
-            y={0}
-            width={opts.uniformRect.width}
-            height={opts.uniformRect.height}
-            rx={opts.uniformRect.rx}
-            ry={opts.uniformRect.rx}
-            fill={opts.fill}
-          />
-        ) : (
-          <path d={opts.pathD} fill={opts.fill} />
-        )
-      ) : null;
+      opts.fill !== "none" ? <path d={opts.pathD} fill={opts.fill} /> : null;
 
-    const strokeLayers = borderFills.map((fill) => (
-      <path
-        key={fill.side}
-        d={fill.pathD}
-        fill={strokeBandFillPaint(node, fill.side, strokePaint)}
-      />
-    ));
+    const [tl, tr, br, bl] = getNodeCornerRadii(node as EditorNode);
+    const debugSegments = ROUNDED_RECT_SIDE_STROKE_DEBUG
+      ? buildRoundedRectStrokeSegments({
+          width: node.width,
+          height: node.height,
+          radius: { topLeft: tl, topRight: tr, bottomRight: br, bottomLeft: bl },
+          smoothing: (node as EditorNode).cornerSmoothing ?? 0,
+          strokeSides: {
+            top: borderFills.some((f) => f.side === "top"),
+            right: borderFills.some((f) => f.side === "right"),
+            bottom: borderFills.some((f) => f.side === "bottom"),
+            left: borderFills.some((f) => f.side === "left"),
+          },
+        })
+      : [];
 
-    if (position === "outside") {
+    const strokeLayers = borderFills.flatMap((fill) => {
+      const paint = strokeBandFillPaint(node, fill.side, strokePaint);
+      const layers = [
+        <path key={fill.side} d={fill.pathD} fill={paint} />,
+      ];
+      if (ROUNDED_RECT_SIDE_STROKE_DEBUG) {
+        const debug = debugSegments.find((s) => s.side === fill.side);
+        if (debug) {
+          layers.unshift(
+            <path
+              key={`${fill.side}-debug`}
+              d={debug.d}
+              fill="none"
+              stroke="red"
+              strokeWidth={2}
+              strokeLinecap="butt"
+              strokeLinejoin="round"
+            />,
+          );
+        }
+      }
+      return layers;
+    });
+
+    if (strokeRingLayersBeforeFill(position)) {
       return wrapStrokeLayers(
         defsEl,
         underlayEl,
@@ -507,55 +492,45 @@ export function renderShapeStrokeLayers(
   }
 
   if (
-    opts.showStroke &&
-    closed &&
-    !usesPerEdgeStroke(node) &&
-    effectiveStrokeType(node) === "gradient"
+    shouldUseFilledStrokeRing(node, { showStroke: opts.showStroke, closed })
   ) {
-    const outlined = outlineStroke(node as EditorNode);
+    const outlined = filledStrokeOutlineFromPathD(
+      node as EditorNode,
+      opts.pathD,
+      closed,
+    );
+    const fillLayer =
+      opts.fill !== "none" ? <path d={opts.pathD} fill={opts.fill} /> : null;
     if (outlined?.pathD) {
-      const fillLayer =
-        opts.fill !== "none" ? (
-          opts.uniformRect ? (
-            <rect
-              x={0}
-              y={0}
-              width={opts.uniformRect.width}
-              height={opts.uniformRect.height}
-              rx={opts.uniformRect.rx}
-              ry={opts.uniformRect.rx}
-              fill={opts.fill}
-            />
-          ) : (
-            <path d={opts.pathD} fill={opts.fill} />
-          )
-        ) : null;
-      const strokeEl = (
-        <path
-          d={outlined.pathD}
-          fill={strokePaint}
-          fillRule={outlined.fillRule !== "nonzero" ? outlined.fillRule : undefined}
-        />
+      const strokeStack = composeStrokeRingLayers(
+        node.id,
+        outlined,
+        strokePaint,
+        underlayMarkup,
       );
-      if (position === "outside") {
+      if (strokeRingLayersBeforeFill(position)) {
         return wrapStrokeLayers(
           defsEl,
-          underlayEl,
+          null,
           <>
-            {strokeEl}
+            {strokeStack}
             {fillLayer}
           </>,
         );
       }
       return wrapStrokeLayers(
         defsEl,
-        underlayEl,
+        null,
         <>
           {fillLayer}
-          {strokeEl}
+          {strokeStack}
         </>,
       );
     }
+    if (fillLayer) {
+      return wrapStrokeLayers(defsEl, underlayEl, fillLayer);
+    }
+    return wrapStrokeLayers(defsEl, underlayEl, null);
   }
 
   if (strokeUsesAxisAlignedRects(node, node.width, node.height)) {
@@ -566,21 +541,7 @@ export function renderShapeStrokeLayers(
       defsEl,
       underlayEl,
       <>
-        {opts.fill !== "none" ? (
-          opts.uniformRect ? (
-            <rect
-              x={0}
-              y={0}
-              width={opts.uniformRect.width}
-              height={opts.uniformRect.height}
-              rx={opts.uniformRect.rx}
-              ry={opts.uniformRect.rx}
-              fill={opts.fill}
-            />
-          ) : (
-            <path d={opts.pathD} fill={opts.fill} />
-          )
-        ) : null}
+        {opts.fill !== "none" ? <path d={opts.pathD} fill={opts.fill} /> : null}
         {opts.showStroke ? <EdgeStrokeRects rects={rects} node={node} unifiedPaint={strokePaint} /> : null}
       </>,
     );
@@ -602,7 +563,6 @@ export function renderShapeStrokeLayers(
         strokeWidth={opts.strokeWidth}
         strokePosition={position}
         strokePresentation={opts.strokePresentation}
-        uniformRect={opts.uniformRect}
         contour={contour}
       />,
     );
@@ -620,7 +580,6 @@ export function renderShapeStrokeLayers(
       strokeWidth={opts.strokeWidth}
       strokePosition="center"
       strokePresentation={opts.strokePresentation}
-      uniformRect={opts.uniformRect}
       contour={contour}
     />,
   );

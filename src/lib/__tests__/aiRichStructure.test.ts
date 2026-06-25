@@ -45,8 +45,8 @@ describe("aiRichStructure", () => {
 
     const frame = frameId ? nodes[frameId] : undefined;
     assert.ok(frame, "expected screen frame");
-    assert.notEqual(frame!.height, 812, "screen frame should not use fixed device shell height");
-    assert.equal(frame!.layoutSizingVertical, "hug");
+    assert.ok(frame!.height >= 812, "screen frame should be at least device shell height");
+    assert.equal(frame!.layoutSizingVertical, "fixed");
     assert.ok(Object.values(nodes).some((n) => n.name.endsWith(" icon")), "expected decorative icons");
   });
 });

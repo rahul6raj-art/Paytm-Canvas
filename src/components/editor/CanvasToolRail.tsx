@@ -1,11 +1,12 @@
 "use client";
 
 import { useRef } from "react";
-import { Hand, MessageSquare, MousePointer2, Pen, Type } from "lucide-react";
+import { Hand, MessageSquare, MousePointer2, Type } from "lucide-react";
 import { ToolButton } from "./ToolButton";
 import { FrameToolDropdown } from "./FrameToolDropdown";
 import { ShapeToolDropdown } from "./ShapeToolDropdown";
 import { CanvasToolRailIcon } from "./CanvasToolRailIcon";
+import { PenToolIcon } from "./PenToolIcon";
 import { useDraggableCanvasToolRail } from "./useDraggableCanvasToolRail";
 import { useEditorStore, type Tool } from "@/stores/useEditorStore";
 import {
@@ -17,9 +18,8 @@ import {
 import { activateCanvasForShortcuts } from "@/lib/editorKeyboardFocus";
 import { cn } from "@/lib/utils";
 
-const RAIL_ICONS: Record<Tool, typeof MousePointer2> = {
+const RAIL_ICONS: Record<Exclude<Tool, "pen">, typeof MousePointer2> = {
   move: MousePointer2,
-  pen: Pen,
   text: Type,
   hand: Hand,
   comment: MessageSquare,
@@ -82,7 +82,7 @@ export function CanvasToolRail({ className }: { className?: string }) {
       <FrameToolDropdown />
       <ShapeToolDropdown />
       {CANVAS_TOOL_RAIL_TOOLS.slice(1).map(({ id, label, shortcut }) => {
-        const Icon = RAIL_ICONS[id];
+        const Icon = id === "pen" ? null : RAIL_ICONS[id];
         return (
           <ToolButton
             key={id}
@@ -100,7 +100,7 @@ export function CanvasToolRail({ className }: { className?: string }) {
               }
             }}
           >
-            <CanvasToolRailIcon icon={Icon} />
+            {id === "pen" ? <PenToolIcon /> : <CanvasToolRailIcon icon={Icon!} />}
           </ToolButton>
         );
       })}

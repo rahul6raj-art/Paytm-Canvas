@@ -31,27 +31,28 @@ function maxDescendantBottom(
   return max;
 }
 
-/** Resize the screen frame to fit generated content instead of a fixed phone height. */
+/** Resize the screen frame to fit generated content, never shorter than the device shell. */
 export function fitRichFrameToContent(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
   frameId: string,
-  shellMaxHeight?: number,
+  shellMinHeight?: number,
 ): number {
   const contentBottom = maxDescendantBottom(frameId, nodes, childOrder);
   const frame = nodes[frameId];
   if (!frame) return MIN_FRAME_HEIGHT;
 
-  const nextH = Math.max(MIN_FRAME_HEIGHT, Math.ceil(contentBottom + BOTTOM_INSET));
-  const capped = shellMaxHeight ? Math.min(nextH, shellMaxHeight) : nextH;
+  const contentHeight = Math.max(MIN_FRAME_HEIGHT, Math.ceil(contentBottom + BOTTOM_INSET));
+  const frameHeight = shellMinHeight ? Math.max(contentHeight, shellMinHeight) : contentHeight;
 
   nodes[frameId] = {
     ...frame,
-    height: capped,
-    layoutSizingVertical: frame.layoutMode && frame.layoutMode !== "none" ? "hug" : frame.layoutSizingVertical,
+    height: frameHeight,
+    layoutSizingVertical:
+      shellMinHeight && frameHeight >= shellMinHeight ? "fixed" : frame.layoutSizingVertical,
   };
 
-  return capped;
+  return frameHeight;
 }
 
 export function measureFlatContentHeight(

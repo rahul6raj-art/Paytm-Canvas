@@ -3,13 +3,7 @@
 import { useSyncExternalStore } from "react";
 import { hasPathCornerRadius, resolvePathOutlineD } from "@/lib/shapes/shapeToPath";
 import { effectiveStrokeType, fillPaintCss } from "@/lib/fillGradient";
-import {
-  clampCornerRadii,
-  getNodeCornerRadii,
-  isUniformCornerRadii,
-  roundedRectPathD,
-  uniformCornerRadiusForRect,
-} from "@/lib/cornerRadius";
+import { roundedRectPathDForNode } from "@/lib/cornerRadius";
 import {
   arrowHeadToStrokeEndpoint,
   arrowMarkerScale,
@@ -17,29 +11,37 @@ import {
   resolveArrowStartKind,
 } from "@/lib/shapes/arrowGeometry";
 import {
+  centerlineStrokeLinecap,
+  openPathStrokeViewport,
   resolveStrokeEndPoint,
   resolveStrokeStartPoint,
+  strokeEndpointDecorationActive,
   strokeEndpointMarkerDefs,
   strokeMarkerRefs,
-  unifiedLineCap,
 } from "@/lib/strokeEndpoints";
 import {
   resolveStrokeColor,
   resolveSvgStrokeLayers,
   strokeIsVisible,
+  svgNativeLinecap,
   svgStrokePresentationFromNode,
   svgStrokePropsFromNode,
 } from "@/lib/stroke";
 import { svgSafeId } from "@/lib/svgMarkupCore";
 import {
+  closedShapeStrokeViewport,
   fullEllipsePathD,
   individualBorderStrokeStyle,
   shouldUseAlignedPathStroke,
+  shouldUseFilledStrokeRingForNode,
   shouldUseOutlinedOpenPathStroke,
+  shouldUseTaperedOpenPathStroke,
   strokeUsesCssIndividualBorders,
 } from "@/lib/strokeAlign";
+import { buildTaperedOpenStrokeFromNode } from "@/lib/taperedStrokePath";
 import { outlineStroke } from "@/lib/outlineStroke";
 import { effectColorToRgba } from "@/lib/nodeEffects";
+import { shapeHasRoundedCornerStroke } from "@/lib/geometry/roundedVectorStrokeRing";
 import { renderShapeStrokeLayers } from "./StrokedShapeLayers";
 import {
   effectiveEllipseArc,
@@ -97,18 +99,12 @@ export function ShapeVectorView({
   };
 
   if (node.type === "rectangle" || node.type === "frame") {
-    const radii = clampCornerRadii(getNodeCornerRadii(node), node.width, node.height);
-    const uniform = isUniformCornerRadii(radii);
-    const r = uniformCornerRadiusForRect(node, node.width, node.height);
-    const pathD = uniform
-      ? roundedRectPathD(node.width, node.height, [
-          r,
-          r,
-          r,
-          r,
-        ])
-      : roundedRectPathD(node.width, node.height, radii);
+    const pathD = roundedRectPathDForNode(node, node.width, node.height);
     const cssBorderStroke = strokeUsesCssIndividualBorders(node) && showStroke;
+    const strokeViewport =
+      showStroke && !cssBorderStroke
+        ? closedShapeStrokeViewport(node.width, node.height, sw, node.strokePosition)
+        : null;
     return (
       <>
         {cssBorderStroke ? (
@@ -119,9 +115,15 @@ export function ShapeVectorView({
           />
         ) : null}
         <svg
-          className="pointer-events-none absolute inset-0 block overflow-visible"
-          width={node.width}
-          height={node.height}
+          className="pointer-events-none absolute block overflow-visible"
+          style={
+            strokeViewport
+              ? { left: strokeViewport.offsetLeft, top: strokeViewport.offsetTop }
+              : { inset: 0 }
+          }
+          width={strokeViewport?.svgWidth ?? node.width}
+          height={strokeViewport?.svgHeight ?? node.height}
+          viewBox={strokeViewport?.viewBox}
           aria-hidden
         >
           {renderShapeStrokeLayers(
@@ -133,7 +135,6 @@ export function ShapeVectorView({
               strokeColor: sc,
               strokeWidth: sw,
               strokePresentation,
-              uniformRect: uniform ? { width: node.width, height: node.height, rx: r } : undefined,
               closed: true,
               assets,
             },
@@ -173,12 +174,6 @@ export function ShapeVectorView({
           height={node.height}
           aria-hidden
         >
-          {strokeDefs.length > 0 ? (
-            <defs dangerouslySetInnerHTML={{ __html: strokeDefs.join("") }} />
-          ) : null}
-          {strokeUnderlay ? (
-            <g dangerouslySetInnerHTML={{ __html: strokeUnderlay }} />
-          ) : null}
           {(() => {
             const shapeD = arcPath ?? fullEllipsePathD(node.width, node.height);
             const fillRule =
@@ -187,7 +182,11 @@ export function ShapeVectorView({
               isFullEllipseArc(arc.sweepDeg)
                 ? "evenodd"
                 : undefined;
-            if (shouldUseAlignedPathStroke(node, true)) {
+            const useLayeredStroke = shouldUseFilledStrokeRingForNode(node, {
+              closed: true,
+              showStroke,
+            });
+            if (useLayeredStroke) {
               return renderShapeStrokeLayers(
                 { ...node, id: nodeId },
                 {
@@ -203,12 +202,20 @@ export function ShapeVectorView({
               );
             }
             return (
-              <path
-                d={shapeD}
-                fill={solidFill}
-                fillRule={fillRule}
-                {...strokeProps}
-              />
+              <>
+                {strokeDefs.length > 0 ? (
+                  <defs dangerouslySetInnerHTML={{ __html: strokeDefs.join("") }} />
+                ) : null}
+                {strokeUnderlay ? (
+                  <g dangerouslySetInnerHTML={{ __html: strokeUnderlay }} />
+                ) : null}
+                <path
+                  d={shapeD}
+                  fill={solidFill}
+                  fillRule={fillRule}
+                  {...strokeProps}
+                />
+              </>
             );
           })()}
         </svg>
@@ -255,9 +262,18 @@ export function ShapeVectorView({
     const markerPrefix = `pc-stroke-${nodeId}`;
     const markers = !closed ? strokeEndpointMarkerDefs(markerPrefix, start, end, sc, sw) : "";
     const markerRefs = !closed ? strokeMarkerRefs(start, end, markerPrefix) : {};
-    const lineCap = !closed ? unifiedLineCap(start, end) : undefined;
+    const lineCap = !closed ? centerlineStrokeLinecap(start, end) : undefined;
+    const endpointDecorated = !closed && strokeEndpointDecorationActive(start, end);
+    const pathViewport = showStroke
+      ? closed
+        ? closedShapeStrokeViewport(node.width, node.height, sw, node.strokePosition)
+        : openPathStrokeViewport(node.width, node.height, sw, start, end)
+      : null;
     const useOpenOutlineStroke = shouldUseOutlinedOpenPathStroke(node, closed) && showStroke;
+    const useTaperedOpenStroke = shouldUseTaperedOpenPathStroke(node, closed) && showStroke;
     const openStrokeOutline = useOpenOutlineStroke ? outlineStroke(node) : null;
+    const taperedOpenStrokePathD =
+      useTaperedOpenStroke ? buildTaperedOpenStrokeFromNode(node, d || "M0 0", closed) : null;
     const openStrokeFill =
       openStrokeOutline && effectiveStrokeType(node) === "gradient" && node.strokeGradient
         ? sc
@@ -267,25 +283,37 @@ export function ShapeVectorView({
               openStrokeOutline.fillOpacity ?? node.strokeOpacity ?? 1,
             )
           : sc;
+    const taperedOpenStrokeFill = taperedOpenStrokePathD ? sc : null;
+    const useLayeredStroke =
+      closed &&
+      shouldUseFilledStrokeRingForNode(node, { closed, showStroke });
     return (
       <>
         <svg
-          className="pointer-events-none absolute inset-0 block overflow-visible"
-          width={node.width}
-          height={node.height}
+          className="pointer-events-none absolute block overflow-visible"
+          style={
+            pathViewport
+              ? { left: pathViewport.offsetLeft, top: pathViewport.offsetTop }
+              : { inset: 0 }
+          }
+          width={pathViewport?.svgWidth ?? node.width}
+          height={pathViewport?.svgHeight ?? node.height}
+          viewBox={pathViewport?.viewBox}
           aria-hidden
         >
-          {strokeDefs.length > 0 || markers ? (
+          {!useLayeredStroke && (strokeDefs.length > 0 || markers) ? (
             <defs
               dangerouslySetInnerHTML={{
                 __html: [...strokeDefs, markers].filter(Boolean).join(""),
               }}
             />
+          ) : markers ? (
+            <defs dangerouslySetInnerHTML={{ __html: markers }} />
           ) : null}
-          {strokeUnderlay ? (
+          {!useLayeredStroke && strokeUnderlay ? (
             <g dangerouslySetInnerHTML={{ __html: strokeUnderlay }} />
           ) : null}
-          {closed && shouldUseAlignedPathStroke(node, true) ? (
+          {useLayeredStroke ? (
             renderShapeStrokeLayers(
               { ...node, id: nodeId },
               {
@@ -299,6 +327,16 @@ export function ShapeVectorView({
                 assets,
               },
             )
+          ) : taperedOpenStrokePathD ? (
+            <>
+              <path
+                d={d || "M0 0"}
+                fill={closed && fillVisible ? solidFill : "none"}
+                fillRule={pathFillRule}
+                stroke="none"
+              />
+              <path d={taperedOpenStrokePathD} fill={taperedOpenStrokeFill ?? sc} stroke="none" />
+            </>
           ) : openStrokeOutline?.pathD ? (
             <>
               <path
@@ -327,7 +365,10 @@ export function ShapeVectorView({
               fillRule={pathFillRule}
               {...strokeProps}
               {...(lineCap ? { strokeLinecap: lineCap } : {})}
-              {...(roundedStroke && showStroke
+              {...(roundedStroke &&
+              showStroke &&
+              !shapeHasRoundedCornerStroke(node) &&
+              !endpointDecorated
                 ? { strokeLinejoin: "round" as const, strokeLinecap: "round" as const }
                 : {})}
               markerStart={markerRefs.markerStart}
@@ -391,8 +432,14 @@ function StrokedLineSvg({
   const markerRefs = strokeMarkerRefs(start, end, prefix);
   const lineCap =
     node.type === "arrow"
-      ? node.strokeLinecap ?? "butt"
-      : unifiedLineCap(start, end);
+      ? svgNativeLinecap(node.strokeLinecap ?? "butt")
+      : centerlineStrokeLinecap(start, end);
+
+  const lineViewport = showStroke
+    ? openPathStrokeViewport(width, height, strokeWidth, start, end)
+    : null;
+  const vpOffsetLeft = lineViewport?.offsetLeft ?? 0;
+  const vpOffsetTop = lineViewport?.offsetTop ?? 0;
 
   const assets = useEditorStore((s) => s.assets);
   const lineStrokeDefs: string[] = [];
@@ -412,9 +459,15 @@ function StrokedLineSvg({
 
   return (
     <svg
-      className="pointer-events-none absolute inset-0 block overflow-visible"
-      width={width}
-      height={height}
+      className="pointer-events-none absolute block overflow-visible"
+      style={
+        lineViewport
+          ? { left: lineViewport.offsetLeft, top: lineViewport.offsetTop }
+          : { inset: 0 }
+      }
+      width={lineViewport?.svgWidth ?? width}
+      height={lineViewport?.svgHeight ?? height}
+      viewBox={lineViewport?.viewBox}
       aria-hidden
     >
       {lineStrokeDefs.length > 0 || markers ? (
@@ -426,10 +479,10 @@ function StrokedLineSvg({
       ) : null}
       {lineUnderlay ? <g dangerouslySetInnerHTML={{ __html: lineUnderlay }} /> : null}
       <line
-        x1={x1}
-        y1={y1}
-        x2={x2}
-        y2={y2}
+        x1={x1 - vpOffsetLeft}
+        y1={y1 - vpOffsetTop}
+        x2={x2 - vpOffsetLeft}
+        y2={y2 - vpOffsetTop}
         fill="none"
         {...lineStrokeProps}
         {...(lineCap ? { strokeLinecap: lineCap } : {})}

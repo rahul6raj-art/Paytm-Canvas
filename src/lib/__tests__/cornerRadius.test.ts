@@ -16,7 +16,7 @@ describe("cornerRadius/roundedRectPathD", () => {
     const d = roundedRectPathD(83, 80, [40, 40, 40, 40]);
     assert.ok(!d.includes("V 80"), `path must not jump across collapsed vertical edge: ${d}`);
     assert.ok(!d.includes("V 0"), `path must not jump across collapsed vertical edge: ${d}`);
-    assert.ok(d.includes("A 40 40"), d);
+    assert.ok(d.includes(" C "), `path uses cubic corners: ${d}`);
     assert.ok(d.endsWith("Z"), d);
   });
 
@@ -35,9 +35,9 @@ describe("cornerRadius/roundedRectPathD", () => {
     assert.equal(hasIndependentVertexCornerRadii([305, 10, 20, 30]), true);
   });
 
-  it("offsetRoundedRectPathD keeps arc commands for inset/outset", () => {
+  it("offsetRoundedRectPathD keeps cubic corners for inset/outset", () => {
     const d = offsetRoundedRectPathD(200, 150, [80, 80, 80, 80], 20);
-    assert.ok(d.includes(" A "), d);
-    assert.ok(!d.includes(" L "), d);
+    assert.ok(d.includes(" C "), d);
+    assert.ok(!d.includes(" A "), d);
   });
 });

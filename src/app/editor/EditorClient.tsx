@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { RequireCraftAuth } from "@/components/auth/RequireCraftAuth";
 
 function EditorLoadError({ message }: { message: string }) {
   return (
@@ -41,5 +42,9 @@ const AppShell = dynamic(
 );
 
 export function EditorClient() {
-  return <AppShell />;
+  return (
+    <RequireCraftAuth>
+      <AppShell />
+    </RequireCraftAuth>
+  );
 }

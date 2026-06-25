@@ -7,9 +7,11 @@ import {
   createCapGeometry,
   expandClosedContourStroke,
   expandOpenPolylineStroke,
+  filledStrokeOutlineFromPathD,
   generateStrokeGeometry,
   outlineStroke,
 } from "@/lib/outlineStroke";
+import { resolvePathOutlineD } from "@/lib/shapes/shapeToPath";
 
 function baseNode(partial: Partial<EditorNode> & Pick<EditorNode, "type">): EditorNode {
   return {
@@ -75,7 +77,10 @@ describe("outlineStroke", () => {
     const result = outlineStroke(node);
     assert.ok(result);
     assert.ok(result.pathPoints.length >= 8);
-    assert.ok(result.pathD.includes(" A "), `expected smooth arc commands, got: ${result.pathD.slice(0, 120)}`);
+    assert.ok(
+      result.pathD.includes(" A ") || result.pathD.includes(" C "),
+      `expected smooth arc/cubic commands, got: ${result.pathD.slice(0, 120)}`,
+    );
     assert.equal((result.pathD.match(/ L /g) || []).length, 0);
   });
 
@@ -91,7 +96,11 @@ describe("outlineStroke", () => {
     const result = outlineStroke(node);
     assert.ok(result);
     assert.equal(result.fillRule, "evenodd");
-    assert.ok((result.pathD.match(/ A /g) || []).length >= 8, result.pathD.slice(0, 200));
+    assert.ok(
+      (result.pathD.match(/ A /g) || []).length >= 8 ||
+        (result.pathD.match(/ C /g) || []).length >= 8,
+      result.pathD.slice(0, 200),
+    );
     assert.equal((result.pathD.match(/ L /g) || []).length, 0);
   });
 
@@ -107,6 +116,108 @@ describe("outlineStroke", () => {
     const result = outlineStroke(node);
     assert.ok(result);
     assert.ok(result.pathPoints.length >= 6);
+  });
+
+  it("outlines edited path geometry with corner fillets (matches fill outline)", () => {
+    const pathPoints = [
+      { id: "a", x: 60, y: 0 },
+      { id: "b", x: 120, y: 50 },
+      { id: "c", x: 60, y: 100 },
+      { id: "d", x: 0, y: 50 },
+    ];
+    const sharp = baseNode({
+      type: "path",
+      width: 120,
+      height: 100,
+      pathClosed: true,
+      cornerRadius: 0,
+      pathPoints,
+    });
+    const rounded = baseNode({
+      ...sharp,
+      cornerRadius: 16,
+    });
+    const sharpOutline = outlineStroke(sharp);
+    const roundedOutline = outlineStroke(rounded);
+    assert.ok(sharpOutline);
+    assert.ok(roundedOutline);
+    assert.notEqual(
+      sharpOutline!.pathD,
+      roundedOutline!.pathD,
+      "gradient stroke outline should follow filleted path geometry, not sharp anchors",
+    );
+  });
+
+  it("outlines edited path with large corner fillets for gradient stroke ring", () => {
+    const pathPoints = [
+      { id: "a", x: 911, y: 0 },
+      { id: "b", x: 1823, y: 500 },
+      { id: "c", x: 1400, y: 1367 },
+      { id: "d", x: 400, y: 1200 },
+      { id: "e", x: 0, y: 400 },
+    ];
+    const node = baseNode({
+      type: "path",
+      width: 1823,
+      height: 1367,
+      pathClosed: true,
+      pathPoints,
+      cornerRadius: 237,
+      strokeWidth: 42,
+    });
+    const sharp = outlineStroke({ ...node, cornerRadius: 0 });
+    const rounded = outlineStroke(node);
+    assert.ok(sharp?.pathD);
+    assert.ok(rounded?.pathD);
+    assert.notEqual(sharp!.pathD, rounded!.pathD);
+    assert.ok(
+      (rounded!.pathD.match(/ M /g) || []).length <= 2,
+      "gradient stroke ring should be one compound path, not per-vertex blobs",
+    );
+  });
+
+  it("filledStrokeOutlineFromPathD follows the same path as fill for edited shapes", () => {
+    const pathPoints = [
+      { id: "a", x: 953, y: 0 },
+      { id: "b", x: 1906, y: 554 },
+      { id: "c", x: 1500, y: 1108 },
+      { id: "d", x: 450, y: 980 },
+      { id: "e", x: 0, y: 420 },
+    ];
+    const node = baseNode({
+      type: "path",
+      width: 1906,
+      height: 1108,
+      pathClosed: true,
+      pathPoints,
+      cornerRadius: 201,
+      strokeWidth: 56,
+    });
+    const fillD = resolvePathOutlineD(node);
+    const fromFillPath = filledStrokeOutlineFromPathD(node, fillD, true);
+    assert.ok(fromFillPath?.pathD);
+    assert.equal(fromFillPath!.fillRule, "evenodd");
+    assert.ok(
+      (fromFillPath!.pathD.match(/ M /g) || []).length <= 2,
+      "stroke ring should be a single compound path",
+    );
+  });
+
+  it("filledStrokeOutlineFromPathD works for parametric star paths", () => {
+    const node = baseNode({
+      type: "path",
+      width: 200,
+      height: 200,
+      starPoints: 5,
+      starInnerRadius: 0.4,
+      pathPoints: [],
+      pathClosed: true,
+      strokeWidth: 12,
+    });
+    const fillD = resolvePathOutlineD(node);
+    const outlined = filledStrokeOutlineFromPathD(node, fillD, true);
+    assert.ok(outlined?.pathD);
+    assert.ok(outlined!.pathD.length > fillD.length);
   });
 
   it("outlines a star path", () => {
@@ -194,6 +305,16 @@ describe("outlineStroke", () => {
 
   it("allows text layers with visible stroke", () => {
     const node = baseNode({ type: "text", content: "Hello", strokeWidth: 2 });
+    assert.equal(canOutlineStroke(node), true);
+  });
+
+  it("allows text layers with visible fill for outline", () => {
+    const node = baseNode({
+      type: "text",
+      content: "Hello",
+      strokeWidth: 0,
+      strokeEnabled: false,
+    });
     assert.equal(canOutlineStroke(node), true);
   });
 

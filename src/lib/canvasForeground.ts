@@ -7,6 +7,8 @@ export const CANVAS_FOREGROUND_DARK = "#ffffff";
 export type CanvasChromeForeground = {
   frameLabel: string;
   frameLabelMuted: string;
+  componentFrameLabel: string;
+  componentFrameLabelSelected: string;
   defaultText: string;
   renameInputBg: string;
   renameInputText: string;
@@ -51,6 +53,8 @@ export function isDarkCanvasBackground(backgroundColor: string): boolean {
 const LIGHT_CHROME: CanvasChromeForeground = {
   frameLabel: CANVAS_VISUAL.frameLabel,
   frameLabelMuted: CANVAS_VISUAL.frameLabelMuted,
+  componentFrameLabel: CANVAS_VISUAL.componentFrameLabel,
+  componentFrameLabelSelected: CANVAS_VISUAL.componentFrameLabelSelected,
   defaultText: CANVAS_FOREGROUND_LIGHT,
   renameInputBg: "#ffffff",
   renameInputText: "#111111",
@@ -64,6 +68,8 @@ const LIGHT_CHROME: CanvasChromeForeground = {
 const DARK_CHROME: CanvasChromeForeground = {
   frameLabel: "#e8e8e8",
   frameLabelMuted: "#a3a3a3",
+  componentFrameLabel: "#8b5cf6",
+  componentFrameLabelSelected: "#a78bfa",
   defaultText: CANVAS_FOREGROUND_DARK,
   renameInputBg: "#2c2c2c",
   renameInputText: "#f8fafc",

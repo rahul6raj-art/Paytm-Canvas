@@ -1,5 +1,7 @@
 import { isAncestorOf, layerPanelChildIds } from "@/lib/editorGraph";
 import { isAutoLayoutContainerNode } from "@/lib/autoLayoutArrowReorder";
+import { isComponentSetContainerNode } from "@/lib/components/componentSet";
+import { findInstanceRoot } from "@/lib/componentModel";
 import type { EditorNode } from "@/stores/useEditorStore";
 
 export function hasVisibleChildren(
@@ -22,7 +24,7 @@ export function frameBodyReceivesPointerHits(
   if (node?.type !== "frame") return true;
   if (
     !deepSelect &&
-    isAutoLayoutContainerNode(node) &&
+    (isAutoLayoutContainerNode(node) || isComponentSetContainerNode(node)) &&
     hasVisibleChildren(nodeId, nodes, childOrder)
   ) {
     return true;
@@ -57,6 +59,7 @@ export function shouldCollapseContainerHits(
   childOrder: Record<string, string[]>,
   objectEditModeNodeId: string | null,
   deepSelect = false,
+  selectedIds?: string[],
 ): boolean {
   const node = nodes[nodeId];
   if (!node?.visible) return false;
@@ -66,10 +69,43 @@ export function shouldCollapseContainerHits(
     return false;
   }
   if (deepSelect) return false;
-  if (isAutoLayoutContainerNode(node)) return true;
+  if (selectedIds?.includes(nodeId)) return true;
+  if (isAutoLayoutContainerNode(node) || isComponentSetContainerNode(node)) return true;
   if (node.isBooleanGroup && !node.maskId) return true;
   if (node.type === "frame") return false;
   return node.type === "group";
+}
+
+/** Prefer dragging a selected parent frame/group when the pointer hits a child inside it. */
+export function resolveCanvasDragNodeId(
+  hitId: string,
+  selectedIds: string[],
+  nodes: Record<string, EditorNode>,
+): string {
+  const dragTargets = selectedIds.filter((sid) => {
+    const n = nodes[sid];
+    return n && !n.locked && n.visible;
+  });
+  if (dragTargets.includes(hitId)) return hitId;
+  for (const sid of dragTargets) {
+    if (isAncestorOf(nodes, sid, hitId)) return sid;
+  }
+  return hitId;
+}
+
+/** When not drilling into an instance, single-click selects the instance root (Figma-style). */
+function instanceSelectionTarget(
+  hitId: string,
+  nodes: Record<string, EditorNode>,
+  objectEditModeNodeId: string | null,
+  deepSelect: boolean,
+): string | null {
+  if (deepSelect) return null;
+  const instRoot = findInstanceRoot(nodes, hitId);
+  if (!instRoot) return null;
+  if (objectEditModeNodeId === instRoot) return null;
+  if (objectEditModeNodeId && isAncestorOf(nodes, objectEditModeNodeId, hitId)) return null;
+  return instRoot;
 }
 
 /** Map a hit on a child to its parent group/frame for click + drag (unless drilling in). */
@@ -85,6 +121,8 @@ export function selectionTargetForClick(
     if (hitId === objectEditModeNodeId) return hitId;
     if (isAncestorOf(nodes, objectEditModeNodeId, hitId)) return hitId;
   }
+  const instTarget = instanceSelectionTarget(hitId, nodes, objectEditModeNodeId, deepSelect);
+  if (instTarget) return instTarget;
   if (deepSelect) return hitId;
   const n = nodes[hitId];
   const parentId = n?.parentId;
@@ -93,8 +131,12 @@ export function selectionTargetForClick(
   if (!parent?.visible || parent.locked) return hitId;
   if (!hasVisibleChildren(parentId, nodes, childOrder)) return hitId;
   if (parent.type === "group" || parent.type === "frame") {
-    if (isAutoLayoutContainerNode(parent)) return parentId;
-    if (parent.type === "frame") return hitId;
+    if (isAutoLayoutContainerNode(parent) || isComponentSetContainerNode(parent)) return parentId;
+    if (parent.type === "frame") {
+      // Text in a manual frame selects the frame; ⌘/Ctrl drills to the text layer (Figma-style).
+      if (n?.type === "text") return parentId;
+      return hitId;
+    }
     return parentId;
   }
   return hitId;
@@ -114,6 +156,15 @@ export function drillTargetForDoubleClick(
 ): ContainerDrillTarget | null {
   const deepest = pickDeepestAt(worldX, worldY) ?? hitId;
   if (!deepest) return null;
+
+  const instRoot = findInstanceRoot(nodes, deepest);
+  if (
+    instRoot &&
+    objectEditModeNodeId !== instRoot &&
+    (!objectEditModeNodeId || !isAncestorOf(nodes, objectEditModeNodeId, deepest))
+  ) {
+    return { containerId: instRoot, selectId: deepest };
+  }
 
   if (objectEditModeNodeId && isAncestorOf(nodes, objectEditModeNodeId, deepest)) {
     return { containerId: objectEditModeNodeId, selectId: deepest };
@@ -161,12 +212,19 @@ export function applyMoveToolPointerSelection(
   selectedIds: string[],
   additive: boolean,
   select: (id: string | null, additive?: boolean) => void,
+  nodes?: Record<string, EditorNode>,
 ): void {
   if (additive) {
     select(targetId, true);
     return;
   }
-  if (!selectedIds.includes(targetId)) {
-    select(targetId, false);
+  if (selectedIds.includes(targetId)) return;
+  if (nodes) {
+    for (const sid of selectedIds) {
+      if (sid !== targetId && isAncestorOf(nodes, sid, targetId)) {
+        return;
+      }
+    }
   }
+  select(targetId, false);
 }

@@ -40,6 +40,7 @@ describe("canvasToolRail", () => {
     assert.match(rail, /position == null && `inset-x-0 \$\{CANVAS_TOOL_RAIL_OFFSET_CLASS\} mx-auto`/);
     assert.doesNotMatch(hook, /defaultCanvasToolRailPosition/);
     assert.match(lib, /craft-canvas-tool-rail-position-v2/);
+    assert.doesNotMatch(rail, /component-tool-rail|ComponentToolButton/);
   });
 });
 

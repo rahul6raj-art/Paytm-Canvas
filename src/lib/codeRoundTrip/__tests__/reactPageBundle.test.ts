@@ -60,6 +60,7 @@ export default function PMLSignupPage() {
 
     const nodes = Object.values(result.slice.nodes);
     const root = nodes.find((n) => n.codeClassName === "pml-signup");
+    assert.equal(root?.name, "PML- Signup");
     const title = nodes.find((n) => n.codeClassName === "pml-signup__hero-title");
     assert.equal(root?.fill, "#101010");
     assert.equal(root?.fillEnabled, true);
@@ -73,6 +74,39 @@ export default function PMLSignupPage() {
     const withCss = applyPageCssToSlice(parsed.slice, [signupCss]);
     assert.deepEqual(withCss.childOrder[EDITOR_ROOT_KEY], parsed.slice.childOrder[EDITOR_ROOT_KEY]);
     assert.equal(Object.keys(withCss.nodes).length, Object.keys(parsed.slice.nodes).length);
+  });
+
+  it("preserves vertical spacing below theme card from page CSS margin", () => {
+    const css = `
+      .pml-more { display: flex; flex-direction: column; }
+      .pml-more-theme-card { margin-bottom: 24px; }
+    `;
+    const tsx = `
+      export const PMLMorePage = () => (
+        <div className="pml-more">
+          <SectionHeader title="Appearance" trailing="none" />
+          <Card className="pml-more-theme-card">
+            <span className="pml-more-theme-card__label">Dark theme</span>
+          </Card>
+          <SectionHeader title="Account" trailing="none" />
+          <ListItem primaryText="Start onboarding" secondaryText="Full KYC flow from welcome to activation" />
+        </div>
+      );
+    `;
+    const result = importReactPageBundle({ tsxSource: tsx, cssSources: [css], fileName: "PMLMorePage.tsx" });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.slice.fileName, "PML- More");
+
+    const nodes = Object.values(result.slice.nodes);
+    const root = nodes.find((n) => n.codeClassName === "pml-more");
+    assert.equal(root?.name, "PML- More");
+    const card = nodes.find((n) => n.codeClassName?.includes("pml-more-theme-card"));
+    const accountHeader = nodes.find((n) => n.codeJsxTag === "SectionHeader" && n.y > (card?.y ?? 0));
+    assert.ok(card, "theme card should exist");
+    assert.ok(accountHeader, "account section header should exist");
+    const gap = accountHeader!.y - (card!.y + card!.height);
+    assert.ok(gap >= 24, `expected >=24px gap below theme card, got ${gap}`);
   });
 
   it("does not collapse flex containers when CSS uses min-height: 0", () => {

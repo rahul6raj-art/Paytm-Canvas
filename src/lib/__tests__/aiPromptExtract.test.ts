@@ -58,7 +58,7 @@ describe("activity tracking rich screen", () => {
     const frameId = result!.slice.childOrder[EDITOR_ROOT_KEY]?.[0];
     const frame = frameId ? result!.slice.nodes[frameId] : undefined;
     assert.ok(frame, "expected screen frame");
-    assert.notEqual(frame!.height, 812, "frame should not use the fixed 812px device shell height");
-    assert.equal(frame!.layoutSizingVertical, "hug", "frame height should hug content");
+    assert.ok(frame!.height >= 812, "screen frame should be at least device shell height");
+    assert.equal(frame!.layoutSizingVertical, "fixed");
   });
 });

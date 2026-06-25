@@ -15,8 +15,13 @@ import {
   drillTargetForDoubleClick,
   isAdditiveSelectionClick,
   isDeepSelectClick,
+  resolveCanvasDragNodeId,
   selectionTargetForClick,
 } from "@/lib/containerSelection";
+import {
+  slotDrillTargetForDoubleClick,
+  slotSelectionTargetForClick,
+} from "@/lib/slotEditScope";
 import {
   canEnterParametricShapeEdit,
   shouldEnterPathEditOnEdit,
@@ -34,13 +39,26 @@ export function useCanvasHitHandlers(clientToWorld: ClientToWorldFn) {
       if (st.editingTextId || st.pathEditModeNodeId) return;
       const n = st.nodes[nodeId];
       if (!n?.visible) return;
-      const hoverId = selectionTargetForClick(
-        nodeId,
-        st.nodes,
-        st.childOrder,
-        st.objectEditModeNodeId,
-        commandDown,
-      );
+      const hoverId = (() => {
+        let target = selectionTargetForClick(
+          nodeId,
+          st.nodes,
+          st.childOrder,
+          st.objectEditModeNodeId,
+          commandDown,
+        );
+        if (st.activeSlotEdit) {
+          target = slotSelectionTargetForClick(
+            nodeId,
+            st.nodes,
+            st.childOrder,
+            st.activeSlotEdit,
+            st.objectEditModeNodeId,
+            commandDown,
+          );
+        }
+        return target;
+      })();
       if (st.editorMode === "inspect") {
         st.setHoveredCanvasId(hoverId);
         return;
@@ -61,13 +79,26 @@ export function useCanvasHitHandlers(clientToWorld: ClientToWorldFn) {
     const st = useEditorStore.getState();
     const n = st.nodes[nodeId];
     if (!n?.visible) return;
-    const targetId = selectionTargetForClick(
-      nodeId,
-      st.nodes,
-      st.childOrder,
-      st.objectEditModeNodeId,
-      isDeepSelectClick(e),
-    );
+    const targetId = (() => {
+      let target = selectionTargetForClick(
+        nodeId,
+        st.nodes,
+        st.childOrder,
+        st.objectEditModeNodeId,
+        isDeepSelectClick(e),
+      );
+      if (st.activeSlotEdit) {
+        target = slotSelectionTargetForClick(
+          nodeId,
+          st.nodes,
+          st.childOrder,
+          st.activeSlotEdit,
+          st.objectEditModeNodeId,
+          isDeepSelectClick(e),
+        );
+      }
+      return target;
+    })();
     st.openContextMenu(targetId, e.clientX, e.clientY);
   }, []);
 
@@ -84,6 +115,27 @@ export function useCanvasHitHandlers(clientToWorld: ClientToWorldFn) {
       }
 
       const w = clientToWorld(e.clientX, e.clientY);
+      const slotDrill = slotDrillTargetForDoubleClick(
+        nodeId,
+        w.x,
+        w.y,
+        st.nodes,
+        st.childOrder,
+        st.activeSlotEdit,
+        (x, y) => pickDeepestNodeAtWorldPoint(x, y, st.nodes, st.childOrder),
+      );
+      if (slotDrill) {
+        const priorCrumbs = st.activeSlotEdit?.breadcrumb ?? [];
+        if (st.activeSlotEdit) st.exitSlotEditMode(true);
+        st.enterSlotEditMode(
+          slotDrill.scope.instanceRootId,
+          slotDrill.scope.propertyKey,
+          priorCrumbs,
+        );
+        st.select(slotDrill.selectId);
+        return;
+      }
+
       const drill = drillTargetForDoubleClick(
         nodeId,
         w.x,
@@ -138,13 +190,23 @@ export function useCanvasHitHandlers(clientToWorld: ClientToWorldFn) {
       if (!canCanvasObjectInteract({ spaceDown, canvasPanning })) return;
 
       const deepSelect = isDeepSelectClick(e);
-      const targetId = selectionTargetForClick(
+      let targetId = selectionTargetForClick(
         nodeId,
         st.nodes,
         st.childOrder,
         st.objectEditModeNodeId,
         deepSelect,
       );
+      if (st.activeSlotEdit) {
+        targetId = slotSelectionTargetForClick(
+          nodeId,
+          st.nodes,
+          st.childOrder,
+          st.activeSlotEdit,
+          st.objectEditModeNodeId,
+          deepSelect,
+        );
+      }
       const { select, editorMode, tool } = st;
 
       if (editorMode === "inspect") {
@@ -170,7 +232,7 @@ export function useCanvasHitHandlers(clientToWorld: ClientToWorldFn) {
       }
 
       const additive = isAdditiveSelectionClick(e);
-      applyMoveToolPointerSelection(targetId, st.selectedIds, additive, select);
+      applyMoveToolPointerSelection(targetId, st.selectedIds, additive, select, st.nodes);
 
       if (additive) return;
 
@@ -179,8 +241,11 @@ export function useCanvasHitHandlers(clientToWorld: ClientToWorldFn) {
 
       if (e.altKey && !prepareAltDragDuplicate(targetId)) return;
 
+      const dragSt = useEditorStore.getState();
+      const dragNodeId = resolveCanvasDragNodeId(targetId, dragSt.selectedIds, dragSt.nodes);
+
       beginCanvasNodeDrag({
-        nodeId: targetId,
+        nodeId: dragNodeId,
         pointerId: e.pointerId,
         clientX: e.clientX,
         clientY: e.clientY,

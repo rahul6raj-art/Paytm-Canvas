@@ -142,6 +142,7 @@ export function offsetContourPathD(
     width: number;
     height: number;
     radii?: CornerRadii;
+    cornerSmoothing?: number;
     points?: Point2[];
     join?: StrokeLinejoin;
   },
@@ -149,10 +150,11 @@ export function offsetContourPathD(
   strokeWidth: number,
 ): string | null {
   const delta = strokeCenterlineOffset(align, strokeWidth);
+  const smoothing = params.cornerSmoothing ?? 0;
   if (Math.abs(delta) < 1e-9) {
     if (kind === "sharpRect") return offsetSharpRectPathD(params.width, params.height, 0);
     if (kind === "roundedRect" && params.radii)
-      return roundedRectPathD(params.width, params.height, params.radii);
+      return roundedRectPathD(params.width, params.height, params.radii, { x: 0, y: 0 }, smoothing);
     if (kind === "ellipse") return offsetEllipsePathD(params.width, params.height, 0);
     if (kind === "polygon" && params.points?.length)
       return pointsToClosedPathD(params.points);
@@ -166,7 +168,7 @@ export function offsetContourPathD(
     return d || null;
   }
   if (kind === "roundedRect" && params.radii) {
-    const d = offsetRoundedRectPathD(params.width, params.height, params.radii, delta);
+    const d = offsetRoundedRectPathD(params.width, params.height, params.radii, delta, smoothing);
     return d || null;
   }
   if (kind === "ellipse") {

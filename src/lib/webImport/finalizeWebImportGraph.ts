@@ -8,6 +8,7 @@ import {
   normalizeFooterLegalText,
   normalizeEmailToButtonGap,
   normalizeWebImportTextNodes,
+  normalizeBottomNavTextNodes,
   normalizeWebImportSvgPaths,
   normalizeWebImportColors,
   preserveWebImportOverflowEffects,
@@ -71,6 +72,7 @@ export function finalizeWebImportGraph(
   normalizeEmailToButtonGap(nodes, childOrder);
   disableAutoLayoutForAbsoluteChildren(nodes, childOrder);
   normalizeWebImportTextNodes(nodes);
+  normalizeBottomNavTextNodes(nodes);
   normalizeWebImportSvgPaths(nodes);
   normalizeWebImportColors(nodes);
 

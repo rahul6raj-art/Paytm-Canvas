@@ -16,6 +16,7 @@ import type {
   ObjectExpression,
   SpreadElement,
 } from "@babel/types";
+import type { LayoutMode } from "@/lib/autoLayout";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import type { EditorPersistSlice } from "@/lib/documentPersistence";
 import { wrapPersistSliceWithPages } from "@/lib/documentPersistence";
@@ -26,6 +27,7 @@ import { sanitizeComponentName } from "./reactStyle";
 import type { ReactStyleRecord } from "./reactStyle";
 import { placeScreenFrameOnCanvas } from "@/lib/codeExport/frameRelativeExport";
 import { finalizeImportedGraph } from "./finalizeImportedGraph";
+import { canvasScreenLabelFromSource } from "@/lib/craftBridge/canvasScreenLabels";
 import { placeholderSizeForComponent } from "./reactComponentPlaceholders";
 import { parseNodeKindFromPcAttrs } from "@/lib/codeExport/pcMetadata";
 import { classNameToNodePatch, mergeStylePatches } from "./reactClassNameImport";
@@ -343,11 +345,42 @@ function jsxChildrenFromComponent(
   return [inner];
 }
 
+type SiblingStart = { x: number; y: number };
+
+function stackJsxChildren(
+  parentId: string,
+  parentLayoutMode: LayoutMode | undefined,
+  parentGap: number | undefined,
+  children: JSXElement[],
+  ctx: BuildCtx,
+): string[] {
+  const mode = parentLayoutMode ?? "vertical";
+  const gap = parentGap ?? 8;
+  const ids: string[] = [];
+  let cursorMain = 0;
+  let cursorCross = 0;
+  for (let i = 0; i < children.length; i++) {
+    const start: SiblingStart =
+      mode === "horizontal" ? { x: cursorMain, y: cursorCross } : { x: cursorCross, y: cursorMain };
+    const cid = buildNode(children[i]!, parentId, ctx, i, start);
+    ids.push(cid);
+    const built = ctx.nodes[cid];
+    if (!built) continue;
+    if (mode === "horizontal") {
+      cursorMain = built.x + built.width + gap;
+    } else {
+      cursorMain = built.y + built.height + gap;
+    }
+  }
+  return ids;
+}
+
 function buildNode(
   el: JSXElement | JSXFragment,
   parentId: string | null,
   ctx: BuildCtx,
   siblingIndex: number,
+  siblingStart?: SiblingStart,
 ): string {
   if (el.type === "JSXFragment") {
     const fragId = nextId();
@@ -356,8 +389,8 @@ function buildNode(
       parentId,
       type: "frame",
       name: "Fragment",
-      x: 0,
-      y: 0,
+      x: siblingStart?.x ?? 0,
+      y: siblingStart?.y ?? 0,
       width: 375,
       height: 400,
       rotation: 0,
@@ -373,7 +406,7 @@ function buildNode(
     };
     ctx.nodes[fragId] = fragNode;
     const buildable = collectBuildableChildren(el.children, ctx);
-    const kids = buildable.map((ch, i) => buildNode(ch, fragId, ctx, i));
+    const kids = stackJsxChildren(fragId, "vertical", 8, buildable, ctx);
     ctx.childOrder[fragId] = kids;
     return fragId;
   }
@@ -409,8 +442,8 @@ function buildNode(
     parentId,
     type: kind,
     name: attrs.name ?? tag,
-    x: mergedPatch.x ?? 0,
-    y: mergedPatch.y ?? siblingIndex * (defaults.height + 8),
+    x: mergedPatch.x ?? siblingStart?.x ?? 0,
+    y: mergedPatch.y ?? siblingStart?.y ?? siblingIndex * (defaults.height + 8),
     width: mergedPatch.width ?? defaults.width,
     height: mergedPatch.height ?? defaults.height,
     rotation: mergedPatch.rotation ?? 0,
@@ -465,7 +498,8 @@ function buildNode(
   }
 
   ctx.nodes[id] = node;
-  const childIds = elementChildren.map((ch, i) => buildNode(ch, id, ctx, i));
+  const childLayoutMode = mergedPatch.layoutMode ?? (elementChildren.length > 0 ? "vertical" : undefined);
+  const childIds = stackJsxChildren(id, childLayoutMode, mergedPatch.layoutGap, elementChildren, ctx);
   ctx.childOrder[id] = childIds;
 
   if (childIds.length > 0 && !node.layoutMode) {
@@ -808,10 +842,11 @@ export function importReactFromJsx(source: string, opts?: { fileName?: string })
   const componentName = sanitizeComponentName(
     opts?.fileName?.replace(/\.[^.]+$/, "") ?? component.componentName,
   );
+  const screenLabel = canvasScreenLabelFromSource(opts?.fileName ?? componentName);
   ctx.nodes[rootId] = {
     ...root,
     parentId: null,
-    name: root.name || componentName,
+    name: screenLabel || root.name || componentName,
   };
 
   const sourceHeader = extractSourceHeader(source);
@@ -833,7 +868,7 @@ export function importReactFromJsx(source: string, opts?: { fileName?: string })
     childOrder: ctx.childOrder,
     assets: {},
     designTokens: {},
-    fileName: componentName,
+    fileName: screenLabel || componentName,
     selectedIds: exportRootIds,
     zoom: 1,
     pan: { x: 0, y: 0 },

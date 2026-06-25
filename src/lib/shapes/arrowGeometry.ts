@@ -26,9 +26,10 @@ import { RESIZE_MIN_DIMENSION } from "@/lib/resize";
 
 export type ArrowHeadKind = "none" | "triangle" | "line" | "circle" | "diamond";
 
-export const DEFAULT_ARROW_END: ArrowHeadKind = "triangle";
+export const DEFAULT_ARROW_END: ArrowHeadKind = "line";
 export const DEFAULT_ARROW_START: ArrowHeadKind = "none";
-export const ARROW_WING_ANGLE = Math.PI / 7;
+/** Half-angle between chevron wings (~45° → 90° opening, Figma-style stroke arrow). */
+export const ARROW_WING_ANGLE = Math.PI / 4;
 
 export type ArrowEndpoints = LineEndpoints;
 
@@ -151,6 +152,50 @@ function wingPoints(
       x: tip.x - Math.cos(baseAngle + ARROW_WING_ANGLE) * size,
       y: tip.y - Math.sin(baseAngle + ARROW_WING_ANGLE) * size,
     },
+  };
+}
+
+/** Open chevron marker path with tip at `(size, markerHeight/2)` for SVG marker-end alignment. */
+export function arrowChevronMarkerPathD(size: number): {
+  pathD: string;
+  refX: number;
+  refY: number;
+  markerWidth: number;
+  markerHeight: number;
+} {
+  const spread = Math.sin(ARROW_WING_ANGLE) * size;
+  const markerHeight = spread * 2;
+  const tipX = size;
+  const tipY = markerHeight / 2;
+  const { left, right } = wingPoints({ x: tipX, y: tipY }, 0, size);
+  return {
+    pathD: `M ${left.x} ${left.y} L ${tipX} ${tipY} L ${right.x} ${right.y}`,
+    refX: tipX,
+    refY: tipY,
+    markerWidth: tipX,
+    markerHeight,
+  };
+}
+
+/** Filled triangle marker with tip at `(size, markerHeight/2)`. */
+export function arrowFilledTriangleMarkerPathD(size: number): {
+  pathD: string;
+  refX: number;
+  refY: number;
+  markerWidth: number;
+  markerHeight: number;
+} {
+  const spread = Math.sin(ARROW_WING_ANGLE) * size;
+  const markerHeight = spread * 2;
+  const tipX = size;
+  const tipY = markerHeight / 2;
+  const { left, right } = wingPoints({ x: tipX, y: tipY }, 0, size);
+  return {
+    pathD: `M ${left.x} ${left.y} L ${tipX} ${tipY} L ${right.x} ${right.y} Z`,
+    refX: tipX,
+    refY: tipY,
+    markerWidth: tipX,
+    markerHeight,
   };
 }
 

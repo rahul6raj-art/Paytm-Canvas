@@ -31,6 +31,7 @@ export function PositionSection({
   displayWidth,
   displayHeight,
   displayRotation,
+  dimensionMin = 1,
 }: {
   node: EditorNode;
   instanceKey: string;
@@ -53,6 +54,7 @@ export function PositionSection({
   displayWidth?: number;
   displayHeight?: number;
   displayRotation?: number;
+  dimensionMin?: number;
 }) {
   const transformMode = useEditorStore((s) => s.transformInteractionMode);
   const rotateSnap = useEditorStore((s) => rotateGeomSnapshotForNode(s, node.id));
@@ -118,6 +120,7 @@ export function PositionSection({
               mixedHeight={mixedHeight}
               instanceKey={instanceKey}
               locked={locked}
+              min={dimensionMin}
               onCommitDimensions={({ width, height }) =>
                 isContainer ? onResizeFrame(width, height) : onPatch({ width, height })
               }

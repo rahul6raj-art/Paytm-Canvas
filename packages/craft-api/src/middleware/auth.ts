@@ -86,5 +86,6 @@ export function userDto(user: User) {
     id: user.id,
     email: user.email,
     displayName: user.displayName,
+    avatarUrl: user.avatarUrl ?? null,
   };
 }

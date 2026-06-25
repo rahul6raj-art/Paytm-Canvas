@@ -16,6 +16,13 @@ import {
   saveMockApiStoreToDisk,
   serializeMockApiStore,
 } from "@/lib/mockApiStorePersistence";
+import {
+  hashMockApiPassword,
+  hashMockApiSessionToken,
+  newMockApiSessionToken,
+  verifyMockApiPassword,
+} from "@/lib/mockApiPassword";
+import { mockApiSessionExpiresAt } from "@/lib/mockApiSession";
 
 const STORE_KEY = "__paytmCraftMockApiStore_v1__" as const;
 
@@ -23,6 +30,18 @@ export interface MockApiUserRow {
   id: string;
   email: string;
   displayName: string;
+  passwordHash?: string;
+  avatarUrl?: string | null;
+}
+
+export type MockApiOAuthProvider = "google" | "github";
+
+export interface MockApiOAuthAccountRow {
+  id: string;
+  userId: string;
+  provider: MockApiOAuthProvider;
+  providerAccountId: string;
+  email?: string;
 }
 
 export interface MockApiWorkspaceRow {
@@ -97,8 +116,25 @@ export interface MockApiCommentRow {
   frameId?: string;
 }
 
+interface MockApiSessionRow {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  expiresAt: string;
+}
+
+interface MockApiPasswordResetRow {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  expiresAt: string;
+}
+
 interface MockApiStoreState {
   users: MockApiUserRow[];
+  oauthAccounts: MockApiOAuthAccountRow[];
+  sessions: MockApiSessionRow[];
+  passwordResets: MockApiPasswordResetRow[];
   teams: MockApiTeamRow[];
   teamMembers: MockApiTeamMemberRow[];
   workspaces: MockApiWorkspaceRow[];
@@ -125,10 +161,16 @@ function emptyDocument(name: string): unknown {
 
 function seedStore(): MockApiStoreState {
   const users: MockApiUserRow[] = [
-    { id: "user-you", email: "rahul6.raj@paytm.com", displayName: "Rahul Raj" },
-    { id: "u2", email: "aisha.khan@paytm.com", displayName: "Aisha Khan" },
-    { id: "u3", email: "dev.sharma@paytm.com", displayName: "Dev Sharma" },
-    { id: "u4", email: "meera@paytm.com", displayName: "Meera N." },
+    {
+      id: "user-you",
+      email: "rahul6.raj@paytm.com",
+      displayName: "Rahul Raj",
+      passwordHash: hashMockApiPassword("1234"),
+      avatarUrl: "/avatars/rahul-raj.webp",
+    },
+    { id: "u2", email: "aisha.khan@paytm.com", displayName: "Aisha Khan", passwordHash: hashMockApiPassword("craft-dev") },
+    { id: "u3", email: "dev.sharma@paytm.com", displayName: "Dev Sharma", passwordHash: hashMockApiPassword("craft-dev") },
+    { id: "u4", email: "meera@paytm.com", displayName: "Meera N.", passwordHash: hashMockApiPassword("craft-dev") },
   ];
 
   const workspaces: MockApiWorkspaceRow[] = [
@@ -233,7 +275,22 @@ function seedStore(): MockApiStoreState {
     resolved: true,
   });
 
-  return { users, teams, teamMembers, workspaces, members, invites: [], apiTokens: [], files, comments, versions: new Map(), nextSeq: 100 };
+  return {
+    users,
+    oauthAccounts: [],
+    sessions: [],
+    passwordResets: [],
+    teams,
+    teamMembers,
+    workspaces,
+    members,
+    invites: [],
+    apiTokens: [],
+    files,
+    comments,
+    versions: new Map(),
+    nextSeq: 100,
+  };
 }
 
 function getState(): MockApiStoreState {
@@ -241,7 +298,13 @@ function getState(): MockApiStoreState {
   if (!g[STORE_KEY]) {
     const loaded = loadMockApiStoreFromDisk();
     if (loaded) {
-      const state = deserializeMockApiStore(loaded);
+      const persisted = deserializeMockApiStore(loaded);
+      const state: MockApiStoreState = {
+        ...persisted,
+        oauthAccounts: [],
+        sessions: [],
+        passwordResets: [],
+      };
       if (state.members.length === 0) {
         state.members = seedStore().members;
       }
@@ -430,6 +493,211 @@ export function fileVersionToDetailDto(row: MockApiVersionRow): {
 export const mockApiStore = {
   getCurrentUser(): MockApiUserRow {
     return getState().users[0]!;
+  },
+
+  findUserBySessionToken(token: string): MockApiUserRow | null {
+    const s = getState();
+    const row = s.sessions.find((sess) => sess.tokenHash === hashMockApiSessionToken(token));
+    if (!row) return null;
+    if (Date.parse(row.expiresAt) <= Date.now()) {
+      s.sessions = s.sessions.filter((sess) => sess.id !== row.id);
+      return null;
+    }
+    return s.users.find((u) => u.id === row.userId) ?? null;
+  },
+
+  createSessionForUser(userId: string): string {
+    const s = getState();
+    const token = newMockApiSessionToken();
+    s.sessions.push({
+      id: `sess-mock-${++s.nextSeq}`,
+      userId,
+      tokenHash: hashMockApiSessionToken(token),
+      expiresAt: mockApiSessionExpiresAt(),
+    });
+    return token;
+  },
+
+  revokeSessionToken(token: string): void {
+    const s = getState();
+    const hash = hashMockApiSessionToken(token);
+    s.sessions = s.sessions.filter((sess) => sess.tokenHash !== hash);
+  },
+
+  registerUser(input: {
+    email: string;
+    displayName: string;
+    password: string;
+  }): { user: MockApiUserRow; token: string } {
+    const s = getState();
+    const email = input.email.trim().toLowerCase();
+    const displayName = input.displayName.trim();
+    if (!email || !displayName || input.password.length < 8) {
+      throw new Error("email, displayName, and password (8+ chars) required");
+    }
+    if (s.users.some((u) => u.email === email)) {
+      throw new Error("Email already registered");
+    }
+    const id = `user-${email.split("@")[0]}-${Date.now().toString(36)}`;
+    const user: MockApiUserRow = {
+      id,
+      email,
+      displayName,
+      passwordHash: hashMockApiPassword(input.password),
+      avatarUrl: null,
+    };
+    s.users.push(user);
+    scheduleMockApiStorePersist();
+    const token = mockApiStore.createSessionForUser(user.id);
+    return { user, token };
+  },
+
+  loginUser(input: { email: string; password: string }): { user: MockApiUserRow; token: string } {
+    const s = getState();
+    const email = input.email.trim().toLowerCase();
+    const user = s.users.find((u) => u.email === email);
+    if (!user?.passwordHash || !verifyMockApiPassword(input.password, user.passwordHash)) {
+      throw new Error("Invalid email or password");
+    }
+    const token = mockApiStore.createSessionForUser(user.id);
+    return { user, token };
+  },
+
+  updateUserProfile(
+    userId: string,
+    patch: { displayName?: string; avatarUrl?: string | null },
+  ): MockApiUserRow | null {
+    const s = getState();
+    const user = s.users.find((u) => u.id === userId);
+    if (!user) return null;
+    if (typeof patch.displayName === "string") {
+      const displayName = patch.displayName.trim();
+      if (!displayName) throw new Error("displayName cannot be empty");
+      user.displayName = displayName;
+    }
+    if ("avatarUrl" in patch) {
+      user.avatarUrl = patch.avatarUrl ?? null;
+    }
+    scheduleMockApiStorePersist();
+    return user;
+  },
+
+  uploadUserAvatar(userId: string, dataUrl: string): MockApiUserRow | null {
+    if (!dataUrl.startsWith("data:image/")) {
+      throw new Error("Avatar must be an image");
+    }
+    return mockApiStore.updateUserProfile(userId, { avatarUrl: dataUrl });
+  },
+
+  changeUserPassword(userId: string, currentPassword: string, newPassword: string): MockApiUserRow | null {
+    if (newPassword.length < 8) throw new Error("newPassword must be at least 8 characters");
+    const s = getState();
+    const user = s.users.find((u) => u.id === userId);
+    if (!user?.passwordHash || !verifyMockApiPassword(currentPassword, user.passwordHash)) {
+      throw new Error("Current password is incorrect");
+    }
+    user.passwordHash = hashMockApiPassword(newPassword);
+    scheduleMockApiStorePersist();
+    return user;
+  },
+
+  requestPasswordReset(email: string): { token: string } | null {
+    const s = getState();
+    const normalized = email.trim().toLowerCase();
+    if (!normalized) return null;
+    const user = s.users.find((u) => u.email === normalized);
+    if (!user?.passwordHash) return null;
+
+    const token = newMockApiSessionToken();
+    const tokenHash = hashMockApiSessionToken(token);
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    s.passwordResets = s.passwordResets.filter((row) => row.userId !== user.id);
+    s.passwordResets.push({
+      id: `pwreset-mock-${++s.nextSeq}`,
+      userId: user.id,
+      tokenHash,
+      expiresAt,
+    });
+    return { token };
+  },
+
+  resetPasswordWithToken(token: string, newPassword: string): MockApiUserRow {
+    if (newPassword.length < 8) {
+      throw new Error("newPassword must be at least 8 characters");
+    }
+    const s = getState();
+    const tokenHash = hashMockApiSessionToken(token.trim());
+    const now = Date.now();
+    const row = s.passwordResets.find((r) => r.tokenHash === tokenHash);
+    if (!row || Date.parse(row.expiresAt) <= now) {
+      throw new Error("Reset link is invalid or has expired");
+    }
+    const user = s.users.find((u) => u.id === row.userId);
+    if (!user) throw new Error("Reset link is invalid or has expired");
+    user.passwordHash = hashMockApiPassword(newPassword);
+    s.passwordResets = s.passwordResets.filter((r) => r.userId !== user.id);
+    scheduleMockApiStorePersist();
+    return user;
+  },
+
+  findOrCreateUserFromOAuth(input: {
+    provider: MockApiOAuthProvider;
+    providerAccountId: string;
+    email: string;
+    displayName: string;
+    avatarUrl?: string | null;
+  }): { user: MockApiUserRow; token: string } {
+    const s = getState();
+    const email = input.email.trim().toLowerCase();
+    const linked = s.oauthAccounts.find(
+      (row) => row.provider === input.provider && row.providerAccountId === input.providerAccountId,
+    );
+    if (linked) {
+      const user = s.users.find((u) => u.id === linked.userId);
+      if (!user) throw new Error("Linked OAuth account has no user");
+      if (input.avatarUrl && user.avatarUrl !== input.avatarUrl) {
+        user.avatarUrl = input.avatarUrl;
+        scheduleMockApiStorePersist();
+      }
+      const token = mockApiStore.createSessionForUser(user.id);
+      return { user, token };
+    }
+
+    const existing = s.users.find((u) => u.email === email);
+    if (existing) {
+      s.oauthAccounts.push({
+        id: `oauth-${input.provider}-${input.providerAccountId}`,
+        userId: existing.id,
+        provider: input.provider,
+        providerAccountId: input.providerAccountId,
+        email,
+      });
+      if (input.avatarUrl && !existing.avatarUrl) {
+        existing.avatarUrl = input.avatarUrl;
+      }
+      scheduleMockApiStorePersist();
+      const token = mockApiStore.createSessionForUser(existing.id);
+      return { user: existing, token };
+    }
+
+    const id = `user-${email.split("@")[0]}-${Date.now().toString(36)}`;
+    const user: MockApiUserRow = {
+      id,
+      email,
+      displayName: input.displayName.trim() || email.split("@")[0] || "User",
+      avatarUrl: input.avatarUrl ?? null,
+    };
+    s.users.push(user);
+    s.oauthAccounts.push({
+      id: `oauth-${input.provider}-${input.providerAccountId}`,
+      userId: user.id,
+      provider: input.provider,
+      providerAccountId: input.providerAccountId,
+      email,
+    });
+    scheduleMockApiStorePersist();
+    const token = mockApiStore.createSessionForUser(user.id);
+    return { user, token };
   },
 
   getUserById(userId: string): MockApiUserRow | undefined {

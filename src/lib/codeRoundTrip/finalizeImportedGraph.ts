@@ -55,7 +55,7 @@ function mergeLayoutIntoEditorNodes(
 }
 
 function isPmlScreenRootClass(className: string): boolean {
-  return /\bpml-(?:home|signup|onboarding)\b/.test(className) && !className.includes("__");
+  return /\bpml-(?:home|more|signup|onboarding|stocks)\b/.test(className) && !className.includes("__");
 }
 
 function isFullBleedContainer(n: EditorNode): boolean {

@@ -30,10 +30,7 @@ export function craftUserToMockUser(u: CraftUser): MockUser {
     email: u.email,
     initials,
     avatarHue: 210,
-    avatarUrl:
-      u.email === "rahul6.raj@paytm.com" || u.email === "rahul.verma@paytm.com"
-        ? "/avatars/rahul-raj.webp"
-        : null,
+    avatarUrl: u.avatarUrl ?? null,
   };
 }
 

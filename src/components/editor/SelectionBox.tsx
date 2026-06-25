@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { clonePathPoints } from "@/lib/pathGeometry";
 import { useEditorStore, finalizeResizeWasmSync, type EditorNode } from "@/stores/useEditorStore";
 import { findInstanceRoot } from "@/lib/componentModel";
 import { compositeSelectionBoundsId } from "@/lib/compositeSelection";
@@ -14,6 +15,7 @@ import {
   CANVAS_VISUAL,
   canvasResizeHandleStyle,
   formatSelectionDimensions,
+  resolveCanvasSelectionAccent,
   screenPxToWorld,
 } from "@/lib/canvasVisual";
 import {
@@ -276,6 +278,7 @@ export function SelectionBox() {
     fixedWorldCorner: { x: number; y: number } | null;
     fixedWorldCenter: { x: number; y: number } | null;
     startPointerWorld: { x: number; y: number };
+    startPathPoints?: ReturnType<typeof clonePathPoints>;
     startClient: { x: number; y: number };
     resizeCommitted: boolean;
     detach?: () => void;
@@ -666,6 +669,7 @@ export function SelectionBox() {
       );
       const fixedWorldCenter = getNodeWorldCenterFromChildOrder(id, nodesSnapshot, childOrderSnapshot);
       const startPointerWorld = clientToWorld(e.clientX, e.clientY);
+      const startPathPoints = clonePathPoints(nodesSnapshot[id]?.pathPoints);
       const startClient = { x: e.clientX, y: e.clientY };
 
       const beginResizeIfNeeded = (clientX: number, clientY: number) => {
@@ -717,6 +721,8 @@ export function SelectionBox() {
             fixedWorld,
             pointerWorld: world,
             startPointerWorld: d.startPointerWorld,
+            startPathPoints: d.startPathPoints,
+            startNodesSnapshot: d.nodesSnapshot,
           },
         );
       };
@@ -784,6 +790,7 @@ export function SelectionBox() {
         fixedWorldCorner,
         fixedWorldCenter,
         startPointerWorld,
+        startPathPoints,
         startClient,
         resizeCommitted: false,
         detach: detachResizeListeners,
@@ -903,29 +910,22 @@ export function SelectionBox() {
 
   const instanceSelection = Boolean(id && findInstanceRoot(nodes, id));
   const anyInstanceInMulti = visibleSelected.some((sid) => findInstanceRoot(nodes, sid));
+  const anyComponentMaster = visibleSelected.some((sid) => nodes[sid]?.isComponent);
 
   const wr = overlayUnion;
   const rotateLabelScreen = rotateLabel
     ? worldPointToOverlay(rotateLabel.x, rotateLabel.y, overlay)
     : null;
 
-  const outlineColor =
-    editorMode === "inspect"
-      ? "#f472b6"
-      : locked
-        ? CANVAS_VISUAL.locked
-        : !multi && instanceSelection
-          ? CANVAS_VISUAL.instance
-          : multi && anyInstanceInMulti
-            ? CANVAS_VISUAL.instance
-            : CANVAS_VISUAL.selection;
+  const accentColor = resolveCanvasSelectionAccent({
+    inspect: editorMode === "inspect",
+    locked,
+    anyInstance: !multi && instanceSelection ? true : multi && anyInstanceInMulti,
+    anyComponentMaster,
+  });
 
-  const handleBorderColor =
-    !multi && instanceSelection
-      ? CANVAS_VISUAL.instance
-      : multi && anyInstanceInMulti
-        ? CANVAS_VISUAL.instance
-        : CANVAS_VISUAL.selection;
+  const outlineColor = accentColor;
+  const handleBorderColor = accentColor;
 
   const resizeHandleStyle = canvasResizeHandleStyle(handleBorderColor, handlePx);
 
@@ -1106,7 +1106,7 @@ export function SelectionBox() {
             left: rotateLabelScreen.x,
             top: rotateLabelScreen.y,
             transform: "translate(-50%, -100%)",
-            background: CANVAS_VISUAL.selection,
+            background: accentColor,
           }}
         >
           {rotateLabel!.text}
@@ -1120,7 +1120,7 @@ export function SelectionBox() {
             left: wr.x + wr.width / 2,
             top: wr.y + wr.height + dimensionLabelOffset,
             transform: "translate(-50%, 0)",
-            background: CANVAS_VISUAL.selection,
+            background: accentColor,
             fontSize: dimensionBadgeFont,
             lineHeight: `${dimensionBadgeFont}px`,
             padding: `${dimensionBadgePadY}px ${dimensionBadgePadX}px`,

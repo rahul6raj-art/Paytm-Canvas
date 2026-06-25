@@ -19,7 +19,7 @@ describe("isZeroAreaShapeNode", () => {
       isZeroAreaShapeNode({
         type: "line",
         width: 0,
-        height: 8,
+        height: 0,
         lineX1: 0,
         lineY1: 0,
         lineX2: 0,

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   CircleHelp,
   LogOut,
@@ -18,12 +18,19 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { cn } from "@/lib/utils";
 import { DEFAULT_MOCK_WORKSPACE, getActiveMockWorkspace, getMockCurrentUser, subscribeMockAuth } from "@/lib/mockAuth";
-import { isPaytmCraftRemoteMode } from "@/lib/env";
-import { signOutRemoteSession } from "@/lib/remoteAuthSession";
+import { isPaytmCraftHttpApiMode } from "@/lib/env";
+import { signOutCraftSession } from "@/lib/craftAuthSession";
+import { profileSettingsHref } from "@/lib/profileSettingsNavigation";
+import { useCraftAuth } from "@/components/auth/CraftAuthProvider";
 import { EditorHintWrap } from "./EditorHoverHint";
 
 export function EditorMenuBarTrailing() {
   const router = useRouter();
+  const pathname = usePathname();
+  const pageSearchParams = useSearchParams();
+  const profileSettingsPath = profileSettingsHref(
+    `${pathname}${pageSearchParams.toString() ? `?${pageSearchParams.toString()}` : ""}`,
+  );
   const openPrototypePreview = useEditorStore((s) => s.openPrototypePreview);
   const openShareModal = useEditorStore((s) => s.openShareModal);
   const openHelpDemoChecklist = useEditorStore((s) => s.openHelpDemoChecklist);
@@ -38,7 +45,8 @@ export function EditorMenuBarTrailing() {
     () => getActiveMockWorkspace(),
     () => DEFAULT_MOCK_WORKSPACE,
   );
-  const currentUser = getMockCurrentUser();
+  const { user: authUser } = useCraftAuth();
+  const currentUser = authUser ?? getMockCurrentUser();
 
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement>(null);
@@ -103,6 +111,14 @@ export function EditorMenuBarTrailing() {
               <p className="mt-1 text-ui text-app-subtle">{workspace.name}</p>
             </div>
             <Link
+              href={profileSettingsPath}
+              role="menuitem"
+              className="block px-3 py-1.5 text-ui text-app-fg hover:bg-app-hover"
+              onClick={() => setAccountMenuOpen(false)}
+            >
+              Profile &amp; settings
+            </Link>
+            <Link
               href="/"
               role="menuitem"
               className="block px-3 py-1.5 text-ui text-app-fg hover:bg-app-hover"
@@ -117,21 +133,24 @@ export function EditorMenuBarTrailing() {
               onClick={() => {
                 setAccountMenuOpen(false);
                 void (async () => {
-                  if (isPaytmCraftRemoteMode()) {
+                  if (isPaytmCraftHttpApiMode() && authUser) {
                     try {
-                      await signOutRemoteSession();
-                      router.push("/");
+                      await signOutCraftSession();
+                      router.replace("/login");
+                      router.refresh();
                     } catch (e) {
                       window.alert(e instanceof Error ? e.message : "Sign out failed.");
                     }
                     return;
                   }
-                  window.alert("Sign out is a mock action — no session exists.");
+                  if (!isPaytmCraftHttpApiMode()) {
+                    window.alert("Sign out is a mock action — no session exists.");
+                  }
                 })();
               }}
             >
               <LogOut className="h-3.5 w-3.5 shrink-0 opacity-80" strokeWidth={2} />
-              {isPaytmCraftRemoteMode() ? "Sign out" : "Sign out (mock)"}
+              {isPaytmCraftHttpApiMode() && authUser ? "Sign out" : "Sign out (mock)"}
             </button>
           </div>
         ) : null}

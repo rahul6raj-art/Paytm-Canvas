@@ -37,6 +37,11 @@ export function measureTypoAscent(typo: ResolvedTextTypo): number {
   );
 }
 
+/** Map canvas line-top y (`textBaseline: top`) to SVG `<tspan y>` with `dominant-baseline: alphabetic`. */
+export function svgTextTspanY(canvasLineTopY: number, typo: ResolvedTextTypo): number {
+  return canvasLineTopY + measureTypoAscent(typo);
+}
+
 export function measureTypoDescent(typo: ResolvedTextTypo): number {
   if (typeof document === "undefined") return typo.fontSize * 0.22;
   const ctx = getTextMeasureContext();

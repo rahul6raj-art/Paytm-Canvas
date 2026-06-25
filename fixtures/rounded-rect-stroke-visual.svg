@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="920" viewBox="0 0 980 920" fill="none">
+  <rect width="980" height="560" fill="#111827"/>
+  <text x="24" y="28" fill="#f8fafc" font-family="Inter, system-ui, sans-serif" font-size="14">Rounded rectangle stroke visual fixture</text>
+
+  <g transform="translate(24,48)">
+    <text x="0" y="-8" fill="#cbd5e1" font-family="Inter, system-ui, sans-serif" font-size="12">Standard SVG rx/ry</text>
+    <rect x="0" y="0" width="140" height="100" rx="24" ry="24" fill="#e53935" stroke="#ffffff" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+
+  <g transform="translate(204,48)">
+    <text x="0" y="-8" fill="#cbd5e1" font-family="Inter, system-ui, sans-serif" font-size="12">Figma-like smoothed</text>
+    <path d="M 101.6 0 c 13.4413 0 20.1619 0 25.2958 2.6158 a 24 24 0 0 1 10.4884 10.4884 c 2.6158 5.1339 2.6158 11.8545 2.6158 25.2958 L 140 61.6 c 0 13.4413 0 20.1619 -2.6158 25.2958 a 24 24 0 0 1 -10.4884 10.4884 c -5.1339 2.6158 -11.8545 2.6158 -25.2958 2.6158 L 38.4 100 c -13.4413 0 -20.1619 0 -25.2958 -2.6158 a 24 24 0 0 1 -10.4884 -10.4884 c -2.6158 -5.1339 -2.6158 -11.8545 -2.6158 -25.2958 L 0 38.4 c 0 -13.4413 0 -20.1619 2.6158 -25.2958 a 24 24 0 0 1 10.4884 -10.4884 c 5.1339 -2.6158 11.8545 -2.6158 25.2958 -2.6158 Z" fill="#e53935" stroke="#ffffff" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+
+  <g transform="translate(384,48)">
+    <text x="0" y="-8" fill="#cbd5e1" font-family="Inter, system-ui, sans-serif" font-size="12">Center stroke</text>
+    <path d="M 101.6 0 c 13.4413 0 20.1619 0 25.2958 2.6158 a 24 24 0 0 1 10.4884 10.4884 c 2.6158 5.1339 2.6158 11.8545 2.6158 25.2958 L 140 61.6 c 0 13.4413 0 20.1619 -2.6158 25.2958 a 24 24 0 0 1 -10.4884 10.4884 c -5.1339 2.6158 -11.8545 2.6158 -25.2958 2.6158 L 38.4 100 c -13.4413 0 -20.1619 0 -25.2958 -2.6158 a 24 24 0 0 1 -10.4884 -10.4884 c -2.6158 -5.1339 -2.6158 -11.8545 -2.6158 -25.2958 L 0 38.4 c 0 -13.4413 0 -20.1619 2.6158 -25.2958 a 24 24 0 0 1 10.4884 -10.4884 c 5.1339 -2.6158 11.8545 -2.6158 25.2958 -2.6158 Z" fill="#9e9e9e" stroke="#ffffff" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+
+  <g transform="translate(564,48)">
+    <text x="0" y="-8" fill="#cbd5e1" font-family="Inter, system-ui, sans-serif" font-size="12">Inside stroke</text>
+    <path d="M 101.6 0 c 13.4413 0 20.1619 0 25.2958 2.6158 a 24 24 0 0 1 10.4884 10.4884 c 2.6158 5.1339 2.6158 11.8545 2.6158 25.2958 L 140 61.6 c 0 13.4413 0 20.1619 -2.6158 25.2958 a 24 24 0 0 1 -10.4884 10.4884 c -5.1339 2.6158 -11.8545 2.6158 -25.2958 2.6158 L 38.4 100 c -13.4413 0 -20.1619 0 -25.2958 -2.6158 a 24 24 0 0 1 -10.4884 -10.4884 c -2.6158 -5.1339 -2.6158 -11.8545 -2.6158 -25.2958 L 0 38.4 c 0 -13.4413 0 -20.1619 2.6158 -25.2958 a 24 24 0 0 1 10.4884 -10.4884 c 5.1339 -2.6158 11.8545 -2.6158 25.2958 -2.6158 Z" fill="#9e9e9e" stroke="#ffffff" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="M 104 4 c 11.2011 0 16.8016 0 21.0798 2.1799 a 20 20 0 0 1 8.7403 8.7403 c 2.1799 4.2782 2.1799 9.8788 2.1799 21.0798 L 136 64 c 0 11.2011 0 16.8016 -2.1799 21.0798 a 20 20 0 0 1 -8.7403 8.7403 c -4.2782 2.1799 -9.8788 2.1799 -21.0798 2.1799 L 36 96 c -11.2011 0 -16.8016 0 -21.0798 -2.1799 a 20 20 0 0 1 -8.7403 -8.7403 c -2.1799 -4.2782 -2.1799 -9.8788 -2.1799 -21.0798 L 4 36 c 0 -11.2011 0 -16.8016 2.1799 -21.0798 a 20 20 0 0 1 8.7403 -8.7403 c 4.2782 -2.1799 9.8788 -2.1799 21.0798 -2.1799 Z" fill="none" stroke="#ffffff" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+
+  <g transform="translate(744,48)">
+    <text x="0" y="-8" fill="#cbd5e1" font-family="Inter, system-ui, sans-serif" font-size="12">Outside stroke</text>
+    <path d="M 101.6 0 c 13.4413 0 20.1619 0 25.2958 2.6158 a 24 24 0 0 1 10.4884 10.4884 c 2.6158 5.1339 2.6158 11.8545 2.6158 25.2958 L 140 61.6 c 0 13.4413 0 20.1619 -2.6158 25.2958 a 24 24 0 0 1 -10.4884 10.4884 c -5.1339 2.6158 -11.8545 2.6158 -25.2958 2.6158 L 38.4 100 c -13.4413 0 -20.1619 0 -25.2958 -2.6158 a 24 24 0 0 1 -10.4884 -10.4884 c -2.6158 -5.1339 -2.6158 -11.8545 -2.6158 -25.2958 L 0 38.4 c 0 -13.4413 0 -20.1619 2.6158 -25.2958 a 24 24 0 0 1 10.4884 -10.4884 c 5.1339 -2.6158 11.8545 -2.6158 25.2958 -2.6158 Z" fill="#9e9e9e" stroke="#ffffff" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="M 99.2 -4 c 15.6815 0 23.5222 0 29.5117 3.0518 a 28 28 0 0 1 12.2364 12.2364 c 3.0518 5.9895 3.0518 13.8303 3.0518 29.5117 L 144 59.2 c 0 15.6815 0 23.5222 -3.0518 29.5117 a 28 28 0 0 1 -12.2364 12.2364 c -5.9895 3.0518 -13.8303 3.0518 -29.5117 3.0518 L 40.8 104 c -15.6815 0 -23.5222 0 -29.5117 -3.0518 a 28 28 0 0 1 -12.2364 -12.2364 c -3.0518 -5.9895 -3.0518 -13.8303 -3.0518 -29.5117 L -4 40.8 c 0 -15.6815 0 -23.5222 3.0518 -29.5117 a 28 28 0 0 1 12.2364 -12.2364 c 5.9895 -3.0518 13.8303 -3.0518 29.5117 -3.0518 Z" fill="none" stroke="#ffffff" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+
+  <g transform="translate(24,220)">
+    <text x="0" y="-8" fill="#cbd5e1" font-family="Inter, system-ui, sans-serif" font-size="12">Mixed corner radii</text>
+    <path d="M 147.2 0 c 4.4804 0 6.7206 0 8.4319 0.8719 a 8 8 0 0 1 3.4961 3.4961 c 0.8719 1.7113 0.8719 3.9515 0.8719 8.4319 L 160 34.4 c 0 8.9608 0 13.4413 -1.7439 16.8638 a 16 16 0 0 1 -6.9923 6.9923 c -3.4226 1.7439 -7.903 1.7439 -16.8638 1.7439 L 0 60 l 0 0 L 0 51.2 c 0 -17.9217 0 -26.8825 3.4878 -33.7277 a 32 32 0 0 1 13.9845 -13.9845 c 6.8452 -3.4878 15.806 -3.4878 33.7277 -3.4878 Z" fill="#e53935" stroke="#ffffff" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+
+  <g transform="translate(220,220)">
+    <text x="0" y="-8" fill="#cbd5e1" font-family="Inter, system-ui, sans-serif" font-size="12">Large radius</text>
+    <path d="M 48 0 H 92 C 118.5097 0 140 21.4903 140 48 V 92 C 140 118.5097 118.5097 140 92 140 H 48 C 21.4903 140 0 118.5097 0 92 V 48 C 0 21.4903 21.4903 0 48 0 Z" fill="#e53935" stroke="#ffffff" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+
+  <g transform="translate(420,220)">
+    <text x="0" y="-8" fill="#cbd5e1" font-family="Inter, system-ui, sans-serif" font-size="12">Regression: gray fill + white 20px center stroke, r=80</text>
+    <path d="M 80 0 H 220 C 264.1828 0 300 35.8172 300 80 V 220 C 300 264.1828 264.1828 300 220 300 H 80 C 35.8172 300 0 264.1828 0 220 V 80 C 0 35.8172 35.8172 0 80 0 Z" fill="#9e9e9e"/>
+    <path d="M 80 -10 H 220 C 269.7056 -10 310 30.2944 310 80 V 220 C 310 269.7056 269.7056 310 220 310 H 80 C 30.2944 310 -10 269.7056 -10 220 V 80 C -10 30.2944 30.2944 -10 80 -10 Z M 80 10 H 220 C 258.6599 10 290 41.3401 290 80 V 220 C 290 258.6599 258.6599 290 220 290 H 80 C 41.3401 290 10 258.6599 10 220 V 80 C 10 41.3401 41.3401 10 80 10 Z" fill="#ffffff" fill-rule="evenodd"/>
+  </g>
+
+  <text x="24" y="416" fill="#cbd5e1" font-family="Inter, system-ui, sans-serif" font-size="12">Path debug — fill + red stroke-width=8 + controls + segment flow</text>
+  
+  <g transform="translate(24, 432)">
+    <text x="0" y="-8" fill="#cbd5e1" font-family="Inter, system-ui, sans-serif" font-size="12">smoothing=0 · M→H→C→V→C→H→C→V→C→Z</text>
+    <path d="M 24 0 H 116 C 129.2548 0 140 10.7452 140 24 V 76 C 140 89.2548 129.2548 100 116 100 H 24 C 10.7452 100 0 89.2548 0 76 V 24 C 0 10.7452 10.7452 0 24 0 Z" fill="#64748b" fill-opacity="0.35"/>
+    <path d="M 24 0 H 116 C 129.2548 0 140 10.7452 140 24 V 76 C 140 89.2548 129.2548 100 116 100 H 24 C 10.7452 100 0 89.2548 0 76 V 24 C 0 10.7452 10.7452 0 24 0 Z" fill="none" stroke="red" stroke-width="8" stroke-linejoin="round"/>
+  </g>
+  
+  <g transform="translate(260, 432)">
+    <text x="0" y="-8" fill="#cbd5e1" font-family="Inter, system-ui, sans-serif" font-size="12">smoothing=0.6 · M→C→A→C→L→C→A→C→L→C→A→C→L→C→A→C→Z</text>
+    <path d="M 101.6 0 c 13.4413 0 20.1619 0 25.2958 2.6158 a 24 24 0 0 1 10.4884 10.4884 c 2.6158 5.1339 2.6158 11.8545 2.6158 25.2958 L 140 61.6 c 0 13.4413 0 20.1619 -2.6158 25.2958 a 24 24 0 0 1 -10.4884 10.4884 c -5.1339 2.6158 -11.8545 2.6158 -25.2958 2.6158 L 38.4 100 c -13.4413 0 -20.1619 0 -25.2958 -2.6158 a 24 24 0 0 1 -10.4884 -10.4884 c -2.6158 -5.1339 -2.6158 -11.8545 -2.6158 -25.2958 L 0 38.4 c 0 -13.4413 0 -20.1619 2.6158 -25.2958 a 24 24 0 0 1 10.4884 -10.4884 c 5.1339 -2.6158 11.8545 -2.6158 25.2958 -2.6158 Z" fill="#64748b" fill-opacity="0.35"/>
+    <path d="M 101.6 0 c 13.4413 0 20.1619 0 25.2958 2.6158 a 24 24 0 0 1 10.4884 10.4884 c 2.6158 5.1339 2.6158 11.8545 2.6158 25.2958 L 140 61.6 c 0 13.4413 0 20.1619 -2.6158 25.2958 a 24 24 0 0 1 -10.4884 10.4884 c -5.1339 2.6158 -11.8545 2.6158 -25.2958 2.6158 L 38.4 100 c -13.4413 0 -20.1619 0 -25.2958 -2.6158 a 24 24 0 0 1 -10.4884 -10.4884 c -2.6158 -5.1339 -2.6158 -11.8545 -2.6158 -25.2958 L 0 38.4 c 0 -13.4413 0 -20.1619 2.6158 -25.2958 a 24 24 0 0 1 10.4884 -10.4884 c 5.1339 -2.6158 11.8545 -2.6158 25.2958 -2.6158 Z" fill="none" stroke="red" stroke-width="8" stroke-linejoin="round"/>
+  </g>
+</svg>

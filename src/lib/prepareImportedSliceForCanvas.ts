@@ -3,6 +3,7 @@ import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import { captureActivePage } from "@/lib/editorPages";
 import { parseCssColor } from "@/lib/color";
 import type { EditorNode } from "@/stores/useEditorStore";
+import { normalizeBottomNavTextNodes } from "@/lib/webImport/normalizeWebImportLayers";
 
 function hasUnresolvableCssColor(value: string | undefined): boolean {
   if (!value?.trim()) return false;
@@ -97,6 +98,7 @@ function syncPagesWithCanvas(slice: EditorPersistSlice): EditorPersistSlice {
 /** Ensure bridge/import slices paint on SVG (no var() fills, no clip hiding children). */
 export function prepareImportedSliceForCanvas(slice: EditorPersistSlice): EditorPersistSlice {
   let nodes = sanitizeNodesRecord(slice.nodes);
+  normalizeBottomNavTextNodes(nodes);
   nodes = ensureRootFrameVisible(nodes, slice.childOrder);
 
   let next: EditorPersistSlice = { ...slice, nodes };
@@ -104,6 +106,7 @@ export function prepareImportedSliceForCanvas(slice: EditorPersistSlice): Editor
     const pages = { ...next.pages };
     for (const [pageId, page] of Object.entries(pages)) {
       let pageNodes = sanitizeNodesRecord(page.nodes);
+      normalizeBottomNavTextNodes(pageNodes);
       pageNodes = ensureRootFrameVisible(pageNodes, page.childOrder);
       pages[pageId] = { ...page, nodes: pageNodes };
     }

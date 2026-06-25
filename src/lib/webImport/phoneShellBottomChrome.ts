@@ -7,9 +7,16 @@ export { isPhoneShellClassName } from "@/lib/webImport/phoneShellViewport";
 /** Wrapper classes for BottomNav / HomeIndicator chrome in PML phone shells. */
 const BOTTOM_CHROME_CLASS_RE = /__(?:bottom-nav|home-indicator)\b/;
 
+function isBottomNavClassName(className: string): boolean {
+  if (BOTTOM_CHROME_CLASS_RE.test(className)) return true;
+  const tokens = className.split(/\s+/).filter(Boolean);
+  if (tokens.some((t) => t === "bn" || t.startsWith("bn__"))) return true;
+  return false;
+}
+
 export function isPhoneShellBottomChrome(className?: string | null, codeJsxTag?: string | null): boolean {
   const cls = className ?? "";
-  if (BOTTOM_CHROME_CLASS_RE.test(cls)) return true;
+  if (isBottomNavClassName(cls)) return true;
   if (codeJsxTag === "BottomNav" || codeJsxTag === "HomeIndicator") return true;
   return false;
 }

@@ -8,6 +8,7 @@ import {
   type MockApiTokenScope,
 } from "@/lib/mockApiTokenScope";
 import { mockApiStore, type MockApiUserRow } from "@/lib/mockApiStore";
+import { MOCK_API_SESSION_COOKIE, parseMockApiCookies } from "@/lib/mockApiSession";
 
 export type MockApiRequestAuth =
   | { kind: "session"; user: MockApiUserRow }
@@ -18,6 +19,13 @@ export type MockApiRequestAuth =
       resourceScopes: MockApiTokenResourceScope[];
       tokenRow: MockApiTokenRow;
     };
+
+export function resolveMockApiSessionUser(request: Request) {
+  const cookies = parseMockApiCookies(request.headers.get("cookie"));
+  const sessionToken = cookies[MOCK_API_SESSION_COOKIE];
+  if (!sessionToken) return null;
+  return mockApiStore.findUserBySessionToken(sessionToken);
+}
 
 export function resolveMockApiRequestAuth(request: Request): MockApiRequestAuth {
   const bearer = parseBearerToken(request.headers.get("authorization") ?? undefined);
@@ -37,6 +45,12 @@ export function resolveMockApiRequestAuth(request: Request): MockApiRequestAuth 
       }
     }
   }
+
+  const sessionUser = resolveMockApiSessionUser(request);
+  if (sessionUser) {
+    return { kind: "session", user: sessionUser };
+  }
+
   return { kind: "session", user: mockApiStore.getCurrentUser() };
 }
 

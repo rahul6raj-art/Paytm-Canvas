@@ -1,14 +1,17 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  closedShapeStrokeViewport,
   resolveStrokeSideWidths,
   resolveStrokeSides,
   shouldUseAlignedPathStroke,
   strokeEdgeRects,
+  strokeRingLayersBeforeFill,
   resolveStrokeSideColor,
   strokeSideColorsAreMixed,
   strokeSideWeightsAreMixed,
   strokeUsesCssIndividualBorders,
+  shouldUseOutlinedOpenPathStroke,
   usesPerEdgeStroke,
 } from "@/lib/strokeAlign";
 
@@ -169,5 +172,41 @@ describe("strokeAlign", () => {
     };
     assert.equal(shouldUseAlignedPathStroke(node, true), true);
     assert.equal(shouldUseAlignedPathStroke(node, false), false);
+  });
+
+  it("orders filled stroke rings below fill only for outside position", () => {
+    assert.equal(strokeRingLayersBeforeFill("outside"), true);
+    assert.equal(strokeRingLayersBeforeFill("center"), false);
+    assert.equal(strokeRingLayersBeforeFill("inside"), false);
+    assert.equal(strokeRingLayersBeforeFill(undefined), false);
+  });
+
+  it("expands closed-shape viewport padding by stroke alignment", () => {
+    const center = closedShapeStrokeViewport(100, 80, 10, "center");
+    assert.ok(center);
+    assert.equal(center!.viewBox, "-5 -5 110 90");
+    const outside = closedShapeStrokeViewport(100, 80, 10, "outside");
+    assert.ok(outside);
+    assert.equal(outside!.viewBox, "-10 -10 120 100");
+    assert.equal(closedShapeStrokeViewport(100, 80, 10, "inside"), null);
+  });
+
+  it("uses native centerline stroke for open center-aligned paths", () => {
+    const base = {
+      type: "path" as const,
+      pathPoints: [
+        { id: "a", x: 0, y: 0 },
+        { id: "b", x: 80, y: 0 },
+      ],
+    };
+    assert.equal(shouldUseOutlinedOpenPathStroke(base, false), false);
+    assert.equal(
+      shouldUseOutlinedOpenPathStroke({ ...base, strokePosition: "outside" }, false),
+      true,
+    );
+    assert.equal(
+      shouldUseOutlinedOpenPathStroke({ ...base, strokeEndPoint: "triangle-arrow" }, false),
+      false,
+    );
   });
 });

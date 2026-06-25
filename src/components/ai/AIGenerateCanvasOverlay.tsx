@@ -2,20 +2,26 @@
 
 import { useMemo, type CSSProperties } from "react";
 import { Plus, Sparkles } from "lucide-react";
+import { useTheme } from "@/components/ThemeProvider";
 import { useCanvasOverlaySpace } from "@/components/editor/useCanvasOverlaySpace";
-import { worldRectToOverlay } from "@/lib/canvasOverlaySpace";
+import { worldLengthToOverlay, worldRectToOverlay } from "@/lib/canvasOverlaySpace";
 import { AI_GENERATE_SKELETON_FRAME_ID } from "@/lib/aiGenerateJob";
 import { useEditorStore } from "@/stores/useEditorStore";
 
-const PLUS_COUNT = 18;
+const GRID_SPACING_PX = 22;
+const FRAME_INSET_PX = 14;
+const PLUS_SIZE_PX = 10;
+const BLINK_COUNT = 34;
 
-type BlinkPlus = {
+type GridCell = {
   x: number;
   y: number;
-  size: number;
+  index: number;
+};
+
+type BlinkPlus = GridCell & {
   duration: number;
   delay: number;
-  peakOpacity: number;
 };
 
 /** Deterministic pseudo-random in [0, 1). */
@@ -24,64 +30,135 @@ function seededUnit(seed: number): number {
   return x - Math.floor(x);
 }
 
-function buildBlinkPluses(): BlinkPlus[] {
-  return Array.from({ length: PLUS_COUNT }, (_, i) => {
-    const seed = i + 1;
-    const edgePad = 0.1;
-    return {
-      x: edgePad + seededUnit(seed * 3.17) * (1 - edgePad * 2),
-      y: edgePad + seededUnit(seed * 7.91) * (1 - edgePad * 2),
-      size: 8 + Math.round(seededUnit(seed * 11.3) * 6),
-      duration: 1.4 + seededUnit(seed * 5.7) * 2.2,
-      delay: seededUnit(seed * 13.1) * 3.5,
-      peakOpacity: 0.35 + seededUnit(seed * 17.9) * 0.45,
-    };
-  });
+function buildPlusGrid(width: number, height: number): GridCell[] {
+  if (width < 48 || height < 48) return [];
+
+  const innerW = Math.max(1, width - FRAME_INSET_PX * 2);
+  const innerH = Math.max(1, height - FRAME_INSET_PX * 2);
+  const cols = Math.max(2, Math.round(innerW / GRID_SPACING_PX) + 1);
+  const rows = Math.max(2, Math.round(innerH / GRID_SPACING_PX) + 1);
+  const stepX = cols > 1 ? innerW / (cols - 1) : 0;
+  const stepY = rows > 1 ? innerH / (rows - 1) : 0;
+
+  const cells: GridCell[] = [];
+  let index = 0;
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      cells.push({
+        x: FRAME_INSET_PX + col * stepX,
+        y: FRAME_INSET_PX + row * stepY,
+        index: index++,
+      });
+    }
+  }
+  return cells;
 }
 
-function BlinkPlusMark({ mark }: { mark: BlinkPlus }) {
+function buildBlinkPluses(cells: GridCell[]): BlinkPlus[] {
+  const count = Math.min(BLINK_COUNT, cells.length);
+  return [...cells]
+    .sort((a, b) => seededUnit(a.index * 31.7 + 5) - seededUnit(b.index * 31.7 + 5))
+    .slice(0, count)
+    .map((cell) => {
+      const seed = cell.index + 1;
+      return {
+        ...cell,
+        duration: 1.2 + seededUnit(seed * 5.7) * 1.8,
+        delay: seededUnit(seed * 13.1) * 2.8,
+      };
+    });
+}
+
+const plusMarkStyle = (x: number, y: number, size: number): CSSProperties => ({
+  left: x,
+  top: y,
+  width: size,
+  height: size,
+  transform: "translate(-50%, -50%)",
+});
+
+function StaticPlusMark({ cell, isLight }: { cell: GridCell; isLight: boolean }) {
   return (
     <Plus
-      className="pointer-events-none absolute ai-gen-plus-blink text-neutral-400"
+      className={
+        isLight
+          ? "pointer-events-none absolute text-neutral-500/55"
+          : "pointer-events-none absolute text-neutral-500/40"
+      }
       strokeWidth={1.5}
       aria-hidden
-      style={
-        {
-          left: `${mark.x * 100}%`,
-          top: `${mark.y * 100}%`,
-          width: mark.size,
-          height: mark.size,
-          ["--plus-peak-opacity" as string]: mark.peakOpacity,
-          animationDuration: `${mark.duration}s`,
-          animationDelay: `${mark.delay}s`,
-          transform: "translate(-50%, -50%)",
-        } as CSSProperties
-      }
+      style={plusMarkStyle(cell.x, cell.y, PLUS_SIZE_PX)}
     />
   );
 }
 
-function SkeletonPlusField({ cornerRadius }: { cornerRadius: number }) {
-  const pluses = useMemo(() => buildBlinkPluses(), []);
+function BlinkPlusMark({ mark, isLight }: { mark: BlinkPlus; isLight: boolean }) {
+  return (
+    <div
+      className="pointer-events-none absolute z-[1]"
+      aria-hidden
+      style={{
+        ...plusMarkStyle(mark.x, mark.y, PLUS_SIZE_PX),
+        animation: `aiGenPlusBlink ${mark.duration}s ease-in-out ${mark.delay}s infinite`,
+      }}
+    >
+      {isLight ? (
+        <Plus
+          className="h-full w-full"
+          strokeWidth={2}
+          style={{ color: "#000000" }}
+        />
+      ) : (
+        <Plus
+          className="h-full w-full"
+          strokeWidth={2}
+          style={{ color: "#ffffff", filter: "drop-shadow(0 0 3px rgba(255, 255, 255, 0.45))" }}
+        />
+      )}
+    </div>
+  );
+}
+
+function SkeletonPlusField({
+  width,
+  height,
+  cornerRadius,
+  isLight,
+}: {
+  width: number;
+  height: number;
+  cornerRadius: number;
+  isLight: boolean;
+}) {
+  const { grid, blinkers } = useMemo(() => {
+    const grid = buildPlusGrid(width, height);
+    return { grid, blinkers: buildBlinkPluses(grid) };
+  }, [width, height]);
+
   return (
     <div
       className="absolute inset-0 overflow-hidden"
       style={{ borderRadius: cornerRadius }}
     >
-      {pluses.map((mark, idx) => (
-        <BlinkPlusMark key={idx} mark={mark} />
+      {grid.map((cell) => (
+        <StaticPlusMark key={`static-${cell.index}`} cell={cell} isLight={isLight} />
+      ))}
+      {blinkers.map((mark) => (
+        <BlinkPlusMark key={`blink-${mark.index}`} mark={mark} isLight={isLight} />
       ))}
     </div>
   );
 }
 
-/** Blinking plus icons scattered over the skeleton frame while AI generates. */
+/** Plus grid skeleton overlay while AI generates. */
 export function AIGenerateCanvasOverlay() {
   const active = useEditorStore((s) => s.aiGenerateActive);
   const step = useEditorStore((s) => s.aiGenerateStep);
   const nodes = useEditorStore((s) => s.nodes);
   const cancel = useEditorStore((s) => s.cancelAIGenerate);
   const space = useCanvasOverlaySpace();
+  const { resolved: theme } = useTheme();
+  const isLight = theme === "light";
 
   const skeleton = nodes[AI_GENERATE_SKELETON_FRAME_ID];
 
@@ -98,7 +175,9 @@ export function AIGenerateCanvasOverlay() {
     );
   }, [skeleton, space]);
 
-  const cornerRadius = skeleton?.cornerRadius ?? 24;
+  const cornerRadiusPx = skeleton
+    ? worldLengthToOverlay(skeleton.cornerRadius ?? 24, space)
+    : 24;
 
   if (!active) return null;
 
@@ -106,17 +185,26 @@ export function AIGenerateCanvasOverlay() {
     <>
       {frameOverlay ? (
         <div
-          className="pointer-events-none absolute z-[44] overflow-hidden ring-1 ring-neutral-300/45"
+          className={
+            isLight
+              ? "pointer-events-none absolute z-[44] overflow-hidden ring-1 ring-neutral-300/50"
+              : "pointer-events-none absolute z-[44] overflow-hidden ring-1 ring-neutral-600/35"
+          }
           style={{
             left: frameOverlay.x,
             top: frameOverlay.y,
             width: frameOverlay.width,
             height: frameOverlay.height,
-            borderRadius: cornerRadius,
+            borderRadius: cornerRadiusPx,
           }}
           aria-hidden
         >
-          <SkeletonPlusField cornerRadius={cornerRadius} />
+          <SkeletonPlusField
+            width={frameOverlay.width}
+            height={frameOverlay.height}
+            cornerRadius={cornerRadiusPx}
+            isLight={isLight}
+          />
         </div>
       ) : null}
 

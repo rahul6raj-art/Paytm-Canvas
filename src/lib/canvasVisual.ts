@@ -1,5 +1,8 @@
-/** Default pasteboard / workspace background (theme-linked — resolves per UI theme). */
-export const DEFAULT_CANVAS_BACKGROUND = "#ffffff";
+/** Default light pasteboard grey (Figma-style workspace). */
+export const CANVAS_WORKSPACE_LIGHT = "#e5e5e5";
+
+/** Default stored pasteboard — theme-linked; resolves per UI theme. */
+export const DEFAULT_CANVAS_BACKGROUND = CANVAS_WORKSPACE_LIGHT;
 
 /** Legacy dark pasteboard sentinel; theme-linked like DEFAULT_CANVAS_BACKGROUND. */
 export const CANVAS_WORKSPACE_DARK = "#1e1e1e";
@@ -8,8 +11,8 @@ export const CANVAS_WORKSPACE_DARK = "#1e1e1e";
 export const THEME_CANVAS_WORKSPACE_CSS = "hsl(var(--pc-canvas-workspace))";
 
 const DEFAULT_LIGHT_WORKSPACE_HEXES = new Set([
-  DEFAULT_CANVAS_BACKGROUND.toLowerCase(),
-  "#e5e5e5",
+  "#ffffff",
+  CANVAS_WORKSPACE_LIGHT.toLowerCase(),
   "#e8eaed",
   "#ebebeb",
   "#f5f5f5",
@@ -57,7 +60,7 @@ export function isThemeLinkedWorkspaceBackground(backgroundColor: string): boole
 
 /** Resolved hex for theme-linked workspace (labels, rulers, store helpers). */
 export function themeCanvasWorkspaceHex(theme: "light" | "dark"): string {
-  return theme === "dark" ? CANVAS_WORKSPACE_DARK : DEFAULT_CANVAS_BACKGROUND;
+  return theme === "dark" ? CANVAS_WORKSPACE_DARK : CANVAS_WORKSPACE_LIGHT;
 }
 
 /** Hex pasteboard color for chrome math when the visible bg is theme-linked. */
@@ -84,7 +87,7 @@ export function displayCanvasBackground(
 
 /** Figma-like canvas chrome tokens; selection/hover use CSS vars (see globals.css `.dark`). */
 export const CANVAS_VISUAL = {
-  workspace: DEFAULT_CANVAS_BACKGROUND,
+  workspace: CANVAS_WORKSPACE_LIGHT,
   selection: "var(--pc-canvas-selection)",
   selectionFill: "var(--pc-canvas-selection-fill)",
   selectionMuted: "var(--pc-canvas-selection-muted)",
@@ -98,15 +101,36 @@ export const CANVAS_VISUAL = {
   swapPinkRing: "rgba(255, 36, 255, 0.55)",
   frameLabel: "#333333",
   frameLabelMuted: "#8c8c8c",
+  /** Component master frame titles (Figma-style violet). */
+  componentFrameLabel: "#7c3aed",
+  componentFrameLabelSelected: "#8b5cf6",
   frameBorder: "#e6e6e6",
   prototype: "var(--pc-canvas-selection)",
   comment: "var(--pc-canvas-selection)",
   locked: "var(--pc-canvas-locked-outline)",
   instance: "var(--pc-canvas-instance-outline)",
+  /** Component master selection outline + transform handles. */
+  component: "var(--pc-canvas-component-outline)",
+  componentFill: "var(--pc-canvas-component-selection-fill)",
+  componentMuted: "var(--pc-canvas-component-selection-muted)",
   groupOutline: "var(--pc-canvas-group-outline)",
   booleanOutline: "var(--pc-canvas-boolean-outline)",
   maskOutline: "var(--pc-canvas-mask-outline)",
 } as const;
+
+/** Selection / handle accent: instance purple, then component violet, else default blue. */
+export function resolveCanvasSelectionAccent(opts: {
+  inspect?: boolean;
+  locked?: boolean;
+  anyInstance?: boolean;
+  anyComponentMaster?: boolean;
+}): string {
+  if (opts.inspect) return "#f472b6";
+  if (opts.locked) return CANVAS_VISUAL.locked;
+  if (opts.anyInstance) return CANVAS_VISUAL.instance;
+  if (opts.anyComponentMaster) return CANVAS_VISUAL.component;
+  return CANVAS_VISUAL.selection;
+}
 
 /** Frame title above artboards (screen px — rendered in overlay space). */
 export const CANVAS_FRAME_LABEL_FONT_SCREEN_PX = 11;
@@ -181,6 +205,7 @@ const CORNER_RADIUS_HANDLE_RING = "#18a0fb";
 export function canvasCornerRadiusHandleStyle(
   outerPx = CANVAS_CORNER_RADIUS_HANDLE_SCREEN_PX,
   borderPx = CANVAS_CORNER_RADIUS_HANDLE_BORDER_SCREEN_PX,
+  ringColor: string = CORNER_RADIUS_HANDLE_RING,
 ): {
   width: number;
   height: number;
@@ -196,7 +221,7 @@ export function canvasCornerRadiusHandleStyle(
     boxSizing: "border-box",
     padding: 0,
     background: CORNER_RADIUS_HANDLE_FILL,
-    border: `${borderPx}px solid ${CORNER_RADIUS_HANDLE_RING}`,
+    border: `${borderPx}px solid ${ringColor}`,
     borderRadius: "50%",
   };
 }

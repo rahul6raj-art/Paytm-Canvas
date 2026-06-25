@@ -1,7 +1,18 @@
 import type { EditorNode } from "@/stores/useEditorStore";
-import { collectSubtreeIds, topLevelSelectedIds } from "@/lib/editorGraph";
+import { childIdsForNode, collectSubtreeIds, topLevelSelectedIds } from "@/lib/editorGraph";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import { worldRect } from "@/lib/tree";
+import { assignStableLayerIds } from "@/lib/components/stableIds";
+import {
+  applyPathOverridesToNode,
+  readInstanceOverrideMap,
+} from "@/lib/components/overrides";
+import {
+  nestedInstanceRootsInSubtree,
+  parentOverridesForNestedLayer,
+  partitionOverrideMap,
+} from "@/lib/components/stablePaths";
+import { findComponentSetContainer } from "@/lib/components/componentSet";
 
 /** Visual / content overrides allowed on component instances */
 export type InstanceOverridePatch = Partial<
@@ -74,13 +85,49 @@ export function mergeInstanceOverrides(
   base: EditorNode,
   nodes: Record<string, EditorNode>,
 ): EditorNode {
-  const rootId = findInstanceRoot(nodes, base.id);
-  if (!rootId) return base;
-  const root = nodes[rootId];
-  const raw = root?.instanceOverrides?.[base.id];
-  if (!raw || typeof raw !== "object") return base;
-  const ov = raw as InstanceOverridePatch;
-  return { ...base, ...ov };
+  const chain: { rootId: string; stableId: string }[] = [];
+  let cur: string | null = base.id;
+  while (cur) {
+    const n: EditorNode | undefined = nodes[cur];
+    if (!n) break;
+    if (n.sourceComponentId) {
+      const stableId = n.instanceStableIdMap?.[base.id];
+      if (stableId) chain.push({ rootId: cur, stableId });
+    }
+    cur = n.parentId ?? null;
+  }
+  if (chain.length === 0) return base;
+
+  let merged = base;
+  for (const { rootId, stableId } of chain) {
+    const root = nodes[rootId];
+    if (!root) continue;
+    const paths = readInstanceOverrideMap(root)[stableId];
+    if (paths) merged = applyPathOverridesToNode(merged, paths);
+  }
+
+  for (let i = 1; i < chain.length; i++) {
+    const outer = nodes[chain[i]!.rootId];
+    if (!outer) continue;
+    const nestedRootId = chain[i - 1]!.rootId;
+    const nestedSlotStableId = outer.instanceStableIdMap?.[nestedRootId];
+    const nestedLayerStableId = chain[0]!.stableId;
+    if (!nestedSlotStableId || !nestedLayerStableId) continue;
+    const parentPaths = parentOverridesForNestedLayer(
+      readInstanceOverrideMap(outer),
+      nestedSlotStableId,
+      nestedLayerStableId,
+    );
+    if (parentPaths) merged = applyPathOverridesToNode(merged, parentPaths);
+  }
+
+  const legacyRootId = chain[0]!.rootId;
+  const raw = nodes[legacyRootId]?.instanceOverrides?.[base.id];
+  if (raw && typeof raw === "object") {
+    merged = { ...merged, ...(raw as InstanceOverridePatch) };
+  }
+
+  return merged;
 }
 
 /** Strip component / instance metadata from a node (used when cloning for instances). */
@@ -90,8 +137,20 @@ export function stripComponentFields(n: EditorNode): EditorNode {
     componentId: _ci,
     sourceComponentId: _sc,
     instanceOverrides: _io,
+    instanceOverridesByStableId: _ios,
+    instanceStableIdMap: _ism,
+    selectedVariantProperties: _sv,
+    componentVersionAtInsert: _cvi,
+    componentPropertyValues: _cpv,
+    instanceDetached: _id,
     variantGroupId: _vg,
     variantProperties: _vp,
+    componentLayerStableIds: _cls,
+    componentDescription: _cd,
+    componentPropertyDefs: _cpd,
+    componentVersion: _cv,
+    libraryId: _li,
+    publishStatus: _ps,
     ...rest
   } = n;
   return rest as EditorNode;
@@ -124,7 +183,10 @@ export type ComponentLibraryGroup = {
 };
 
 /** Group variant siblings; standalone masters become single-item groups. */
-export function groupComponentMasters(masters: EditorNode[]): ComponentLibraryGroup[] {
+export function groupComponentMasters(
+  masters: EditorNode[],
+  nodes?: Record<string, EditorNode>,
+): ComponentLibraryGroup[] {
   const byVariantGroup = new Map<string, EditorNode[]>();
   const standalone: EditorNode[] = [];
 
@@ -144,7 +206,8 @@ export function groupComponentMasters(masters: EditorNode[]): ComponentLibraryGr
     const sortedVariants = [...variants].sort((a, b) =>
       variantSortKey(a).localeCompare(variantSortKey(b)),
     );
-    const label = masterGroupLabel(sortedVariants);
+    const container = nodes ? findComponentSetContainer(nodes, vgId) : undefined;
+    const label = container?.name ?? masterGroupLabel(sortedVariants);
     groups.push({ id: vgId, label, variants: sortedVariants });
   }
 
@@ -153,6 +216,19 @@ export function groupComponentMasters(masters: EditorNode[]): ComponentLibraryGr
   }
 
   return groups.sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/** Default variant shown in the library panel and used when placing from the panel. */
+export function primaryMasterForGroup(group: ComponentLibraryGroup): EditorNode {
+  return group.variants[0]!;
+}
+
+/** One library row per component set — variant siblings collapse to the primary master. */
+export function libraryPanelMasters(
+  masters: EditorNode[],
+  nodes?: Record<string, EditorNode>,
+): EditorNode[] {
+  return groupComponentMasters(masters, nodes).map((g) => primaryMasterForGroup(g));
 }
 
 function variantSortKey(node: EditorNode): string {
@@ -203,6 +279,13 @@ export function canCreateComponentFromSelection(
   });
   if (tops.length === 0) return false;
   if (tops.some((id) => findInstanceRoot(nodes, id))) return false;
+  if (tops.length >= 2) {
+    const allFramesOrGroups = tops.every((id) => {
+      const n = nodes[id];
+      return n && (n.type === "frame" || n.type === "group");
+    });
+    if (allFramesOrGroups) return false;
+  }
   const parentId = nodes[tops[0]!]!.parentId;
   if (!tops.every((id) => nodes[id]!.parentId === parentId)) return false;
   const root = nodes[tops[0]!]!;
@@ -303,8 +386,7 @@ export function wrapNodeInFrameForComponent(
     visible: true,
     locked: false,
     expanded: true,
-    fill: "#ffffff",
-    fillEnabled: true,
+    fillEnabled: false,
   };
   nextNodes[nodeId] = {
     ...n,
@@ -326,12 +408,14 @@ export function wrapNodeInFrameForComponent(
 
 export function markNodeAsComponent(
   nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
   rootId: string,
 ): Record<string, EditorNode> {
   const n = nodes[rootId];
   if (!n || (n.type !== "frame" && n.type !== "group")) return nodes;
   const cmpId = newComponentId();
   const vg = newVariantGroupId();
+  const stableIds = assignStableLayerIds(nodes, childOrder, rootId);
   return {
     ...nodes,
     [rootId]: {
@@ -340,6 +424,10 @@ export function markNodeAsComponent(
       componentId: cmpId,
       variantGroupId: vg,
       variantProperties: n.variantProperties ?? { Variant: "Default" },
+      componentLayerStableIds: stableIds,
+      componentVersion: n.componentVersion ?? 1,
+      componentPropertyDefs: n.componentPropertyDefs ?? [],
+      publishStatus: n.publishStatus ?? "local",
     },
   };
 }
@@ -385,7 +473,7 @@ export function cloneEditorSubtree(
     };
     if (mapClonedNode) fresh = mapClonedNode(old, fresh, idMap);
     nextNodes[newId] = fresh;
-    const kids = [...(childOrder[oldId] ?? [])];
+    const kids = childIdsForNode(nodes, childOrder, oldId);
     const nk: string[] = [];
     for (const k of kids) nk.push(cloneRec(k, newId));
     nextOrder[newId] = nk;
@@ -411,25 +499,63 @@ export function detachInstanceTree(
 ): Record<string, EditorNode> | null {
   const root = nodes[instanceRootId];
   if (!root?.sourceComponentId) return null;
+
+  let out = { ...nodes };
+  const nestedRoots = nestedInstanceRootsInSubtree(out, childOrder, instanceRootId);
+  const overrideMap = readInstanceOverrideMap(root);
+  const { local: localOverrideMap } = partitionOverrideMap(overrideMap);
+
+  for (const nestedId of [...nestedRoots].reverse()) {
+    const nestedRoot = out[nestedId];
+    const nestedSlotStableId = root.instanceStableIdMap?.[nestedId];
+    if (nestedSlotStableId && nestedRoot?.instanceStableIdMap) {
+      for (const [nestedNodeId, nestedLayerStableId] of Object.entries(
+        nestedRoot.instanceStableIdMap,
+      )) {
+        const parentPaths = parentOverridesForNestedLayer(
+          overrideMap,
+          nestedSlotStableId,
+          nestedLayerStableId,
+        );
+        if (parentPaths && out[nestedNodeId]) {
+          out[nestedNodeId] = applyPathOverridesToNode(out[nestedNodeId]!, parentPaths);
+        }
+      }
+    }
+    const nestedDetached = detachInstanceTree(out, childOrder, nestedId);
+    if (nestedDetached) out = nestedDetached;
+  }
+
   const ids = collectSubtreeIds(instanceRootId, childOrder);
-  const out = { ...nodes };
   const ovs = root.instanceOverrides ?? {};
   for (const tid of ids) {
-    const base = out[tid]!;
-    const raw = ovs[tid];
-    const patch =
-      raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as InstanceOverridePatch) : {};
+    let base = out[tid]!;
+    const stableId = root.instanceStableIdMap?.[tid];
+    if (stableId && localOverrideMap[stableId]) {
+      base = applyPathOverridesToNode(base, localOverrideMap[stableId]);
+    } else {
+      const raw = ovs[tid];
+      const patch =
+        raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as InstanceOverridePatch) : {};
+      base = { ...base, ...patch };
+    }
     const next: EditorNode = {
       ...base,
-      ...patch,
       sourceComponentId: undefined,
+      componentId: undefined,
       instanceOverrides: undefined,
+      instanceOverridesByStableId: undefined,
+      instanceStableIdMap: undefined,
+      instanceDetached: true,
+      variantGroupId: undefined,
+      selectedVariantProperties: undefined,
+      currentInteractiveVariantValues: undefined,
+      interactionState: undefined,
     };
     if (tid === instanceRootId) {
       next.isComponent = undefined;
-      next.componentId = undefined;
-      next.variantGroupId = undefined;
-      next.variantProperties = undefined;
+      next.componentPropertyValues = undefined;
+      next.componentVersionAtInsert = undefined;
     }
     out[tid] = next;
   }

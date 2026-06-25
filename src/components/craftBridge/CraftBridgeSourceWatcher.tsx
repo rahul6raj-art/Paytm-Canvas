@@ -116,7 +116,12 @@ export function CraftBridgeSourceWatcher() {
       if (cancelled || importingRef.current || craftBridgeInboundActive) return;
       if (Date.now() < pauseOutboundUntilRef.current) return;
 
-      const fetched = await fetchLinkedSourceContent(link);
+      let fetched: Awaited<ReturnType<typeof fetchLinkedSourceContent>>;
+      try {
+        fetched = await fetchLinkedSourceContent(link);
+      } catch {
+        return;
+      }
       if ("ok" in fetched && fetched.ok === false) return;
       const read = fetched as { hash: string; content: string };
 

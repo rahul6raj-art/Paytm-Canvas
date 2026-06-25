@@ -7,6 +7,7 @@ import {
   CANVAS_CORNER_RADIUS_HANDLE_INSET_SCREEN_PX,
   CANVAS_CORNER_RADIUS_HANDLE_SCREEN_PX,
   CANVAS_EDIT_VALUE_BADGE_OFFSET_SCREEN_PX,
+  CANVAS_VISUAL,
   canvasCornerRadiusHandleStyle,
 } from "@/lib/canvasVisual";
 import {
@@ -150,7 +151,11 @@ export function CornerRadiusHandles() {
     Math.max(Number.isFinite(overlay.zoom) ? overlay.zoom : CANVAS_MIN_ZOOM, CANVAS_MIN_ZOOM);
   const dotPx = CANVAS_CORNER_RADIUS_HANDLE_SCREEN_PX;
   const dotOff = dotPx / 2;
-  const dotStyle = canvasCornerRadiusHandleStyle();
+  const dotStyle = canvasCornerRadiusHandleStyle(
+    undefined,
+    undefined,
+    node?.isComponent ? CANVAS_VISUAL.component : undefined,
+  );
 
   const radii = useMemo(() => {
     if (!node) return [0, 0, 0, 0] as CornerRadii;

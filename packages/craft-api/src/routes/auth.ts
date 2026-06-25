@@ -2,6 +2,7 @@ import { Router } from "express";
 import { prisma } from "../db.js";
 import { acceptPendingInvitesForUser } from "../access/acceptWorkspaceInvites.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
+import { requestPasswordReset, resetPasswordWithToken } from "../auth/passwordReset.js";
 import {
   buildSessionCookie,
   clearSessionCookie,
@@ -13,10 +14,12 @@ import {
 import { jsonV1Data, jsonV1Error } from "../envelope.js";
 import { resolveRequestUser, userDto } from "../middleware/auth.js";
 import { apiTokensRouter } from "./apiTokens.js";
+import { oauthRouter } from "./oauth.js";
 
 export const authRouter = Router();
 
 authRouter.use("/tokens", apiTokensRouter);
+authRouter.use("/oauth", oauthRouter);
 
 authRouter.get("/me", async (req, res) => {
   const user = await resolveRequestUser(req);
@@ -80,6 +83,41 @@ authRouter.post("/login", async (req, res) => {
   const token = await createSession(user.id);
   res.setHeader("Set-Cookie", buildSessionCookie(token));
   res.status(200).json(jsonV1Data(userDto(user)).body);
+});
+
+authRouter.post("/forgot-password", async (req, res) => {
+  const email = String(req.body?.email ?? "").trim();
+  if (!email) {
+    res.status(400).json(jsonV1Error("VALIDATION", "email required", 400).body);
+    return;
+  }
+
+  try {
+    const result = await requestPasswordReset(email);
+    res.status(200).json(jsonV1Data(result).body);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Could not request password reset";
+    res.status(400).json(jsonV1Error("VALIDATION", message, 400).body);
+  }
+});
+
+authRouter.post("/reset-password", async (req, res) => {
+  const token = String(req.body?.token ?? "").trim();
+  const newPassword = String(req.body?.newPassword ?? "");
+  if (!token || newPassword.length < 8) {
+    res
+      .status(400)
+      .json(jsonV1Error("VALIDATION", "token and newPassword (8+ chars) required", 400).body);
+    return;
+  }
+
+  try {
+    const user = await resetPasswordWithToken(token, newPassword);
+    res.status(200).json(jsonV1Data(userDto(user)).body);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Could not reset password";
+    res.status(400).json(jsonV1Error("VALIDATION", message, 400).body);
+  }
 });
 
 authRouter.post("/logout", async (req, res) => {

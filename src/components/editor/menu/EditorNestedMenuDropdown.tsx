@@ -12,6 +12,10 @@ import {
   type ResolvedLogoMenuRootEntry,
   type ResolvedSubmenuEntry,
 } from "@/lib/editorLogoMenuConfig";
+import {
+  editorMenuDividerClass,
+  editorMenuPanelScrollClass,
+} from "@/lib/editorMenuChrome";
 import { useEditorStore } from "@/stores/useEditorStore";
 import {
   anchoredMenuStyle,
@@ -161,7 +165,7 @@ function MenuFlyoutPanel({
           role="menu"
           data-editor-shell
           data-editor-menu-flyout
-          className="editor-menu-dropdown fixed overflow-y-auto border border-app-border bg-app-surface shadow-xl thin-scroll"
+          className={cn(editorMenuPanelScrollClass, "overflow-y-auto")}
           style={{
             left: position.left,
             top: position.top,
@@ -173,7 +177,7 @@ function MenuFlyoutPanel({
           {entries.map((entry, i) => {
             if (entry.type === "divider") {
               return (
-                <div key={`sd-${i}`} className="my-1.5 border-t border-app-border" role="separator" />
+                <div key={`sd-${i}`} className={editorMenuDividerClass} role="separator" />
               );
             }
 
@@ -338,7 +342,7 @@ export function EditorNestedMenuDropdown({
 
   const renderRootEntry = (entry: ResolvedLogoMenuRootEntry, index: number) => {
     if (entry.type === "divider") {
-      return <div key={`d-${index}`} className="my-1.5 border-t border-app-border" role="separator" />;
+      return <div key={`d-${index}`} className={editorMenuDividerClass} role="separator" />;
     }
 
     if (entry.type === "link") {
@@ -400,7 +404,7 @@ export function EditorNestedMenuDropdown({
           role="menu"
           data-editor-shell
           data-editor-menu-flyout
-          className="editor-menu-dropdown fixed z-[120] overflow-y-auto border border-app-border bg-app-surface shadow-xl thin-scroll"
+          className={cn(editorMenuPanelScrollClass, "z-[120]")}
           style={anchoredMenuStyle(position)}
         >
           {rootEntries.map(renderRootEntry)}

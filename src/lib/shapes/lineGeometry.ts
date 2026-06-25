@@ -3,7 +3,7 @@ import {
   buildParentMapFromChildOrder,
   getNodeWorldMatrixFromChildOrder,
 } from "@/lib/editorGraph";
-import { applyMatrixToPoint, getNodeLocalMatrix } from "@/lib/transformMath";
+import { applyMatrixToPoint, getNodeLocalMatrix, invertMatrix } from "@/lib/transformMath";
 import { RESIZE_MIN_DIMENSION } from "@/lib/resize";
 import { screenPxToWorld } from "@/lib/canvasVisual";
 import { constrainLineEndpointTo45Degrees } from "./shapeCreation";
@@ -60,10 +60,11 @@ export function nodeLocalToParent(
 export function lineEndpointsFromLayout(
   node: Pick<EditorNode, "x" | "y" | "width" | "height" | "rotation" | "flipHorizontal" | "flipVertical">,
 ): LineEndpoints {
-  const h = Math.max(1, node.height);
+  const h = Math.max(0, node.height);
   const w = Math.max(1, node.width);
-  const a = nodeLocalToParent(node, { x: 0, y: h / 2 });
-  const b = nodeLocalToParent(node, { x: w, y: h / 2 });
+  const midY = h / 2;
+  const a = nodeLocalToParent(node, { x: 0, y: midY });
+  const b = nodeLocalToParent(node, { x: w, y: midY });
   return { x1: a.x, y1: a.y, x2: b.x, y2: b.y };
 }
 
@@ -97,7 +98,7 @@ export function layoutFromLineEndpoints(
   strokeWidth = 2,
   minLength = MIN_LEN,
 ): Pick<EditorNode, "x" | "y" | "width" | "height" | "rotation" | "lineX1" | "lineY1" | "lineX2" | "lineY2"> {
-  const h = linePadding(strokeWidth);
+  const h = 0;
   const dx = x2 - x1;
   const dy = y2 - y1;
   const length = Math.max(minLength, Math.hypot(dx, dy));
@@ -108,7 +109,7 @@ export function layoutFromLineEndpoints(
     lineX2: x2,
     lineY2: y2,
     x: x1,
-    y: y1 - h / 2,
+    y: y1,
     width: length,
     height: h,
     rotation,
@@ -136,6 +137,45 @@ export function lineEndpointsPatchFromLayout(
 ): Pick<EditorNode, "lineX1" | "lineY1" | "lineX2" | "lineY2"> {
   const ep = lineEndpointsFromLayout(node);
   return { lineX1: ep.x1, lineY1: ep.y1, lineX2: ep.x2, lineY2: ep.y2 };
+}
+
+type LineBoxFields = Pick<
+  EditorNode,
+  | "x"
+  | "y"
+  | "width"
+  | "height"
+  | "rotation"
+  | "flipHorizontal"
+  | "flipVertical"
+  | "lineX1"
+  | "lineY1"
+  | "lineX2"
+  | "lineY2"
+>;
+
+/** Transform stored endpoints when the line box changes (resize, move, rotate). */
+export function lineEndpointsPatchFromBoxResize(
+  before: LineBoxFields,
+  after: Pick<
+    EditorNode,
+    "x" | "y" | "width" | "height" | "rotation" | "flipHorizontal" | "flipVertical"
+  >,
+): Pick<EditorNode, "lineX1" | "lineY1" | "lineX2" | "lineY2"> {
+  const ep = lineEndpointsFromNode(before);
+  const sx = before.width > 0 ? after.width / before.width : 1;
+  const sy = before.height > 0 ? after.height / before.height : 1;
+  const invBefore = invertMatrix(getNodeLocalMatrix(before as EditorNode));
+  if (!invBefore) return lineEndpointsPatchFromLayout(after);
+  const afterMatrix = getNodeLocalMatrix({ ...(before as EditorNode), ...after });
+  const mapEndpoint = (px: number, py: number) => {
+    const local = applyMatrixToPoint(invBefore, { x: px, y: py });
+    const scaled = { x: local.x * sx, y: local.y * sy };
+    return applyMatrixToPoint(afterMatrix, scaled);
+  };
+  const a = mapEndpoint(ep.x1, ep.y1);
+  const b = mapEndpoint(ep.x2, ep.y2);
+  return { lineX1: a.x, lineY1: a.y, lineX2: b.x, lineY2: b.y };
 }
 
 /** Local render coords for SVG line inside the node box. */
@@ -199,7 +239,25 @@ export function hitTestLineWorld(
   );
 }
 
-/** Axis-aligned world bounds including stroke padding. */
+/** Minimum axis-aligned bounds that contain the stroked line (round caps ≈ strokeWidth/2 inset). */
+export function lineStrokeWorldBounds(
+  ep: LineEndpoints,
+  strokeWidth = 1,
+): { x: number; y: number; width: number; height: number } {
+  const half = Math.max(0, strokeWidth) / 2;
+  const minX = Math.min(ep.x1, ep.x2) - half;
+  const minY = Math.min(ep.y1, ep.y2) - half;
+  const maxX = Math.max(ep.x1, ep.x2) + half;
+  const maxY = Math.max(ep.y1, ep.y2) + half;
+  return {
+    x: minX,
+    y: minY,
+    width: Math.max(MIN_LEN, maxX - minX),
+    height: Math.max(0, maxY - minY),
+  };
+}
+
+/** Axis-aligned world bounds for selection outlines and layout (matches visible stroke, not frame height). */
 export function lineRenderedWorldBounds(
   nodeId: string,
   nodes: Record<string, EditorNode>,
@@ -208,12 +266,7 @@ export function lineRenderedWorldBounds(
   const n = nodes[nodeId];
   if (!n || (n.type !== "line" && n.type !== "arrow")) return { x: 0, y: 0, width: 0, height: 0 };
   const ep = lineEndpointsWorld(nodeId, nodes, childOrder);
-  const pad = linePadding(n.strokeWidth ?? 2);
-  const minX = Math.min(ep.x1, ep.x2) - pad;
-  const minY = Math.min(ep.y1, ep.y2) - pad;
-  const maxX = Math.max(ep.x1, ep.x2) + pad;
-  const maxY = Math.max(ep.y1, ep.y2) + pad;
-  return { x: minX, y: minY, width: Math.max(MIN_LEN, maxX - minX), height: Math.max(1, maxY - minY) };
+  return lineStrokeWorldBounds(ep, n.strokeWidth ?? 1);
 }
 
 /** Snap moving endpoint when Shift is held (45° from the fixed endpoint). */

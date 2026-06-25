@@ -52,27 +52,57 @@ export function TextEditPortal({ nodeId }: TextEditPortalProps) {
   const applyContent = useCallback(
     (content: string, anchor: number, focus: number) => {
       if (!nodeRaw || nodeRaw.type !== "text") return;
-      const layoutPatch = textLayoutPatchForNode({ ...nodeRaw, content }, content);
-      updateNodeStyle(nodeId, { content, ...layoutPatch }, { skipHistory: true });
+      const mergedForLayout = mergeInstanceOverrides(nodeRaw, useEditorStore.getState().nodes);
+      const layoutPatch = textLayoutPatchForNode({ ...mergedForLayout, content }, content);
+      // Selection before content so store subscribers never see stale caret after a re-render.
       setTextEditSelection(anchor, focus);
+      updateNodeStyle(nodeId, { content, ...layoutPatch }, { skipHistory: true });
       syncTextareaSelection(anchor, focus);
     },
     [nodeRaw, nodeId, updateNodeStyle, setTextEditSelection, syncTextareaSelection],
   );
+
+  const textareaText = useCallback((): string => {
+    const el = textareaRef.current;
+    if (el) return el.value;
+    return node?.content ?? "";
+  }, [node?.content]);
 
   const finishEdit = useCallback(() => {
     setEditingTextId(null);
   }, [setEditingTextId]);
 
   useEffect(() => {
+    const st = useEditorStore.getState();
+    const raw = st.nodes[nodeId];
+    if (raw?.type !== "text") return;
+    const merged = resolveNodeWithDesignTokens(
+      mergeInstanceOverrides(raw, st.nodes),
+      st.designTokens,
+    );
+    const el = textareaRef.current;
+    if (!el) return;
+    el.value = merged.content ?? "";
+    focusActiveTextEditField(nodeId);
+    const sel = st.textEditSelection;
+    const len = merged.content?.length ?? 0;
+    const anchor = sel?.anchor ?? len;
+    const focus = sel?.focus ?? len;
+    syncTextareaSelection(anchor, focus);
+  }, [nodeId, syncTextareaSelection]);
+
+  // Pull external store edits (undo, inspector) into the hidden field without clobbering active typing.
+  useEffect(() => {
     const el = textareaRef.current;
     if (!el || !node) return;
-    focusActiveTextEditField(nodeId);
-    const len = node.content?.length ?? 0;
+    if (document.activeElement === el) return;
+    const next = node.content ?? "";
+    if (el.value !== next) el.value = next;
+    const len = next.length;
     const anchor = selection?.anchor ?? len;
     const focus = selection?.focus ?? len;
     syncTextareaSelection(anchor, focus);
-  }, [nodeId, node, selection?.anchor, selection?.focus, syncTextareaSelection]);
+  }, [node, node?.content, selection?.anchor, selection?.focus, syncTextareaSelection]);
 
   const handleCanvasPointer = useCallback(
     (localX: number, localY: number, extend: boolean) => {
@@ -163,7 +193,7 @@ export function TextEditPortal({ nodeId }: TextEditPortalProps) {
       const textNode = st.nodes[nodeId];
       if (textNode?.type !== "text") return;
 
-      const text = textNode.content ?? "";
+      const text = mergeInstanceOverrides(textNode, st.nodes).content ?? "";
       const anchor = st.textEditSelection?.anchor ?? text.length;
       const focus = st.textEditSelection?.focus ?? text.length;
       const next = applyTextEditDelete(
@@ -186,13 +216,14 @@ export function TextEditPortal({ nodeId }: TextEditPortalProps) {
 
   const editor = (
     <textarea
+        key={nodeId}
         ref={textareaRef}
         data-text-editor={nodeId}
         aria-hidden
         tabIndex={-1}
         className="pointer-events-none fixed opacity-0"
         style={{ left: -9999, top: 0, width: 1, height: 1, resize: "none" }}
-        value={node.content ?? ""}
+        defaultValue={node.content ?? ""}
         onChange={(ev) => {
           const v = ev.target.value;
           const a = ev.target.selectionStart ?? v.length;
@@ -205,7 +236,7 @@ export function TextEditPortal({ nodeId }: TextEditPortalProps) {
         }}
         onKeyDown={(ev) => {
           ev.stopPropagation();
-          const text = node.content ?? "";
+          const text = textareaText();
           const anchor = selection?.anchor ?? text.length;
           const focus = selection?.focus ?? text.length;
 

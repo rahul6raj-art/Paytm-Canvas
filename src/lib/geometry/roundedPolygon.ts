@@ -252,7 +252,7 @@ function squircleCornerCurveD(
   next: Point2,
 ): { start: Point2; end: Point2; curveD: string } {
   const { a, b, c, d, p, arcSectionLength, cornerRadius } = params;
-  const startLocal = { x: p, y: 0 };
+  const startLocal = { x: -p, y: 0 };
   const start = fromLocal(startLocal, origin, travel, perp);
 
   if (cornerRadius <= EPS || p <= EPS) {
@@ -270,22 +270,34 @@ function squircleCornerCurveD(
   const lx = leaveLocal.x / leaveLen;
   const ly = leaveLocal.y / leaveLen;
 
-  const c1 = { x: startLocal.x - a, y: 0 };
-  const c2 = { x: startLocal.x - a - b, y: 0 };
-  const c3 = { x: startLocal.x - a - b - c, y: d };
+  const c1 = { x: startLocal.x + a, y: 0 };
+  const c2 = { x: startLocal.x + a + b, y: 0 };
+  const c3 = { x: startLocal.x + a + b + c, y: d };
+  const arcStart = c3;
   const arcEnd = {
-    x: startLocal.x - a - b - c - arcSectionLength * lx,
-    y: d + arcSectionLength * ly,
+    x: arcStart.x - arcSectionLength * lx,
+    y: arcStart.y + arcSectionLength * ly,
+  };
+  const arcK = (4 / 3) * Math.tan(params.arcMeasure / 4);
+  const arcC1 = {
+    x: arcStart.x - arcSectionLength * arcK * lx,
+    y: arcStart.y,
+  };
+  const arcC2 = {
+    x: arcEnd.x,
+    y: arcEnd.y - arcSectionLength * arcK * ly,
   };
   const c4 = { x: arcEnd.x - d * lx, y: arcEnd.y - d * ly };
   const c5 = { x: c4.x - c * lx, y: c4.y - c * ly };
   const c6 = { x: c5.x - b * lx, y: c5.y - b * ly };
-  const endLocal = { x: c6.x - a * lx, y: c6.y - a * ly };
+  const endLocal = { x: p * lx, y: p * ly };
   const end = fromLocal(endLocal, origin, travel, perp);
 
   const p1 = fromLocal(c1, origin, travel, perp);
   const p2 = fromLocal(c2, origin, travel, perp);
   const p3 = fromLocal(c3, origin, travel, perp);
+  const pArc1 = fromLocal(arcC1, origin, travel, perp);
+  const pArc2 = fromLocal(arcC2, origin, travel, perp);
   const pArc = fromLocal(arcEnd, origin, travel, perp);
   const p4 = fromLocal(c4, origin, travel, perp);
   const p5 = fromLocal(c5, origin, travel, perp);
@@ -295,7 +307,7 @@ function squircleCornerCurveD(
   const curveD = [
     `L ${fmt(start.x)} ${fmt(start.y)}`,
     `C ${fmt(p1.x)} ${fmt(p1.y)} ${fmt(p2.x)} ${fmt(p2.y)} ${fmt(p3.x)} ${fmt(p3.y)}`,
-    `A ${fmt(cornerRadius)} ${fmt(cornerRadius)} 0 0 ${sweep} ${fmt(pArc.x)} ${fmt(pArc.y)}`,
+    `C ${fmt(pArc1.x)} ${fmt(pArc1.y)} ${fmt(pArc2.x)} ${fmt(pArc2.y)} ${fmt(pArc.x)} ${fmt(pArc.y)}`,
     `C ${fmt(p4.x)} ${fmt(p4.y)} ${fmt(p5.x)} ${fmt(p5.y)} ${fmt(p6.x)} ${fmt(p6.y)}`,
     `L ${fmt(end.x)} ${fmt(end.y)}`,
   ].join(" ");

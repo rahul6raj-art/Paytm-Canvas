@@ -12,6 +12,13 @@ import {
 } from "@/lib/strokeAlign";
 import type { EditorNode, StrokePosition } from "@/stores/useEditorStore";
 import type { CornerArcPortion, RectCorner, RectStrokeSide } from "@/lib/roundedRectSideStroke";
+import {
+  cornerExtentAlongSide,
+  roundedRectCornerPolyline,
+  sideJoin,
+  type RoundedRectCorner,
+  type RoundedRectRadii,
+} from "@/lib/vector/roundedRectPath";
 
 const SIDE_ORDER = ["top", "right", "bottom", "left"] as const;
 const CORNER_ARC_K = 0.7071067811865476;
@@ -39,7 +46,74 @@ export type BorderGeometryInput = {
   sides: ResolvedStrokeSides;
   sideWidths: ResolvedStrokeSideWidths;
   position: StrokePosition;
+  smoothing?: number;
 };
+
+const CORNER_TO_ROUNDED: Record<RectCorner, RoundedRectCorner> = {
+  tl: "topLeft",
+  tr: "topRight",
+  br: "bottomRight",
+  bl: "bottomLeft",
+};
+
+function shapeRoundedRadii(shape: RoundedRectBounds): RoundedRectRadii {
+  const [tl, tr, br, bl] = shape.radii;
+  return { topLeft: tl, topRight: tr, bottomRight: br, bottomLeft: bl };
+}
+
+function bandRoundedRadii(
+  shape: RoundedRectBounds,
+  sideWidth: number,
+  position: StrokePosition,
+  band: "outer" | "inner",
+): RoundedRectRadii {
+  const [tl, tr, br, bl] = shape.radii;
+  return {
+    topLeft: borderCornerRadius(tl, sideWidth, position, band),
+    topRight: borderCornerRadius(tr, sideWidth, position, band),
+    bottomRight: borderCornerRadius(br, sideWidth, position, band),
+    bottomLeft: borderCornerRadius(bl, sideWidth, position, band),
+  };
+}
+
+/** Outer/inner corner contour for border bands (circular arcs or smoothed superellipse). */
+function bandCornerPoints(
+  corner: RectCorner,
+  shape: RoundedRectBounds,
+  sideWidth: number,
+  position: StrokePosition,
+  band: "outer" | "inner",
+  portion: CornerArcPortion,
+  segments: number,
+  smoothing: number,
+): Point2[] {
+  const shapeR = shape.radii[{ tl: 0, tr: 1, br: 2, bl: 3 }[corner]]!;
+  if (smoothing <= EPS) {
+    return concentricCornerArcPoints(corner, shapeR, shape, sideWidth, position, band, portion, segments);
+  }
+  return roundedRectCornerPolyline(
+    CORNER_TO_ROUNDED[corner],
+    shape.width,
+    shape.height,
+    bandRoundedRadii(shape, sideWidth, position, band),
+    smoothing,
+    portion,
+    { x: shape.x, y: shape.y },
+  );
+}
+
+function bandCornerPointsReversed(
+  corner: RectCorner,
+  shape: RoundedRectBounds,
+  sideWidth: number,
+  position: StrokePosition,
+  band: "outer" | "inner",
+  portion: CornerArcPortion,
+  segments: number,
+  smoothing: number,
+): Point2[] {
+  return bandCornerPoints(corner, shape, sideWidth, position, band, portion, segments, smoothing).reverse();
+}
 
 type SideBandOffsets = {
   outer: number;
@@ -249,16 +323,17 @@ function appendInnerCornerArcWithSeam(
   position: StrokePosition,
   portion: CornerArcPortion,
   segments: number,
+  smoothing: number,
 ): void {
-  const pts = concentricCornerArcPointsReversed(
+  const pts = bandCornerPointsReversed(
     corner,
-    shapeRadius,
     shape,
     ownWidth,
     position,
     "inner",
     portion,
     segments,
+    smoothing,
   );
   if (
     portion === "first" &&
@@ -344,6 +419,7 @@ function buildTopBorderPolygon(
   sideWidth: number,
   sideWidths: ResolvedStrokeSideWidths,
   position: StrokePosition,
+  smoothing: number,
 ): Point2[] | null {
   const [otl, otr] = shape.radii;
   const outerPts: Point2[] = [];
@@ -352,10 +428,16 @@ function buildTopBorderPolygon(
   const innerY = topBandY(position, sideWidth, "inner");
   const segTl = segmentsForRadius(otl);
   const segTr = segmentsForRadius(otr);
+  const shapeRadii = shapeRoundedRadii(shape);
+  const pTL = cornerExtentAlongSide("topLeft", shape.width, shape.height, shapeRadii, smoothing);
+  const pTR = cornerExtentAlongSide("topRight", shape.width, shape.height, shapeRadii, smoothing);
 
   const tlOuter = sides.left ? "first" : "full";
   if (otl > 0) {
-    appendPoints(outerPts, concentricCornerArcPoints("tl", otl, shape, sideWidth, position, "outer", tlOuter, segTl));
+    appendPoints(
+      outerPts,
+      bandCornerPoints("tl", shape, sideWidth, position, "outer", tlOuter, segTl, smoothing),
+    );
     if (sides.left) {
       appendCornerSeamConnector(outerPts, "tl", otl, shape, sideWidth, sideWidths.left, position, "outer");
     }
@@ -363,13 +445,16 @@ function buildTopBorderPolygon(
     appendPoints(outerPts, [{ x: shape.x, y: outerY }]);
   }
 
-  const topX0 = otl > 0 ? shape.x + otl : shape.x;
-  const topX1 = shape.x + shape.width - otr;
+  const topX0 = otl > 0 ? shape.x + (smoothing > EPS ? pTL : otl) : shape.x;
+  const topX1 = shape.x + shape.width - (otr > 0 ? (smoothing > EPS ? pTR : otr) : 0);
   if (topX1 - topX0 > EPS) appendPoints(outerPts, [{ x: topX0, y: outerY }, { x: topX1, y: outerY }]);
 
   const trOuter = sides.right ? "first" : "full";
   if (otr > 0) {
-    appendPoints(outerPts, concentricCornerArcPoints("tr", otr, shape, sideWidth, position, "outer", trOuter, segTr).slice(1));
+    appendPoints(
+      outerPts,
+      bandCornerPoints("tr", shape, sideWidth, position, "outer", trOuter, segTr, smoothing).slice(1),
+    );
     if (sides.right) {
       appendCornerSeamConnector(outerPts, "tr", otr, shape, sideWidth, sideWidths.right, position, "outer");
     }
@@ -387,6 +472,7 @@ function buildTopBorderPolygon(
       position,
       trInner,
       segTr,
+      smoothing,
     );
   } else {
     appendPoints(innerPts, [{ x: topX1, y: innerY }]);
@@ -396,15 +482,15 @@ function buildTopBorderPolygon(
 
   const tlInner = sides.left ? "first" : "full";
   if (otl > 0) {
-    const tlInnerPts = concentricCornerArcPointsReversed(
+    const tlInnerPts = bandCornerPointsReversed(
       "tl",
-      otl,
       shape,
       sideWidth,
       position,
       "inner",
       tlInner,
       segTl,
+      smoothing,
     );
     appendPoints(innerPts, tlInnerPts.slice(1));
     if (sides.left) {
@@ -424,6 +510,7 @@ function buildRightBorderPolygon(
   sideWidth: number,
   sideWidths: ResolvedStrokeSideWidths,
   position: StrokePosition,
+  smoothing: number,
 ): Point2[] | null {
   const [, otr, obr] = shape.radii;
   const outerPts: Point2[] = [];
@@ -432,23 +519,35 @@ function buildRightBorderPolygon(
   const innerX = rightBandX(position, sideWidth, shape.width, "inner");
   const segTr = segmentsForRadius(otr);
   const segBr = segmentsForRadius(obr);
+  const shapeRadii = shapeRoundedRadii(shape);
+  const pTR = cornerExtentAlongSide("topRight", shape.width, shape.height, shapeRadii, smoothing);
+  const pBR = cornerExtentAlongSide("bottomRight", shape.width, shape.height, shapeRadii, smoothing);
 
   const trOuter = sides.top ? "second" : "full";
   if (otr > 0) {
-    appendPoints(outerPts, concentricCornerArcPoints("tr", otr, shape, sideWidth, position, "outer", trOuter, segTr));
+    appendPoints(
+      outerPts,
+      bandCornerPoints("tr", shape, sideWidth, position, "outer", trOuter, segTr, smoothing),
+    );
   } else {
     appendPoints(outerPts, [{ x: outerX, y: shape.y }]);
   }
 
-  const rightY0 = otr > 0 ? shape.y + otr : shape.y;
-  const rightY1 = shape.y + shape.height - obr;
+  const rightY0 = otr > 0 ? shape.y + (smoothing > EPS ? pTR : otr) : shape.y;
+  const rightY1 =
+    shape.y +
+    shape.height -
+    (obr > 0 ? (smoothing > EPS ? sideJoin(shape.height, pBR) : obr) : 0);
   if (rightY1 - rightY0 > EPS) {
     appendPoints(outerPts, [{ x: outerX, y: rightY0 }, { x: outerX, y: rightY1 }]);
   }
 
   const brOuter = sides.bottom ? "first" : "full";
   if (obr > 0) {
-    appendPoints(outerPts, concentricCornerArcPoints("br", obr, shape, sideWidth, position, "outer", brOuter, segBr).slice(1));
+    appendPoints(
+      outerPts,
+      bandCornerPoints("br", shape, sideWidth, position, "outer", brOuter, segBr, smoothing).slice(1),
+    );
     if (sides.bottom) {
       appendCornerSeamConnector(outerPts, "br", obr, shape, sideWidth, sideWidths.bottom, position, "outer");
     }
@@ -466,6 +565,7 @@ function buildRightBorderPolygon(
       position,
       brInner,
       segBr,
+      smoothing,
     );
   } else {
     appendPoints(innerPts, [{ x: innerX, y: rightY1 }]);
@@ -475,7 +575,10 @@ function buildRightBorderPolygon(
 
   const trInner = sides.top ? "second" : "full";
   if (otr > 0) {
-    appendPoints(innerPts, concentricCornerArcPointsReversed("tr", otr, shape, sideWidth, position, "inner", trInner, segTr).slice(1));
+    appendPoints(
+      innerPts,
+      bandCornerPointsReversed("tr", shape, sideWidth, position, "inner", trInner, segTr, smoothing).slice(1),
+    );
   } else {
     appendPoints(innerPts, [{ x: innerX, y: rightY0 }]);
   }
@@ -490,6 +593,7 @@ function buildBottomBorderPolygon(
   sideWidth: number,
   sideWidths: ResolvedStrokeSideWidths,
   position: StrokePosition,
+  smoothing: number,
 ): Point2[] | null {
   const [, , obr, obl] = shape.radii;
   const outerPts: Point2[] = [];
@@ -498,23 +602,35 @@ function buildBottomBorderPolygon(
   const innerY = bottomBandY(position, sideWidth, shape.height, "inner");
   const segBr = segmentsForRadius(obr);
   const segBl = segmentsForRadius(obl);
+  const shapeRadii = shapeRoundedRadii(shape);
+  const pBR = cornerExtentAlongSide("bottomRight", shape.width, shape.height, shapeRadii, smoothing);
+  const pBL = cornerExtentAlongSide("bottomLeft", shape.width, shape.height, shapeRadii, smoothing);
 
   const brOuter = sides.right ? "second" : "full";
   if (obr > 0) {
-    appendPoints(outerPts, concentricCornerArcPoints("br", obr, shape, sideWidth, position, "outer", brOuter, segBr));
+    appendPoints(
+      outerPts,
+      bandCornerPoints("br", shape, sideWidth, position, "outer", brOuter, segBr, smoothing),
+    );
   } else {
     appendPoints(outerPts, [{ x: shape.x + shape.width, y: outerY }]);
   }
 
-  const bottomX0 = obr > 0 ? shape.x + shape.width - obr : shape.x + shape.width;
-  const bottomX1 = obl > 0 ? shape.x + obl : shape.x;
+  const bottomX0 =
+    shape.x +
+    shape.width -
+    (obr > 0 ? (smoothing > EPS ? pBR : obr) : 0);
+  const bottomX1 = shape.x + (obl > 0 ? (smoothing > EPS ? sideJoin(shape.width, pBL) : obl) : 0);
   if (bottomX0 - bottomX1 > EPS) {
     appendPoints(outerPts, [{ x: bottomX0, y: outerY }, { x: bottomX1, y: outerY }]);
   }
 
   const blOuter = sides.left ? "first" : "full";
   if (obl > 0) {
-    appendPoints(outerPts, concentricCornerArcPoints("bl", obl, shape, sideWidth, position, "outer", blOuter, segBl).slice(1));
+    appendPoints(
+      outerPts,
+      bandCornerPoints("bl", shape, sideWidth, position, "outer", blOuter, segBl, smoothing).slice(1),
+    );
     if (sides.left) {
       appendCornerSeamConnector(outerPts, "bl", obl, shape, sideWidth, sideWidths.left, position, "outer");
     }
@@ -532,6 +648,7 @@ function buildBottomBorderPolygon(
       position,
       blInner,
       segBl,
+      smoothing,
     );
   } else {
     appendPoints(innerPts, [{ x: bottomX1, y: innerY }]);
@@ -541,7 +658,10 @@ function buildBottomBorderPolygon(
 
   const brInner = sides.right ? "second" : "full";
   if (obr > 0) {
-    appendPoints(innerPts, concentricCornerArcPointsReversed("br", obr, shape, sideWidth, position, "inner", brInner, segBr).slice(1));
+    appendPoints(
+      innerPts,
+      bandCornerPointsReversed("br", shape, sideWidth, position, "inner", brInner, segBr, smoothing).slice(1),
+    );
   } else {
     appendPoints(innerPts, [{ x: bottomX0, y: innerY }]);
   }
@@ -556,6 +676,7 @@ function buildLeftBorderPolygon(
   sideWidth: number,
   sideWidths: ResolvedStrokeSideWidths,
   position: StrokePosition,
+  smoothing: number,
 ): Point2[] | null {
   const [otl, , , obl] = shape.radii;
   const outerPts: Point2[] = [];
@@ -564,28 +685,43 @@ function buildLeftBorderPolygon(
   const innerX = leftBandX(position, sideWidth, "inner");
   const segTl = segmentsForRadius(otl);
   const segBl = segmentsForRadius(obl);
+  const shapeRadii = shapeRoundedRadii(shape);
+  const pTL = cornerExtentAlongSide("topLeft", shape.width, shape.height, shapeRadii, smoothing);
+  const pBL = cornerExtentAlongSide("bottomLeft", shape.width, shape.height, shapeRadii, smoothing);
 
   const blOuter = sides.bottom ? "second" : "full";
   if (obl > 0) {
-    appendPoints(outerPts, concentricCornerArcPoints("bl", obl, shape, sideWidth, position, "outer", blOuter, segBl));
+    appendPoints(
+      outerPts,
+      bandCornerPoints("bl", shape, sideWidth, position, "outer", blOuter, segBl, smoothing),
+    );
   } else {
     appendPoints(outerPts, [{ x: outerX, y: shape.y + shape.height }]);
   }
 
-  const leftY0 = obl > 0 ? shape.y + shape.height - obl : shape.y + shape.height;
-  const leftY1 = otl > 0 ? shape.y + otl : shape.y;
+  const leftY0 =
+    shape.y +
+    shape.height -
+    (obl > 0 ? (smoothing > EPS ? pBL : obl) : 0);
+  const leftY1 = shape.y + (otl > 0 ? (smoothing > EPS ? sideJoin(shape.height, pTL) : otl) : 0);
   if (leftY0 - leftY1 > EPS) {
     appendPoints(outerPts, [{ x: outerX, y: leftY0 }, { x: outerX, y: leftY1 }]);
   }
 
   const tlOuter = sides.top ? "second" : "full";
   if (otl > 0) {
-    appendPoints(outerPts, concentricCornerArcPoints("tl", otl, shape, sideWidth, position, "outer", tlOuter, segTl).slice(1));
+    appendPoints(
+      outerPts,
+      bandCornerPoints("tl", shape, sideWidth, position, "outer", tlOuter, segTl, smoothing).slice(1),
+    );
   }
 
   const tlInner = sides.top ? "second" : "full";
   if (otl > 0) {
-    appendPoints(innerPts, concentricCornerArcPointsReversed("tl", otl, shape, sideWidth, position, "inner", tlInner, segTl));
+    appendPoints(
+      innerPts,
+      bandCornerPointsReversed("tl", shape, sideWidth, position, "inner", tlInner, segTl, smoothing),
+    );
   } else {
     appendPoints(innerPts, [{ x: innerX, y: leftY1 }]);
   }
@@ -594,7 +730,10 @@ function buildLeftBorderPolygon(
 
   const blInner = sides.bottom ? "second" : "full";
   if (obl > 0) {
-    appendPoints(innerPts, concentricCornerArcPointsReversed("bl", obl, shape, sideWidth, position, "inner", blInner, segBl).slice(1));
+    appendPoints(
+      innerPts,
+      bandCornerPointsReversed("bl", shape, sideWidth, position, "inner", blInner, segBl, smoothing).slice(1),
+    );
   } else {
     appendPoints(innerPts, [{ x: innerX, y: leftY0 }]);
   }
@@ -614,11 +753,19 @@ const SIDE_BUILDERS = {
 export function buildRoundedRectBorderFills(input: BorderGeometryInput): BorderSideFill[] {
   const shape = shapeBounds(input);
   const position = input.position ?? "center";
+  const smoothing = Math.max(0, Math.min(1, input.smoothing ?? 0));
   const fills: BorderSideFill[] = [];
 
   for (const side of SIDE_ORDER) {
     if (!input.sides[side] || input.sideWidths[side] <= 0) continue;
-    const points = SIDE_BUILDERS[side](shape, input.sides, input.sideWidths[side], input.sideWidths, position);
+    const points = SIDE_BUILDERS[side](
+      shape,
+      input.sides,
+      input.sideWidths[side],
+      input.sideWidths,
+      position,
+      smoothing,
+    );
     if (!points || points.length < 3) continue;
     fills.push({
       side,
@@ -652,6 +799,7 @@ export function roundedRectBorderFills(
     | "strokePosition"
     | "cornerRadius"
     | "cornerRadii"
+    | "cornerSmoothing"
   >,
 ): BorderSideFill[] | null {
   if (node.type !== "rectangle" && node.type !== "frame") return null;
@@ -662,13 +810,18 @@ export function roundedRectBorderFills(
   const hasActive = SIDE_ORDER.some((s) => sides[s] && sideWidths[s] > 0);
   if (!hasActive) return null;
 
+  const radii = getNodeCornerRadii(node);
+  const smoothing = node.cornerSmoothing ?? 0;
+  const position = node.strokePosition ?? "center";
+
   const fills = buildRoundedRectBorderFills({
     width: node.width,
     height: node.height,
-    radii: getNodeCornerRadii(node),
+    radii,
     sides,
     sideWidths,
-    position: node.strokePosition ?? "center",
+    position,
+    smoothing,
   });
   return fills.length > 0 ? fills : null;
 }

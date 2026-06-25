@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildNodeEffectRenderStyle,
+  buildTextCanvasEffectRenderStyle,
   changeEffectType,
   defaultNodeEffect,
   mergeNodeEffectPatch,
@@ -14,6 +15,16 @@ describe("nodeEffects", () => {
     const style = buildNodeEffectRenderStyle([drop, blur]);
     assert.ok(style.boxShadow?.includes("px"));
     assert.equal(style.filter, "blur(8px)");
+  });
+
+  it("canvas text drop shadow uses filter not box-shadow", () => {
+    const drop = defaultNodeEffect("drop-shadow");
+    drop.color = "#ff0000";
+    const blur = defaultNodeEffect("layer-blur");
+    const style = buildTextCanvasEffectRenderStyle([drop, blur]);
+    assert.equal(style.boxShadow, undefined);
+    assert.match(style.filter!, /drop-shadow\(/);
+    assert.match(style.filter!, /blur\(8px\)/);
   });
 
   it("builds glass and noise overlays", () => {

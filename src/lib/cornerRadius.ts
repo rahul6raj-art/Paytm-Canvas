@@ -1,6 +1,11 @@
 import { isCanvasBgCreationTool } from "@/lib/canvasInteractionGuards";
 import { isPolygonNode } from "@/lib/shapes/polygonGeometry";
 import { isStarNode } from "@/lib/shapes/starGeometry";
+import {
+  buildRoundedRectPath,
+  offsetRoundedRectPath,
+  outlineRoundedRectRingPath,
+} from "@/lib/vector/roundedRectPath";
 import type { EditorMode, EditorNode, Tool } from "@/stores/useEditorStore";
 
 /** Top-left, top-right, bottom-right, bottom-left (Figma / CSS 4-value order). */
@@ -217,33 +222,16 @@ export function roundedRectPathD(
   h: number,
   radii: CornerRadii,
   origin: { x: number; y: number } = { x: 0, y: 0 },
+  smoothing = 0,
 ): string {
-  const width = Math.max(0, w);
-  const height = Math.max(0, h);
-  const ox = origin.x;
-  const oy = origin.y;
-  if (width <= 0 || height <= 0) return "";
-  const [tl, tr, br, bl] = clampCornerRadii(radii, width, height);
-  if (tl === 0 && tr === 0 && br === 0 && bl === 0) {
-    return `M ${ox} ${oy} H ${ox + width} V ${oy + height} H ${ox} Z`;
-  }
-
-  const edgeEps = 0.001;
-  const parts: string[] = [`M ${ox + tl} ${oy}`];
-  if (width - tl - tr > edgeEps) parts.push(`H ${ox + width - tr}`);
-
-  if (tr > 0) parts.push(`A ${tr} ${tr} 0 0 1 ${ox + width} ${oy + tr}`);
-  if (height - tr - br > edgeEps) parts.push(`V ${oy + height - br}`);
-
-  if (br > 0) parts.push(`A ${br} ${br} 0 0 1 ${ox + width - br} ${oy + height}`);
-  if (width - br - bl > edgeEps) parts.push(`H ${ox + bl}`);
-
-  if (bl > 0) parts.push(`A ${bl} ${bl} 0 0 1 ${ox} ${oy + height - bl}`);
-  if (height - bl - tl > edgeEps) parts.push(`V ${oy + tl}`);
-
-  if (tl > 0) parts.push(`A ${tl} ${tl} 0 0 1 ${ox + tl} ${oy}`);
-  parts.push("Z");
-  return parts.join(" ");
+  const [tl, tr, br, bl] = radii;
+  return buildRoundedRectPath({
+    width: w,
+    height: h,
+    radius: { topLeft: tl, topRight: tr, bottomRight: br, bottomLeft: bl },
+    smoothing,
+    origin,
+  });
 }
 
 /**
@@ -255,28 +243,16 @@ export function offsetRoundedRectPathD(
   height: number,
   radii: CornerRadii,
   delta: number,
+  smoothing = 0,
 ): string {
-  const w = Math.max(0, width);
-  const h = Math.max(0, height);
-  if (w <= 0 || h <= 0) return "";
-  const clamped = clampCornerRadii(radii, w, h);
-  if (Math.abs(delta) < 1e-9) {
-    return roundedRectPathD(w, h, clamped);
-  }
-
-  const d = -delta;
-  const ow = w - 2 * d;
-  const oh = h - 2 * d;
-  if (ow < 1e-6 || oh < 1e-6) return "";
-
-  const shifted: CornerRadii = [
-    Math.max(0, clamped[0] - d),
-    Math.max(0, clamped[1] - d),
-    Math.max(0, clamped[2] - d),
-    Math.max(0, clamped[3] - d),
-  ];
-  const outRadii = clampCornerRadii(shifted, ow, oh);
-  return roundedRectPathD(ow, oh, outRadii, { x: d, y: d });
+  const [tl, tr, br, bl] = radii;
+  return offsetRoundedRectPath(
+    width,
+    height,
+    { topLeft: tl, topRight: tr, bottomRight: br, bottomLeft: bl },
+    delta,
+    smoothing,
+  );
 }
 
 export type StrokeBandAlign = "center" | "inside" | "outside";
@@ -288,31 +264,17 @@ export function outlineRoundedRectRingPathD(
   radii: CornerRadii,
   strokeWidth: number,
   align: StrokeBandAlign,
+  smoothing = 0,
 ): { pathD: string; fillRule: "evenodd" | "nonzero" } | null {
-  const w = Math.max(0, width);
-  const h = Math.max(0, height);
-  if (w <= 0 || h <= 0 || strokeWidth < 1e-9) return null;
-  const clamped = clampCornerRadii(radii, w, h);
-  if (clamped.every((r) => r <= 0)) return null;
-
-  const half = strokeWidth / 2;
-  let outerD: string;
-  let innerD: string | null = null;
-
-  if (align === "center") {
-    outerD = offsetRoundedRectPathD(w, h, clamped, half);
-    innerD = offsetRoundedRectPathD(w, h, clamped, -half);
-  } else if (align === "inside") {
-    outerD = roundedRectPathD(w, h, clamped);
-    innerD = offsetRoundedRectPathD(w, h, clamped, -strokeWidth);
-  } else {
-    outerD = offsetRoundedRectPathD(w, h, clamped, strokeWidth);
-    innerD = roundedRectPathD(w, h, clamped);
-  }
-
-  if (!outerD) return null;
-  if (!innerD) return { pathD: outerD, fillRule: "nonzero" };
-  return { pathD: `${outerD} ${innerD}`, fillRule: "evenodd" };
+  const [tl, tr, br, bl] = clampCornerRadii(radii, width, height);
+  return outlineRoundedRectRingPath(
+    width,
+    height,
+    { topLeft: tl, topRight: tr, bottomRight: br, bottomLeft: bl },
+    strokeWidth,
+    align,
+    smoothing,
+  );
 }
 
 function arcPoints(
@@ -375,6 +337,16 @@ export function roundedRectPolygonPoints(
     pts.push(...arcPoints(tl, tl, tl, Math.PI, (3 * Math.PI) / 2, segTl).slice(1));
   }
   return pts;
+}
+
+export function roundedRectPathDForNode(
+  node: Pick<EditorNode, "cornerRadius" | "cornerRadii" | "cornerSmoothing">,
+  w: number,
+  h: number,
+  origin: { x: number; y: number } = { x: 0, y: 0 },
+): string {
+  const radii = clampCornerRadii(getNodeCornerRadii(node), w, h);
+  return roundedRectPathD(w, h, radii, origin, node.cornerSmoothing ?? 0);
 }
 
 /** Uniform corner value for legacy `rx` on SVG `<rect>`. */

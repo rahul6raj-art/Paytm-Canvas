@@ -2,13 +2,21 @@ import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import type { ReactImportResult } from "./reactImport";
 import { importReactSource } from "./reactImport";
 import { applyPageCssToSlice } from "./applyPageCssToSlice";
+import { relayoutFlowChildrenInSlice } from "./flowSiblingLayout";
 import { finalizeImportedGraph } from "./finalizeImportedGraph";
+import { pinPhoneShellBottomChromeNodes } from "@/lib/webImport/phoneShellBottomChrome";
+import { normalizeBottomNavTextNodes } from "@/lib/webImport/normalizeWebImportLayers";
+import { isPhoneShellClassName } from "@/lib/webImport/phoneShellViewport";
 import { placeScreenFrameOnCanvas } from "@/lib/codeExport/frameRelativeExport";
 import {
   designTokensFromProjectCss,
   mergeDesignTokenRecords,
 } from "@/lib/codeRoundTrip/designTokensFromProjectCss";
 import { tokenizeImportedNodes } from "@/lib/craftBridge/tokenizeImportedNodes";
+import {
+  applyCanvasScreenLabelToRoots,
+  canvasScreenLabelFromSource,
+} from "@/lib/craftBridge/canvasScreenLabels";
 import type { CssThemeScope } from "@/lib/codeRoundTrip/parseCssCustomProperties";
 
 export type ReactPageBundleInput = {
@@ -22,11 +30,23 @@ export type ReactPageBundleInput = {
 
 function finalizePageCssSlice(
   slice: import("@/lib/documentPersistence").EditorPersistSlice,
+  cssSources: string[] = [],
+  sourceFileName?: string,
 ): import("@/lib/documentPersistence").EditorPersistSlice {
   const rootIds = slice.childOrder[EDITOR_ROOT_KEY] ?? [];
-  let nodes = finalizeImportedGraph(slice.nodes, slice.childOrder, {
+  const screenLabel = sourceFileName
+    ? canvasScreenLabelFromSource(sourceFileName)
+    : canvasScreenLabelFromSource(slice.fileName);
+  let nodes = relayoutFlowChildrenInSlice(slice, cssSources).nodes;
+  nodes = finalizeImportedGraph(nodes, slice.childOrder, {
     preserveAbsoluteLayout: true,
   });
+  const shellHeight =
+    Object.values(nodes).find((n) => isPhoneShellClassName(n.codeClassName))?.height ??
+    nodes[rootIds[0] ?? ""]?.height ??
+    844;
+  pinPhoneShellBottomChromeNodes(nodes, slice.childOrder, shellHeight);
+  normalizeBottomNavTextNodes(nodes);
   nodes = placeScreenFrameOnCanvas(nodes, rootIds);
   for (const rootId of rootIds) {
     const root = nodes[rootId];
@@ -34,7 +54,13 @@ function finalizePageCssSlice(
       nodes[rootId] = { ...root, parentId: null, clipChildren: false };
     }
   }
-  return { ...slice, nodes, selectedIds: rootIds.length ? rootIds : slice.selectedIds };
+  nodes = applyCanvasScreenLabelToRoots(nodes, rootIds, screenLabel);
+  return {
+    ...slice,
+    nodes,
+    fileName: screenLabel,
+    selectedIds: rootIds.length ? rootIds : slice.selectedIds,
+  };
 }
 
 /** Import a page component (.tsx) with optional companion stylesheet(s) from the same folder. */
@@ -45,7 +71,7 @@ export function importReactPageBundle(input: ReactPageBundleInput): ReactImportR
   const cssSources = (input.cssSources ?? []).filter((c) => c?.trim());
   const withCss =
     cssSources.length > 0 ? applyPageCssToSlice(result.slice, cssSources) : result.slice;
-  let slice = finalizePageCssSlice(withCss);
+  let slice = finalizePageCssSlice(withCss, cssSources, input.fileName);
   const projectTokens = designTokensFromProjectCss(cssSources, input.theme ?? "light");
   const designTokens = mergeDesignTokenRecords(slice.designTokens, projectTokens);
   slice = {

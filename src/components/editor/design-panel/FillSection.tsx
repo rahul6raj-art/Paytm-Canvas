@@ -30,6 +30,8 @@ import type { FillType } from "@/lib/gradient/types";
 import { mediaFillPreviewCss } from "@/lib/gradient/mediaFill";
 import { GradientFillEditorDialog } from "../gradient/GradientFillEditorDialog";
 import { FillAssetPickerAside } from "../FillAssetPickerAside";
+import { OverrideResetButton } from "@/components/editor/component-inspector/OverrideResetButton";
+import { useInstanceOverrideReset } from "@/components/editor/component-inspector/useInstanceOverrideReset";
 import {
   clearGradientEditorFocusIfConsumed,
   getGradientEditorFocusSnapshot,
@@ -493,6 +495,14 @@ export function FillSection({
         : DEFAULT_SHAPE_FILL;
   const gradient = resolveNodeFillGradientForEdit(node, designTokens);
   const assets = useEditorStore((s) => s.assets);
+  const fillOverride = useInstanceOverrideReset(node.id, [
+    "fill",
+    "fillGradient",
+    "fillOpacity",
+    "fillEnabled",
+    "fillTokenId",
+    "fillType",
+  ]);
   const [gradientEditorOpen, setGradientEditorOpen] = useState(false);
   const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
   const [editorFocus, setEditorFocus] = useState<Pick<
@@ -606,7 +616,18 @@ export function FillSection({
     commitFillOpacity(op, node, designTokens, onStyle, onUpdateDesignToken);
 
   return (
-    <PropertiesSection title="Fill" defaultOpen>
+    <PropertiesSection
+      title="Fill"
+      defaultOpen
+      headerActions={
+        <OverrideResetButton
+          visible={fillOverride.hasOverride}
+          disabled={locked}
+          label="Reset fill override"
+          onReset={fillOverride.reset}
+        />
+      }
+    >
       {node.fillTokenId ? (
         <div className="mb-2 flex flex-wrap gap-1">
           <button

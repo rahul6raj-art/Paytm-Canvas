@@ -37,6 +37,8 @@ export const DEFAULT_FRAME_FILL = "#ffffff";
 export const DEFAULT_SHAPE_STROKE = "#ffffff";
 /** Filled shapes start with no stroke; lines/arrows set width explicitly at creation. */
 export const DEFAULT_STROKE_WIDTH = 0;
+/** Default stroke weight for the line tool (Figma-style 1px). */
+export const DEFAULT_LINE_STROKE_WIDTH = 1;
 
 export function inferShapeType(node: EditorNode): ShapeType | null {
   if (node.type === "rectangle") return "rectangle";

@@ -59,7 +59,10 @@
   --pc-canvas-hover-outline: #18a0fb;
   --pc-canvas-inspect-hover: rgba(244, 114, 182, 0.5);
   --pc-canvas-locked-outline: rgba(214, 158, 46, 0.5);
-  --pc-canvas-instance-outline: rgba(151, 71, 255, 0.45);
+  --pc-canvas-instance-outline: rgba(139, 92, 246, 0.52);
+  --pc-canvas-component-outline: #7c3aed;
+  --pc-canvas-component-selection-fill: rgba(139, 92, 246, 0.1);
+  --pc-canvas-component-selection-muted: rgba(139, 92, 246, 0.16);
   --pc-canvas-group-outline: rgba(15, 23, 42, 0.1);
   --pc-canvas-boolean-outline: rgba(24, 160, 251, 0.35);
   --pc-canvas-mask-outline: rgba(168, 85, 247, 0.35);
@@ -100,7 +103,10 @@
   --pc-canvas-hover-outline: rgba(138, 188, 255, 0.95);
   --pc-canvas-inspect-hover: rgba(244, 114, 182, 0.38);
   --pc-canvas-locked-outline: rgba(214, 158, 46, 0.38);
-  --pc-canvas-instance-outline: rgba(180, 140, 255, 0.38);
+  --pc-canvas-instance-outline: rgba(167, 139, 250, 0.72);
+  --pc-canvas-component-outline: #8b5cf6;
+  --pc-canvas-component-selection-fill: rgba(139, 92, 246, 0.14);
+  --pc-canvas-component-selection-muted: rgba(139, 92, 246, 0.22);
   --pc-canvas-group-outline: rgba(255, 255, 255, 0.09);
   --pc-canvas-boolean-outline: rgba(138, 188, 255, 0.28);
   --pc-canvas-mask-outline: rgba(196, 150, 255, 0.32);
@@ -137,11 +143,11 @@ html.dark [data-editor-shell] {
 }
 
 html:not(.dark) [data-editor-shell] {
-  /* Light editor — bright chrome cards on a white pasteboard. */
+  /* Light editor — bright chrome cards on a soft grey pasteboard. */
   --app-panel: 0 0% 100%;
   --app-raised: 0 0% 98%;
   --app-inset: 0 0% 94%;
-  --pc-canvas-workspace: 0 0% 100%;
+  --pc-canvas-workspace: 0 0% 90%;
 }
 
 html:not(.dark) [data-dashboard-shell] {
@@ -462,24 +468,15 @@ body {
   0%,
   100% {
     opacity: 0;
-    transform: translate(-50%, -50%) scale(0.85);
   }
-  12%,
-  28% {
-    opacity: var(--plus-peak-opacity, 0.55);
-    transform: translate(-50%, -50%) scale(1);
+  8%,
+  34% {
+    opacity: 1;
   }
-  40% {
-    opacity: calc(var(--plus-peak-opacity, 0.55) * 0.15);
-    transform: translate(-50%, -50%) scale(0.92);
+  48% {
+    opacity: 0.35;
   }
-  58% {
+  62% {
     opacity: 0;
-    transform: translate(-50%, -50%) scale(0.85);
   }
-}
-
-.ai-gen-plus-blink {
-  animation: aiGenPlusBlink ease-in-out infinite;
-  will-change: opacity, transform;
 }

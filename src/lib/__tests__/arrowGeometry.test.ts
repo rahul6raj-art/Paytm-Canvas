@@ -1,11 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  arrowChevronMarkerPathD,
   arrowEndpointStylePatch,
   arrowHeadSizeForNode,
   arrowHeadToStrokeEndpoint,
   getArrowAngle,
-  getArrowHeadPolygon,
   getArrowLength,
   resolveArrowEndKind,
   strokeEndpointToArrowHead,
@@ -30,8 +30,8 @@ describe("arrowGeometry", () => {
     assert.equal(getArrowLength(ep), 100);
   });
 
-  it("default arrow end is triangle for arrow nodes", () => {
-    assert.equal(resolveArrowEndKind({ type: "arrow" }), "triangle");
+  it("default arrow end is line for arrow nodes", () => {
+    assert.equal(resolveArrowEndKind({ type: "arrow" }), "line");
   });
 
   it("arrowHeadSize defaults from stroke width", () => {
@@ -39,8 +39,10 @@ describe("arrowGeometry", () => {
     assert.equal(arrowHeadSizeForNode({ strokeWidth: 4, arrowHeadSize: 20 }), 20);
   });
 
-  it("triangle head polygon has three points", () => {
-    const poly = getArrowHeadPolygon({ x: 100, y: 50 }, 0, "triangle", 12);
-    assert.equal(poly.length, 3);
+  it("chevron marker tip aligns with ref point", () => {
+    const chevron = arrowChevronMarkerPathD(18);
+    assert.equal(chevron.refX, 18);
+    assert.equal(chevron.refY, chevron.markerHeight / 2);
+    assert.match(chevron.pathD, new RegExp(` L ${chevron.refX} ${chevron.refY} `));
   });
 });
