@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import type { EditorNode } from "@/stores/useEditorStore";
 import {
   toTextNodeModel,
+  scaleTextTypoForScreen,
   textTypoFromModel,
   wrapWidthForResizeMode,
 } from "@/lib/text/textNodeModel";
@@ -70,13 +71,7 @@ export function TextCanvasView({
     const scaleY = contentScaleY ?? scaleX;
     const screenSized = scaleX !== 1 || scaleY !== 1;
     const typo = textTypoFromModel(model);
-    const renderTypo = screenSized
-      ? {
-          ...typo,
-          fontSize: typo.fontSize * scaleX,
-          letterSpacing: typo.letterSpacing * scaleX,
-        }
-      : typo;
+    const renderTypo = scaleTextTypoForScreen(typo, scaleX, scaleY);
     const wrapWidth = wrapWidthForResizeMode(model.width, model.textResizeMode);
     const renderWidth = model.width * scaleX;
     const renderHeight = model.height * scaleY;
@@ -109,6 +104,7 @@ export function TextCanvasView({
         gradientNode: paintNode,
         mediaFill,
         prepared,
+        textResizeMode: model.textResizeMode,
       });
       const fresh = useEditorStore.getState().nodes[paintNode.id];
       const rotateSt = useEditorStore.getState();

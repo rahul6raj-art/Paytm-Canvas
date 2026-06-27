@@ -5,7 +5,7 @@ import { centerProportionalScaleFromWorld, computeResizedBounds } from "@/lib/re
 const start = { x: 100, y: 100, width: 200, height: 100 };
 
 describe("resize modifiers (Figma-like)", () => {
-  it("edge + Shift only changes one dimension (opposite edge fixed)", () => {
+  it("edge + Shift keeps aspect ratio with opposite edge fixed on drag axis", () => {
     const next = computeResizedBounds(
       "e",
       start,
@@ -13,10 +13,11 @@ describe("resize modifiers (Figma-like)", () => {
       { shiftKey: true, altKey: false },
       "rectangle",
     );
+    const ar = start.width / start.height;
     assert.equal(next.x, start.x);
-    assert.equal(next.y, start.y);
     assert.equal(next.width, 250);
-    assert.equal(next.height, start.height);
+    assert.ok(Math.abs(next.width / next.height - ar) < 0.01);
+    assert.equal(next.y + next.height / 2, start.y + start.height / 2);
   });
 
   it("edge + Option (Alt) follows pointer when resizing from center", () => {

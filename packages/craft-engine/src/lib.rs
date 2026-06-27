@@ -1,3 +1,4 @@
+mod clip;
 mod document;
 mod effects;
 mod gradient;

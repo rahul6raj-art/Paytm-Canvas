@@ -105,6 +105,8 @@ import {
   focusCanvasViewport,
   isEditableFieldElement,
   releaseFieldFocusForCanvas,
+  shouldTrackSpaceForCanvasPan,
+  syncCanvasPointerModifiers,
 } from "@/lib/editorKeyboardFocus";
 import { enterTextEditModeAtWorldPoint } from "@/lib/text/textEditMode";
 import { hasEditorClipboardContent } from "@/lib/editorClipboardAvailability";
@@ -349,7 +351,10 @@ export function Canvas() {
       setCommandDown(e.metaKey || e.ctrlKey);
     };
     const down = (e: KeyboardEvent) => {
-      if (e.code === "Space") setSpaceDown(true);
+      if (shouldTrackSpaceForCanvasPan(e)) {
+        e.preventDefault();
+        setSpaceDown(true);
+      }
       syncModifiers(e);
     };
     const up = (e: KeyboardEvent) => {
@@ -1064,6 +1069,7 @@ export function Canvas() {
   };
 
   const onViewportPointerDownCapture = (e: React.PointerEvent) => {
+    syncCanvasPointerModifiers(e, { setSpaceDown, setOptionDown, setCommandDown });
     const liveTool = useEditorStore.getState().tool;
     if (shouldSuppressCanvasPointer() && liveTool !== "pencil") {
       const st = useEditorStore.getState();

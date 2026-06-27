@@ -27,6 +27,9 @@ import { useDismissAnchoredDropdown } from "../useAnchoredDropdown";
 import { useDraggableFloatingPanel } from "../useDraggableFloatingPanel";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { DEFAULT_TEXT_FONT_SIZE, TEXT_FONT_WEIGHTS } from "@/lib/textTypography";
+import type { LineHeightStylePatch } from "@/lib/text/lineHeight";
+import type { LetterSpacingStylePatch } from "@/lib/text/letterSpacing";
+import { effectiveLineHeightMultiplier } from "@/lib/text/lineHeight";
 import {
   isTypographyValue,
   type DesignToken,
@@ -110,12 +113,27 @@ export function TypographySection({
     return () => window.removeEventListener("keydown", onKey, true);
   }, [moreOpen]);
 
-  const patchTypography = (patch: Partial<TypographyTokenValue>) => {
+  const patchTypography = (patch: Partial<TypographyTokenValue> | LineHeightStylePatch | LetterSpacingStylePatch) => {
     if (!node.textStyleTokenId) return false;
     const t = designTokens[node.textStyleTokenId];
     if (t?.type !== "typography" || !isTypographyValue(t.value)) return false;
+    const tokenPatch =
+      "lineHeightUnit" in patch
+        ? {
+            lineHeight:
+              patch.lineHeightUnit === "auto"
+                ? effectiveLineHeightMultiplier({
+                    fontSize: display.fontSize,
+                    lineHeight: display.lineHeight,
+                    lineHeightUnit: display.lineHeightUnit,
+                  })
+                : patch.lineHeight,
+          }
+        : "letterSpacingUnit" in patch
+          ? { letterSpacing: patch.letterSpacing }
+          : patch;
     onUpdateDesignToken(node.textStyleTokenId, {
-      value: { ...(t.value as TypographyTokenValue), ...patch },
+      value: { ...(t.value as TypographyTokenValue), ...tokenPatch },
     });
     return true;
   };
@@ -283,13 +301,13 @@ export function TypographySection({
           display={display}
           instanceKey={instanceKey}
           locked={locked}
-          onCommitLineHeight={(v) => {
-            if (patchTypography({ lineHeight: v })) return;
-            onStyle({ lineHeight: v });
+          onCommitLineHeight={(patch) => {
+            if (patchTypography(patch)) return;
+            onStyle(patch);
           }}
-          onCommitLetterSpacing={(v) => {
-            if (patchTypography({ letterSpacing: v })) return;
-            onStyle({ letterSpacing: v });
+          onCommitLetterSpacing={(patch) => {
+            if (patchTypography(patch)) return;
+            onStyle(patch);
           }}
         />
 

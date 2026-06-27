@@ -12,7 +12,11 @@ import {
   getShapeVertexCornerRadii,
   shapeSupportsIndividualCornerRadius,
 } from "@/lib/shapes/parametricCornerRadii";
-import { buildSelectionInspectorModel } from "@/lib/selectionInspector";
+import {
+  buildSelectionInspectorModel,
+  dedupeSelectionEffectTargets,
+  resolveSelectionEffectTargets,
+} from "@/lib/selectionInspector";
 import { canCreateComponentSetFromSelection } from "@/lib/componentUx";
 import { findInstanceRoot } from "@/lib/componentModel";
 import { cn } from "@/lib/utils";
@@ -84,6 +88,7 @@ export function SelectionDesignInspector() {
   const key = `selection-${selectedIds.join(",")}`;
   const locked = model.allLocked;
   const node = primary;
+  const blendPreviewNodeIds = useMemo(() => model.nodes.map((n) => n.id), [model.nodes]);
   const resolved = useMemo(
     () => resolveNodeWithDesignTokens(node, designTokens, canvasColorMode),
     [node, designTokens, canvasColorMode],
@@ -133,10 +138,39 @@ export function SelectionDesignInspector() {
     }
   };
 
+  const selectionEffectTargets = (primaryEffectId: string) =>
+    dedupeSelectionEffectTargets(
+      model.nodes,
+      resolveSelectionEffectTargets(model.nodes, node, primaryEffectId),
+    );
+
   const batchToggleEffect = (effectId: string) => {
-    for (const n of model.nodes) {
-      const effect = n.effects?.find((e) => e.id === effectId);
-      if (effect) toggleEffect(n.id, effectId);
+    const targets = selectionEffectTargets(effectId);
+    if (targets.length === 0) return;
+    pushHistory();
+    for (const { nodeId, effectId: targetEffectId } of targets) {
+      toggleEffect(nodeId, targetEffectId, { skipHistory: true });
+    }
+  };
+
+  const batchDeleteEffect = (effectId: string) => {
+    const targets = selectionEffectTargets(effectId);
+    if (targets.length === 0) return;
+    pushHistory();
+    for (const { nodeId, effectId: targetEffectId } of targets) {
+      deleteEffect(nodeId, targetEffectId, { skipHistory: true });
+    }
+  };
+
+  const batchUpdateEffect = (
+    effectId: string,
+    patch: Parameters<typeof updateEffect>[2],
+  ) => {
+    const targets = selectionEffectTargets(effectId);
+    if (targets.length === 0) return;
+    pushHistory();
+    for (const { nodeId, effectId: targetEffectId } of targets) {
+      updateEffect(nodeId, targetEffectId, patch, { skipHistory: true });
     }
   };
 
@@ -213,6 +247,7 @@ export function SelectionDesignInspector() {
         showArc={false}
         onOpacityCommit={(opacity) => style({ opacity })}
         onBlendModeChange={(blendMode) => style({ blendMode })}
+        blendPreviewNodeIds={blendPreviewNodeIds}
         onToggleVisible={() => toggleVisibleSelection()}
         onCornerStyle={applyCornerStyle}
         onArcStyle={style}
@@ -284,14 +319,10 @@ export function SelectionDesignInspector() {
         onAddEffect={batchAddEffect}
         onDetachEffectToken={() => detachEffectTokenFromSelection()}
         onToggleEffect={batchToggleEffect}
-        onDeleteEffect={(effectId) => {
-          for (const n of model.nodes) deleteEffect(n.id, effectId);
-        }}
-        onUpdateEffect={(effectId, patch) => {
-          for (const n of model.nodes) updateEffect(n.id, effectId, patch);
-        }}
+        onDeleteEffect={batchDeleteEffect}
+        onUpdateEffect={batchUpdateEffect}
         onChangeEffectType={(effectId, type) => {
-          for (const n of model.nodes) updateEffect(n.id, effectId, { type });
+          batchUpdateEffect(effectId, { type });
         }}
       />
     </>

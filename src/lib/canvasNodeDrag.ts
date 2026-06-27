@@ -46,6 +46,7 @@ import {
   clearDragPreview,
 } from "@/lib/canvasEphemeralTransform";
 import { refreshDuplicateStepAfterMove } from "@/lib/duplicateRepeatOffset";
+import { recoverCanvasInteractionState } from "@/lib/editorKeyboardFocus";
 
 export type ClientToWorldFn = (clientX: number, clientY: number) => { x: number; y: number };
 
@@ -509,7 +510,7 @@ export function beginCanvasNodeDrag(opts: {
     moveScheduler.cancel();
     const session = d;
     activeDrag = null;
-    document.body.style.cursor = "";
+    recoverCanvasInteractionState();
     if (!session.activated) {
       clearDragPreview();
       const stEnd = useEditorStore.getState();
@@ -654,7 +655,7 @@ export function beginCanvasSwapHandleDrag(opts: {
 export function cancelCanvasNodeDrag(): void {
   clearDragPreview();
   activeDrag = null;
-  document.body.style.cursor = "";
+  recoverCanvasInteractionState();
   const st = useEditorStore.getState();
   st.setIsMovingSelection(false);
   st.setGuides([]);

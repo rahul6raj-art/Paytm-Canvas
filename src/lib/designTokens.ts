@@ -283,7 +283,9 @@ export function resolveNodeWithDesignTokens(
         fontSize: v.fontSize,
         fontWeight: v.fontWeight,
         lineHeight: v.lineHeight,
+        lineHeightUnit: "percent" as const,
         letterSpacing: v.letterSpacing,
+        letterSpacingUnit: "percent" as const,
       };
     }
   }

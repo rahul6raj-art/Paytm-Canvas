@@ -30,7 +30,7 @@ export function hitTestTextLocal(
   const prepared = textLayoutForEditorNode(node as EditorNode);
   const layout = prepared?.layout;
   if (!layout) return localX >= 0 && localX <= w && localY >= 0 && localY <= h;
-  const innerH = textInnerHeight(h);
+  const innerH = textInnerHeight(h, mode);
   const offsetY = verticalContentOffsetY(layout.height, innerH, node.verticalAlign);
   const contentTop = offsetY;
   const contentBottom = offsetY + layout.height;

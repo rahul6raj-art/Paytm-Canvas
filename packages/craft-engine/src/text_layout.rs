@@ -42,7 +42,7 @@ pub fn vertical_align_for(node: &NodeInput) -> &str {
     }
 }
 
-fn is_auto_width(node: &NodeInput) -> bool {
+pub fn is_auto_width(node: &NodeInput) -> bool {
     match node.text_resize_mode.as_deref() {
         Some("auto-width") => true,
         Some("auto-height") | Some("fixed") => false,
@@ -202,16 +202,13 @@ pub fn layout_text_node(node: &NodeInput, fonts: &RuntimeFontRegistry) -> TextLa
         width = width.max(line.width);
     }
 
-    let mut paragraph_gaps = 0u32;
+    let line_count = lines.len().max(1) as f32;
+    let mut height = line_height_px * line_count;
     for line in lines.iter().skip(1) {
         if line.paragraph_start {
-            paragraph_gaps += 1;
+            height += paragraph_spacing;
         }
     }
-
-    let height = (lines.len() as f32 * line_height_px
-        + paragraph_gaps as f32 * paragraph_spacing)
-        .max(line_height_px);
 
     TextLayout {
         lines,

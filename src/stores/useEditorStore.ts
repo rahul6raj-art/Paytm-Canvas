@@ -306,6 +306,8 @@ import {
   DEFAULT_TEXT_FONT_SIZE,
   resolveTextTypo,
 } from "@/lib/textTypography";
+import { effectiveLineHeightMultiplier } from "@/lib/text/lineHeight";
+import { letterSpacingPercentFromNode } from "@/lib/text/letterSpacing";
 import {
   createShapeNode,
   shapeGeometryPatchFromDrag,
@@ -627,8 +629,12 @@ export interface EditorNode {
   fontWeight?: number;
   /** Unitless multiplier, e.g. 1.25 */
   lineHeight?: number;
-  /** px */
+  /** How `lineHeight` is interpreted; defaults to auto when unset. */
+  lineHeightUnit?: import("@/lib/text/lineHeight").LineHeightUnit;
+  /** px when `letterSpacingUnit` is `px`; percent of font size when `percent` */
   letterSpacing?: number;
+  /** How `letterSpacing` is interpreted; legacy nodes default to px. */
+  letterSpacingUnit?: import("@/lib/text/letterSpacing").LetterSpacingUnit;
   /** Stroke dash pattern */
   strokeStyle?: "solid" | "dashed" | "dotted";
   /** Custom dash length (px) when dashed/dotted */
@@ -917,7 +923,9 @@ export type NodeStylePatch = Partial<
     | "fontSize"
     | "fontWeight"
     | "lineHeight"
+    | "lineHeightUnit"
     | "letterSpacing"
+    | "letterSpacingUnit"
     | "textAlign"
     | "textDecoration"
     | "textCase"
@@ -1279,9 +1287,14 @@ export interface EditorState {
   applyTokenToSelection: (tokenId: string) => void;
   detachTokenFromSelection: (tokenType: DetachableTokenKind) => void;
   addEffect: (nodeId: string, type: import("@/lib/nodeEffects").NodeEffectType) => void;
-  updateEffect: (nodeId: string, effectId: string, patch: Partial<import("@/lib/nodeEffects").NodeEffect>) => void;
-  deleteEffect: (nodeId: string, effectId: string) => void;
-  toggleEffect: (nodeId: string, effectId: string) => void;
+  updateEffect: (
+    nodeId: string,
+    effectId: string,
+    patch: Partial<import("@/lib/nodeEffects").NodeEffect>,
+    opts?: { skipHistory?: boolean },
+  ) => void;
+  deleteEffect: (nodeId: string, effectId: string, opts?: { skipHistory?: boolean }) => void;
+  toggleEffect: (nodeId: string, effectId: string, opts?: { skipHistory?: boolean }) => void;
   createEffectTokenFromSelection: (name?: string) => void;
   applyEffectTokenToSelection: (tokenId: string) => void;
   detachEffectTokenFromSelection: () => void;
@@ -1435,6 +1448,8 @@ export interface EditorState {
   ) => void;
   /** Restore frozen geometry + final rotation, then end rotate mode. */
   endRotateInteraction: (nodeId: string, rotation: number) => void;
+  /** End multi-select rotate drag and clear geometry snapshots. */
+  endMultiRotateInteraction: () => void;
   setIsMovingSelection: (active: boolean) => void;
   setRotateHandleHovered: (
     hovered: boolean,
@@ -2955,11 +2970,11 @@ function buildPasteSelectionResult(
   }
 
   const newRoots: string[] = [];
-  const pasteParentId = resolvePasteParentId(s);
 
   for (const rootId of payload.rootIds) {
     const rootOld = payload.nodes[rootId];
     if (!rootOld) continue;
+    const pasteParentId = resolvePasteParentId(s, payload, rootId);
     const rootLabel =
       rootOld.type === "text"
         ? duplicatedTextLayerName(rootOld.content)
@@ -5553,8 +5568,8 @@ function buildCreateTypographyTokenFromSelectionResult(
       fontFamily: picked.fontFamily ?? "Inter, system-ui, sans-serif",
       fontSize: picked.fontSize ?? DEFAULT_TEXT_FONT_SIZE,
       fontWeight: picked.fontWeight ?? 500,
-      lineHeight: picked.lineHeight ?? 1.25,
-      letterSpacing: picked.letterSpacing ?? 0,
+      lineHeight: picked.lineHeight ?? effectiveLineHeightMultiplier(picked),
+      letterSpacing: letterSpacingPercentFromNode(picked),
     },
     createdAt: designTokenTimestamp(),
     updatedAt: designTokenTimestamp(),
@@ -7056,6 +7071,34 @@ function buildRestoreResponsivePreviewGeomResult(
   };
 }
 
+function buildEndMultiRotateInteractionResult(
+  s: Pick<EditorState, "nodes" | "childOrder" | "rotateGeomSnapshots">,
+): StructuralDocumentResult | null {
+  const snapshots = s.rotateGeomSnapshots;
+  if (!snapshots || Object.keys(snapshots).length === 0) return null;
+  const nodes = { ...s.nodes };
+  for (const [nodeId, snap] of Object.entries(snapshots)) {
+    const n = nodes[nodeId];
+    if (!n || n.locked) continue;
+    nodes[nodeId] = sanitizeNodeGeometry(
+      {
+        ...n,
+        x: n.x,
+        y: n.y,
+        rotation: n.rotation ?? 0,
+        width: snap.width,
+        height: snap.height,
+      },
+      { width: snap.width, height: snap.height },
+    );
+  }
+  return {
+    nodes,
+    childOrder: s.childOrder,
+    ui: { transformInteractionMode: "none", rotateGeomSnapshot: null, rotateGeomSnapshots: null },
+  };
+}
+
 function buildEndRotateInteractionResult(
   s: Pick<EditorState, "nodes" | "childOrder" | "rotateGeomSnapshot">,
   nodeId: string,
@@ -7259,7 +7302,9 @@ const INSTANCE_STYLE_KEYS = new Set<string>([
   "fontSize",
   "fontWeight",
   "lineHeight",
+  "lineHeightUnit",
   "letterSpacing",
+  "letterSpacingUnit",
   "textResizeMode",
   "autoResize",
   "content",
@@ -7313,7 +7358,9 @@ function toLayoutNode(n: EditorNode): LayoutNode {
     fontSize: n.fontSize,
     fontWeight: n.fontWeight,
     lineHeight: n.lineHeight,
+    lineHeightUnit: n.lineHeightUnit,
     letterSpacing: n.letterSpacing,
+    letterSpacingUnit: n.letterSpacingUnit,
     textResizeMode: n.textResizeMode,
   };
 }
@@ -7442,8 +7489,10 @@ function textStyleFromSelection(
         fontFamily: n.fontFamily ?? DEFAULT_TEXT_FONT_FAMILY,
         fontSize: n.fontSize ?? DEFAULT_TEXT_FONT_SIZE,
         fontWeight: n.fontWeight ?? 500,
-        lineHeight: n.lineHeight ?? 1.25,
+        lineHeight: n.lineHeight,
+        lineHeightUnit: n.lineHeightUnit ?? (n.lineHeight != null ? "percent" : "auto"),
         letterSpacing: n.letterSpacing ?? 0,
+        letterSpacingUnit: n.letterSpacingUnit ?? "percent",
         fill: n.fill ?? defaultColor,
         textColor: n.textColor ?? n.fill ?? defaultColor,
       };
@@ -7453,8 +7502,9 @@ function textStyleFromSelection(
     fontFamily: DEFAULT_TEXT_FONT_FAMILY,
     fontSize: DEFAULT_TEXT_FONT_SIZE,
     fontWeight: 500,
-    lineHeight: 1.25,
+    lineHeightUnit: "auto" as const,
     letterSpacing: 0,
+    letterSpacingUnit: "percent" as const,
     fill: defaultColor,
     textColor: defaultColor,
   };
@@ -7657,8 +7707,12 @@ function firstVisibleUnlockedRootFrameId(
   return null;
 }
 
-/** Single selected frame → paste inside it; otherwise canvas root. */
-function resolvePasteParentId(s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds">): string | null {
+/** Selected frame → paste inside it; otherwise keep the copied layer's original parent. */
+function resolvePasteParentId(
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds">,
+  payload: EditorClipboardPayloadV1,
+  rootId: string,
+): string | null {
   const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
     const n = s.nodes[id];
     return n && !n.locked && n.visible;
@@ -7667,6 +7721,9 @@ function resolvePasteParentId(s: Pick<EditorState, "nodes" | "childOrder" | "sel
     const n = s.nodes[tops[0]!];
     if (n?.type === "frame") return tops[0]!;
   }
+  const copiedRoot = payload.nodes[rootId];
+  const originalParent = copiedRoot?.parentId ?? null;
+  if (originalParent && s.nodes[originalParent]) return originalParent;
   return null;
 }
 
@@ -9296,7 +9353,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     commitStructuralResult(buildAddEffectResult(get(), nodeId, type));
   },
 
-  updateEffect: (nodeId, effectId, patch) => {
+  updateEffect: (nodeId, effectId, patch, opts) => {
     const s0 = get();
     const n = s0.nodes[nodeId];
     if (!n || n.locked) return;
@@ -9311,11 +9368,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
       get().updateDesignToken(tokId, { value: { ...v, effects: effs } });
       return;
     }
-    get().pushHistory();
+    if (!opts?.skipHistory) get().pushHistory();
     commitStructuralResult(buildUpdateEffectResult(get(), nodeId, effectId, patch));
   },
 
-  deleteEffect: (nodeId, effectId) => {
+  deleteEffect: (nodeId, effectId, opts) => {
     const s0 = get();
     const n = s0.nodes[nodeId];
     if (!n || n.locked) return;
@@ -9328,11 +9385,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
       get().updateDesignToken(tokId, { value: { ...v, effects: effs } });
       return;
     }
-    get().pushHistory();
+    if (!opts?.skipHistory) get().pushHistory();
     commitStructuralResult(buildDeleteEffectResult(get(), nodeId, effectId));
   },
 
-  toggleEffect: (nodeId, effectId) => {
+  toggleEffect: (nodeId, effectId, opts) => {
     const s0 = get();
     const n = s0.nodes[nodeId];
     if (!n || n.locked) return;
@@ -9345,7 +9402,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       get().updateDesignToken(tokId, { value: { ...v, effects: effs } });
       return;
     }
-    get().pushHistory();
+    if (!opts?.skipHistory) get().pushHistory();
     commitStructuralResult(buildToggleEffectResult(get(), nodeId, effectId));
   },
 
@@ -11429,6 +11486,58 @@ export const useEditorStore = create<EditorState>((set, get) => {
         mirrored = mirrorNodeGeometryToWasm(nodeId, patch, after);
         if (!mirrored) syncWasmDocumentAfterStoreUpdate();
       }
+    }
+    if (mirrored) {
+      clearDeferredWasmReconcile();
+    } else {
+      flushDeferredWasmReconcile();
+    }
+  },
+
+  endMultiRotateInteraction: () => {
+    const s = get();
+    const snapshots = s.rotateGeomSnapshots;
+    if (!snapshots || Object.keys(snapshots).length === 0) {
+      set({
+        transformInteractionMode: "none",
+        rotateGeomSnapshot: null,
+        rotateGeomSnapshots: null,
+      });
+      flushDeferredWasmReconcile();
+      return;
+    }
+    const beforeNodes = s.nodes;
+    const result = buildEndMultiRotateInteractionResult(s);
+    if (!result) {
+      set({
+        transformInteractionMode: "none",
+        rotateGeomSnapshot: null,
+        rotateGeomSnapshots: null,
+      });
+      flushDeferredWasmReconcile();
+      return;
+    }
+    commitStructuralResult(result);
+    const afterNodes = get().nodes;
+    const entries = Object.keys(snapshots)
+      .map((nodeId) => {
+        const before = beforeNodes[nodeId];
+        const after = afterNodes[nodeId];
+        if (!before || !after) return null;
+        const patch: Partial<EditorNode> = {};
+        if (before.rotation !== after.rotation) patch.rotation = after.rotation;
+        if (before.x !== after.x) patch.x = after.x;
+        if (before.y !== after.y) patch.y = after.y;
+        if (before.width !== after.width) patch.width = after.width;
+        if (before.height !== after.height) patch.height = after.height;
+        if (Object.keys(patch).length === 0) return null;
+        return { nodeId, patch, node: after };
+      })
+      .filter((e): e is NonNullable<typeof e> => e != null);
+    let mirrored = false;
+    if (entries.length > 0) {
+      mirrored = mirrorGeometryPatchesToWasm(entries);
+      if (!mirrored) syncWasmDocumentAfterStoreUpdate();
     }
     if (mirrored) {
       clearDeferredWasmReconcile();

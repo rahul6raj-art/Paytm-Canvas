@@ -5,6 +5,15 @@ import { textNodeAsFillPaint } from "@/lib/text/textFillPaint";
 import { CANVAS_VIEWPORT_SELECTOR } from "@/lib/viewportZoom";
 import { getNodeTransformedWorldCorners } from "@/lib/transformMath";
 import type { EditorNode } from "@/stores/useEditorStore";
+import {
+  effectiveLineHeightMultiplier,
+  lineHeightUnitFromNode,
+  resolveLineHeightPxFromNode,
+} from "@/lib/text/lineHeight";
+import type { LineHeightUnit } from "@/lib/text/lineHeight";
+import {
+  resolveLetterSpacingPxFromNode,
+} from "@/lib/text/letterSpacing";
 
 export { TEXT_FONT_FAMILIES } from "@/lib/fonts/fontCatalog";
 
@@ -32,7 +41,11 @@ export type ResolvedTextTypo = {
   fontFamily: string;
   fontSize: number;
   fontWeight: number;
+  /** Unitless multiplier (lineHeightPx / fontSize) for CSS fallback paths. */
   lineHeight: number;
+  lineHeightUnit: LineHeightUnit;
+  /** Resolved px line height (auto uses rounded fontSize × 1.2). */
+  lineHeightPx: number;
   letterSpacing: number;
 };
 
@@ -48,7 +61,9 @@ export function resolveTextTypo(node: Pick<
   | "fontSize"
   | "fontWeight"
   | "lineHeight"
+  | "lineHeightUnit"
   | "letterSpacing"
+  | "letterSpacingUnit"
 >): ResolvedTextTypo {
   const paint = textNodeAsFillPaint(node);
   const color =
@@ -56,13 +71,17 @@ export function resolveTextTypo(node: Pick<
     resolveSolidFillCss(paint) ||
     node.fill ||
     defaultCanvasForegroundColor();
+  const lineHeightPx = resolveLineHeightPxFromNode(node);
+  const fontSize = node.fontSize ?? DEFAULT_TEXT_FONT_SIZE;
   return {
     color,
     fontFamily: node.fontFamily ?? DEFAULT_TEXT_FONT_FAMILY,
-    fontSize: node.fontSize ?? DEFAULT_TEXT_FONT_SIZE,
+    fontSize,
     fontWeight: node.fontWeight ?? 500,
-    lineHeight: node.lineHeight ?? 1.25,
-    letterSpacing: node.letterSpacing ?? 0,
+    lineHeight: effectiveLineHeightMultiplier(node),
+    lineHeightUnit: lineHeightUnitFromNode(node),
+    lineHeightPx,
+    letterSpacing: resolveLetterSpacingPxFromNode(node),
   };
 }
 
@@ -79,7 +98,12 @@ export function textTypoStyle(typo: ResolvedTextTypo): CSSProperties {
     fontFamily: typo.fontFamily,
     fontSize: typo.fontSize,
     fontWeight: typo.fontWeight,
-    lineHeight: typo.lineHeight,
+    lineHeight:
+      typo.lineHeightUnit === "auto"
+        ? "normal"
+        : typo.lineHeightUnit === "px"
+          ? `${typo.lineHeightPx}px`
+          : typo.lineHeight,
     letterSpacing: typo.letterSpacing !== 0 ? `${typo.letterSpacing}px` : undefined,
   };
 }
@@ -93,7 +117,12 @@ export function textEditScreenStyle(typo: ResolvedTextTypo, zoom: number): CSSPr
     fontFamily: typo.fontFamily,
     fontSize: typo.fontSize * z,
     fontWeight: typo.fontWeight,
-    lineHeight: typo.lineHeight,
+    lineHeight:
+      typo.lineHeightUnit === "auto"
+        ? "normal"
+        : typo.lineHeightUnit === "px"
+          ? `${typo.lineHeightPx}px`
+          : typo.lineHeight,
     letterSpacing: typo.letterSpacing !== 0 ? `${typo.letterSpacing * z}px` : undefined,
   };
 }

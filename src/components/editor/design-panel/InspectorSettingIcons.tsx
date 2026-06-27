@@ -499,6 +499,64 @@ export function TextAlignJustifyIcon({ className }: { className?: string }) {
   );
 }
 
+/** Text line height — Figma `A` with lines above/below. */
+export function TextLineHeightIcon({ className }: { className?: string }) {
+  return (
+    <SettingIconSvg className={className}>
+      <path
+        d="M3.5 4.5h9M3.5 11.5h9"
+        stroke="currentColor"
+        strokeWidth={PENPOT_STROKE}
+        strokeLinecap="round"
+        fill="none"
+      />
+      <path
+        d="M8 6.5v3"
+        stroke="currentColor"
+        strokeWidth={PENPOT_STROKE}
+        strokeLinecap="round"
+        fill="none"
+      />
+      <path
+        d="M6.5 8h3"
+        stroke="currentColor"
+        strokeWidth={PENPOT_STROKE}
+        strokeLinecap="round"
+        fill="none"
+      />
+    </SettingIconSvg>
+  );
+}
+
+/** Text letter spacing — Figma `|A|` tracking icon. */
+export function TextLetterSpacingIcon({ className }: { className?: string }) {
+  return (
+    <SettingIconSvg className={className}>
+      <path
+        d="M3 5.5v5M13 5.5v5"
+        stroke="currentColor"
+        strokeWidth={PENPOT_STROKE}
+        strokeLinecap="round"
+        fill="none"
+      />
+      <path
+        d="M8 6.25v3.5"
+        stroke="currentColor"
+        strokeWidth={PENPOT_STROKE}
+        strokeLinecap="round"
+        fill="none"
+      />
+      <path
+        d="M6.5 8h3"
+        stroke="currentColor"
+        strokeWidth={PENPOT_STROKE}
+        strokeLinecap="round"
+        fill="none"
+      />
+    </SettingIconSvg>
+  );
+}
+
 /** Text vertical align top — Penpot `text-top.svg`. */
 export function TextVerticalAlignTopIcon({ className }: { className?: string }) {
   return (

@@ -249,4 +249,32 @@ describe("childOrderReconcile", () => {
     assert.equal(fixed.nodes.r1!.height, 120);
     assert.equal(fixed.nodes.r1!.rotation, 24);
   });
+
+  it("needsNodeGeometryRepair ignores children inside rotated frames", () => {
+    const frameId = "frame";
+    const childId = "child";
+    const nodes = {
+      [frameId]: { ...frame(frameId, 100, 80), rotation: 35, width: 300, height: 200 },
+      [childId]: { ...rect(childId, frameId, 40, 50), width: 80, height: 40 },
+    };
+    const childOrder = { [EDITOR_ROOT_KEY]: [frameId], [frameId]: [childId] };
+    assert.equal(needsNodeGeometryRepair(nodes, childOrder), false);
+  });
+
+  it("repairNodeHierarchy preserves children when parent frame is rotated", () => {
+    const frameId = "frame";
+    const childId = "child";
+    const child = { ...rect(childId, frameId, 40, 50), width: 80, height: 40 };
+    const nodes = {
+      [frameId]: { ...frame(frameId, 100, 80), rotation: 35, width: 300, height: 200 },
+      [childId]: child,
+    };
+    const childOrder = { [EDITOR_ROOT_KEY]: [frameId], [frameId]: [childId] };
+    const fixed = repairNodeHierarchy(nodes, childOrder);
+    assert.equal(fixed.nodes[childId]!.x, child.x);
+    assert.equal(fixed.nodes[childId]!.y, child.y);
+    assert.equal(fixed.nodes[childId]!.width, child.width);
+    assert.equal(fixed.nodes[childId]!.height, child.height);
+    assert.equal(fixed.nodes[childId]!.rotation, child.rotation);
+  });
 });

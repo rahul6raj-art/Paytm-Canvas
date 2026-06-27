@@ -5,7 +5,6 @@ import {
   finiteCoord,
   finiteDimension,
   getNodeLocalMatrix,
-  getNodeWorldOrigin,
   getRotatedRectCorners,
   hasRotation,
   invertMatrix,
@@ -570,7 +569,7 @@ export function syncGroupFrameToVisible(
   const kids = (childOrder[groupId] ?? []).filter((cid) => nodes[cid]);
   const worldOrigins = new Map<string, { x: number; y: number }>();
   for (const cid of kids) {
-    worldOrigins.set(cid, getNodeWorldOrigin(cid, nodes));
+    worldOrigins.set(cid, getRenderedWorldTopLeft(cid, nodes, childOrder));
   }
 
   let out = { ...nodes };
@@ -1036,6 +1035,7 @@ export function repairNodeHierarchy(
     if (!wb) continue;
     const node = out[id];
     if (!node || nodeUsesLocalTransformBox(node)) continue;
+    if (nodeHasTransformedAncestor(id, out, parentOf)) continue;
     const wantParent = parentOf.has(id) ? parentOf.get(id)! : null;
     out[id] = nodeWithWorldBoundsAsParentLocal(node, wantParent, wb, out, co);
   }
@@ -1048,6 +1048,22 @@ function nodeUsesLocalTransformBox(node: EditorNode): boolean {
   if (hasRotation(node.rotation)) return true;
   if (node.flipHorizontal || node.flipVertical) return true;
   if (node.type === "line" || node.type === "arrow" || node.type === "path") return true;
+  return false;
+}
+
+/** True when a rotated/flipped/path ancestor owns parent-local geometry semantics. */
+function nodeHasTransformedAncestor(
+  nodeId: string,
+  nodes: Record<string, EditorNode>,
+  parentOf: Map<string, string>,
+): boolean {
+  let parentId = parentOf.get(nodeId) ?? null;
+  while (parentId) {
+    const parent = nodes[parentId];
+    if (!parent) break;
+    if (nodeUsesLocalTransformBox(parent)) return true;
+    parentId = parentOf.get(parentId) ?? null;
+  }
   return false;
 }
 
@@ -1083,6 +1099,7 @@ export function needsNodeGeometryRepair(
     const n = nodes[id];
     if (!n) continue;
     if (nodeUsesLocalTransformBox(n)) continue;
+    if (nodeHasTransformedAncestor(id, nodes, parentOf)) continue;
     const rendered = getRenderedWorldBounds(id, nodes, childOrder);
     const parentId = parentOf.get(id) ?? null;
     let expectedOrigin = { x: n.x, y: n.y };

@@ -565,7 +565,8 @@ export function svgTextMarkup(n: EditorNode, opts?: SvgTextMarkupOpts): string {
     style.textCase === "small-caps"
       ? { ...typo, fontSize: Math.max(1, typo.fontSize * 0.82) }
       : typo;
-  const toSvgY = (canvasLineTopY: number) => svgTextTspanY(canvasLineTopY, markupTypo);
+  const toSvgY = (canvasLineTopY: number) =>
+    svgTextTspanY(canvasLineTopY, markupTypo, layout.firstLineAscent);
 
   const tspans: string[] = [];
   for (let i = 0; i < layout.lines.length; i++) {

@@ -3,6 +3,7 @@ import type { TextNodeModel } from "./textNodeModel";
 import {
   TEXT_BOX_PAD_X,
   TEXT_BOX_PAD_Y,
+  textVerticalPad,
   toTextNodeModel,
   type TextAlign,
 } from "./textNodeModel";
@@ -69,6 +70,7 @@ export function getCursorPositionFromPoint(
     model.textAlign,
     displayText.length,
     prepared?.canonical.lines,
+    textVerticalPad(model.textResizeMode),
   );
   return displayIndexToRawIndex(displayIndex, model.text, style);
 }
@@ -82,10 +84,11 @@ export function cursorIndexFromPoint(
   align: TextAlign,
   textLength: number,
   canonicalLines?: Array<{ y: number; x: number; text: string; startIndex: number }>,
+  verticalPad = TEXT_BOX_PAD_Y,
 ): number {
   if (layout.lines.length === 0) return 0;
 
-  const lineIdx = lineIndexFromLocalY(localY, layout, canonicalLines);
+  const lineIdx = lineIndexFromLocalY(localY, layout, canonicalLines, verticalPad);
   const line = layout.lines[lineIdx]!;
   const canonicalLine = canonicalLines?.[lineIdx];
   const lineX = canonicalLine?.x ?? lineOffsetX(line.width, boxWidth, align) + TEXT_BOX_PAD_X;
@@ -136,9 +139,10 @@ function lineIndexFromLocalY(
   localY: number,
   layout: TextLayout,
   canonicalLines?: Array<{ y: number }>,
+  verticalPad = TEXT_BOX_PAD_Y,
 ): number {
   for (let i = 0; i < layout.lines.length; i++) {
-    const top = canonicalLines?.[i]?.y ?? lineTopY(layout, i) + TEXT_BOX_PAD_Y;
+    const top = canonicalLines?.[i]?.y ?? lineTopY(layout, i) + verticalPad;
     const bottom = top + layout.lineHeightPx;
     if (localY < bottom || i === layout.lines.length - 1) return i;
   }

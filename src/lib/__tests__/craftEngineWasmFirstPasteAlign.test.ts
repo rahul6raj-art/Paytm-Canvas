@@ -46,16 +46,31 @@ describe("craftEngineWasmFirstPasteAlign", () => {
     assert.notEqual(xBefore, xAfter);
   });
 
-  it("pasteSelection inserts clipboard nodes", () => {
+  it("pasteSelection keeps the copied layer in its original parent frame", () => {
+    const frame = `frame-${Date.now()}`;
     const src = `rect-src-${Date.now()}`;
     useEditorStore.setState({
       editorMode: "design",
       nodes: {
+        [frame]: {
+          id: frame,
+          parentId: null,
+          type: "frame",
+          name: "Frame",
+          x: 0,
+          y: 0,
+          width: 400,
+          height: 400,
+          rotation: 0,
+          visible: true,
+          locked: false,
+          expanded: true,
+        },
         [src]: {
           id: src,
-          parentId: null,
+          parentId: frame,
           type: "rectangle",
-          name: "Source",
+          name: "Box",
           x: 40,
           y: 40,
           width: 60,
@@ -66,12 +81,20 @@ describe("craftEngineWasmFirstPasteAlign", () => {
           expanded: true,
         },
       },
-      childOrder: { [ROOT]: [src] },
+      childOrder: { [ROOT]: [frame], [frame]: [src] },
       selectedIds: [src],
     });
-    const before = Object.keys(useEditorStore.getState().nodes).length;
     useEditorStore.getState().copySelection();
     useEditorStore.getState().pasteSelection();
-    assert.ok(Object.keys(useEditorStore.getState().nodes).length > before);
+    const pastedId = useEditorStore
+      .getState()
+      .selectedIds.find((id) => id !== src);
+    assert.ok(pastedId);
+    assert.equal(useEditorStore.getState().nodes[pastedId!]!.parentId, frame);
+    assert.ok(useEditorStore.getState().childOrder[frame]?.includes(pastedId!));
+    assert.equal(
+      useEditorStore.getState().childOrder[ROOT]?.includes(pastedId!),
+      false,
+    );
   });
 });

@@ -3,55 +3,24 @@ import { applyMatrixToPoint } from "@/lib/transformMath";
 import type { ResolvedTextTypo } from "@/lib/textTypography";
 import type { EditorNode } from "@/stores/useEditorStore";
 import {
-  prepareTextForDisplay,
-  textAdvancedStyleFromNode,
-} from "./textAdvancedStyle";
-import {
-  TEXT_BOX_PAD_Y,
-  textInnerHeight,
-  textInnerWidth,
-  textTypoFromModel,
-  toTextNodeModel,
-  wrapWidthForResizeMode,
-  type TextResizeMode,
-} from "./textNodeModel";
-import { verticalContentOffsetY } from "./textVerticalAlign";
-import {
   buildFontString,
   getTextMeasureContext,
-  layoutText,
-  lineTopY,
+  layoutTextFrameContentHeight,
+  measureTypoAscent,
+  measureTypoDescent,
   type TextLayout,
 } from "./textMeasure";
+import type { TextResizeMode } from "./textNodeModel";
 
-/** Approximate alphabetic baseline offset from em top (canvas `textBaseline: top`). */
-export function measureTypoAscent(typo: ResolvedTextTypo): number {
-  if (typeof document === "undefined") return typo.fontSize * 0.82;
-  const ctx = getTextMeasureContext();
-  ctx.font = buildFontString(typo);
-  const metrics = ctx.measureText("Hg");
-  return (
-    metrics.fontBoundingBoxAscent ??
-    metrics.actualBoundingBoxAscent ??
-    typo.fontSize * 0.82
-  );
-}
+export { measureTypoAscent, measureTypoDescent } from "./textMeasure";
 
 /** Map canvas line-top y (`textBaseline: top`) to SVG `<tspan y>` with `dominant-baseline: alphabetic`. */
-export function svgTextTspanY(canvasLineTopY: number, typo: ResolvedTextTypo): number {
-  return canvasLineTopY + measureTypoAscent(typo);
-}
-
-export function measureTypoDescent(typo: ResolvedTextTypo): number {
-  if (typeof document === "undefined") return typo.fontSize * 0.22;
-  const ctx = getTextMeasureContext();
-  ctx.font = buildFontString(typo);
-  const metrics = ctx.measureText("Hg");
-  return (
-    metrics.fontBoundingBoxDescent ??
-    metrics.actualBoundingBoxDescent ??
-    typo.fontSize * 0.22
-  );
+export function svgTextTspanY(
+  canvasLineTopY: number,
+  typo: ResolvedTextTypo,
+  ascent?: number,
+): number {
+  return canvasLineTopY + (ascent ?? measureTypoAscent(typo));
 }
 
 /** Tight single-line height from font metrics (Figma hug-contents vertical). */
@@ -82,32 +51,16 @@ export function measureTextPaintHeight(text: string, typo: ResolvedTextTypo): nu
   return Math.max(typo.fontSize, ascent + descent);
 }
 
-function hugFirstLineHeight(
-  layout: Pick<TextLayout, "lines" | "verticalTrimTop">,
-  typo: ResolvedTextTypo,
-): number {
-  const trim = layout.verticalTrimTop * 2;
-  const lineText = layout.lines[0]?.text ?? "";
-  const paintH = lineText ? measureTextPaintHeight(lineText, typo) : tightLineHeightPx(typo);
-  return Math.max(typo.fontSize * 0.5, paintH - trim);
-}
 
-/** Hug-contents height: ink bounds on first line, line-height stepping for wrapped lines. */
+/** Hug-contents height: sum of line boxes (never glyph bbox metrics). */
 export function hugContentHeightForLayout(
-  layout: Pick<TextLayout, "lines" | "lineHeightPx" | "paragraphSpacing" | "verticalTrimTop">,
-  typo: ResolvedTextTypo,
+  layout: Pick<
+    TextLayout,
+    "lines" | "lineHeightPx" | "paragraphSpacing" | "verticalTrimTop"
+  >,
+  _typo?: ResolvedTextTypo,
 ): number {
-  if (layout.lines.length <= 1) {
-    return hugFirstLineHeight(layout, typo);
-  }
-  let height = hugFirstLineHeight(layout, typo);
-  for (let i = 1; i < layout.lines.length; i++) {
-    height += layout.lineHeightPx;
-    if (layout.lines[i]?.paragraphStart) {
-      height += layout.paragraphSpacing;
-    }
-  }
-  return height;
+  return layoutTextFrameContentHeight(layout);
 }
 
 /** Content height used for vertical alignment inside the text box. */
@@ -124,25 +77,13 @@ export function textBlockContentHeight(
 
 /** First-line baseline Y in the text node's local box coordinates. */
 export function textBaselineLocalY(node: EditorNode): number | null {
-  const model = toTextNodeModel(node, false);
-  if (!model) return null;
-
-  const typo = textTypoFromModel(model);
-  const style = textAdvancedStyleFromNode(node);
-  const innerW = textInnerWidth(model.width);
-  const innerH = textInnerHeight(model.height);
-  const wrapWidth = wrapWidthForResizeMode(model.width, model.textResizeMode);
-  const effectiveWrap =
-    wrapWidth === Number.POSITIVE_INFINITY
-      ? Number.POSITIVE_INFINITY
-      : Math.max(1, Math.min(wrapWidth, innerW));
-  const displayText = prepareTextForDisplay(model.text, style);
-  const layout = layoutText(displayText, effectiveWrap, typo, style);
-  const contentHeight = textBlockContentHeight(layout, typo, model.textResizeMode ?? "auto-width");
-  const blockOffsetY = verticalContentOffsetY(contentHeight, innerH, model.verticalAlign);
-  const lineBoxTop = lineTopY(layout, 0) + TEXT_BOX_PAD_Y + blockOffsetY;
-
-  return lineBoxTop + measureTypoAscent(typo);
+  // Lazy import avoids circular dependency with canonicalTextLayout → textBaseline.
+  const { textLayoutForEditorNode } = require("./canonicalTextLayout") as typeof import("./canonicalTextLayout");
+  const prepared = textLayoutForEditorNode(node);
+  if (!prepared) return null;
+  const firstLine = prepared.canonical.lines[0];
+  if (!firstLine) return null;
+  return svgTextTspanY(firstLine.y, prepared.typo, prepared.layout.firstLineAscent);
 }
 
 /** Baseline segment across the text box width in world coordinates. */

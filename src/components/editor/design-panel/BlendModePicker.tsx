@@ -4,6 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, Droplet } from "lucide-react";
 import {
+  clearBlendModePreview,
+  setBlendModePreview,
+} from "@/lib/blendModePreview";
+import {
   blendModeGroupsForNode,
   defaultLayerBlendMode,
   effectiveLayerBlendMode,
@@ -29,11 +33,19 @@ type BlendModePickerProps = {
   node: Pick<EditorNode, "type" | "blendMode">;
   disabled?: boolean;
   onChange: (mode: LayerBlendMode) => void;
+  /** Layers that receive hover preview + click apply. */
+  previewNodeIds?: readonly string[];
   /** Icon-only trigger for compact section headers. */
   variant?: "default" | "icon";
 };
 
-export function BlendModePicker({ node, disabled, onChange, variant = "default" }: BlendModePickerProps) {
+export function BlendModePicker({
+  node,
+  disabled,
+  onChange,
+  previewNodeIds = [],
+  variant = "default",
+}: BlendModePickerProps) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
@@ -52,6 +64,14 @@ export function BlendModePicker({ node, disabled, onChange, variant = "default" 
 
   useEffect(() => setMounted(true), []);
 
+  useEffect(() => {
+    if (!open) clearBlendModePreview();
+  }, [open]);
+
+  useEffect(() => () => clearBlendModePreview(), []);
+
+  const previewTargets = previewNodeIds.length > 0 ? previewNodeIds : [];
+
   const menu =
     open && mounted ? (
       <div
@@ -65,6 +85,7 @@ export function BlendModePicker({ node, disabled, onChange, variant = "default" 
           "z-[120]",
         )}
         style={anchoredMenuStyle(position)}
+        onMouseLeave={() => clearBlendModePreview()}
       >
         {groups.map((group, gi) => (
           <div key={gi}>
@@ -81,8 +102,14 @@ export function BlendModePicker({ node, disabled, onChange, variant = "default" 
                     "editor-menu-dropdown-item !justify-start gap-2.5",
                     selected && "bg-app-inset font-medium text-app-fg",
                   )}
+                  onMouseEnter={() => {
+                    if (previewTargets.length > 0) {
+                      setBlendModePreview(previewTargets, mode);
+                    }
+                  }}
                   onClick={() => {
                     onChange(mode);
+                    clearBlendModePreview();
                     setOpen(false);
                   }}
                 >

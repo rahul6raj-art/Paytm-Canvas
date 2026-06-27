@@ -75,11 +75,14 @@ export function runTextLayoutPipeline(
   const prepared = textLayoutForEditorNode(layoutNode);
   if (!prepared) return null;
 
-  const lineHeightPx = resolveLineHeightPx(
+  let lineHeightPx = resolveLineHeightPx(
     input.typo.fontSize,
-    input.typo.lineHeight,
+    layoutNode.lineHeight,
     input.lineHeightUnit,
   );
+  if (input.lineHeightUnit === "auto") {
+    lineHeightPx = prepared.layout.lineHeightPx;
+  }
   const metrics = resolveTextFontMetrics(
     input.typo,
     lineHeightPx,

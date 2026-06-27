@@ -16,6 +16,7 @@ import {
   canvasResizeHandleStyle,
   formatSelectionDimensions,
   resolveCanvasSelectionAccent,
+  resolveCanvasSelectionBadgeAccent,
   screenPxToWorld,
 } from "@/lib/canvasVisual";
 import {
@@ -923,6 +924,12 @@ export function SelectionBox() {
     anyInstance: !multi && instanceSelection ? true : multi && anyInstanceInMulti,
     anyComponentMaster,
   });
+  const badgeAccentColor = resolveCanvasSelectionBadgeAccent({
+    inspect: editorMode === "inspect",
+    locked,
+    anyInstance: !multi && instanceSelection ? true : multi && anyInstanceInMulti,
+    anyComponentMaster,
+  });
 
   const outlineColor = accentColor;
   const handleBorderColor = accentColor;
@@ -1106,7 +1113,7 @@ export function SelectionBox() {
             left: rotateLabelScreen.x,
             top: rotateLabelScreen.y,
             transform: "translate(-50%, -100%)",
-            background: accentColor,
+            background: badgeAccentColor,
           }}
         >
           {rotateLabel!.text}
@@ -1120,7 +1127,7 @@ export function SelectionBox() {
             left: wr.x + wr.width / 2,
             top: wr.y + wr.height + dimensionLabelOffset,
             transform: "translate(-50%, 0)",
-            background: accentColor,
+            background: badgeAccentColor,
             fontSize: dimensionBadgeFont,
             lineHeight: `${dimensionBadgeFont}px`,
             padding: `${dimensionBadgePadY}px ${dimensionBadgePadX}px`,

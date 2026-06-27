@@ -19,6 +19,7 @@ import { isBooleanGroup, isMaskGroup } from "@/lib/booleanGeometry";
 import { strokeSidesToReactStyle } from "@/lib/strokeAlign";
 import { buildLayerCssTransform } from "@/lib/transformMath";
 import type { EditorNode } from "@/stores/useEditorStore";
+import { resolveTextTypo } from "@/lib/textTypography";
 import { isPhoneShellBottomChrome } from "@/lib/webImport/phoneShellBottomChrome";
 
 export type ReactStyleRecord = Record<string, string | number>;
@@ -59,15 +60,17 @@ export function nodeToReactStyle(
   if (blend.isolation) style.isolation = blend.isolation;
 
   if (node.type === "text") {
-    const fontSize = resolved.fontSize ?? 14;
-    const lhFactor = resolved.lineHeight ?? 1.25;
-    style.color = resolved.textColor ?? resolved.fill ?? "#111111";
-    style.fontFamily = resolved.fontFamily ?? "Inter, system-ui, sans-serif";
+    const typo = resolveTextTypo(resolved);
+    const fontSize = typo.fontSize;
+    style.color = typo.color;
+    style.fontFamily = typo.fontFamily;
     style.fontSize = fontSize;
-    style.fontWeight = resolved.fontWeight ?? 500;
+    style.fontWeight = typo.fontWeight;
     // Pixel line-height matches canvas text layout and prevents bleed into adjacent layers.
-    style.lineHeight = `${Math.round(fontSize * lhFactor * 100) / 100}px`;
-    if (resolved.letterSpacing) style.letterSpacing = resolved.letterSpacing;
+    style.lineHeight = `${Math.round(typo.lineHeightPx * 100) / 100}px`;
+    if (typo.letterSpacing) {
+      style.letterSpacing = `${Math.round(typo.letterSpacing * 1000) / 1000}px`;
+    }
     style.whiteSpace = "pre-wrap";
     style.margin = 0;
     style.padding = "2px 4px";

@@ -4,6 +4,8 @@ import { CANVAS_VISUAL } from "@/lib/canvasVisual";
 import { getNodeWorldMatrixFromChildOrder, layerPanelChildIds, topLevelSelectedIds } from "@/lib/editorGraph";
 import { applyMatrixToPoint, composeSvgTransform, matrixToSvgTransform } from "@/lib/transformMath";
 import type { EllipseArcPreview } from "@/lib/shapes/ellipseArc";
+import type { BlendModePreview } from "@/lib/blendModePreview";
+import { nodeBlendModeForPreview } from "@/lib/blendModePreview";
 import type { EditorNode } from "@/stores/useEditorStore";
 import {
   collectNodeEffects,
@@ -62,6 +64,8 @@ export type SvgSceneBuildInput = {
   dragPreview?: SvgDragPreview;
   /** Live ellipse arc drag preview (canvas handles). */
   ellipseArcPreview?: EllipseArcPreview;
+  /** Live blend mode picker hover preview. */
+  blendModePreview?: BlendModePreview | null;
   /** Boolean group in object-edit mode shows operand children instead of composite. */
   objectEditModeNodeId?: string | null;
   selectedIds?: readonly string[];
@@ -124,6 +128,7 @@ type BuildCtx = {
   excludeNodeIds?: ReadonlySet<string>;
   renderScale: number;
   ellipseArcPreview?: EllipseArcPreview;
+  blendModePreview?: BlendModePreview | null;
   objectEditModeNodeId?: string | null;
   selectedIds?: readonly string[];
   colorMode: CanvasColorMode;
@@ -159,6 +164,10 @@ function registerClipRectWithEffectBleed(
   registerClipRect(ctx.defs, clipId, w, h, node, bleed);
 }
 
+function svgBlendAttrForNode(nodeId: string, node: EditorNode, ctx: BuildCtx): string {
+  return svgLayerBlendStyleAttr(nodeBlendModeForPreview(nodeId, node, ctx.blendModePreview ?? null));
+}
+
 function renderChildren(parentId: string, ctx: BuildCtx): string {
   const kids = layerPanelChildIds(parentId, ctx.nodes, ctx.childOrder);
   let out = "";
@@ -167,7 +176,7 @@ function renderChildren(parentId: string, ctx: BuildCtx): string {
     if (!c?.visible) continue;
     const inner = renderNode(cid, ctx);
     if (inner) {
-      const blend = svgLayerBlendStyleAttr(c);
+      const blend = svgBlendAttrForNode(cid, c, ctx);
       out += `<g transform="${composeSvgTransform(c)}"${blend}>${inner}</g>`;
     }
   }
@@ -406,6 +415,7 @@ export function buildSvgScene(input: SvgSceneBuildInput): SvgSceneBuildResult {
     excludeNodeIds,
     renderScale: gradientRenderScale(input.zoom ?? 1),
     ellipseArcPreview: input.ellipseArcPreview ?? null,
+    blendModePreview: input.blendModePreview ?? null,
     objectEditModeNodeId: effectiveObjectEditMode,
     selectedIds: input.selectedIds,
     colorMode: input.colorMode ?? "light",
@@ -423,7 +433,7 @@ export function buildSvgScene(input: SvgSceneBuildInput): SvgSceneBuildResult {
     const inner = renderNode(rid, ctx);
     if (node.type !== "frame") {
       if (inner) {
-        const blend = svgLayerBlendStyleAttr(node);
+        const blend = svgBlendAttrForNode(rid, node, ctx);
         bodyParts.push(
           `<g transform="${rootTransform ?? ""}" data-node-id="${rid}"${blend}>${inner}</g>`,
         );
@@ -432,7 +442,7 @@ export function buildSvgScene(input: SvgSceneBuildInput): SvgSceneBuildResult {
     }
 
     if (inner) {
-      const blend = svgLayerBlendStyleAttr(node);
+      const blend = svgBlendAttrForNode(rid, node, ctx);
       bodyParts.push(
         `<g transform="${rootTransform ?? ""}" data-node-id="${rid}"${blend}>${inner}</g>`,
       );
@@ -468,7 +478,7 @@ export function buildSvgScene(input: SvgSceneBuildInput): SvgSceneBuildResult {
       const inner = renderNode(mid, overlayCtx);
       if (inner) {
         const n = input.nodes[mid];
-        const blend = n ? svgLayerBlendStyleAttr(n) : "";
+        const blend = n ? svgBlendAttrForNode(mid, n, ctx) : "";
         bodyParts.push(
           `<g transform="${matrixToSvgTransform(shifted)}" data-drag-preview data-node-id="${mid}"${blend}>${inner}</g>`,
         );

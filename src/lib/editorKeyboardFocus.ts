@@ -35,6 +35,26 @@ export function isEditableFieldElement(el: EventTarget | null): boolean {
   return false;
 }
 
+/** Space in inspector fields must not switch the canvas into hand/pan mode. */
+export function shouldTrackSpaceForCanvasPan(e: Pick<KeyboardEvent, "code" | "target">): boolean {
+  if (e.code !== "Space") return false;
+  return !isEditableFieldElement(e.target);
+}
+
+/** Reconcile modifier keys from a pointer event (fixes stuck Space after field blur). */
+export function syncCanvasPointerModifiers(
+  e: Pick<PointerEvent, "getModifierState">,
+  sync: {
+    setSpaceDown: (v: boolean) => void;
+    setOptionDown: (v: boolean) => void;
+    setCommandDown: (v: boolean) => void;
+  },
+): void {
+  sync.setSpaceDown(e.getModifierState("Space"));
+  sync.setOptionDown(e.getModifierState("Alt"));
+  sync.setCommandDown(e.getModifierState("Meta") || e.getModifierState("Control"));
+}
+
 /** Hidden textarea used for canvas inline text editing (must keep focus while typing). */
 export function isCanvasTextEditFieldElement(el: EventTarget | null): boolean {
   if (typeof HTMLElement === "undefined" || !(el instanceof HTMLElement)) return false;

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { autoResizeToTextResizeMode, textResizeModeToAutoResize } from "@/lib/text/autoResizeMode";
-import { textResizePatch, normalizeTextResizeMode } from "@/lib/text/textNodeModel";
+import { textResizePatch, normalizeTextResizeMode, scaleTextTypoForScreen } from "@/lib/text/textNodeModel";
 import { verticalContentOffsetY } from "@/lib/text/textVerticalAlign";
 
 describe("textNodeModel", () => {
@@ -39,5 +39,24 @@ describe("textNodeModel", () => {
     assert.equal(verticalContentOffsetY(100, 20, "top"), 0);
     assert.equal(verticalContentOffsetY(100, 20, "middle"), -40);
     assert.equal(verticalContentOffsetY(100, 20, "bottom"), -80);
+  });
+
+  it("scaleTextTypoForScreen scales line height with font size", () => {
+    const scaled = scaleTextTypoForScreen(
+      {
+        color: "#fff",
+        fontFamily: "Inter",
+        fontSize: 14,
+        fontWeight: 500,
+        lineHeight: 1.2,
+        lineHeightUnit: "auto",
+        lineHeightPx: 17,
+        letterSpacing: 0,
+      },
+      10,
+    );
+    assert.equal(scaled.fontSize, 140);
+    assert.equal(scaled.lineHeightPx, 170);
+    assert.equal(scaled.letterSpacing, 0);
   });
 });

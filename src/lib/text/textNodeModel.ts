@@ -1,5 +1,6 @@
 import type { EditorNode } from "@/stores/useEditorStore";
 import { resolveTextTypo, type ResolvedTextTypo } from "@/lib/textTypography";
+import type { LineHeightUnit } from "@/lib/text/lineHeight";
 
 import {
   autoResizeToTextResizeMode,
@@ -29,6 +30,8 @@ export type TextNodeModel = {
   fontSize: number;
   fontWeight: number;
   lineHeight: number;
+  lineHeightUnit: LineHeightUnit;
+  lineHeightPx: number;
   letterSpacing: number;
   color: string;
   textAlign: TextAlign;
@@ -57,8 +60,15 @@ export function textInnerWidth(boxWidth: number): number {
   return Math.max(1, boxWidth - TEXT_BOX_PAD_X * 2);
 }
 
-export function textInnerHeight(boxHeight: number): number {
-  return Math.max(1, boxHeight - TEXT_BOX_PAD_Y * 2);
+/** Vertical inset between node frame and line boxes — zero for auto-width/auto-height (Figma hug). */
+export function textVerticalPad(mode?: TextResizeMode): number {
+  if (mode === "auto-width" || mode === "auto-height") return 0;
+  return TEXT_BOX_PAD_Y;
+}
+
+export function textInnerHeight(boxHeight: number, mode?: TextResizeMode): number {
+  const padY = textVerticalPad(mode);
+  return Math.max(1, boxHeight - padY * 2);
 }
 
 export function wrapWidthForResizeMode(
@@ -127,6 +137,8 @@ export function toTextNodeModel(
     fontSize: typo.fontSize,
     fontWeight: typo.fontWeight,
     lineHeight: typo.lineHeight,
+    lineHeightUnit: typo.lineHeightUnit,
+    lineHeightPx: typo.lineHeightPx,
     letterSpacing: typo.letterSpacing,
     color: typo.color,
     textAlign: normalizeTextAlign(node.textAlign),
@@ -139,13 +151,42 @@ export function toTextNodeModel(
   };
 }
 
-export function textTypoFromModel(model: Pick<TextNodeModel, "fontFamily" | "fontSize" | "fontWeight" | "lineHeight" | "letterSpacing" | "color">): ResolvedTextTypo {
+export function textTypoFromModel(
+  model: Pick<
+    TextNodeModel,
+    | "fontFamily"
+    | "fontSize"
+    | "fontWeight"
+    | "lineHeight"
+    | "lineHeightUnit"
+    | "lineHeightPx"
+    | "letterSpacing"
+    | "color"
+  >,
+): ResolvedTextTypo {
   return {
     color: model.color,
     fontFamily: model.fontFamily,
     fontSize: model.fontSize,
     fontWeight: model.fontWeight,
     lineHeight: model.lineHeight,
+    lineHeightUnit: model.lineHeightUnit,
+    lineHeightPx: model.lineHeightPx,
     letterSpacing: model.letterSpacing,
+  };
+}
+
+/** Scale resolved typography for screen-space text bitmaps (native edit overlay). */
+export function scaleTextTypoForScreen(
+  typo: ResolvedTextTypo,
+  scaleX: number,
+  scaleY: number = scaleX,
+): ResolvedTextTypo {
+  if (scaleX === 1 && scaleY === 1) return typo;
+  return {
+    ...typo,
+    fontSize: typo.fontSize * scaleX,
+    letterSpacing: typo.letterSpacing * scaleX,
+    lineHeightPx: typo.lineHeightPx * scaleY,
   };
 }

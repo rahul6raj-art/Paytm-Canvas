@@ -7,6 +7,7 @@ import {
   isDefaultLightWorkspaceBackground,
   isThemeLinkedWorkspaceBackground,
   resolveCanvasSelectionAccent,
+  textCaretLayoutWidth,
   themeCanvasWorkspaceHex,
 } from "@/lib/canvasVisual";
 
@@ -42,5 +43,12 @@ describe("canvasVisual", () => {
       resolveCanvasSelectionAccent({ anyInstance: true, anyComponentMaster: true }),
       CANVAS_VISUAL.instance,
     );
+  });
+
+  it("text caret width stays 1 screen px at any zoom", () => {
+    assert.equal(textCaretLayoutWidth({ zoom: 9.84 }), 1 / 9.84);
+    assert.equal(textCaretLayoutWidth({ zoom: 0.25 }), 4);
+    assert.equal(textCaretLayoutWidth({ zoom: 9.84, layoutScale: 9.84 }), 1);
+    assert.equal(textCaretLayoutWidth({ layoutScale: 1 }), 1);
   });
 });

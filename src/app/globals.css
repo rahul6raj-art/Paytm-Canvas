@@ -54,13 +54,16 @@
   --app-field-fg: 0 0% 9%;
   /* Canvas selection / hover (Figma-like, restrained on dark UI) */
   --pc-canvas-selection: #18a0fb;
+  --pc-canvas-selection-badge: #0d99ff;
   --pc-canvas-selection-fill: rgba(24, 160, 251, 0.08);
   --pc-canvas-selection-muted: rgba(24, 160, 251, 0.12);
   --pc-canvas-hover-outline: #18a0fb;
   --pc-canvas-inspect-hover: rgba(244, 114, 182, 0.5);
   --pc-canvas-locked-outline: rgba(214, 158, 46, 0.5);
-  --pc-canvas-instance-outline: rgba(139, 92, 246, 0.52);
+  --pc-canvas-instance-outline: #7c3aed;
+  --pc-canvas-instance-badge: #8b5cf6;
   --pc-canvas-component-outline: #7c3aed;
+  --pc-canvas-component-badge: #8b5cf6;
   --pc-canvas-component-selection-fill: rgba(139, 92, 246, 0.1);
   --pc-canvas-component-selection-muted: rgba(139, 92, 246, 0.16);
   --pc-canvas-group-outline: rgba(15, 23, 42, 0.1);
@@ -97,18 +100,21 @@
   --app-scrollbar-opacity: 0.12;
   --app-field-bg: 0 0% 15%;
   --app-field-fg: 0 0% 98%;
-  --pc-canvas-selection: rgba(138, 188, 255, 0.68);
-  --pc-canvas-selection-fill: rgba(138, 188, 255, 0.05);
-  --pc-canvas-selection-muted: rgba(138, 188, 255, 0.1);
-  --pc-canvas-hover-outline: rgba(138, 188, 255, 0.95);
+  --pc-canvas-selection: #18a0fb;
+  --pc-canvas-selection-badge: #0d99ff;
+  --pc-canvas-selection-fill: rgba(24, 160, 251, 0.08);
+  --pc-canvas-selection-muted: rgba(24, 160, 251, 0.12);
+  --pc-canvas-hover-outline: #18a0fb;
   --pc-canvas-inspect-hover: rgba(244, 114, 182, 0.38);
   --pc-canvas-locked-outline: rgba(214, 158, 46, 0.38);
-  --pc-canvas-instance-outline: rgba(167, 139, 250, 0.72);
+  --pc-canvas-instance-outline: #8b5cf6;
+  --pc-canvas-instance-badge: #8b5cf6;
   --pc-canvas-component-outline: #8b5cf6;
+  --pc-canvas-component-badge: #8b5cf6;
   --pc-canvas-component-selection-fill: rgba(139, 92, 246, 0.14);
   --pc-canvas-component-selection-muted: rgba(139, 92, 246, 0.22);
   --pc-canvas-group-outline: rgba(255, 255, 255, 0.09);
-  --pc-canvas-boolean-outline: rgba(138, 188, 255, 0.28);
+  --pc-canvas-boolean-outline: rgba(24, 160, 251, 0.35);
   --pc-canvas-mask-outline: rgba(196, 150, 255, 0.32);
   /* Pasteboard — deep grey canvas like reference UI */
   --pc-canvas-workspace: 0 0% 4%;

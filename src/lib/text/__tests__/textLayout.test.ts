@@ -92,11 +92,10 @@ describe("text layout patch helpers", () => {
     assert.ok(twoLines.height > oneLine.height);
   });
 
-  it("auto-width hugs ink height instead of the full line-height box", () => {
-    const typo = resolveTextTypo({ fontSize: 14, lineHeight: 1.25, fontWeight: 500 });
+  it("auto-width frame height matches resolved line height box", () => {
+    const typo = resolveTextTypo({ fontSize: 14, lineHeightUnit: "auto", fontWeight: 500 });
     const size = computeTextBoxSize("Rahul", typo, "auto-width", 0, 0);
-    const lineHeightBoxH = Math.ceil(14 * 1.25) + TEXT_BOX_PAD_Y * 2;
-    assert.ok(size.height < lineHeightBoxH);
+    assert.equal(size.height, typo.lineHeightPx);
   });
 
   it("switches narrowed auto-width text to wrapped auto-height on width resize", () => {
@@ -175,7 +174,7 @@ describe("text layout patch helpers", () => {
       const typo = resolveTextTypo({ fontSize: 14, lineHeight: 1.25, fontWeight: 500 });
       const size = computeTextBoxSize("More", typo, "auto-width", 0, 0);
       assert.ok(size.width > TEXT_BOX_PAD_X * 2);
-      assert.ok(size.height >= TEXT_BOX_PAD_Y * 2 + typo.fontSize);
+      assert.ok(size.height >= typo.lineHeightPx);
     } finally {
       globalThis.document = prev;
     }
@@ -190,9 +189,7 @@ describe("text layout patch helpers", () => {
     assert.equal(cleared.width, empty.width);
     assert.equal(cleared.height, empty.height);
     assert.equal(empty.width, TEXT_BOX_PAD_X * 2 + 2);
-    const lineHeightBoxH = Math.ceil(typo.fontSize * typo.lineHeight) + TEXT_BOX_PAD_Y * 2;
-    assert.ok(empty.height <= lineHeightBoxH);
-    assert.ok(empty.height >= TEXT_BOX_PAD_Y * 2 + typo.fontSize);
+    assert.equal(empty.height, Math.ceil(typo.lineHeightPx));
   });
 
   it("does not auto-grow height when truncate is enabled", () => {

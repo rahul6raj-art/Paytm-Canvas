@@ -108,7 +108,7 @@ export function ShapeDrawPreview() {
           fontSize: badgeFont,
           padding: `${badgePadY}px ${badgePadX}px`,
           borderRadius: badgeRadius,
-          background: CANVAS_VISUAL.selection,
+          background: CANVAS_VISUAL.selectionBadge,
         }}
         aria-hidden
       >

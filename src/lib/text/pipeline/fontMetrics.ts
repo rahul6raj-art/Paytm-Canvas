@@ -1,36 +1,12 @@
-import type { EditorNode } from "@/stores/useEditorStore";
 import type { ResolvedTextTypo } from "@/lib/textTypography";
 import { buildFontString, getTextMeasureContext } from "../textMeasure";
-import type { LineHeightUnit, TextFontMetrics } from "./types";
+import {
+  lineHeightUnitFromNode,
+  resolveLineHeightPx,
+} from "../lineHeight";
+import type { TextFontMetrics } from "./types";
 
-const DEFAULT_LINE_HEIGHT_MULTIPLIER = 1.25;
-const AUTO_LINE_HEIGHT_MULTIPLIER = 1.2;
-
-/** Figma-style line height unit stored on the node (defaults to percent multiplier). */
-export function lineHeightUnitFromNode(
-  node: Pick<EditorNode, "lineHeightUnit">,
-): LineHeightUnit {
-  const u = node.lineHeightUnit;
-  if (u === "auto" || u === "px" || u === "percent") return u;
-  return "percent";
-}
-
-/** Resolve line height in px from font size and node settings. */
-export function resolveLineHeightPx(
-  fontSize: number,
-  lineHeight: number | undefined,
-  unit: LineHeightUnit = "percent",
-): number {
-  const fs = Math.max(1, fontSize);
-  if (unit === "auto") {
-    return fs * AUTO_LINE_HEIGHT_MULTIPLIER;
-  }
-  if (unit === "px") {
-    return Math.max(fs, lineHeight ?? fs * DEFAULT_LINE_HEIGHT_MULTIPLIER);
-  }
-  const mult = lineHeight ?? DEFAULT_LINE_HEIGHT_MULTIPLIER;
-  return fs * Math.max(0.5, mult);
-}
+export { lineHeightUnitFromNode, resolveLineHeightPx } from "../lineHeight";
 
 const metricsCache = new Map<string, TextFontMetrics>();
 const METRICS_CACHE_MAX = 256;

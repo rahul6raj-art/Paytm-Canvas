@@ -81,9 +81,11 @@ export function scaleSubtreeContentPatches(
 
     if (n.type === "text") {
       const fs = base.fontSize ?? 14;
-      const ls = base.letterSpacing ?? 0;
       patch.fontSize = Math.max(1, Math.round(fs * uniform * 100) / 100);
-      if (ls !== 0) patch.letterSpacing = ls * uniform;
+      if ((base.letterSpacingUnit ?? "px") === "px") {
+        const ls = base.letterSpacing ?? 0;
+        if (ls !== 0) patch.letterSpacing = ls * uniform;
+      }
     }
 
     if (isPolygonNode(base)) {
@@ -184,9 +186,11 @@ export function buildResizeContentPatches(
 
   if (node.type === "text" && shouldScaleTextContent(handle, modifiers)) {
     const fs = opts?.startFontSize ?? node.fontSize ?? 14;
-    const ls = opts?.startLetterSpacing ?? node.letterSpacing ?? 0;
     patches.fontSize = Math.max(1, Math.round(fs * uniform * 100) / 100);
-    if (ls !== 0) patches.letterSpacing = ls * uniform;
+    if ((node.letterSpacingUnit ?? "px") === "px") {
+      const ls = opts?.startLetterSpacing ?? node.letterSpacing ?? 0;
+      if (ls !== 0) patches.letterSpacing = ls * uniform;
+    }
   }
 
   if (isPolygonNode(node)) {

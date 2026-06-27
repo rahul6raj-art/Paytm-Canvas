@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 import { useEditorStore } from "@/stores/useEditorStore";
+import { useCanvasInteraction } from "@/components/editor/CanvasInteractionContext";
 import { useCanvasToWorld } from "@/components/editor/CanvasToWorldContext";
 import { clearPostCreationPointerSuppress } from "@/lib/canvasCreationGuard";
 import { pickDeepestNodeAtWorldPoint } from "@/lib/tree";
@@ -17,6 +18,7 @@ export function NativeHitLayer({
   zoom = 1,
 }: Pick<SceneRendererProps, "nodes" | "childOrder" | "zoom">) {
   const pathEditModeNodeId = useEditorStore((s) => s.pathEditModeNodeId);
+  const { panning } = useCanvasInteraction();
   const toWorld = useCanvasToWorld();
   const clientToWorld = useCallback(
     (clientX: number, clientY: number) => {
@@ -85,7 +87,8 @@ export function NativeHitLayer({
       className="absolute inset-0 z-[3] touch-none"
       data-native-hit-layer
       style={{
-        pointerEvents: pathEditModeNodeId ? "none" : "auto",
+        // Let hand tool / Space+pan reach the canvas background; path edit uses screen overlays.
+        pointerEvents: pathEditModeNodeId || panning ? "none" : "auto",
         touchAction: "none",
       }}
       onPointerMove={onPointerMove}

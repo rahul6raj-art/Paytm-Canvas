@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 import { Artboard } from "./Artboard";
 import { releaseFieldFocusForCanvas } from "@/lib/editorKeyboardFocus";
 import { cn } from "@/lib/utils";
@@ -63,6 +63,11 @@ import {
 } from "@/lib/pathEditAnchors";
 import { applyPathPointHitOnPath } from "@/lib/pathEditSelection";
 import { layerBlendCanvasStyle } from "@/lib/layerBlendMode";
+import {
+  getBlendModePreview,
+  nodeBlendModeForPreview,
+  subscribeBlendModePreview,
+} from "@/lib/blendModePreview";
 import { prepareAltDragDuplicate } from "@/lib/canvasAltDrag";
 import { EMPTY_CHILD_IDS } from "@/lib/editorConstants";
 import {
@@ -171,6 +176,7 @@ export function CanvasObject({
     const merged = resolveNodeForDisplay(nodes, childOrder, id) ?? nodeRaw;
     return resolveNodeWithDesignTokens(merged, designTokens, canvasColorMode, projectCssSources);
   }, [nodeRaw, nodes, childOrder, id, designTokens, canvasColorMode, projectCssSources]);
+  const blendModePreview = useSyncExternalStore(subscribeBlendModePreview, getBlendModePreview, () => null);
   const maskNode = useEditorStore((s) =>
     nodeRaw?.maskId ? s.nodes[nodeRaw.maskId] : undefined,
   );
@@ -778,7 +784,7 @@ export function CanvasObject({
   const effectOverlays = er.overlayLayers;
   const layerOpacity = node.opacity ?? 1;
   const imageAlpha = node.type === "image" ? layerOpacity * (node.fillOpacity ?? 1) : layerOpacity;
-  const blendStyle = layerBlendCanvasStyle(node);
+  const blendStyle = layerBlendCanvasStyle(nodeBlendModeForPreview(id, node, blendModePreview));
   /** Clip only on inner child layers; vector stroke/fill stays unclipped (Figma-like). */
   const clipOverflow =
     node.type === "frame" || node.type === "group" ? "visible" : shouldClipChildren(node) ? "hidden" : "visible";
@@ -791,10 +797,10 @@ export function CanvasObject({
   const isComponentFrame =
     isComponentMaster && (node.type === "frame" || node.type === "group");
   const componentMasterOutline = isComponentSetContainer
-    ? "1px dashed rgba(139, 92, 246, 0.85)"
+    ? `1px dashed ${CANVAS_VISUAL.component}`
     : isComponentFrame && !isVariantInSet
     ? variantSetSize > 1
-      ? "1px dashed rgba(139, 92, 246, 0.85)"
+      ? `1px dashed ${CANVAS_VISUAL.component}`
       : `1px solid ${CANVAS_VISUAL.component}`
     : isComponentFrame && isVariantInSet
       ? undefined

@@ -4,8 +4,8 @@ import {
   EMPTY_TEXT_CARET_INNER_WIDTH,
   MIN_TEXT_BOX,
   TEXT_BOX_PAD_X,
-  TEXT_BOX_PAD_Y,
   textResizePatch,
+  textVerticalPad,
   wrapWidthForResizeMode,
 } from "./textNodeModel";
 import { layoutTextCanonical, canonicalToTextLayout, clearCanonicalTextLayoutCache } from "./canonicalTextLayout";
@@ -42,20 +42,23 @@ export function computeTextBoxSize(
   );
   const displayText = prepareTextForDisplay(text, style);
   const layoutNode = node != null ? nodeForTextLayout({ ...node, content: text }) : null;
+  const canonical =
+    layoutNode != null ? layoutTextCanonical(layoutNode, { bypassCache: true }) : null;
+  if (canonical?.source === "wasm") {
+    return { width: canonical.nodeWidth, height: canonical.nodeHeight };
+  }
   const layout =
-    layoutNode != null
-      ? (() => {
-          const canonical = layoutTextCanonical(layoutNode, { bypassCache: true });
-          return canonical ? canonicalToTextLayout(canonical) : layoutText(displayText, wrapWidth, typo, style);
-        })()
+    canonical != null
+      ? canonicalToTextLayout(canonical, typo)
       : layoutText(displayText, wrapWidth, typo, style);
 
   const contentHeight = hugContentHeightForLayout(layout, typo);
+  const verticalPad = textVerticalPad(mode);
 
   if (mode === "auto-width") {
     const isEmpty = displayText.length === 0;
     const width = Math.ceil(layout.width) + TEXT_BOX_PAD_X * 2;
-    const height = Math.ceil(contentHeight) + TEXT_BOX_PAD_Y * 2;
+    const height = Math.ceil(contentHeight) + verticalPad * 2;
     if (isEmpty) {
       return {
         width: Math.max(TEXT_BOX_PAD_X * 2 + EMPTY_TEXT_CARET_INNER_WIDTH, width),
@@ -71,7 +74,7 @@ export function computeTextBoxSize(
     // Width is user-controlled (drag / inspector); only height follows wrapped content.
     return {
       width: Math.max(MIN_TEXT_BOX, currentWidth),
-      height: Math.max(MIN_TEXT_BOX, contentHeight + TEXT_BOX_PAD_Y * 2),
+      height: Math.max(MIN_TEXT_BOX, contentHeight + verticalPad * 2),
     };
   }
   // Fixed (NONE): both axes are user-controlled; text wraps inside and may overflow.
@@ -126,7 +129,9 @@ export const TEXT_LAYOUT_AFFECTING_KEYS = new Set<keyof EditorNode>([
   "fontSize",
   "fontWeight",
   "lineHeight",
+  "lineHeightUnit",
   "letterSpacing",
+  "letterSpacingUnit",
   "textResizeMode",
   "autoResize",
   "textAlign",

@@ -66,4 +66,57 @@ describe("textBaseline", () => {
     assert.ok(y! > 2);
     assert.ok(y! < 40);
   });
+
+  it("baseline follows vertical alignment using the same layout as rendering", () => {
+    installTextMeasureDomStub();
+    const base = {
+      id: "t1",
+      type: "text",
+      x: 0,
+      y: 0,
+      width: 200,
+      height: 80,
+      content: "Rahul",
+      fontSize: 20,
+      fontWeight: 500,
+      lineHeightUnit: "auto",
+      textResizeMode: "fixed",
+    } as EditorNode;
+
+    const topY = textBaselineLocalY({ ...base, verticalAlign: "top" });
+    const middleY = textBaselineLocalY({ ...base, verticalAlign: "middle" });
+    const bottomY = textBaselineLocalY({ ...base, verticalAlign: "bottom" });
+
+    assert.ok(topY != null && middleY != null && bottomY != null);
+    assert.ok(middleY! > topY!);
+    assert.ok(bottomY! > middleY!);
+    assert.equal(middleY! - topY!, bottomY! - middleY!);
+  });
+
+  it("baseline tracks vertical align in auto-width frames without vertical inset", () => {
+    installTextMeasureDomStub();
+    const frameHeight = 34;
+    const base = {
+      id: "t1",
+      type: "text",
+      x: 0,
+      y: 0,
+      width: 47,
+      height: frameHeight,
+      content: "Rahul",
+      fontSize: 14,
+      fontWeight: 500,
+      lineHeightUnit: "auto",
+      textResizeMode: "auto-width",
+    } as EditorNode;
+
+    const lineHeight = 17;
+    const expectedBottomOffset = frameHeight - lineHeight;
+
+    const topBaseline = textBaselineLocalY({ ...base, verticalAlign: "top" });
+    const bottomBaseline = textBaselineLocalY({ ...base, verticalAlign: "bottom" });
+    assert.ok(topBaseline != null && bottomBaseline != null);
+    assert.ok(bottomBaseline! - topBaseline! > expectedBottomOffset - 1);
+    assert.equal(bottomBaseline! - topBaseline!, expectedBottomOffset);
+  });
 });

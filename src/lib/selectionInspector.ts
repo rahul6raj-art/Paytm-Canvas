@@ -76,6 +76,63 @@ function nodeCanStroke(node: EditorNode): boolean {
   return nodeCanFillStroke(node) || node.type === "line" || node.type === "arrow";
 }
 
+/** Map a primary-row effect id to each selected node's effect id at the same stack index. */
+export function resolveSelectionEffectTargets(
+  nodes: EditorNode[],
+  primary: EditorNode,
+  primaryEffectId: string,
+): Array<{ nodeId: string; effectId: string }> {
+  const primaryEffects = primary.effects ?? [];
+  const index = primaryEffects.findIndex((e) => e.id === primaryEffectId);
+  if (index < 0) {
+    const targets: Array<{ nodeId: string; effectId: string }> = [];
+    for (const n of nodes) {
+      if (n.locked) continue;
+      if ((n.effects ?? []).some((e) => e.id === primaryEffectId)) {
+        targets.push({ nodeId: n.id, effectId: primaryEffectId });
+      }
+    }
+    return targets;
+  }
+
+  const primaryEffect = primaryEffects[index]!;
+  const targets: Array<{ nodeId: string; effectId: string }> = [];
+
+  for (const n of nodes) {
+    if (n.locked) continue;
+    const effects = n.effects ?? [];
+    const atIndex = effects[index];
+    if (atIndex) {
+      targets.push({ nodeId: n.id, effectId: atIndex.id });
+      continue;
+    }
+    const byType = effects.find((e) => e.type === primaryEffect.type);
+    if (byType) targets.push({ nodeId: n.id, effectId: byType.id });
+  }
+
+  return targets;
+}
+
+/** Avoid double-applying token-backed effects when several nodes share one effect token. */
+export function dedupeSelectionEffectTargets(
+  nodes: EditorNode[],
+  targets: Array<{ nodeId: string; effectId: string }>,
+): Array<{ nodeId: string; effectId: string }> {
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+  const seen = new Set<string>();
+  const out: Array<{ nodeId: string; effectId: string }> = [];
+  for (const t of targets) {
+    const n = nodeById.get(t.nodeId);
+    const dedupeKey = n?.effectTokenId
+      ? `effect-token:${n.effectTokenId}:${t.effectId}`
+      : `node:${t.nodeId}:${t.effectId}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    out.push(t);
+  }
+  return out;
+}
+
 export function buildSelectionInspectorModel(
   selectedIds: string[],
   nodes: Record<string, EditorNode>,

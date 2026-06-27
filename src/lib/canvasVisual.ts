@@ -89,6 +89,8 @@ export function displayCanvasBackground(
 export const CANVAS_VISUAL = {
   workspace: CANVAS_WORKSPACE_LIGHT,
   selection: "var(--pc-canvas-selection)",
+  /** W × H badge below selection — solid Figma blue (readable on dark pasteboard). */
+  selectionBadge: "var(--pc-canvas-selection-badge)",
   selectionFill: "var(--pc-canvas-selection-fill)",
   selectionMuted: "var(--pc-canvas-selection-muted)",
   hoverOutline: "var(--pc-canvas-hover-outline)",
@@ -109,8 +111,10 @@ export const CANVAS_VISUAL = {
   comment: "var(--pc-canvas-selection)",
   locked: "var(--pc-canvas-locked-outline)",
   instance: "var(--pc-canvas-instance-outline)",
+  instanceBadge: "var(--pc-canvas-instance-badge)",
   /** Component master selection outline + transform handles. */
   component: "var(--pc-canvas-component-outline)",
+  componentBadge: "var(--pc-canvas-component-badge)",
   componentFill: "var(--pc-canvas-component-selection-fill)",
   componentMuted: "var(--pc-canvas-component-selection-muted)",
   groupOutline: "var(--pc-canvas-group-outline)",
@@ -130,6 +134,20 @@ export function resolveCanvasSelectionAccent(opts: {
   if (opts.anyInstance) return CANVAS_VISUAL.instance;
   if (opts.anyComponentMaster) return CANVAS_VISUAL.component;
   return CANVAS_VISUAL.selection;
+}
+
+/** Dimension / rotate badges: saturated accent on default/component/instance selection. */
+export function resolveCanvasSelectionBadgeAccent(opts: {
+  inspect?: boolean;
+  locked?: boolean;
+  anyInstance?: boolean;
+  anyComponentMaster?: boolean;
+}): string {
+  const accent = resolveCanvasSelectionAccent(opts);
+  if (accent === CANVAS_VISUAL.selection) return CANVAS_VISUAL.selectionBadge;
+  if (accent === CANVAS_VISUAL.instance) return CANVAS_VISUAL.instanceBadge;
+  if (accent === CANVAS_VISUAL.component) return CANVAS_VISUAL.componentBadge;
+  return accent;
 }
 
 /** Frame title above artboards (screen px — rendered in overlay space). */
@@ -423,6 +441,21 @@ export const CANVAS_SELECTION_DIMENSION_BADGE_RADIUS_SCREEN_PX = 6;
 
 export function screenPxToWorld(px: number, zoom: number): number {
   return px / Math.max(zoom, 0.0001);
+}
+
+/**
+ * Text caret width in canvas layout units — always ~1 screen pixel when displayed.
+ * Screen-sized overlays bake zoom into layout coords; world-sized text divides by zoom.
+ */
+export function textCaretLayoutWidth(opts: {
+  zoom?: number;
+  /** Set when the bitmap is laid out in viewport pixels (native text overlay). */
+  layoutScale?: number;
+}): number {
+  if (opts.layoutScale != null && opts.layoutScale !== 1) {
+    return TEXT_CARET_SCREEN_PX;
+  }
+  return screenPxToWorld(TEXT_CARET_SCREEN_PX, opts.zoom ?? 1);
 }
 
 /** W × H label for canvas selection dimension badge. */

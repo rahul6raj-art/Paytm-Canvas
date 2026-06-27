@@ -299,8 +299,8 @@ function FrameLabel({
             fontSize,
             backgroundColor: chrome.renameInputBg,
             color: isComponent ? chrome.componentFrameLabelSelected : chrome.renameInputText,
-            borderColor: isComponent ? "rgba(167, 139, 250, 0.55)" : chrome.renameInputBorder,
-            boxShadow: isComponent ? "0 0 0 1px rgba(167, 139, 250, 0.35)" : undefined,
+            borderColor: isComponent ? "rgba(139, 92, 246, 0.65)" : chrome.renameInputBorder,
+            boxShadow: isComponent ? "0 0 0 1px rgba(139, 92, 246, 0.45)" : undefined,
           }}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}

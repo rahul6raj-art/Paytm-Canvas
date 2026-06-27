@@ -175,7 +175,7 @@ export function updateTextAutoResize(
 ): Partial<EditorNode> | null {
   const mode = node.textResizeMode ?? "auto-width";
   if (mode !== "auto-height") return null;
-  const nextHeight = Math.max(8, layout.height + TEXT_BOX_PAD_Y * 2);
+  const nextHeight = Math.max(MIN_TEXT_BOX, layout.height);
   if (nextHeight === node.height) return null;
   return { height: nextHeight };
 }

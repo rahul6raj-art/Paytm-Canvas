@@ -38,11 +38,11 @@ export function isEdgeHandle(handle: ResizeHandle): boolean {
   return handle === "n" || handle === "s" || handle === "e" || handle === "w";
 }
 
-/** Figma-like proportional resize (Shift+Option, Shift on a corner, or aspect lock). */
+/** Figma-like proportional resize (Shift+Option, Shift on any handle, or aspect lock). */
 export function isProportionalResize(handle: ResizeHandle, modifiers: ResizeModifiers): boolean {
   if (modifiers.lockAspectRatio) return true;
   if (modifiers.shiftKey && modifiers.altKey) return true;
-  if (modifiers.shiftKey && !isEdgeHandle(handle)) return true;
+  if (modifiers.shiftKey) return true;
   return false;
 }
 
@@ -379,10 +379,8 @@ export function computeResizedBounds(
       ? proportionalEdgeResize(handle, startBounds, px, py)
       : shiftAnchoredResize(handle, startBounds, px, py);
   } else if (shiftKey) {
-    // Shift alone: one-axis / opposite-side anchored on edges; proportional on corners.
-    out = isEdgeHandle(handle)
-      ? anchoredResize(handle, startBounds, px, py)
-      : shiftAnchoredResize(handle, startBounds, px, py);
+    // Shift alone: proportional resize (corner anchored / edge expands both axes from center).
+    out = shiftAnchoredResize(handle, startBounds, px, py);
   } else {
     out = anchoredResize(handle, startBounds, px, py);
   }

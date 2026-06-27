@@ -2,7 +2,7 @@ import {
   createGradientPaintStyle,
   paintNodeFillInBox,
 } from "@/lib/canvasGradientPaint";
-import { screenPxToWorld, TEXT_CARET_SCREEN_PX } from "@/lib/canvasVisual";
+import { textCaretLayoutWidth } from "@/lib/canvasVisual";
 import { effectiveFillType } from "@/lib/fillGradient";
 import { textNodeAsFillPaint } from "@/lib/text/textFillPaint";
 import { applyCanvasTextLayerStroke, resolveTextLayerStroke } from "@/lib/text/textLayerStroke";
@@ -24,19 +24,22 @@ import {
 } from "./textAdvancedStyle";
 import {
   TEXT_BOX_PAD_X,
-  TEXT_BOX_PAD_Y,
   textInnerHeight,
   textInnerWidth,
   textTypoFromModel,
+  textVerticalPad,
   toTextNodeModel,
   wrapWidthForResizeMode,
   type TextAlign,
+  type TextResizeMode,
 } from "./textNodeModel";
 import { verticalContentOffsetY } from "./textVerticalAlign";
+import { hugContentHeightForLayout } from "./textBaseline";
 import {
   buildFontString,
   getTextMeasureContext,
   layoutText,
+  layoutTextContentHeight,
   lineOffsetX,
   lineTopY,
   measureStringWidth,
@@ -44,7 +47,8 @@ import {
   type TextLayout,
 } from "./textMeasure";
 import { normalizedRange } from "./textCursor";
-import type { TextLayoutForRender } from "./canonicalTextLayout";
+import type { TextLayoutForRender, CanonicalTextLayout } from "./canonicalTextLayout";
+import { caretXAtIndex } from "./canonicalTextLayout";
 
 export type TextCanvasRenderOptions = {
   typo: ResolvedTextTypo;
@@ -70,6 +74,8 @@ export type TextCanvasRenderOptions = {
   prepared?: TextLayoutForRender | null;
   /** Multiplier for box padding when the canvas is rendered in screen pixels. */
   layoutScale?: number;
+  /** Controls vertical frame inset — auto hug modes use zero vertical pad. */
+  textResizeMode?: TextResizeMode;
 };
 
 const MAX_TEXT_BITMAP_EDGE = 8192;
@@ -111,7 +117,7 @@ export function paintTextLayoutToContext(
   const h = Math.max(1, opts.height);
   const layoutScale = opts.layoutScale ?? 1;
   const padX = TEXT_BOX_PAD_X * layoutScale;
-  const padY = TEXT_BOX_PAD_Y * layoutScale;
+  const padY = textVerticalPad(opts.textResizeMode) * layoutScale;
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, 0, w, h);
@@ -145,7 +151,11 @@ export function paintTextLayoutToContext(
     innerW = boxInnerW;
     layout = layoutText(displayText, wrapWidth, opts.typo, style);
     layout = applyTruncate(layout, opts.typo, style, boxInnerH, innerW, wrapWidth);
-    blockOffsetY = verticalContentOffsetY(layout.height, boxInnerH, opts.verticalAlign);
+    const contentHeight =
+      opts.textResizeMode === "auto-width" || opts.textResizeMode === "auto-height"
+        ? hugContentHeightForLayout(layout, opts.typo)
+        : layout.height;
+    blockOffsetY = verticalContentOffsetY(contentHeight, boxInnerH, opts.verticalAlign);
   }
 
   if (opts.selection && opts.selection.anchor !== opts.selection.focus) {
@@ -162,6 +172,7 @@ export function paintTextLayoutToContext(
       padY + blockOffsetY,
       displayStart,
       displayEnd,
+      opts.prepared?.canonical,
       opts.prepared?.canonical.lines,
     );
   }
@@ -205,12 +216,13 @@ export function paintTextLayoutToContext(
       padY,
       blockOffsetY,
     );
-    const caretWidth =
-      layoutScale !== 1
-        ? TEXT_CARET_SCREEN_PX * layoutScale
-        : screenPxToWorld(TEXT_CARET_SCREEN_PX, opts.zoom ?? 1);
+    const caretWidth = textCaretLayoutWidth({
+      zoom: opts.zoom,
+      layoutScale: opts.layoutScale,
+    });
+    const minCaretWidth = 1 / Math.max(1, opts.dpr ?? resolveTextCanvasDpr(w, h, opts.zoom ?? 1));
     ctx.fillStyle = TEXT_CARET_COLOR;
-    ctx.fillRect(caret.x, caret.y, Math.max(0.5, caretWidth), caret.height);
+    ctx.fillRect(caret.x, caret.y, Math.max(caretWidth, minCaretWidth), caret.height);
   }
 
   ctx.globalAlpha = prevAlpha;
@@ -256,39 +268,32 @@ function paintTextGlyphs(
   mode: "fill" | "stroke" = "fill",
 ): void {
   const canonical = opts.prepared?.canonical;
+  const smallCaps = style.textCase === "small-caps";
+
   for (let i = 0; i < layout.lines.length; i++) {
     const line = layout.lines[i]!;
-    const isLast = i === layout.lines.length - 1;
     const canonicalLine = canonical?.lines[i];
-    const y = canonicalLine?.y ?? lineTopY(layout, i) + padY + blockOffsetY;
 
-    if (canonicalLine && canonicalLine.segments.length > 1) {
+    if (canonicalLine) {
       for (const segment of canonicalLine.segments) {
-        drawLineWithSpacing(
-          ctx,
-          segment.text,
-          segment.x,
-          segment.y,
-          opts.typo,
-          style.textCase === "small-caps",
-          mode,
-        );
+        drawTextAt(ctx, segment.text, segment.x, segment.y, opts.typo, smallCaps, mode);
       }
       continue;
     }
 
+    const isLast = i === layout.lines.length - 1;
+    const y = lineTopY(layout, i) + padY + blockOffsetY;
     const x =
-      canonicalLine?.x ??
       lineOffsetX(line.width, innerW, opts.textAlign, {
         isLastLine: isLast,
         fullLineText: line.text,
         letterSpacing: opts.typo.letterSpacing,
       }) + padX;
 
-    if (opts.textAlign === "justify" && !isLast && !canonicalLine) {
-      drawJustifiedLine(ctx, line.text, x, y, innerW, opts.typo, mode);
+    if (opts.textAlign === "justify" && !isLast) {
+      drawJustifiedLineFallback(ctx, line.text, x, y, innerW, opts.typo, mode);
     } else {
-      drawLineWithSpacing(ctx, line.text, x, y, opts.typo, style.textCase === "small-caps", mode);
+      drawTextAt(ctx, line.text, x, y, opts.typo, smallCaps, mode);
     }
   }
 }
@@ -308,17 +313,17 @@ function paintTextDecorations(
   for (let i = 0; i < layout.lines.length; i++) {
     const line = layout.lines[i]!;
     if (!line.text) continue;
-    const isLast = i === layout.lines.length - 1;
     const canonicalLine = canonical?.lines[i];
     const y = canonicalLine?.y ?? lineTopY(layout, i) + padY + blockOffsetY;
     const x =
       canonicalLine?.x ??
       lineOffsetX(line.width, innerW, opts.textAlign, {
-        isLastLine: isLast,
+        isLastLine: i === layout.lines.length - 1,
         fullLineText: line.text,
         letterSpacing: opts.typo.letterSpacing,
       }) + padX;
-    drawLineDecorations(ctx, line.text, x, y, opts.typo, style.textDecoration);
+    const width = canonicalLine?.width ?? line.width;
+    drawLineDecorations(ctx, x, y, width, opts.typo, style.textDecoration);
   }
 }
 
@@ -377,7 +382,31 @@ function paintMaskedTextFill(
   ctx.restore();
 }
 
-function drawJustifiedLine(
+/** Paint glyphs at precomputed positions — no measureText. */
+function drawTextAt(
+  ctx: TextCanvasContext,
+  text: string,
+  x: number,
+  y: number,
+  typo: ResolvedTextTypo,
+  smallCaps = false,
+  mode: "fill" | "stroke" = "fill",
+): void {
+  if (!text) return;
+  const prev = ctx.font;
+  if (smallCaps) {
+    ctx.font = buildFontString({ ...typo, fontSize: Math.max(1, typo.fontSize * 0.82) });
+  }
+  const draw =
+    mode === "stroke"
+      ? (s: string, px: number, py: number) => ctx.strokeText(s, px, py)
+      : (s: string, px: number, py: number) => ctx.fillText(s, px, py);
+  draw(text, x, y);
+  if (smallCaps) ctx.font = prev;
+}
+
+/** Bootstrap-only justify when canonical layout is unavailable. */
+function drawJustifiedLineFallback(
   ctx: TextCanvasContext,
   text: string,
   x: number,
@@ -387,10 +416,9 @@ function drawJustifiedLine(
   mode: "fill" | "stroke" = "fill",
 ): void {
   const words = text.split(/(\s+)/);
-  const gaps = words.filter((w) => /^\s+$/.test(w)).length;
   const wordCount = words.filter((w) => w && !/^\s+$/.test(w)).length;
   if (wordCount < 2) {
-    drawLineWithSpacing(ctx, text, x, y, typo, false, mode);
+    drawTextAt(ctx, text, x, y, typo, false, mode);
     return;
   }
   let total = 0;
@@ -405,48 +433,20 @@ function drawJustifiedLine(
       cx += extra;
       continue;
     }
-    drawLineWithSpacing(ctx, token, cx, y, typo, false, mode);
+    drawTextAt(ctx, token, cx, y, typo, false, mode);
     cx += measureStringWidth(getTextMeasureContext(), token, typo.letterSpacing);
   }
 }
 
-function drawLineWithSpacing(
-  ctx: TextCanvasContext,
-  text: string,
-  x: number,
-  y: number,
-  typo: ResolvedTextTypo,
-  smallCaps = false,
-  mode: "fill" | "stroke" = "fill",
-): void {
-  const prev = ctx.font;
-  if (smallCaps) {
-    ctx.font = buildFontString({ ...typo, fontSize: Math.max(1, typo.fontSize * 0.82) });
-  }
-  const draw = mode === "stroke" ? (s: string, px: number, py: number) => ctx.strokeText(s, px, py) : (s: string, px: number, py: number) => ctx.fillText(s, px, py);
-  if (!typo.letterSpacing) {
-    draw(text, x, y);
-    if (smallCaps) ctx.font = prev;
-    return;
-  }
-  let cx = x;
-  for (const ch of text) {
-    draw(ch, cx, y);
-    cx += ctx.measureText(ch).width + typo.letterSpacing;
-  }
-  if (smallCaps) ctx.font = prev;
-}
-
 function drawLineDecorations(
   ctx: TextCanvasContext,
-  text: string,
   x: number,
   y: number,
+  width: number,
   typo: ResolvedTextTypo,
   decoration: TextLayoutStyleOptions["textDecoration"],
 ): void {
-  if (!text || decoration === "none") return;
-  const width = measureStringWidth(getTextMeasureContext(), text, typo.letterSpacing);
+  if (width <= 0 || decoration === "none") return;
   ctx.strokeStyle = typo.color;
   ctx.lineWidth = textDecorationStrokeWidth(typo.fontSize);
   if (decoration === "underline") {
@@ -521,15 +521,20 @@ function applyTruncate(
   for (let i = 1; i < lines.length; i++) {
     if (lines[i]!.paragraphStart) paragraphGaps++;
   }
-  const contentHeight =
-    lines.length * layout.lineHeightPx +
-    paragraphGaps * layout.paragraphSpacing -
-    layout.verticalTrimTop * 2;
+
+  const truncatedLayout = {
+    lines,
+    lineHeightPx: layout.lineHeightPx,
+    firstLineAscent: layout.firstLineAscent,
+    firstLineDescent: layout.firstLineDescent,
+    paragraphSpacing: layout.paragraphSpacing,
+    verticalTrimTop: layout.verticalTrimTop,
+  };
 
   return {
     ...layout,
     lines,
-    height: Math.max(layout.lineHeightPx, contentHeight),
+    height: layoutTextContentHeight(truncatedLayout),
     width: Math.max(...lines.map((ln) => ln.width), 0),
   };
 }
@@ -544,7 +549,8 @@ function drawSelection(
   padY: number,
   start: number,
   end: number,
-  canonicalLines?: Array<{ x: number; y: number; text: string; startIndex: number }>,
+  canonical?: CanonicalTextLayout,
+  canonicalLines?: Array<{ x: number; y: number; text: string; startIndex: number; width: number }>,
 ): void {
   ctx.fillStyle = "rgba(24, 160, 251, 0.35)";
 
@@ -557,6 +563,15 @@ function drawSelection(
 
     const selStart = Math.max(start, lineStart) - lineStart;
     const selEnd = Math.min(end, lineEnd) - lineStart;
+    const y = canonicalLine?.y ?? lineTopY(layout, i) + padY;
+
+    if (canonical?.caretStops.length) {
+      const x0 = caretXAtIndex(canonical.caretStops, lineStart + selStart);
+      const x1 = caretXAtIndex(canonical.caretStops, lineStart + selEnd);
+      ctx.fillRect(x0, y, Math.max(1, x1 - x0), layout.lineHeightPx);
+      continue;
+    }
+
     const before = line.text.slice(0, selStart);
     const selected = line.text.slice(selStart, selEnd);
     const lineX =
@@ -565,7 +580,6 @@ function drawSelection(
     const x0 =
       lineX + measureStringWidth(getTextMeasureContext(), before, typo.letterSpacing);
     const selW = measureStringWidth(getTextMeasureContext(), selected, typo.letterSpacing);
-    const y = canonicalLine?.y ?? lineTopY(layout, i) + padY;
     ctx.fillRect(x0, y, Math.max(1, selW), layout.lineHeightPx);
   }
 }

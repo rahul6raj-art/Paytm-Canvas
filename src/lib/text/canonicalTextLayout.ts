@@ -9,20 +9,24 @@ import {
 } from "./textAdvancedStyle";
 import {
   layoutText,
+  layoutTextContentHeight,
   lineTopY,
   measureStringWidthForTypo,
+  measureTypoAscent,
+  measureTypoDescent,
   type TextLayout,
   type TextLine,
 } from "./textMeasure";
 import {
+  MIN_TEXT_BOX,
   TEXT_BOX_PAD_X,
-  TEXT_BOX_PAD_Y,
   availableWrapWidthForNode,
   nodeForTextLayout,
   normalizeTextResizeMode,
   textInnerHeight,
   textInnerWidth,
   textTypoFromModel,
+  textVerticalPad,
   toTextNodeModel,
   type TextAlign,
 } from "./textNodeModel";
@@ -52,6 +56,13 @@ export type CanonicalGlyphBox = {
   glyphId: number;
 };
 
+export type CanonicalLineBox = {
+  top: number;
+  height: number;
+  baseline: number;
+  width: number;
+};
+
 export type FontResolutionInfo = {
   requestedFamily: string;
   resolvedFamily: string;
@@ -73,11 +84,16 @@ export type CanonicalTextLayout = {
   width: number;
   height: number;
   lineHeightPx: number;
+  firstLineAscent: number;
+  firstLineDescent: number;
   paragraphSpacing: number;
   verticalTrimTop: number;
   innerW: number;
   innerH: number;
   blockOffsetY: number;
+  nodeWidth: number;
+  nodeHeight: number;
+  lineBoxes: CanonicalLineBox[];
   caretStops: CanonicalCaretStop[];
   glyphs: CanonicalGlyphBox[];
   font: FontResolutionInfo;
@@ -123,7 +139,9 @@ function layoutCacheKey(node: EditorNode, displayText: string, style: TextAdvanc
     layoutNode.fontSize ?? "",
     layoutNode.fontWeight ?? "",
     layoutNode.lineHeight ?? "",
+    layoutNode.lineHeightUnit ?? "",
     layoutNode.letterSpacing ?? "",
+    layoutNode.letterSpacingUnit ?? "",
     layoutNode.textAlign ?? "",
     layoutNode.verticalAlign ?? "",
     layoutNode.textResizeMode ?? "",
@@ -197,6 +215,9 @@ function buildLayoutRequest(
     node: {
       ...layoutNode,
       fontSize: effectiveFontSize(typo, style),
+      // WASM treats lineHeight as a unitless multiplier — never send raw px/percent storage.
+      lineHeight: typo.lineHeight,
+      letterSpacing: typo.letterSpacing,
       paragraphSpacing: style.paragraphSpacing,
     },
     displayContent: displayText,
@@ -232,9 +253,17 @@ function wasmLayout(
   );
   if (!json) return null;
   try {
-    const parsed = JSON.parse(json) as CanonicalTextLayout;
+    const parsed = JSON.parse(json) as Partial<CanonicalTextLayout>;
     if (!parsed?.lines) return null;
-    return { ...parsed, source: "wasm" };
+    return {
+      ...parsed,
+      source: "wasm",
+      firstLineAscent: parsed.firstLineAscent ?? parsed.lineHeightPx! * 0.82,
+      firstLineDescent: parsed.firstLineDescent ?? parsed.lineHeightPx! * 0.22,
+      nodeWidth: parsed.nodeWidth ?? parsed.width ?? 0,
+      nodeHeight: parsed.nodeHeight ?? parsed.height ?? 0,
+      lineBoxes: parsed.lineBoxes ?? [],
+    } as CanonicalTextLayout;
   } catch {
     return null;
   }
@@ -250,11 +279,12 @@ function fallbackLayout(
   effectiveWrap: number,
 ): CanonicalTextLayout {
   const layout = layoutText(displayText, effectiveWrap, typo, style);
-  const mode = normalizeTextResizeMode(node);
+  const mode = normalizeTextResizeMode(node.textResizeMode, node.autoResize);
   const contentHeight = textBlockContentHeight(layout, typo, mode);
+  const padY = textVerticalPad(mode);
   const blockOffsetY = verticalContentOffsetY(contentHeight, innerH, node.verticalAlign);
   const lines = layout.lines.map((line, i) => {
-    const y = lineTopYFromLayout(layout, i) + TEXT_BOX_PAD_Y + blockOffsetY;
+    const y = lineTopYFromLayout(layout, i) + padY + blockOffsetY;
     const x =
       lineOffsetFromLayout(line, innerW, node.textAlign as TextAlign, i === layout.lines.length - 1) +
       TEXT_BOX_PAD_X;
@@ -278,23 +308,39 @@ function fallbackLayout(
     }
   }
 
+  const metrics = fallbackTypoMetrics(typo);
+  const model = toTextNodeModel(node, false);
+  const nodeWidth =
+    mode === "auto-width"
+      ? Math.max(MIN_TEXT_BOX, layout.width + TEXT_BOX_PAD_X * 2)
+      : model?.width ?? node.width;
+  const nodeHeight =
+    mode === "auto-width" || mode === "auto-height"
+      ? Math.max(MIN_TEXT_BOX, contentHeight + textVerticalPad(mode) * 2)
+      : model?.height ?? node.height;
+
   return {
     source: "fallback",
     lines,
     width: layout.width,
     height: contentHeight,
     lineHeightPx: layout.lineHeightPx,
+    firstLineAscent: metrics.ascent,
+    firstLineDescent: metrics.descent,
     paragraphSpacing: layout.paragraphSpacing,
     verticalTrimTop: layout.verticalTrimTop,
     innerW,
     innerH,
     blockOffsetY,
+    nodeWidth,
+    nodeHeight,
+    lineBoxes: buildFallbackLineBoxes(layout, lines, typo),
     caretStops,
     glyphs: [],
     font: {
       requestedFamily: typo.fontFamily.split(",")[0]?.trim() ?? "sans-serif",
       resolvedFamily: typo.fontFamily.split(",")[0]?.trim() ?? "sans-serif",
-      fallbackUsed: false,
+      fallbackUsed: true,
       missing: false,
     },
     rtl: false,
@@ -317,11 +363,61 @@ function lineOffsetFromLayout(
   return 0;
 }
 
+/** X coordinate for a string index from precomputed caret stops (WASM / fallback layout). */
+export function caretXAtIndex(stops: CanonicalCaretStop[], index: number): number {
+  if (stops.length === 0) return 0;
+  let best = stops[0]!;
+  let bestDist = Math.abs(best.index - index);
+  for (const stop of stops) {
+    const dist = Math.abs(stop.index - index);
+    if (dist <= bestDist) {
+      best = stop;
+      bestDist = dist;
+    }
+    if (stop.index > index) break;
+  }
+  return best.x;
+}
+
+function fallbackTypoMetrics(typo: ResolvedTextTypo): { ascent: number; descent: number } {
+  return {
+    ascent: measureTypoAscent(typo),
+    descent: measureTypoDescent(typo),
+  };
+}
+
 function measureFallbackWidth(text: string, typo: ResolvedTextTypo): number {
   return measureStringWidthForTypo(text, typo);
 }
 
-export function canonicalToTextLayout(canonical: CanonicalTextLayout): TextLayout {
+function buildFallbackLineBoxes(
+  layout: TextLayout,
+  lines: CanonicalTextLayout["lines"],
+  typo: ResolvedTextTypo,
+): CanonicalLineBox[] {
+  const { ascent } = fallbackTypoMetrics(typo);
+  const baselineOffset = (layout.lineHeightPx - typo.fontSize) * 0.5;
+  return lines.map((line) => ({
+    top: line.y,
+    height: layout.lineHeightPx,
+    baseline: line.y + baselineOffset + ascent,
+    width: line.width,
+  }));
+}
+
+export function canonicalToTextLayout(
+  canonical: CanonicalTextLayout,
+  typo?: ResolvedTextTypo,
+): TextLayout {
+  const fallbackMetrics = typo ? fallbackTypoMetrics(typo) : null;
+  const firstLineAscent =
+    canonical.firstLineAscent ??
+    fallbackMetrics?.ascent ??
+    canonical.lineHeightPx * 0.82;
+  const firstLineDescent =
+    canonical.firstLineDescent ??
+    fallbackMetrics?.descent ??
+    canonical.lineHeightPx * 0.22;
   return {
     lines: canonical.lines.map((line) => ({
       text: line.text,
@@ -332,6 +428,8 @@ export function canonicalToTextLayout(canonical: CanonicalTextLayout): TextLayou
     width: canonical.width,
     height: canonical.height,
     lineHeightPx: canonical.lineHeightPx,
+    firstLineAscent,
+    firstLineDescent,
     paragraphSpacing: canonical.paragraphSpacing,
     verticalTrimTop: canonical.verticalTrimTop,
     source: canonical.source,
@@ -348,23 +446,68 @@ function alignCanonicalBlockOffset(
   typo: ResolvedTextTypo,
   canonical: CanonicalTextLayout,
 ): CanonicalTextLayout {
-  const mode = normalizeTextResizeMode(node);
+  if (canonical.source === "wasm") return canonical;
+
+  const mode = normalizeTextResizeMode(node.textResizeMode, node.autoResize);
+  const model = toTextNodeModel(nodeForTextLayout(node), false);
+  const innerW = model ? textInnerWidth(model.width) : canonical.innerW;
+  const innerH = model ? textInnerHeight(model.height, mode) : canonical.innerH;
+  const padY = textVerticalPad(mode);
   const contentHeight = textBlockContentHeight(layout, typo, mode);
-  const blockOffsetY = verticalContentOffsetY(contentHeight, canonical.innerH, node.verticalAlign);
-  const deltaY = blockOffsetY - canonical.blockOffsetY;
-  if (Math.abs(deltaY) < 0.01 && Math.abs(canonical.height - contentHeight) < 0.01) {
-    return canonical;
+  const blockOffsetY = verticalContentOffsetY(contentHeight, innerH, node.verticalAlign);
+
+  const lines = layout.lines.map((line, i) => {
+    const y = lineTopYFromLayout(layout, i) + padY + blockOffsetY;
+    const x =
+      lineOffsetFromLayout(line, innerW, (node.textAlign ?? "left") as TextAlign, i === layout.lines.length - 1) +
+      TEXT_BOX_PAD_X;
+    const prev = canonical.lines[i];
+    const segments =
+      prev && prev.segments.length > 1
+        ? prev.segments.map((seg) => ({ ...seg, y }))
+        : [{ text: line.text, x, y }];
+    return {
+      text: line.text,
+      startIndex: line.startIndex,
+      width: line.width,
+      paragraphStart: line.paragraphStart,
+      x,
+      y,
+      segments,
+    };
+  });
+
+  const caretStops: CanonicalCaretStop[] = [];
+  for (const line of lines) {
+    for (let i = 0; i <= line.text.length; i++) {
+      const before = line.text.slice(0, i);
+      const relX = measureFallbackWidth(before, typo);
+      caretStops.push({ index: line.startIndex + i, x: line.x + relX, y: line.y });
+    }
   }
+
+  const oldFirstY = canonical.lines[0]?.y ?? lines[0]?.y ?? 0;
+  const newFirstY = lines[0]?.y ?? 0;
+  const deltaY = newFirstY - oldFirstY;
+
   return {
     ...canonical,
+    lines,
+    innerW,
+    innerH,
     blockOffsetY,
     height: contentHeight,
-    lines: canonical.lines.map((line) => ({
-      ...line,
-      y: line.y + deltaY,
-      segments: line.segments.map((seg) => ({ ...seg, y: seg.y + deltaY })),
-    })),
-    caretStops: canonical.caretStops.map((stop) => ({ ...stop, y: stop.y + deltaY })),
+    nodeWidth:
+      mode === "auto-width"
+        ? Math.max(MIN_TEXT_BOX, layout.width + TEXT_BOX_PAD_X * 2)
+        : model?.width ?? canonical.nodeWidth,
+    nodeHeight:
+      mode === "auto-width" || mode === "auto-height"
+        ? Math.max(MIN_TEXT_BOX, contentHeight + textVerticalPad(mode) * 2)
+        : model?.height ?? canonical.nodeHeight,
+    lineBoxes: buildFallbackLineBoxes(layout, lines, typo),
+    caretStops,
+    glyphs: canonical.glyphs.map((glyph) => ({ ...glyph, y: glyph.y + deltaY })),
   };
 }
 
@@ -380,8 +523,9 @@ export function layoutTextCanonical(
   const typo = textTypoFromModel(model);
   const style = textAdvancedStyleFromNode(layoutNode);
   const displayText = prepareTextForDisplay(model.text, style);
+  const mode = normalizeTextResizeMode(layoutNode.textResizeMode, layoutNode.autoResize);
   const innerW = textInnerWidth(model.width);
-  const innerH = textInnerHeight(model.height);
+  const innerH = textInnerHeight(model.height, mode);
   const wrapWidth = availableWrapWidthForNode(layoutNode);
   const effectiveWrap =
     wrapWidth === Number.POSITIVE_INFINITY
@@ -399,7 +543,7 @@ export function layoutTextCanonical(
     ? wasmLayout(layoutNode, displayText, style, typo)
     : null;
   const raw = wasm ?? fallbackLayout(layoutNode, displayText, style, typo, innerW, innerH, effectiveWrap);
-  const layout = canonicalToTextLayout(raw);
+  const layout = canonicalToTextLayout(raw, typo);
   const canonical = alignCanonicalBlockOffset(layoutNode, layout, typo, raw);
 
   recordFontResolution(layoutNode.id, canonical.font);
@@ -429,7 +573,7 @@ export function textLayoutForEditorNode(node: EditorNode): TextLayoutForRender |
   const canonical = layoutTextCanonical(layoutNode);
   if (!canonical) return null;
 
-  let layout = canonicalToTextLayout(canonical);
+  let layout = canonicalToTextLayout(canonical, typo);
   layout = applyTruncateFromCanonical(layout, typo, style, canonical.innerH, canonical.innerW);
 
   const wrapWidth = availableWrapWidthForNode(layoutNode);
@@ -493,15 +637,20 @@ function applyTruncateFromCanonical(
   for (let i = 1; i < lines.length; i++) {
     if (lines[i]!.paragraphStart) paragraphGaps++;
   }
-  const contentHeight =
-    lines.length * layout.lineHeightPx +
-    paragraphGaps * layout.paragraphSpacing -
-    layout.verticalTrimTop * 2;
+
+  const truncatedLayout = {
+    lines,
+    lineHeightPx: layout.lineHeightPx,
+    firstLineAscent: layout.firstLineAscent,
+    firstLineDescent: layout.firstLineDescent,
+    paragraphSpacing: layout.paragraphSpacing,
+    verticalTrimTop: layout.verticalTrimTop,
+  };
 
   return {
     ...layout,
     lines,
-    height: Math.max(layout.lineHeightPx, contentHeight),
+    height: layoutTextContentHeight(truncatedLayout),
     width: Math.max(...lines.map((ln) => ln.width), 0),
   };
 }

@@ -6,6 +6,7 @@ import {
   verticalTrimInsetPx,
 } from "./textAdvancedStyle";
 import type { TextAlign } from "./textNodeModel";
+import { segmentGraphemes } from "./graphemeClusters";
 
 /** One visual line after wrapping; `startIndex` is the offset in the full string. */
 export type TextLine = {
@@ -43,6 +44,8 @@ export type TextLayout = {
   width: number;
   height: number;
   lineHeightPx: number;
+  firstLineAscent: number;
+  firstLineDescent: number;
   paragraphSpacing: number;
   verticalTrimTop: number;
   /** `wasm` when shaped by craft-engine; `fallback` before engine/fonts load. */
@@ -73,20 +76,54 @@ export function buildFontString(typo: ResolvedTextTypo): string {
   return `${typo.fontWeight} ${typo.fontSize}px ${canvasFontFamilyStack(typo.fontFamily)}`;
 }
 
-/** Measure a string width including per-character letter-spacing. */
+/** Approximate alphabetic ascent — fallback only when WASM layout is unavailable. */
+export function measureTypoAscent(typo: ResolvedTextTypo): number {
+  if (typeof document === "undefined") return typo.fontSize * 0.82;
+  const ctx = getTextMeasureContext();
+  ctx.font = buildFontString(typo);
+  const metrics = ctx.measureText("Hg");
+  return (
+    metrics.fontBoundingBoxAscent ??
+    metrics.actualBoundingBoxAscent ??
+    typo.fontSize * 0.82
+  );
+}
+
+/** Approximate alphabetic descent — fallback only when WASM layout is unavailable. */
+export function measureTypoDescent(typo: ResolvedTextTypo): number {
+  if (typeof document === "undefined") return typo.fontSize * 0.22;
+  const ctx = getTextMeasureContext();
+  ctx.font = buildFontString(typo);
+  const metrics = ctx.measureText("Hg");
+  return (
+    metrics.fontBoundingBoxDescent ??
+    metrics.actualBoundingBoxDescent ??
+    typo.fontSize * 0.22
+  );
+}
+
+/** Resolved line height in px for layout — always from typography, never glyph bbox metrics. */
+export function resolveLayoutLineHeightPx(typo: ResolvedTextTypo): number {
+  return typo.lineHeightPx;
+}
+
+/** Measure a string width including per-grapheme letter-spacing. */
 export function measureStringWidth(
   ctx: CanvasRenderingContext2D,
   text: string,
   letterSpacing: number,
 ): number {
   if (!text) return 0;
-  ctx.font = ctx.font || buildFontString({ fontSize: 13, fontWeight: 400, fontFamily: "sans-serif", lineHeight: 1.25, letterSpacing: 0, color: "#000" });
-  if (!letterSpacing) return ctx.measureText(text).width;
+  const clusters = segmentGraphemes(text);
+  if (clusters.length === 0) return 0;
+  if (!letterSpacing || clusters.length === 1) {
+    return ctx.measureText(clusters.join("")).width;
+  }
 
   let w = 0;
-  for (let i = 0; i < text.length; i++) {
-    w += ctx.measureText(text[i]!).width;
-    if (i < text.length - 1) w += letterSpacing;
+  for (let i = 0; i < clusters.length; i++) {
+    w += ctx.measureText(clusters[i]!).width;
+    if (i < clusters.length - 1) w += letterSpacing;
   }
   return w;
 }
@@ -105,12 +142,13 @@ export function measureStringWidthForTypo(text: string, typo: ResolvedTextTypo):
   }
   const glyph = estimateGlyphWidthPx(typo);
   const ls = typo.letterSpacing;
-  if (!text) return 0;
-  if (!ls) return text.length * glyph;
+  const clusters = segmentGraphemes(text);
+  if (clusters.length === 0) return 0;
+  if (!ls) return clusters.length * glyph;
   let w = 0;
-  for (let i = 0; i < text.length; i++) {
+  for (let i = 0; i < clusters.length; i++) {
     w += glyph;
-    if (i < text.length - 1) w += ls;
+    if (i < clusters.length - 1) w += ls;
   }
   return w;
 }
@@ -164,19 +202,46 @@ function wrapParagraph(
     if (measureStringWidthForTypo(token, typo) <= maxWidth) {
       line = token;
     } else {
-      for (const ch of token) {
-        const next = line + ch;
+      for (const cluster of segmentGraphemes(token)) {
+        const next = line + cluster;
         if (measureStringWidthForTypo(next, typo) <= maxWidth || !line) {
           line = next;
         } else {
           flush();
-          line = ch;
+          line = cluster;
         }
       }
     }
   }
   if (line.length > 0 || lines.length === 0) flush();
   return lines;
+}
+
+/** Frame/content height from line boxes only (Figma auto-height model). */
+export function layoutTextFrameContentHeight(
+  layout: Pick<
+    TextLayout,
+    "lines" | "lineHeightPx" | "paragraphSpacing" | "verticalTrimTop"
+  >,
+): number {
+  const lineCount = Math.max(1, layout.lines.length);
+  let height = layout.lineHeightPx * lineCount;
+  for (let i = 1; i < layout.lines.length; i++) {
+    if (layout.lines[i]?.paragraphStart) {
+      height += layout.paragraphSpacing;
+    }
+  }
+  const trimmed = height - layout.verticalTrimTop * 2;
+  return Math.max(layout.lineHeightPx, trimmed);
+}
+
+export function layoutTextContentHeight(
+  layout: Pick<
+    TextLayout,
+    "lines" | "lineHeightPx" | "paragraphSpacing" | "verticalTrimTop"
+  >,
+): number {
+  return layoutTextFrameContentHeight(layout);
 }
 
 /**
@@ -189,7 +254,9 @@ export function layoutText(
   typo: ResolvedTextTypo,
   style: TextLayoutStyleOptions = DEFAULT_TEXT_ADVANCED_STYLE,
 ): TextLayout {
-  const lineHeightPx = typo.fontSize * typo.lineHeight;
+  const lineHeightPx = resolveLayoutLineHeightPx(typo);
+  const firstLineAscent = measureTypoAscent(typo);
+  const firstLineDescent = measureTypoDescent(typo);
   const paragraphSpacing = Math.max(0, style.paragraphSpacing ?? 0);
   const verticalTrimTop = verticalTrimInsetPx(typo.fontSize, style.verticalTrim);
 
@@ -217,27 +284,35 @@ export function layoutText(
     if (lines[i]!.paragraphStart) paragraphGaps++;
   }
 
-  const contentHeight =
-    lines.length * lineHeightPx + paragraphGaps * paragraphSpacing - verticalTrimTop * 2;
-
-  return {
+  const layoutCore = {
     lines,
-    width,
-    height: Math.max(lineHeightPx, contentHeight),
     lineHeightPx,
+    firstLineAscent,
+    firstLineDescent,
     paragraphSpacing,
     verticalTrimTop,
   };
+
+  return {
+    ...layoutCore,
+    width,
+    height: layoutTextContentHeight(layoutCore),
+  };
 }
 
-/** Y offset for a line index including paragraph spacing and vertical trim. */
-export function lineTopY(layout: TextLayout, lineIndex: number): number {
-  let y = layout.verticalTrimTop;
+/** Baseline Y for a line index: firstBaseline + lineIndex × resolvedLineHeight (+ paragraph gaps). */
+export function lineBaselineY(layout: TextLayout, lineIndex: number): number {
+  let y = layout.verticalTrimTop + layout.firstLineAscent;
   for (let i = 1; i <= lineIndex; i++) {
     y += layout.lineHeightPx;
     if (layout.lines[i]?.paragraphStart) y += layout.paragraphSpacing;
   }
   return y;
+}
+
+/** Y offset for a line box top when canvas uses `textBaseline: top`. */
+export function lineTopY(layout: TextLayout, lineIndex: number): number {
+  return lineBaselineY(layout, lineIndex) - layout.firstLineAscent;
 }
 
 /** Extra space distributed between words for justified lines. */
@@ -324,22 +399,12 @@ export function getCaretRect(
   return { x: 0, y: 0, height: layout.lineHeightPx };
 }
 
-/** Caret height centered on glyph metrics within a line box. */
+/** Caret box spans the full line height (Figma-style), anchored at line top. */
 export function measureTypoCaretBox(
-  typo: ResolvedTextTypo,
+  _typo: ResolvedTextTypo,
   lineHeightPx: number,
 ): { offsetY: number; height: number } {
-  if (typeof document === "undefined") {
-    const height = Math.min(lineHeightPx, typo.fontSize);
-    return { offsetY: (lineHeightPx - height) / 2, height };
-  }
-  const ctx = getTextMeasureContext();
-  ctx.font = buildFontString(typo);
-  const m = ctx.measureText("Hg");
-  const ascent = m.fontBoundingBoxAscent ?? m.actualBoundingBoxAscent ?? typo.fontSize * 0.82;
-  const descent = m.fontBoundingBoxDescent ?? m.actualBoundingBoxDescent ?? typo.fontSize * 0.18;
-  const height = Math.min(lineHeightPx, Math.max(1, ascent + descent));
-  return { offsetY: Math.max(0, (lineHeightPx - height) / 2), height };
+  return { offsetY: 0, height: lineHeightPx };
 }
 
 /** Map a caret index to canvas draw coordinates (handles canonical caret stops). */
@@ -354,13 +419,12 @@ export function resolveCaretDrawRect(
   blockOffsetY: number,
 ): { x: number; y: number; height: number } {
   const caret = getCaretRect(index, layout, typo, innerW, align);
-  const { offsetY, height } = measureTypoCaretBox(typo, layout.lineHeightPx);
   if (layout.caretStops?.length) {
-    return { x: caret.x, y: caret.y + offsetY, height };
+    return { x: caret.x, y: caret.y, height: layout.lineHeightPx };
   }
   return {
     x: caret.x + padX,
-    y: caret.y + padY + blockOffsetY + offsetY,
-    height,
+    y: caret.y + padY + blockOffsetY,
+    height: layout.lineHeightPx,
   };
 }

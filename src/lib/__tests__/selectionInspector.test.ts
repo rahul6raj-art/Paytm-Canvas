@@ -1,7 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildSelectionInspectorModel } from "../selectionInspector";
+import {
+  buildSelectionInspectorModel,
+  dedupeSelectionEffectTargets,
+  resolveSelectionEffectTargets,
+} from "../selectionInspector";
 import type { EditorNode } from "@/stores/useEditorStore";
+import type { NodeEffect } from "@/lib/nodeEffects";
 
 function rect(id: string, x: number, fill = "#cccccc"): EditorNode {
   return {
@@ -32,5 +37,48 @@ describe("buildSelectionInspectorModel", () => {
     assert.equal(model!.mixed.x, true);
     assert.equal(model!.mixed.fillHex, true);
     assert.equal(model!.caps.canFillStroke, true);
+  });
+});
+
+describe("resolveSelectionEffectTargets", () => {
+  function withEffects(id: string, effects: NodeEffect[]): EditorNode {
+    return { ...rect(id, 0), effects };
+  }
+
+  it("maps primary effect id to same stack index on each node", () => {
+    const primary = withEffects("a", [
+      { id: "eff-a", type: "layerBlur", visible: true, radius: 4 },
+    ]);
+    const b = withEffects("b", [
+      { id: "eff-b", type: "layerBlur", visible: true, radius: 4 },
+    ]);
+    const targets = resolveSelectionEffectTargets([primary, b], primary, "eff-a");
+    assert.deepEqual(targets, [
+      { nodeId: "a", effectId: "eff-a" },
+      { nodeId: "b", effectId: "eff-b" },
+    ]);
+  });
+
+  it("falls back to shared effect id when present on multiple nodes", () => {
+    const shared = { id: "shared", type: "dropShadow" as const, visible: true, radius: 4 };
+    const primary = withEffects("a", [shared]);
+    const b = withEffects("b", [shared]);
+    const targets = resolveSelectionEffectTargets([primary, b], primary, "shared");
+    assert.deepEqual(targets, [
+      { nodeId: "a", effectId: "shared" },
+      { nodeId: "b", effectId: "shared" },
+    ]);
+  });
+
+  it("dedupes token-backed targets so shared tokens update once", () => {
+    const shared = { id: "shared", type: "layerBlur" as const, visible: true, radius: 4 };
+    const a = { ...withEffects("a", [shared]), effectTokenId: "tok-1" };
+    const b = { ...withEffects("b", [shared]), effectTokenId: "tok-1" };
+    const targets = dedupeSelectionEffectTargets(
+      [a, b],
+      resolveSelectionEffectTargets([a, b], a, "shared"),
+    );
+    assert.equal(targets.length, 1);
+    assert.equal(targets[0]!.nodeId, "a");
   });
 });

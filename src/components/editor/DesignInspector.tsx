@@ -179,6 +179,10 @@ export function DesignInspector({ node }: { node: EditorNode }) {
     () => resolveNodeWithDesignTokens(styleNode, designTokens, canvasColorMode, projectCssSources),
     [styleNode, designTokens, canvasColorMode, projectCssSources],
   );
+  const blendPreviewNodeIds = useMemo(
+    () => (aggregateStyleTargets.length > 0 ? aggregateStyleTargets.map((t) => t.id) : [node.id]),
+    [aggregateStyleTargets, node.id],
+  );
   const showPaintSectionsEarly = node.type === "path" || aggregateStyleTargets.length > 0;
 
   const locked = node.locked;
@@ -371,6 +375,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
         showArc={node.type === "ellipse"}
         onOpacityCommit={(opacity) => style({ opacity })}
         onBlendModeChange={(blendMode) => style({ blendMode })}
+        blendPreviewNodeIds={blendPreviewNodeIds}
         onToggleVisible={() => toggleVisible(id)}
         onCornerStyle={applyCornerStyle}
         onArcStyle={style}

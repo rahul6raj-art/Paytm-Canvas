@@ -11,7 +11,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, RefreshCw, Upload } from "lucide-react";
+import { ChevronDown, RefreshCw, Upload, X } from "lucide-react";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { FONT_IMPORT_ACCEPT } from "@/lib/editorFontAssets";
 import { uploadedFontOptionsFromAssets } from "@/lib/fonts/uploadedFonts";
@@ -25,11 +25,13 @@ import {
 } from "@/lib/fonts";
 import { cn } from "@/lib/utils";
 import { appFieldClass } from "@/lib/appFieldStyles";
+import { inspectorHeaderActionBtnClass, inspectorLucideProps } from "@/lib/inspectorIconStyles";
 import {
-  anchoredMenuStyle,
-  useAnchoredDropdownPosition,
-  useDismissAnchoredDropdown,
-} from "./useAnchoredDropdown";
+  adjacentPanelDialogStyle,
+  useAdjacentPanelDialogPosition,
+} from "./useAdjacentPanelDialogPosition";
+import { useDismissAnchoredDropdown } from "./useAnchoredDropdown";
+import { useDraggableFloatingPanel } from "./useDraggableFloatingPanel";
 import { EditorHintWrap } from "./EditorHoverHint";
 
 type FontFamilyPickerProps = {
@@ -63,11 +65,14 @@ export function FontFamilyPicker({
   const fontAssets = useEditorStore((s) => s.fontAssets);
   const importFontFile = useEditorStore((s) => s.importFontFile);
   const { groups, filter, localStatus, localFontsSupported, refreshInstalled } = useFontCatalog();
-  const position = useAnchoredDropdownPosition(anchorRef, open, 4, {
-    viewportClamp: true,
-    maxHeight: 420,
+  const panelPosition = useAdjacentPanelDialogPosition(anchorRef, open, {
     width: 280,
+    maxHeight: 420,
   });
+  const { position: dragPosition, onHeaderPointerDown, isDragging } = useDraggableFloatingPanel(
+    open,
+    panelPosition,
+  );
   useDismissAnchoredDropdown(open, () => setOpen(false), anchorRef, menuRef);
 
   const filteredGroups = useMemo(() => filter(query), [filter, query]);
@@ -179,18 +184,48 @@ export function FontFamilyPicker({
     }
   };
 
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        close();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [open, close]);
+
   const menu =
     open && mounted ? (
       <div
         ref={menuRef}
-        id={listId}
-        role="listbox"
-        aria-label="Font family"
+        role="dialog"
+        aria-label="Fonts"
+        aria-modal="false"
+        data-editor-shell
         onKeyDown={onMenuKeyDown}
-        className="editor-inspector-dialog fixed z-[120] w-[min(280px,calc(100vw-16px))]"
-        style={anchoredMenuStyle(position)}
+        className="editor-inspector-dialog fixed"
+        style={{ ...adjacentPanelDialogStyle(dragPosition), zIndex: 121 }}
       >
-        <div className="editor-inspector-dialog-body !py-2">
+        <div
+          className={cn("editor-inspector-dialog-header", isDragging && "cursor-grabbing")}
+          onPointerDown={onHeaderPointerDown}
+        >
+          <div className="inspector-field-label pointer-events-none min-w-0 truncate">Fonts</div>
+          <button
+            type="button"
+            onClick={close}
+            onPointerDown={(e) => e.stopPropagation()}
+            className={cn(inspectorHeaderActionBtnClass, "pointer-events-auto rounded-lg")}
+            aria-label="Close fonts"
+          >
+            <X {...inspectorLucideProps()} />
+          </button>
+        </div>
+
+        <div className="editor-inspector-dialog-body !flex-none !overflow-visible border-b border-app-panel-edge !py-2">
           <label htmlFor={inputId} className="sr-only">
             Search fonts
           </label>
@@ -249,7 +284,12 @@ export function FontFamilyPicker({
           )}
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-1">
+        <div
+          id={listId}
+          role="listbox"
+          aria-label="Font family"
+          className="thin-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain py-1"
+        >
           {!matchFontOption(value) && value ? (
             <div className="border-b border-app-border-subtle px-2 pb-2">
               <p className="px-2 py-1 section-heading">
@@ -280,33 +320,35 @@ export function FontFamilyPicker({
                     {group.label}
                     {group.id === "google" ? ` (${group.fonts.length})` : null}
                   </p>
-                  {group.fonts.map((opt) => {
-                    optionIndex += 1;
-                    const idx = optionIndex;
-                    const optionId = `${group.id}-${opt.id}`;
-                    const selected = value === opt.value;
-                    const active = idx === activeIndex;
-                    return (
-                      <button
-                        key={opt.id}
-                        id={`font-opt-${optionId}`}
-                        data-font-option-index={idx}
-                        type="button"
-                        role="option"
-                        aria-selected={selected}
-                        className={cn(
-                          "flex w-full items-center rounded-md px-3 py-1.5 text-left text-ui text-app-fg hover:bg-app-hover",
-                          selected && "bg-app-inset text-app-fg",
-                          active && !selected && "bg-app-hover",
-                        )}
-                        style={{ fontFamily: opt.value }}
-                        onMouseEnter={() => setActiveIndex(idx)}
-                        onClick={() => void pick(opt)}
-                      >
-                        <span className="truncate">{opt.label}</span>
-                      </button>
-                    );
-                  })}
+                  <div className="flex flex-col gap-1">
+                    {group.fonts.map((opt) => {
+                      optionIndex += 1;
+                      const idx = optionIndex;
+                      const optionId = `${group.id}-${opt.id}`;
+                      const selected = value === opt.value;
+                      const active = idx === activeIndex;
+                      return (
+                        <button
+                          key={opt.id}
+                          id={`font-opt-${optionId}`}
+                          data-font-option-index={idx}
+                          type="button"
+                          role="option"
+                          aria-selected={selected}
+                          className={cn(
+                            "flex w-full items-center rounded-md px-3 py-1.5 text-left text-ui text-app-fg hover:bg-app-hover",
+                            selected && "bg-app-inset text-app-fg",
+                            active && !selected && "bg-app-hover",
+                          )}
+                          style={{ fontFamily: opt.value }}
+                          onMouseEnter={() => setActiveIndex(idx)}
+                          onClick={() => void pick(opt)}
+                        >
+                          <span className="truncate">{opt.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               ),
             );
@@ -325,7 +367,7 @@ export function FontFamilyPicker({
           disabled={disabled}
           aria-label={`Font family, ${currentLabel}`}
           aria-expanded={open}
-          aria-haspopup="listbox"
+          aria-haspopup="dialog"
           aria-controls={open ? listId : undefined}
           onClick={() => setOpen((v) => !v)}
           onKeyDown={(e) => {

@@ -127,6 +127,7 @@ export function AppearanceSection({
   showArc,
   onOpacityCommit,
   onBlendModeChange,
+  blendPreviewNodeIds,
   onToggleVisible,
   onCornerStyle,
   onArcStyle,
@@ -141,6 +142,7 @@ export function AppearanceSection({
   showArc?: boolean;
   onOpacityCommit: (opacity: number) => void;
   onBlendModeChange: (blendMode: LayerBlendMode) => void;
+  blendPreviewNodeIds?: readonly string[];
   onToggleVisible: () => void;
   onCornerStyle: (patch: NodeStylePatch) => void;
   onArcStyle: (patch: NodeStylePatch) => void;
@@ -163,6 +165,7 @@ export function AppearanceSection({
             node={node}
             disabled={locked}
             variant="icon"
+            previewNodeIds={blendPreviewNodeIds}
             onChange={onBlendModeChange}
           />
         </>

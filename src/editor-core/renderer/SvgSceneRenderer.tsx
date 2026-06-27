@@ -11,6 +11,10 @@ import {
   getEllipseArcPreview,
   subscribeEllipseArcPreview,
 } from "@/lib/shapes/ellipseArcDrag";
+import {
+  getBlendModePreview,
+  subscribeBlendModePreview,
+} from "@/lib/blendModePreview";
 import { buildSvgScene } from "@/lib/svgSceneMarkup";
 import { isNativeRendererEnabled } from "@/lib/rendererMode";
 import { useEditorStore } from "@/stores/useEditorStore";
@@ -40,6 +44,11 @@ export function SvgSceneRenderer({
   const ellipseArcPreview = useSyncExternalStore(
     subscribeEllipseArcPreview,
     getEllipseArcPreview,
+    () => null,
+  );
+  const blendModePreview = useSyncExternalStore(
+    subscribeBlendModePreview,
+    getBlendModePreview,
     () => null,
   );
   const textLayoutEpoch = useSyncExternalStore(subscribeTextLayoutEpoch, getTextLayoutEpoch, () => 0);
@@ -80,6 +89,7 @@ export function SvgSceneRenderer({
         zoom,
         dragPreview: activeDragPreview,
         ellipseArcPreview,
+        blendModePreview,
         objectEditModeNodeId,
         selectedIds,
         colorMode: canvasColorMode,
@@ -95,6 +105,7 @@ export function SvgSceneRenderer({
       zoom,
       activeDragPreview,
       ellipseArcPreview,
+      blendModePreview,
       objectEditModeNodeId,
       selectedIds,
       textLayoutEpoch,

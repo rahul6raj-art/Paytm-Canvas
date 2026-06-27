@@ -69,7 +69,7 @@ const DARK_CHROME: CanvasChromeForeground = {
   frameLabel: "#e8e8e8",
   frameLabelMuted: "#a3a3a3",
   componentFrameLabel: "#8b5cf6",
-  componentFrameLabelSelected: "#a78bfa",
+  componentFrameLabelSelected: "#8b5cf6",
   defaultText: CANVAS_FOREGROUND_DARK,
   renameInputBg: "#2c2c2c",
   renameInputText: "#f8fafc",

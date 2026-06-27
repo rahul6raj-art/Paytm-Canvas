@@ -1,6 +1,6 @@
 "use client";
 
-import type { ComponentType, ReactNode } from "react";
+import type { ComponentType } from "react";
 import { cn } from "@/lib/utils";
 import { inspectorControlHeightClass } from "@/lib/appFieldStyles";
 import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
@@ -13,8 +13,11 @@ import {
   TextVerticalAlignMiddleIcon,
   TextVerticalAlignTopIcon,
 } from "./InspectorSettingIcons";
-import { PropertyNumberInput } from "../PropertyInput";
+import { LineHeightInput } from "./LineHeightInput";
+import { LetterSpacingInput } from "./LetterSpacingInput";
 import type { EditorNode, NodeStylePatch } from "@/stores/useEditorStore";
+import type { LineHeightStylePatch } from "@/lib/text/lineHeight";
+import type { LetterSpacingStylePatch } from "@/lib/text/letterSpacing";
 import type { TextAlign } from "@/lib/text/textNodeModel";
 import type { VerticalAlign } from "@/lib/text/textVerticalAlign";
 
@@ -88,31 +91,25 @@ export function TypographyLineSpacingFields({
   display: EditorNode;
   instanceKey: string;
   locked: boolean;
-  onCommitLineHeight: (v: number) => void;
-  onCommitLetterSpacing: (v: number) => void;
+  onCommitLineHeight: (patch: LineHeightStylePatch) => void;
+  onCommitLetterSpacing: (patch: LetterSpacingStylePatch) => void;
 }) {
   return (
     <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
-      <PropertyNumberInput
-        commitOnInput={false}
-        label="Line height"
-        value={display.lineHeight ?? 1.25}
+      <LineHeightInput
+        fontSize={display.fontSize ?? 14}
+        lineHeight={display.lineHeight}
+        lineHeightUnit={display.lineHeightUnit}
         instanceKey={`${instanceKey}-lh`}
         disabled={locked}
-        min={0.5}
-        max={4}
-        decimals={2}
         onCommit={onCommitLineHeight}
       />
-      <PropertyNumberInput
-        commitOnInput={false}
-        label="Letter px"
-        value={display.letterSpacing ?? 0}
+      <LetterSpacingInput
+        fontSize={display.fontSize ?? 14}
+        letterSpacing={display.letterSpacing}
+        letterSpacingUnit={display.letterSpacingUnit}
         instanceKey={`${instanceKey}-ls`}
         disabled={locked}
-        min={-20}
-        max={80}
-        decimals={2}
         onCommit={onCommitLetterSpacing}
       />
     </div>

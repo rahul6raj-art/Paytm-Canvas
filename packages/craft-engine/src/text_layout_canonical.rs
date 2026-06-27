@@ -66,6 +66,15 @@ pub struct GlyphBox {
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct LineBox {
+    pub top: f32,
+    pub height: f32,
+    pub baseline: f32,
+    pub width: f32,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct FontResolution {
     pub requested_family: String,
     pub resolved_family: String,
@@ -81,11 +90,16 @@ pub struct CanonicalTextLayout {
     pub width: f32,
     pub height: f32,
     pub line_height_px: f32,
+    pub first_line_ascent: f32,
+    pub first_line_descent: f32,
     pub paragraph_spacing: f32,
     pub vertical_trim_top: f32,
     pub inner_w: f32,
     pub inner_h: f32,
     pub block_offset_y: f32,
+    pub node_width: f32,
+    pub node_height: f32,
+    pub line_boxes: Vec<LineBox>,
     pub caret_stops: Vec<CaretStop>,
     pub glyphs: Vec<GlyphBox>,
     pub font: FontResolution,
@@ -137,6 +151,74 @@ fn resolve_font_metadata(node: &NodeInput, fonts: &RuntimeFontRegistry) -> FontR
         fallback_used: missing || !has_runtime,
         missing,
     }
+}
+
+fn font_typo_metrics(font: &fontdue::Font, font_size: f32) -> (f32, f32) {
+    if let Some(metrics) = font.horizontal_line_metrics(font_size) {
+        return (metrics.ascent, metrics.descent);
+    }
+    (font_size * 0.82, font_size * 0.22)
+}
+
+fn is_auto_height(node: &NodeInput) -> bool {
+    match node.text_resize_mode.as_deref() {
+        Some("auto-height") => true,
+        Some("auto-width") | Some("fixed") => false,
+        _ => node.auto_resize.as_deref() == Some("height"),
+    }
+}
+
+fn compute_node_dimensions(
+    node: &NodeInput,
+    layout: &TextLayout,
+    content_height: f32,
+) -> (f32, f32) {
+    const MIN_BOX: f32 = 8.0;
+    let auto_w = crate::text_layout::is_auto_width(node);
+    let auto_h = is_auto_height(node);
+    let vertical_pad = if auto_w || auto_h {
+        0.0
+    } else {
+        TEXT_BOX_PAD_Y * 2.0
+    };
+    let width = if auto_w {
+        layout.width + TEXT_BOX_PAD_X * 2.0
+    } else {
+        node.width
+    };
+    let height = if auto_w || auto_h {
+        content_height + vertical_pad
+    } else {
+        node.height
+    };
+    (width.max(MIN_BOX), height.max(MIN_BOX))
+}
+
+fn build_spaced_char_segments(
+    font_bytes: &[u8],
+    line: &str,
+    line_x: f32,
+    line_y: f32,
+    font_size: f32,
+    letter_spacing: f32,
+) -> Vec<CanonicalLineSegment> {
+    let mut segments = Vec::new();
+    for (i, ch) in line.chars().enumerate() {
+        let x = line_x + shaped_prefix_width(font_bytes, line, i, font_size, letter_spacing);
+        segments.push(CanonicalLineSegment {
+            text: ch.to_string(),
+            x,
+            y: line_y,
+        });
+    }
+    if segments.is_empty() {
+        segments.push(CanonicalLineSegment {
+            text: String::new(),
+            x: line_x,
+            y: line_y,
+        });
+    }
+    segments
 }
 
 fn shaped_prefix_width(
@@ -259,10 +341,12 @@ pub fn layout_text_canonical(
     let inner_h = (node.height - TEXT_BOX_PAD_Y * 2.0).max(1.0);
     let block_offset_y =
         vertical_content_offset_y(base_layout.height, inner_h, vertical_align_for(&node));
-    let baseline = (base_layout.line_height_px - font_size) * 0.5;
+    let (first_line_ascent, first_line_descent) = font_typo_metrics(font, font_size);
+    let baseline_offset = (base_layout.line_height_px - font_size) * 0.5;
     let last_line = base_layout.lines.len().saturating_sub(1);
 
     let mut lines: Vec<CanonicalLine> = Vec::new();
+    let mut line_boxes: Vec<LineBox> = Vec::new();
     let mut caret_stops: Vec<CaretStop> = Vec::new();
     let mut glyphs: Vec<GlyphBox> = Vec::new();
     let mut start_index = 0usize;
@@ -270,6 +354,7 @@ pub fn layout_text_canonical(
 
     for (line_index, line) in base_layout.lines.iter().enumerate() {
         let line_y = TEXT_BOX_PAD_Y + block_offset_y + line_top_y(&base_layout, line_index);
+        let line_baseline = line_y + baseline_offset + first_line_ascent;
         let rtl = detect_text_direction(&line.text) == Direction::RightToLeft;
         rtl_any = rtl_any || rtl;
         let line_x =
@@ -285,6 +370,15 @@ pub fn layout_text_canonical(
                 letter_spacing,
                 inner_w,
             )
+        } else if letter_spacing.abs() > f32::EPSILON {
+            build_spaced_char_segments(
+                font_bytes,
+                &line.text,
+                line_x,
+                line_y,
+                font_size,
+                letter_spacing,
+            )
         } else {
             vec![CanonicalLineSegment {
                 text: line.text.clone(),
@@ -292,6 +386,13 @@ pub fn layout_text_canonical(
                 y: line_y,
             }]
         };
+
+        line_boxes.push(LineBox {
+            top: line_y,
+            height: base_layout.line_height_px,
+            baseline: line_baseline,
+            width: line.width,
+        });
 
         build_caret_stops_for_line(
             font_bytes,
@@ -311,7 +412,7 @@ pub fn layout_text_canonical(
             &line.text,
             line_x,
             line_y,
-            baseline,
+            baseline_offset,
             font_size,
             letter_spacing,
             start_index,
@@ -336,7 +437,8 @@ pub fn layout_text_canonical(
         }
     }
 
-    let height = (base_layout.height - vertical_trim_top * 2.0).max(base_layout.line_height_px);
+    let height = base_layout.height.max(base_layout.line_height_px);
+    let (node_width, node_height) = compute_node_dimensions(&node, &base_layout, height);
 
     CanonicalTextLayout {
         source: "wasm".into(),
@@ -344,11 +446,16 @@ pub fn layout_text_canonical(
         width: base_layout.width,
         height,
         line_height_px: base_layout.line_height_px,
+        first_line_ascent,
+        first_line_descent,
         paragraph_spacing: base_layout.paragraph_spacing,
         vertical_trim_top,
         inner_w,
         inner_h,
         block_offset_y,
+        node_width,
+        node_height,
+        line_boxes,
         caret_stops,
         glyphs,
         font: resolve_font_metadata(&node, fonts),
