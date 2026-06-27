@@ -4,6 +4,7 @@ import {
   cssVarDisplayName,
   cssVarTokenId,
   designTokensFromProjectCss,
+  projectDesignTokensWithColorModesFromCssSources,
 } from "../designTokensFromProjectCss";
 
 const SAMPLE = `
@@ -41,6 +42,14 @@ describe("designTokensFromProjectCss", () => {
     const tokens = designTokensFromProjectCss([SAMPLE], "dark");
     assert.equal(tokens["css-var-background-neutral-weak"]!.value.hex, "#282828");
     assert.equal(tokens["css-var-surface-level-4"]!.value.hex, "#101010");
+  });
+
+  it("imports both light and dark values into one token", () => {
+    const tokens = projectDesignTokensWithColorModesFromCssSources([SAMPLE]);
+    const bg = tokens["css-var-background-neutral-weak"]!.value;
+    assert.equal(bg.hex, "#ebecee");
+    assert.equal(bg.dark?.hex, "#282828");
+    assert.equal(tokens["css-var-surface-level-4"]!.value.dark?.hex, "#101010");
   });
 
   it("maps css var helpers consistently", () => {

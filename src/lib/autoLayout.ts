@@ -250,6 +250,42 @@ function patchTouchesGap(patch: LayoutPatch): boolean {
   return "layoutGap" in patch || "layoutGapAuto" in patch;
 }
 
+function patchTouchesPadding(patch: LayoutPatch): boolean {
+  return (
+    "paddingTop" in patch ||
+    "paddingRight" in patch ||
+    "paddingBottom" in patch ||
+    "paddingLeft" in patch
+  );
+}
+
+/**
+ * After padding changes, resize the frame to fit children + padding + gap (both axes).
+ * Keeps child dimensions stable while the auto-layout container grows or shrinks.
+ */
+export function applyPaddingResponsiveFrameSize(
+  nodes: Record<string, LayoutNode>,
+  childOrder: Record<string, string[]>,
+  containerId: string,
+): Record<string, LayoutNode> {
+  const parent = nodes[containerId];
+  if (!parent || (parent.layoutMode ?? "none") === "none") return nodes;
+
+  let next = applyDeepAutoLayout(nodes, childOrder, containerId);
+  const laid = next[containerId];
+  if (!laid) return next;
+
+  const targetW = laid.computedWidth ?? laid.width;
+  const targetH = laid.computedHeight ?? laid.height;
+  const sizePatch: Partial<LayoutNode> = {};
+  if (Math.abs(targetW - laid.width) > 0.01) sizePatch.width = targetW;
+  if (Math.abs(targetH - laid.height) > 0.01) sizePatch.height = targetH;
+  if (Object.keys(sizePatch).length === 0) return next;
+
+  next = { ...next, [containerId]: { ...laid, ...sizePatch } };
+  return applyDeepAutoLayout(next, childOrder, containerId);
+}
+
 /**
  * After gap changes on a fixed-size auto-layout frame, resize the primary axis to fit
  * children + gap + padding. Clip content does not affect layout measurement.
@@ -297,6 +333,9 @@ export function applyLayoutPatchWithAutoLayout(
   const merged = { ...nodes, [containerId]: { ...parent, ...expandedPatch, layoutDirty: true } };
   if (patchTouchesGap(expandedPatch)) {
     return applyGapResponsivePrimarySize(merged, childOrder, containerId);
+  }
+  if (patchTouchesPadding(expandedPatch)) {
+    return applyPaddingResponsiveFrameSize(merged, childOrder, containerId);
   }
   return applyDeepAutoLayout(merged, childOrder, containerId);
 }

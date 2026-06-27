@@ -12,7 +12,10 @@ const SCREEN_ROOT_CLASS_TOKENS = new Set([
 
 function isLikelyScreenRoot(node: DomSnapshotNode): boolean {
   const tokens = (node.className ?? "").trim().split(/\s+/).filter(Boolean);
-  return tokens.some((t) => SCREEN_ROOT_CLASS_TOKENS.has(t.toLowerCase()));
+  if (tokens.some((t) => SCREEN_ROOT_CLASS_TOKENS.has(t.toLowerCase()))) return true;
+  if (node.role === "main") return true;
+  if (tokens.includes("data-craft-screen")) return true;
+  return false;
 }
 
 function scoreScreenCandidate(

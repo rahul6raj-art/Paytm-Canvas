@@ -10,6 +10,7 @@ import { IMPORT_WEB_LIMITS } from "@/lib/webImport/types";
 import { validateReactPreviewUrl } from "@/lib/codeRoundTrip/reactPreviewUrlValidation";
 import { validateImportWebUrl } from "@/lib/webImport/urlValidation";
 import { focusDomTreeOnReactScreenRoot } from "@/lib/webImport/reactPreviewDomRoot";
+import { focusDomTreeOnStorybookStoryRoot } from "@/lib/webImport/storybookDomRoot";
 import { filterDomSnapshotTree, countDomNodes, pruneDomTreeByLimit } from "@/lib/webImport/domFilter";
 import { normalizeDomSnapshot } from "@/lib/webImport/domNormalizer";
 import { annotateSectionHints, detectSections } from "@/lib/webImport/sectionDetector";
@@ -20,12 +21,27 @@ import { launchImportBrowser } from "@/lib/webImport/server/launchPlaywrightBrow
 import { loadPageForImport } from "@/lib/webImport/server/pageLoad";
 import { loadDomExtractorBundle } from "@/lib/webImport/server/bundleDomExtractor";
 import {
-  captureThemeFromUrl,
-  defaultCaptureColorTheme,
-  PML_THEME_STORAGE_KEY,
+  applyCaptureThemeToUrl,
+  resolveBridgeImportColorTheme,
   type CaptureColorTheme,
+  PML_THEME_STORAGE_KEY,
 } from "@/lib/webImport/captureTheme";
 import type { Page } from "playwright";
+
+/** Localhost Storybook + Vite preview captures (craft bridge). */
+export function isLocalBridgeCapturePolicy(urlPolicy?: ImportWebRequest["urlPolicy"]): boolean {
+  return urlPolicy === "react-preview" || urlPolicy === "storybook-iframe";
+}
+
+function parseStorybookIframeTheme(url: string): CaptureColorTheme {
+  try {
+    const globals = new URL(url).searchParams.get("globals") ?? "";
+    if (/theme:dark\b/i.test(globals)) return "dark";
+  } catch {
+    /* ignore */
+  }
+  return "light";
+}
 
 async function extractDomTreeWithRetry(
   page: Page,
@@ -73,20 +89,24 @@ export async function runImportWebCapture(
 
   let targetUrl: string | null = null;
   if (body.url?.trim()) {
-    const v =
-      body.urlPolicy === "react-preview"
-        ? validateReactPreviewUrl(body.url)
-        : validateImportWebUrl(body.url);
+    const v = isLocalBridgeCapturePolicy(body.urlPolicy)
+      ? validateReactPreviewUrl(body.url)
+      : validateImportWebUrl(body.url);
     if (!v.ok) throw new Error(v.error);
     targetUrl = v.url;
   }
 
   const browser = await launchImportBrowser();
 
-  const captureTheme: CaptureColorTheme =
-    body.urlPolicy === "react-preview"
-      ? captureThemeFromUrl(targetUrl ?? "") ?? defaultCaptureColorTheme()
-      : "light";
+  const captureTheme: CaptureColorTheme = isLocalBridgeCapturePolicy(body.urlPolicy)
+    ? body.urlPolicy === "storybook-iframe"
+      ? parseStorybookIframeTheme(targetUrl ?? "")
+      : resolveBridgeImportColorTheme(targetUrl ?? "")
+    : "light";
+
+  if (targetUrl && body.urlPolicy === "react-preview") {
+    targetUrl = applyCaptureThemeToUrl(targetUrl, captureTheme);
+  }
 
   try {
     const context = await browser.newContext({
@@ -100,7 +120,7 @@ export async function runImportWebCapture(
       locale: "en-US",
     });
 
-    if (body.urlPolicy === "react-preview") {
+    if (isLocalBridgeCapturePolicy(body.urlPolicy)) {
       await context.addInitScript(
         ({ storageKey, theme }: { storageKey: string; theme: string }) => {
           try {
@@ -121,6 +141,24 @@ export async function runImportWebCapture(
       await loadPageForImport(page, { url: targetUrl });
     } else {
       await loadPageForImport(page, { html: body.html! });
+    }
+
+    if (isLocalBridgeCapturePolicy(body.urlPolicy)) {
+      await page
+        .evaluate(
+          ({ storageKey, theme }: { storageKey: string; theme: string }) => {
+            try {
+              localStorage.setItem(storageKey, theme);
+            } catch {
+              /* ignore */
+            }
+            document.documentElement.classList.toggle("dark", theme === "dark");
+            document.documentElement.setAttribute("data-theme", theme);
+          },
+          { storageKey: PML_THEME_STORAGE_KEY, theme: captureTheme },
+        )
+        .catch(() => undefined);
+      await page.waitForTimeout(150);
     }
 
     const title = await page.title();
@@ -178,7 +216,9 @@ export async function runImportWebCapture(
     tree = await inlineDomImageSources(tree, context.request);
     await context.close();
     tree = normalizeDomSnapshot(tree);
-    if (body.urlPolicy === "react-preview") {
+    if (body.urlPolicy === "storybook-iframe") {
+      tree = focusDomTreeOnStorybookStoryRoot(tree);
+    } else if (body.urlPolicy === "react-preview") {
       tree = focusDomTreeOnReactScreenRoot(tree, viewport);
     }
     tree = annotateSectionHints(tree);

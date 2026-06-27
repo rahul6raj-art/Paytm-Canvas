@@ -34,6 +34,7 @@ import { pasteCanvasImageFromClipboard } from "@/lib/canvasImagePlace";
 import { isVectorEditableShape } from "@/lib/shapes/shapeToPath";
 import { clientToWorld } from "@/lib/canvasCoordinates";
 import { tryDeleteActiveGradientStop } from "@/lib/gradientStopKeyboard";
+import { cancelActiveMarqueeFromKeyboard } from "@/lib/canvasMarqueeController";
 
 export function EditorKeyboardShortcuts() {
   useEffect(() => {

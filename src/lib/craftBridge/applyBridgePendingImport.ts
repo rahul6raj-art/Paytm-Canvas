@@ -7,8 +7,8 @@ import {
 } from "@/lib/craftBridge/bridgeImportStrategy";
 import {
   enrichSliceWithProjectColorTokens,
-  themeFromPreviewUrl,
 } from "@/lib/craftBridge/projectTokenCss";
+import { resolveBridgeImportColorTheme } from "@/lib/webImport/captureTheme";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import {
   fitCanvasToImportedDocumentWithRetry,
@@ -73,7 +73,7 @@ export async function applyBridgePendingImport(
   };
   slice = await enrichSliceWithProjectColorTokens(slice, {
     link: pending.link ?? null,
-    theme: themeFromPreviewUrl(pending.link?.previewUrl),
+    theme: resolveBridgeImportColorTheme(pending.link?.previewUrl),
   });
 
   const rootCount = slice.childOrder[EDITOR_ROOT_KEY]?.length ?? 0;

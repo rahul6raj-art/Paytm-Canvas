@@ -132,6 +132,7 @@ export function GradientHandlesOverlay() {
   const nodes = useEditorStore((s) => s.nodes);
   const childOrder = useEditorStore((s) => s.childOrder);
   const designTokens = useEditorStore((s) => s.designTokens);
+  const canvasColorMode = useEditorStore((s) => s.canvasColorMode);
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const updateNodeStyle = useEditorStore((s) => s.updateNodeStyle);
   const overlay = useCanvasOverlaySpace();
@@ -149,8 +150,8 @@ export function GradientHandlesOverlay() {
   const id = selectedIds.length === 1 ? selectedIds[0]! : null;
   const node = id ? nodes[id] : null;
   const renderNode = useMemo(
-    () => (node ? resolveNodeWithDesignTokens(node, designTokens) : null),
-    [node, designTokens],
+    () => (node ? resolveNodeWithDesignTokens(node, designTokens, canvasColorMode) : null),
+    [node, designTokens, canvasColorMode],
   );
 
   const show =

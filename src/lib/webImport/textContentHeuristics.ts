@@ -34,8 +34,7 @@ export function isTailwindUtilityText(text: string): boolean {
 export function isGenericComponentLabel(text: string, role?: string): boolean {
   const t = text.trim().toLowerCase();
   if (!GENERIC_COMPONENT_NAMES.has(t)) return false;
-  if (role && t === role) return true;
-  return GENERIC_COMPONENT_NAMES.has(t);
+  return Boolean(role && t === role);
 }
 
 export function isImportableTextContent(

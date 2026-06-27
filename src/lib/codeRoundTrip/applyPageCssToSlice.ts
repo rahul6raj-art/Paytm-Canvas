@@ -9,6 +9,7 @@ import {
   type PageCssRule,
 } from "@/lib/codeRoundTrip/parsePageCss";
 import { resolveCssDeclarations } from "@/lib/codeRoundTrip/resolveCssVariables";
+import type { CssThemeScope } from "@/lib/codeRoundTrip/parseCssCustomProperties";
 
 function cssDeclarationsToPatch(declarations: Record<string, string>): Partial<EditorNode> {
   const cssText = Object.entries(declarations)
@@ -27,6 +28,7 @@ function pickBestRules(codeClassName: string, rules: PageCssRule[]): PageCssRule
 export function applyPageCssToSlice(
   slice: EditorPersistSlice,
   cssSources: string[],
+  theme: CssThemeScope = "light",
 ): EditorPersistSlice {
   if (!cssSources.length) return slice;
 
@@ -44,7 +46,7 @@ export function applyPageCssToSlice(
 
     let patch: Partial<EditorNode> = {};
     for (const rule of matched) {
-      const resolved = resolveCssDeclarations(rule.declarations, cssSources, "dark");
+      const resolved = resolveCssDeclarations(rule.declarations, cssSources, theme);
       patch = mergeStylePatches(patch, cssDeclarationsToPatch(resolved));
     }
     if (Object.keys(patch).length === 0) continue;

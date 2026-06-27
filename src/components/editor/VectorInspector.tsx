@@ -33,6 +33,7 @@ import { PropertiesSection } from "./PropertiesSection";
 import { EditorHintWrap } from "./EditorHoverHint";
 import { InspectorHintIconButton } from "./design-panel/InspectorPrimitives";
 import { FillSection } from "./design-panel/FillSection";
+import { DesignColorModeSection } from "./DesignColorModeSection";
 
 function MirroringButton({
   mode,
@@ -105,6 +106,7 @@ function MirroringIconAngleLength() {
 
 export function VectorInspector({ node }: { node: EditorNode }) {
   const designTokens = useEditorStore((s) => s.designTokens);
+  const canvasColorMode = useEditorStore((s) => s.canvasColorMode);
   const updateNode = useEditorStore((s) => s.updateNode);
   const updateNodeStyle = useEditorStore((s) => s.updateNodeStyle);
   const setPathHandleMirroring = useEditorStore((s) => s.setPathHandleMirroring);
@@ -112,7 +114,10 @@ export function VectorInspector({ node }: { node: EditorNode }) {
   const detachTokenFromSelection = useEditorStore((s) => s.detachTokenFromSelection);
   const updateDesignToken = useEditorStore((s) => s.updateDesignToken);
 
-  const display = useMemo(() => resolveNodeWithDesignTokens(node, designTokens), [node, designTokens]);
+  const display = useMemo(
+    () => resolveNodeWithDesignTokens(node, designTokens, canvasColorMode),
+    [node, designTokens, canvasColorMode],
+  );
   const locked = node.locked;
   const id = node.id;
   const key = id;
@@ -322,6 +327,8 @@ export function VectorInspector({ node }: { node: EditorNode }) {
           </p>
         ) : null}
       </PropertiesSection>
+
+      <DesignColorModeSection compact className="border-b border-app-panel-edge" />
 
       <FillSection
         node={node}

@@ -3,6 +3,7 @@ import { childIdsForNode, collectSubtreeIds, topLevelSelectedIds } from "@/lib/e
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import { worldRect } from "@/lib/tree";
 import { assignStableLayerIds } from "@/lib/components/stableIds";
+import { detectComponentInstanceContentStableId } from "@/lib/components/componentInstanceShell";
 import {
   applyPathOverridesToNode,
   readInstanceOverrideMap,
@@ -416,6 +417,12 @@ export function markNodeAsComponent(
   const cmpId = newComponentId();
   const vg = newVariantGroupId();
   const stableIds = assignStableLayerIds(nodes, childOrder, rootId);
+  const contentStableId = detectComponentInstanceContentStableId(
+    nodes,
+    childOrder,
+    rootId,
+    stableIds,
+  );
   return {
     ...nodes,
     [rootId]: {
@@ -425,6 +432,7 @@ export function markNodeAsComponent(
       variantGroupId: vg,
       variantProperties: n.variantProperties ?? { Variant: "Default" },
       componentLayerStableIds: stableIds,
+      ...(contentStableId ? { componentInstanceContentStableId: contentStableId } : {}),
       componentVersion: n.componentVersion ?? 1,
       componentPropertyDefs: n.componentPropertyDefs ?? [],
       publishStatus: n.publishStatus ?? "local",

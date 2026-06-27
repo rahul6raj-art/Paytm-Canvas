@@ -4,6 +4,7 @@ import { importHtmlPageBundle } from "@/lib/codeRoundTrip/importHtmlPageBundle";
 import { importReactSource } from "@/lib/codeRoundTrip/reactImport";
 import { importHtmlFromString } from "@/lib/codeImport/htmlImport";
 import { importBridgeFromLivePreview } from "@/lib/craftBridge/bridgeLiveImport";
+import { buildBridgeEditorOpenUrl } from "@/lib/craftBridge/buildBridgeEditorOpenUrl";
 import { defaultCaptureColorTheme } from "@/lib/webImport/captureTheme";
 import { writePendingImport } from "@paytm-craft/bridge";
 import type { CraftBridgePendingImport } from "@/lib/craftBridge/types";
@@ -42,6 +43,7 @@ export async function POST(req: Request) {
     const pageLabel =
       body.fileName?.replace(/\.[^.]+$/, "") ?? body.link?.sourcePath?.split("/").pop();
     const captureUrl = resolvePreviewCaptureUrl(body.link?.previewUrl, pageLabel);
+    let liveCaptureError: string | undefined;
     if (captureUrl && format === "react") {
       const live = await importBridgeFromLivePreview({
         previewUrl: captureUrl,
@@ -56,8 +58,11 @@ export async function POST(req: Request) {
         message = live.message;
         sourceHeader = live.sourceHeader;
       } else {
-        console.warn("[craft-bridge/import-source] live capture failed:", live.error);
-        return NextResponse.json({ error: live.error }, { status: 503 });
+        liveCaptureError = live.error;
+        console.warn(
+          "[craft-bridge/import-source] live capture failed, falling back to source parse:",
+          live.error,
+        );
       }
     }
 
@@ -90,7 +95,10 @@ export async function POST(req: Request) {
         if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
         slice = result.slice;
         componentName = result.componentName;
-        message = message ? `${message} ${result.message}` : result.message;
+        const parseMessage = message ? `${message} ${result.message}` : result.message;
+        message = liveCaptureError
+          ? `Live preview unavailable (${liveCaptureError}). Used source parse instead. ${parseMessage}`
+          : parseMessage;
         sourceHeader = result.sourceHeader;
       }
     }
@@ -131,7 +139,7 @@ export async function POST(req: Request) {
       componentName,
       message,
       layerCount: Object.keys(slice.nodes).length,
-      openUrl: "/editor",
+      openUrl: buildBridgeEditorOpenUrl(pending.id),
     });
   } catch (e) {
     console.error("[craft-bridge/import-source]", e);

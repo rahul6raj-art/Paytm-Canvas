@@ -25,6 +25,7 @@ import {
   buildNestedInstanceStableIdMap,
   remapStableIdMapThroughClone,
 } from "@/lib/components/stableIds";
+import { unwrapComponentInstanceContentShell } from "@/lib/components/componentInstanceShell";
 import { pushInstanceOverridesToMaster } from "@/lib/components/propagate";
 
 function parentListKey(parentId: string | null): string {
@@ -136,7 +137,14 @@ export function buildInstanceFromMaster(
     instanceStableIdMap: stableMap,
   };
 
-  return res;
+  const unwrappedRootId = unwrapComponentInstanceContentShell(
+    res.nodes,
+    res.childOrder,
+    res.newRootId,
+    masterId,
+  );
+
+  return { ...res, newRootId: unwrappedRootId };
 }
 
 export function buildSwapInstanceComponentResult(

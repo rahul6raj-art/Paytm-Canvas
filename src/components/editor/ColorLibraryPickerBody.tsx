@@ -3,9 +3,10 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { LayoutGrid, List } from "lucide-react";
 import { useEditorStore } from "@/stores/useEditorStore";
-import { isColorValue } from "@/lib/designTokens";
+import { isColorValue, resolvedColorForMode } from "@/lib/designTokens";
+import { useCanvasColorMode } from "@/hooks/useCanvasColorMode";
 import { cn } from "@/lib/utils";
-import { getColorDesignTokens } from "./LibraryColorPickerMenu";
+import { getGroupedColorDesignTokens } from "./LibraryColorPickerMenu";
 import { EditorHintWrap } from "./EditorHoverHint";
 
 type ColorLibraryView = "grid" | "list";
@@ -41,13 +42,18 @@ export function ColorLibraryPickerBody({
 }: ColorLibraryPickerBodyProps) {
   const designTokens = useEditorStore((s) => s.designTokens);
   const selectedIds = useEditorStore((s) => s.selectedIds);
+  const colorMode = useCanvasColorMode();
   const [internalView, setInternalView] = useState<ColorLibraryView>("grid");
   const activeGridRef = useRef<HTMLButtonElement>(null);
   const activeListRef = useRef<HTMLButtonElement>(null);
   const view = viewOverride ?? internalView;
   const setView = viewOverride ? () => undefined : setInternalView;
 
-  const colors = useMemo(() => getColorDesignTokens(designTokens), [designTokens]);
+  const groups = useMemo(() => getGroupedColorDesignTokens(designTokens), [designTokens]);
+  const colors = useMemo(
+    () => groups.flatMap((g) => g.tokens),
+    [groups],
+  );
   const canApply = selectedIds.length > 0;
 
   useLayoutEffect(() => {
@@ -113,6 +119,8 @@ export function ColorLibraryPickerBody({
     </div>
   ) : null;
 
+  const sectionHeadingClass = "mb-1.5 px-0.5 text-ui font-semibold text-app-subtle";
+
   return (
     <div className={className}>
       {showHeader || showViewToggle ? (
@@ -136,100 +144,115 @@ export function ColorLibraryPickerBody({
       ) : null}
 
       {view === "grid" ? (
-        <div className={gridClass}>
-          {colors.map((token) => {
-            const v = token.value;
-            if (!isColorValue(v)) return null;
-            const active = activeTokenId === token.id;
-            return (
-              <EditorHintWrap
-                key={token.id}
-                title={`${token.name} · ${v.hex}`}
-                disabled={!canApply}
-              >
-                <button
-                  ref={active ? activeGridRef : undefined}
-                  type="button"
-                  disabled={!canApply}
-                  aria-selected={active}
-                  onClick={() => onPick(token.id)}
-                  className={cn(
-                    "group relative aspect-square min-h-[28px] rounded-md border transition-all",
-                    canApply ? "cursor-pointer hover:scale-105 hover:shadow-md" : "cursor-not-allowed opacity-50",
-                    active
-                      ? "border-accent ring-2 ring-accent/50 scale-105 shadow-md"
-                      : "border-white/[0.15] hover:border-white/30",
-                  )}
-                  style={{
-                    backgroundColor: v.hex,
-                    opacity: v.opacity ?? 1,
-                  }}
-                >
-                  <span className="sr-only">{token.name}</span>
-                </button>
-              </EditorHintWrap>
-            );
-          })}
+        <div className="space-y-3">
+          {groups.map((group) => (
+            <section key={group.id}>
+              <h4 className={sectionHeadingClass}>{group.label}</h4>
+              <div className={gridClass}>
+                {group.tokens.map((token) => {
+                  const raw = token.value;
+                  if (!isColorValue(raw)) return null;
+                  const v = resolvedColorForMode(raw, colorMode);
+                  const active = activeTokenId === token.id;
+                  return (
+                    <EditorHintWrap
+                      key={token.id}
+                      title={`${token.name} · ${v.hex}`}
+                      disabled={!canApply}
+                    >
+                      <button
+                        ref={active ? activeGridRef : undefined}
+                        type="button"
+                        disabled={!canApply}
+                        aria-selected={active}
+                        onClick={() => onPick(token.id)}
+                        className={cn(
+                          "group relative aspect-square min-h-[28px] rounded-md border transition-all",
+                          canApply ? "cursor-pointer hover:scale-105 hover:shadow-md" : "cursor-not-allowed opacity-50",
+                          active
+                            ? "border-accent ring-2 ring-accent/50 scale-105 shadow-md"
+                            : "border-white/[0.15] hover:border-white/30",
+                        )}
+                        style={{
+                          backgroundColor: v.hex,
+                          opacity: v.opacity ?? 1,
+                        }}
+                      >
+                        <span className="sr-only">{token.name}</span>
+                      </button>
+                    </EditorHintWrap>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
         </div>
       ) : (
-        <ul
+        <div
           className={cn(
-            "space-y-0.5",
             listScrollContained && "thin-scroll overflow-y-auto",
             listScrollContained && listMaxHeightClass,
           )}
         >
-          {colors.map((token) => {
-            const v = token.value;
-            if (!isColorValue(v)) return null;
-            const active = activeTokenId === token.id;
-            return (
-              <li key={token.id}>
-                <EditorHintWrap title={`${token.name} · ${v.hex}`} disabled={!canApply}>
-                  <button
-                    ref={active ? activeListRef : undefined}
-                    type="button"
-                    disabled={!canApply}
-                    aria-selected={active}
-                    onClick={() => onPick(token.id)}
-                    className={cn(
-                      "flex w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors",
-                      applyButtonClass(active),
-                    )}
-                  >
-                  <span
-                    className={cn(
-                      "h-5 w-5 shrink-0 rounded border border-white/[0.15]",
-                      active && "border-accent ring-1 ring-accent/50",
-                    )}
-                    style={{
-                      backgroundColor: v.hex,
-                      opacity: v.opacity ?? 1,
-                    }}
-                    aria-hidden
-                  />
-                  <span
-                    className={cn(
-                      "min-w-0 flex-1 truncate text-ui",
-                      active ? "font-medium text-app-fg" : "text-app-fg",
-                    )}
-                  >
-                    {token.name}
-                  </span>
-                  <span
-                    className={cn(
-                      "shrink-0 font-mono text-ui",
-                      active ? "text-app-muted" : "text-app-subtle",
-                    )}
-                  >
-                    {v.hex}
-                  </span>
-                </button>
-                </EditorHintWrap>
-              </li>
-            );
-          })}
-        </ul>
+          {groups.map((group, groupIndex) => (
+            <section key={group.id} className={groupIndex > 0 ? "mt-3 border-t border-app-border-subtle pt-3" : ""}>
+              <h4 className={sectionHeadingClass}>{group.label}</h4>
+              <ul className="space-y-0.5">
+                {group.tokens.map((token) => {
+                  const raw = token.value;
+                  if (!isColorValue(raw)) return null;
+                  const v = resolvedColorForMode(raw, colorMode);
+                  const active = activeTokenId === token.id;
+                  return (
+                    <li key={token.id}>
+                      <EditorHintWrap title={`${token.name} · ${v.hex}`} disabled={!canApply}>
+                        <button
+                          ref={active ? activeListRef : undefined}
+                          type="button"
+                          disabled={!canApply}
+                          aria-selected={active}
+                          onClick={() => onPick(token.id)}
+                          className={cn(
+                            "flex w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors",
+                            applyButtonClass(active),
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              "h-5 w-5 shrink-0 rounded border border-white/[0.15]",
+                              active && "border-accent ring-1 ring-accent/50",
+                            )}
+                            style={{
+                              backgroundColor: v.hex,
+                              opacity: v.opacity ?? 1,
+                            }}
+                            aria-hidden
+                          />
+                          <span
+                            className={cn(
+                              "min-w-0 flex-1 truncate text-ui",
+                              active ? "font-medium text-app-fg" : "text-app-fg",
+                            )}
+                          >
+                            {token.name}
+                          </span>
+                          <span
+                            className={cn(
+                              "shrink-0 font-mono text-ui",
+                              active ? "text-app-muted" : "text-app-subtle",
+                            )}
+                          >
+                            {v.hex}
+                          </span>
+                        </button>
+                      </EditorHintWrap>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ))}
+        </div>
       )}
     </div>
   );

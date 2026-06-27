@@ -1,6 +1,7 @@
 import { applyDeepAutoLayoutAll, type LayoutNode } from "@/lib/autoLayout";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import type { EditorNode } from "@/stores/useEditorStore";
+import { enforceManualScreenFrames } from "@/lib/webImport/enforceManualScreenFrames";
 
 /** Mobile screen width for imported React screens (PML, etc.). */
 export const IMPORT_SCREEN_WIDTH = 390;
@@ -251,6 +252,7 @@ export function finalizeImportedGraph(
       };
     }
     next = expandFrameHeightsToFitDescendants(next, childOrder);
+    enforceManualScreenFrames(next, childOrder);
     return next;
   }
 

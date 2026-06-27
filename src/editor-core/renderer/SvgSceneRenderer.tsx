@@ -65,6 +65,9 @@ export function SvgSceneRenderer({
   const activeDragPreview =
     interactionPreview && dragPreview?.movingIds.length ? dragPreview : undefined;
 
+  const canvasColorMode = useEditorStore((s) => s.canvasColorMode);
+  const projectCssSources = useEditorStore((s) => s.projectCssSources);
+
   const scene = useMemo(
     () =>
       buildSvgScene({
@@ -79,6 +82,8 @@ export function SvgSceneRenderer({
         ellipseArcPreview,
         objectEditModeNodeId,
         selectedIds,
+        colorMode: canvasColorMode,
+        cssSources: projectCssSources,
       }),
     [
       rootIds,
@@ -93,6 +98,8 @@ export function SvgSceneRenderer({
       objectEditModeNodeId,
       selectedIds,
       textLayoutEpoch,
+      canvasColorMode,
+      projectCssSources,
     ],
   );
 

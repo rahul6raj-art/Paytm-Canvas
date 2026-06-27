@@ -13,13 +13,13 @@ npm run extension:pack
 In Cursor:
 
 1. `Cmd+Shift+P` → **Extensions: Install from VSIX…**
-2. Select `packages/craft-bridge-vscode/craft-bridge-0.1.8.vsix`
+2. Select `packages/craft-bridge-vscode/craft-bridge-0.1.11.vsix`
 3. Reload Cursor
 
 Or:
 
 ```bash
-/Applications/Cursor.app/Contents/Resources/app/bin/cursor --install-extension packages/craft-bridge-vscode/craft-bridge-0.1.8.vsix
+/Applications/Cursor.app/Contents/Resources/app/bin/cursor --install-extension packages/craft-bridge-vscode/craft-bridge-0.1.11.vsix
 ```
 
 ## Workflow (manual sync)
@@ -58,9 +58,13 @@ Or:
 |---------|---------|
 | `craftBridge.craftUrl` | `http://localhost:3000` |
 | `craftBridge.openBrowserOnPush` | `true` |
+| `craftBridge.captureTheme` | `light` — set `dark` when pushing dark-mode screens |
 
 ## Notes
 
+- **v0.1.11** — `craftBridge.captureTheme` sets live capture to light or dark (`?theme=` on preview). Pair with Craft **Styles → Light/Dark** to preview both token modes on canvas. Bundled CLI sync for internal routes + dual-theme color tokens from project CSS.
+- **v0.1.10** — Push to Craft works on **any visible preview route** (internal screens, modals, nested paths). Right-click anywhere in the live app preview. Capture-only mode when no linked page folder matches.
+- **v0.1.9** — Falls back to source parse when live preview capture fails; opens Craft with `?bridgeImport=1&bridgeId=…` so imports apply immediately after push.
 - **v0.1.8** — Bundled bridge CLI + Cursor hooks refresh. Pair with latest Craft dev server for hug-contents text frame sizing (tighter vertical bounds on auto-width text).
 - **v0.1.7** — Light-mode live capture (`?theme=light`), unique `bridgeId` per push so canvas reloads reliably, bundled CLI passes preview theme. Requires Craft dev server + PML preview running.
 - **v0.1.6** — Auto live-capture from `http://localhost:5173` for PML screens (`?screen=more`, `signup`, etc.) when `previewUrl` is omitted. Requires Vite preview running for real colors/shapes (not grey placeholders).

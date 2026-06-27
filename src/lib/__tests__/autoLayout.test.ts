@@ -186,7 +186,7 @@ describe("auto layout", () => {
     assert.equal(next.parent!.height, 40 + 10 + 80);
   });
 
-  it("keeps fixed frame size when only padding changes", () => {
+  it("grows the frame when padding increases so fixed children keep their size", () => {
     const nodes: Record<string, LayoutNode> = {
       parent: {
         id: "parent",
@@ -207,18 +207,19 @@ describe("auto layout", () => {
         layoutSizingHorizontal: "fixed",
         layoutSizingVertical: "fixed",
       },
-      a: frame("a", 0, 0, 50, 40, {
-        parentId: "parent",
-        layoutSizingHorizontal: "fill",
-      }),
+      a: frame("a", 0, 0, 50, 40, { parentId: "parent" }),
     };
     const childOrder = { parent: ["a"] };
     const next = applyLayoutPatchWithAutoLayout(nodes, childOrder, "parent", {
       paddingLeft: 24,
       paddingRight: 24,
+      paddingTop: 24,
+      paddingBottom: 24,
     });
-    assert.equal(next.parent!.width, 200);
-    assert.equal(next.a!.width, 200 - 24 - 24);
+    assert.equal(next.a!.width, 50);
+    assert.equal(next.a!.height, 40);
+    assert.equal(next.parent!.width, 24 + 50 + 24);
+    assert.equal(next.parent!.height, 24 + 40 + 24);
   });
 
   it("fixed width keeps children overflowing for clip (horizontal auto layout)", () => {

@@ -2,7 +2,7 @@ import type { DomSnapshotNode, ImportWebPageMeta, ImportWebSceneNode } from "@/l
 import { buildDesignTree } from "@/lib/webImport/designNodeBuilder";
 import { designTreeToScene } from "@/lib/webImport/canvasNodeBuilder";
 import { compareFidelity, scoreDesignTree, scoreSceneTree } from "@/lib/webImport/fidelityValidator";
-import { sanitizeDomSnapshotText } from "@/lib/webImport/inferLayoutFromBounds";
+import { sanitizeDomSnapshotText, inferLayoutFromChildPositions } from "@/lib/webImport/inferLayoutFromBounds";
 
 export interface DesignNativeImportResult {
   scene: ImportWebSceneNode;
@@ -19,7 +19,7 @@ export function runDesignNativeImport(
   page: ImportWebPageMeta,
 ): DesignNativeImportResult {
   const sanitized = sanitizeDomSnapshotText(domRoot);
-  const designRoot = buildDesignTree(sanitized);
+  const designRoot = inferLayoutFromChildPositions(buildDesignTree(sanitized));
   // Repeated-component detection strips instance subtrees and renames masters — skip for web pages.
   // detectRepeatedComponents(designRoot);
   const { scene, assets } = designTreeToScene(designRoot, page);

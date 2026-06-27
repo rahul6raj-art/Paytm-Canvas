@@ -18,6 +18,7 @@ export type InitialDocumentFields = Pick<
   | "showGrid"
   | "showRulers"
   | "canvasBackgroundColor"
+  | "canvasColorMode"
   | "selectedIds"
   | "assets"
   | "fontAssets"
@@ -49,6 +50,7 @@ export function createEmptyDocumentFields(): InitialDocumentFields {
     showGrid: page.showGrid,
     showRulers: page.showRulers,
     canvasBackgroundColor: page.canvasBackgroundColor,
+    canvasColorMode: "light",
     selectedIds: [],
     assets: {},
     fontAssets: {},
@@ -82,6 +84,7 @@ export function mergeSampleDocumentFields(
     showGrid: active.showGrid,
     showRulers: active.showRulers,
     canvasBackgroundColor: active.canvasBackgroundColor,
+    canvasColorMode: "light",
     selectedIds: [],
     assets: {},
     fontAssets: {},

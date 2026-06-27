@@ -126,6 +126,19 @@ export function CraftBridgeImportListener() {
           pending.message?.trim() ? pending.message.trim() : defaultMessage,
         );
 
+        void useEditorStore
+          .getState()
+          .importStorybookComponents({ force: true })
+          .then((result) => {
+            if (!result.ok) return;
+            if ((result.imported ?? 0) > 0) {
+              setCraftBridgeSyncStatus("synced", `${defaultMessage} ${result.message}`);
+            }
+          })
+          .catch(() => {
+            /* importStorybookComponents reports via storybookSyncMessage */
+          });
+
         lastConsumedBridgeIdRef.current = pending.id;
 
         await bridgeFetch("/api/craft-bridge/pending-import", { method: "DELETE" });

@@ -11,10 +11,7 @@ import {
   Unlink,
 } from "lucide-react";
 import { canAlignSelection } from "@/lib/alignSelection";
-import {
-  collectContainerStyleTargets,
-  containerSupportsAggregateFillStroke,
-} from "@/lib/groupStyleTargets";
+import { resolveFillStrokeStyleContext } from "@/lib/groupStyleTargets";
 import { canCreateComponentSetFromSelection } from "@/lib/componentUx";
 import { AlignControls } from "./AlignControls";
 import { ComponentInspectorPanel } from "./ComponentInspectorPanel";
@@ -39,7 +36,9 @@ import {
   resolveNodeWithDesignTokens,
   type EffectTokenValue,
 } from "@/lib/designTokens";
-import { inferAutoLayoutGap, type LayoutNode } from "@/lib/autoLayout";
+import { inferAutoLayoutGap, type LayoutMode, type LayoutNode } from "@/lib/autoLayout";
+import { resolveAutoLayoutHandleFrameId } from "@/lib/autoLayout/resolveHandleFrame";
+import { isManualScreenFrame, rootFrameIds } from "@/lib/webImport/manualScreenFrames";
 import {
   LAYOUT_GAP_MAX,
   sanitizeLayoutGap,
@@ -80,6 +79,7 @@ import { AppearanceSection } from "./design-panel/AppearanceSection";
 import { StrokeSection } from "./design-panel/StrokeSection";
 import { EffectsSection } from "./design-panel/EffectsSection";
 import { FillSection } from "./design-panel/FillSection";
+import { DesignColorModeSection } from "./DesignColorModeSection";
 import { InspectorSegmented } from "./design-panel/InspectorPrimitives";
 import { PositionSection } from "./design-panel/PositionSection";
 import { InspectorLayerHeaderActions } from "./design-panel/InspectorLayerHeaderActions";
@@ -138,6 +138,8 @@ export function DesignInspector({ node }: { node: EditorNode }) {
   const assets = useEditorStore((s) => s.assets);
   const replaceImageAsset = useEditorStore((s) => s.replaceImageAsset);
   const designTokens = useEditorStore((s) => s.designTokens);
+  const canvasColorMode = useEditorStore((s) => s.canvasColorMode);
+  const projectCssSources = useEditorStore((s) => s.projectCssSources);
   const updateDesignToken = useEditorStore((s) => s.updateDesignToken);
   const pushHistory = useEditorStore((s) => s.pushHistory);
   const createColorTokenFromSelection = useEditorStore((s) => s.createColorTokenFromSelection);
@@ -157,18 +159,25 @@ export function DesignInspector({ node }: { node: EditorNode }) {
   const objectEditModeNodeId = useEditorStore((s) => s.objectEditModeNodeId);
   const toggleVisible = useEditorStore((s) => s.toggleVisible);
 
-  const display = useMemo(() => resolveNodeWithDesignTokens(node, designTokens), [node, designTokens]);
+  const display = useMemo(
+    () => resolveNodeWithDesignTokens(node, designTokens, canvasColorMode, projectCssSources),
+    [node, designTokens, canvasColorMode, projectCssSources],
+  );
 
-  const aggregateStyleTargets = useMemo(() => {
-    if (containerSupportsAggregateFillStroke(node, nodesAll, childOrder)) {
-      return collectContainerStyleTargets(node.id, nodesAll, childOrder);
-    }
-    return [];
-  }, [node, nodesAll, childOrder]);
-  const styleNode = aggregateStyleTargets[0] ?? node;
+  const { styleNode, aggregateStyleTargets } = useMemo(
+    () =>
+      resolveFillStrokeStyleContext(
+        node,
+        nodesAll,
+        childOrder,
+        designTokens,
+        projectCssSources,
+      ),
+    [node, nodesAll, childOrder, designTokens, projectCssSources],
+  );
   const styleDisplay = useMemo(
-    () => resolveNodeWithDesignTokens(styleNode, designTokens),
-    [styleNode, designTokens],
+    () => resolveNodeWithDesignTokens(styleNode, designTokens, canvasColorMode, projectCssSources),
+    [styleNode, designTokens, canvasColorMode, projectCssSources],
   );
   const showPaintSectionsEarly = node.type === "path" || aggregateStyleTargets.length > 0;
 
@@ -260,6 +269,20 @@ export function DesignInspector({ node }: { node: EditorNode }) {
 
   const isContainer = node.type === "frame" || node.type === "group";
   const layoutMode = node.layoutMode ?? "none";
+  const manualScreenFrame = isManualScreenFrame(node, rootFrameIds(childOrder));
+  const effectiveLayoutMode = manualScreenFrame ? "none" : layoutMode;
+  const autoLayoutEditFrameId = useMemo(
+    () => resolveAutoLayoutHandleFrameId([id], nodesAll),
+    [id, nodesAll],
+  );
+  const autoLayoutEditNode = autoLayoutEditFrameId ? nodesAll[autoLayoutEditFrameId] : null;
+  const autoLayoutEditMode = (autoLayoutEditNode?.layoutMode ?? "none") as LayoutMode;
+  const showAutoLayoutControls =
+    autoLayoutEditFrameId != null &&
+    autoLayoutEditMode !== "none" &&
+    (autoLayoutEditMode === "horizontal" || autoLayoutEditMode === "vertical");
+  const editingParentAutoLayout =
+    showAutoLayoutControls && autoLayoutEditFrameId != null && autoLayoutEditFrameId !== id;
   const inAutoLayoutParent = (parent?.layoutMode ?? "none") !== "none";
   const parentAutoLayout = Boolean(parent && (parent.layoutMode ?? "none") !== "none");
 
@@ -318,7 +341,8 @@ export function DesignInspector({ node }: { node: EditorNode }) {
   };
 
   const fillOpacity = styleDisplay.fillOpacity ?? 1;
-  const fillEnabled = styleNode.fillEnabled !== false;
+  const fillEnabled =
+    styleNode.fillEnabled !== false || Boolean(styleDisplay.fill?.trim());
   const fillToken = styleNode.fillTokenId ? designTokens[styleNode.fillTokenId] : undefined;
   const strokePos: StrokePosition = styleNode.strokePosition ?? "center";
 
@@ -351,6 +375,8 @@ export function DesignInspector({ node }: { node: EditorNode }) {
         onCornerStyle={applyCornerStyle}
         onArcStyle={style}
       />
+
+      <DesignColorModeSection compact className="border-b border-app-panel-edge" />
 
       {canFillStroke && (
         <FillSection
@@ -480,7 +506,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
         locked={locked}
         parentAutoLayout={parentAutoLayout}
         isContainer={isContainer}
-        isAutoLayoutContainer={isContainer && layoutMode !== "none"}
+        isAutoLayoutContainer={isContainer && effectiveLayoutMode !== "none"}
         nodesAll={nodesAll}
         hideDimensions={isText}
         dimensionMin={node.type === "path" ? 0 : 1}
@@ -543,7 +569,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               />
             </div>
           )}
-          {parent?.id && parentAutoLayout ? (() => {
+          {parent?.id && parentAutoLayout && !editingParentAutoLayout ? (() => {
             const frameId = parent.id;
             const frame = nodesAll[frameId];
             if (!frame) return null;
@@ -748,6 +774,12 @@ export function DesignInspector({ node }: { node: EditorNode }) {
 
       {(isContainer || (!isContainer && !locked)) && (
         <PropertiesSection title="Layout" defaultOpen>
+          {manualScreenFrame ? (
+            <p className="mb-2 text-ui leading-snug text-app-subtle">
+              Screen artboards use manual layout so imported spacing stays stable. Edit inner
+              frames, or select a section and use Auto layout there.
+            </p>
+          ) : null}
           {isContainer ? (
             <div className="mb-2">
               <InspectorSegmented
@@ -755,9 +787,10 @@ export function DesignInspector({ node }: { node: EditorNode }) {
                   { value: "auto" as const, label: "Auto" },
                   { value: "none" as const, label: "None" },
                 ]}
-                value={layoutMode === "none" ? "none" : "auto"}
-                disabled={locked}
+                value={effectiveLayoutMode === "none" ? "none" : "auto"}
+                disabled={locked || manualScreenFrame}
                 onChange={(v) => {
+                  if (manualScreenFrame) return;
                   if (v === "none") updateLayout(id, { layoutMode: "none" });
                   else if (layoutMode === "none") addAutoLayoutToContainer(id);
                 }}
@@ -777,7 +810,7 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               <LayoutTemplate className="h-3.5 w-3.5" strokeWidth={1.75} />
               Add auto layout
             </button>
-          ) : layoutMode === "none" ? (
+          ) : effectiveLayoutMode === "none" ? (
             <button
               type="button"
               disabled={locked}
@@ -791,17 +824,25 @@ export function DesignInspector({ node }: { node: EditorNode }) {
               Add auto layout
             </button>
           ) : null}
-          {isContainer && layoutMode !== "none" ? (
-            <AutoLayoutInspectorPanel
-              node={node}
-              frameId={id}
-              instanceKey={key}
-              locked={locked}
-              layoutMode={layoutMode}
-              nodesAll={nodesAll}
-              childOrder={childOrder}
-              updateLayout={updateLayout}
-            />
+          {showAutoLayoutControls && autoLayoutEditFrameId && autoLayoutEditNode ? (
+            <>
+              {editingParentAutoLayout ? (
+                <p className="mb-2 text-ui leading-snug text-app-subtle">
+                  Auto layout on parent frame{" "}
+                  <span className="font-medium text-app-fg">{autoLayoutEditNode.name}</span>
+                </p>
+              ) : null}
+              <AutoLayoutInspectorPanel
+                node={autoLayoutEditNode}
+                frameId={autoLayoutEditFrameId}
+                instanceKey={editingParentAutoLayout ? autoLayoutEditFrameId : key}
+                locked={locked || autoLayoutEditNode.locked}
+                layoutMode={autoLayoutEditMode}
+                nodesAll={nodesAll}
+                childOrder={childOrder}
+                updateLayout={updateLayout}
+              />
+            </>
           ) : null}
           {isContainer && !node.isBooleanGroup && !node.maskId && (node.type === "frame" || node.type === "group") ? (
             <label

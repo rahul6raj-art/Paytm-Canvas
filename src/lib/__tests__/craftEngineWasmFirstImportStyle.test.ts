@@ -74,6 +74,48 @@ describe("craftEngineWasmFirstImportStyle", () => {
     assert.equal(useEditorStore.getState().nodes[id]?.fillTokenId, tokenId);
   });
 
+  it("applyTokenToSelection binds fill token on polygon", () => {
+    const id = `poly-tok-${Date.now()}`;
+    const tokenId = `color-poly-${Date.now()}`;
+    useEditorStore.setState({
+      nodes: {
+        [id]: {
+          id,
+          parentId: null,
+          type: "polygon",
+          name: "Poly",
+          x: 0,
+          y: 0,
+          width: 80,
+          height: 60,
+          rotation: 0,
+          visible: true,
+          locked: false,
+          expanded: true,
+          fill: "#000000",
+          fillEnabled: true,
+          fillOpacity: 1,
+          strokePosition: "center",
+          sides: 6,
+        },
+      },
+      childOrder: { [ROOT]: [id] },
+      selectedIds: [id],
+      designTokens: {
+        [tokenId]: {
+          id: tokenId,
+          name: "Brand",
+          type: "color",
+          value: "#3366ff",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      },
+    });
+    useEditorStore.getState().applyTokenToSelection(tokenId);
+    assert.equal(useEditorStore.getState().nodes[id]?.fillTokenId, tokenId);
+  });
+
   it("toggleLockSelection flips locked on selected nodes", () => {
     const id = `rect-lock-${Date.now()}`;
     useEditorStore.setState({

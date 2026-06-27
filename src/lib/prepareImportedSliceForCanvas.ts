@@ -3,7 +3,13 @@ import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import { captureActivePage } from "@/lib/editorPages";
 import { parseCssColor } from "@/lib/color";
 import type { EditorNode } from "@/stores/useEditorStore";
-import { normalizeBottomNavTextNodes } from "@/lib/webImport/normalizeWebImportLayers";
+import { enforceManualScreenFrames } from "@/lib/webImport/enforceManualScreenFrames";
+import {
+  normalizeBottomNavTextNodes,
+  normalizeImportedLabelTextNodes,
+  normalizeListItemTextNodes,
+  normalizeWebImportTextNodes,
+} from "@/lib/webImport/normalizeWebImportLayers";
 
 function hasUnresolvableCssColor(value: string | undefined): boolean {
   if (!value?.trim()) return false;
@@ -98,16 +104,24 @@ function syncPagesWithCanvas(slice: EditorPersistSlice): EditorPersistSlice {
 /** Ensure bridge/import slices paint on SVG (no var() fills, no clip hiding children). */
 export function prepareImportedSliceForCanvas(slice: EditorPersistSlice): EditorPersistSlice {
   let nodes = sanitizeNodesRecord(slice.nodes);
+  normalizeWebImportTextNodes(nodes);
+  normalizeImportedLabelTextNodes(nodes);
+  normalizeListItemTextNodes(nodes, slice.childOrder);
   normalizeBottomNavTextNodes(nodes);
   nodes = ensureRootFrameVisible(nodes, slice.childOrder);
+  enforceManualScreenFrames(nodes, slice.childOrder);
 
   let next: EditorPersistSlice = { ...slice, nodes };
   if (next.pages && next.activePageId) {
     const pages = { ...next.pages };
     for (const [pageId, page] of Object.entries(pages)) {
       let pageNodes = sanitizeNodesRecord(page.nodes);
+      normalizeWebImportTextNodes(pageNodes);
+      normalizeImportedLabelTextNodes(pageNodes);
+      normalizeListItemTextNodes(pageNodes, page.childOrder);
       normalizeBottomNavTextNodes(pageNodes);
       pageNodes = ensureRootFrameVisible(pageNodes, page.childOrder);
+      enforceManualScreenFrames(pageNodes, page.childOrder);
       pages[pageId] = { ...page, nodes: pageNodes };
     }
     next = { ...next, pages };

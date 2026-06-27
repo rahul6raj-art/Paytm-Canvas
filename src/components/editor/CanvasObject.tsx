@@ -164,11 +164,13 @@ export function CanvasObject({
   const instanceRootId = useEditorStore((s) => findInstanceRoot(s.nodes, id));
   const assets = useEditorStore((s) => s.assets);
   const designTokens = useEditorStore((s) => s.designTokens);
+  const canvasColorMode = useEditorStore((s) => s.canvasColorMode);
+  const projectCssSources = useEditorStore((s) => s.projectCssSources);
   const node = useMemo(() => {
     if (!nodeRaw) return null;
     const merged = resolveNodeForDisplay(nodes, childOrder, id) ?? nodeRaw;
-    return resolveNodeWithDesignTokens(merged, designTokens);
-  }, [nodeRaw, nodes, childOrder, id, designTokens]);
+    return resolveNodeWithDesignTokens(merged, designTokens, canvasColorMode, projectCssSources);
+  }, [nodeRaw, nodes, childOrder, id, designTokens, canvasColorMode, projectCssSources]);
   const maskNode = useEditorStore((s) =>
     nodeRaw?.maskId ? s.nodes[nodeRaw.maskId] : undefined,
   );

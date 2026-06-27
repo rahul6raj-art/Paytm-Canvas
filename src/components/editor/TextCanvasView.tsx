@@ -20,8 +20,10 @@ import {
 } from "./TextEditPortal";
 import { cn } from "@/lib/utils";
 import { getTextLayoutEpoch, subscribeTextLayoutEpoch } from "@/lib/text/textLayoutEpoch";
+import { useCanvasColorMode } from "@/hooks/useCanvasColorMode";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { isRotateGeometryLockActive, rotateGeomSnapshotForNode } from "@/lib/rotation/rotateGeometryLock";
+import { useResolvedTextPaintNode } from "./TextNodeCanvasShell";
 
 type TextCanvasViewProps = {
   node: EditorNode;
@@ -47,9 +49,11 @@ export function TextCanvasView({
   const [caretVisible, setCaretVisible] = useState(true);
 
   const zoom = useEditorStore((s) => s.zoom);
+  const canvasColorMode = useCanvasColorMode();
   const assets = useEditorStore((s) => s.assets);
   const textLayoutEpoch = useSyncExternalStore(subscribeTextLayoutEpoch, getTextLayoutEpoch, () => 0);
-  const model = toTextNodeModel(node, isEditing);
+  const paintNode = useResolvedTextPaintNode(node);
+  const model = toTextNodeModel(paintNode, isEditing);
   const caretIndex = selection?.focus ?? 0;
 
   useEffect(() => {
@@ -83,7 +87,7 @@ export function TextCanvasView({
 
     const paint = (mediaFill: Awaited<ReturnType<typeof loadTextMediaFill>>) => {
       if (!alive || !canvasRef.current) return;
-      const prepared = screenSized ? null : textLayoutForEditorNode(node);
+      const prepared = screenSized ? null : textLayoutForEditorNode(paintNode);
       renderTextToCanvas(canvasRef.current, {
         typo: renderTypo,
         text: model.text,
@@ -91,7 +95,7 @@ export function TextCanvasView({
         height: renderHeight,
         textAlign: model.textAlign,
         verticalAlign: model.verticalAlign,
-        opacity: node.opacity ?? 1,
+        opacity: paintNode.opacity ?? 1,
         wrapWidth: renderWrapWidth,
         zoom: screenSized ? 1 : zoom,
         layoutScale: screenSized ? scaleX : undefined,
@@ -101,30 +105,30 @@ export function TextCanvasView({
         selection: isEditing ? selection : null,
         caretIndex: isEditing ? caretIndex : null,
         caretVisible: isEditing && caretVisible,
-        style: textAdvancedStyleFromNode(node),
-        gradientNode: node,
+        style: textAdvancedStyleFromNode(paintNode),
+        gradientNode: paintNode,
         mediaFill,
         prepared,
       });
-      const fresh = useEditorStore.getState().nodes[node.id];
+      const fresh = useEditorStore.getState().nodes[paintNode.id];
       const rotateSt = useEditorStore.getState();
       const rotateLocked =
         isRotateGeometryLockActive(rotateSt) &&
-        rotateGeomSnapshotForNode(rotateSt, node.id) != null;
+        rotateGeomSnapshotForNode(rotateSt, paintNode.id) != null;
       if (fresh?.type === "text" && !rotateLocked && !screenSized) {
         const layoutPatch = textLayoutPatchForNode(fresh, fresh.content ?? "");
         if (
           layoutPatch &&
           (layoutPatch.width !== fresh.width || layoutPatch.height !== fresh.height)
         ) {
-          useEditorStore.getState().updateNodeStyle(node.id, layoutPatch, { skipHistory: true });
+          useEditorStore.getState().updateNodeStyle(paintNode.id, layoutPatch, { skipHistory: true });
         }
       }
     };
 
     void Promise.all([
       ensureFontFamilyLoaded(typo.fontFamily),
-      loadTextMediaFill(node, assets),
+      loadTextMediaFill(paintNode, assets),
     ]).then(([, mediaFill]) => {
       paint(mediaFill);
     });
@@ -139,7 +143,8 @@ export function TextCanvasView({
     caretIndex,
     caretVisible,
     zoom,
-    node,
+    paintNode,
+    canvasColorMode,
     assets,
     textLayoutEpoch,
     contentScaleX,

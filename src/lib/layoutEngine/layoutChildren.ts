@@ -208,28 +208,33 @@ export function layoutChildren(input: LayoutChildrenInput): Record<string, Layou
         mode === "horizontal" ? crossSize : mainSize,
       );
 
+      const localX =
+        mode === "horizontal" ? padLeft + mainCursor : padLeft + lineCrossCursor + crossOff;
+      const localY =
+        mode === "horizontal" ? padTop + lineCrossCursor + crossOff : padTop + mainCursor;
+
       if (mode === "horizontal") {
         out[id] = {
-          x: padLeft + mainCursor,
-          y: padTop + lineCrossCursor + crossOff,
+          x: localX,
+          y: localY,
           width: sized.width,
           height: sized.height,
           computedWidth: sized.width,
           computedHeight: sized.height,
           layoutDirty: false,
         };
-        mainCursor += mainSize + gap + between;
+        mainCursor += sized.width + gap + between;
       } else {
         out[id] = {
-          x: padLeft + lineCrossCursor + crossOff,
-          y: padTop + mainCursor,
+          x: localX,
+          y: localY,
           width: sized.width,
           height: sized.height,
           computedWidth: sized.width,
           computedHeight: sized.height,
           layoutDirty: false,
         };
-        mainCursor += mainSize + gap + between;
+        mainCursor += sized.height + gap + between;
       }
     }
 

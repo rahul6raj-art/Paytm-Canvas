@@ -22,5 +22,9 @@ describe("textContentHeuristics", () => {
       isImportableTextContent("Enter your email", { tagName: "label" }),
       true,
     );
+    assert.equal(
+      isImportableTextContent("Label", { className: "btn__label", tagName: "span" }),
+      true,
+    );
   });
 });

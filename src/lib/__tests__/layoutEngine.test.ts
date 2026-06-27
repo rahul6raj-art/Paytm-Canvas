@@ -306,6 +306,32 @@ describe("layoutEngine — padding on fixed frame", () => {
 });
 
 describe("layoutEngine — fill child", () => {
+  it("grows the frame when padding increases without shrinking a fixed child", () => {
+    const nodes: Record<string, LayoutEngineNode> = {
+      parent: rootFrame("parent", {
+        layoutMode: "horizontal",
+        width: 408,
+        height: 269,
+        layoutGap: 0,
+        paddingLeft: 16,
+        paddingRight: 16,
+        paddingTop: 16,
+        paddingBottom: 16,
+        layoutSizingHorizontal: "hug",
+        layoutSizingVertical: "hug",
+      }),
+      child: frame("child", 0, 0, 408, 269, { parentId: "parent" }),
+    };
+    const childOrder = { parent: ["child"] };
+    const out = layoutAutoNode("parent", nodes, childOrder);
+    assert.equal(out.children.child?.width, 408);
+    assert.equal(out.children.child?.height, 269);
+    assert.equal(out.children.child?.x, 16);
+    assert.equal(out.children.child?.y, 16);
+    assert.equal(out.parent?.width, 408 + 32);
+    assert.equal(out.parent?.height, 269 + 32);
+  });
+
   it("stretches fill child on main axis in fixed parent", () => {
     const nodes: Record<string, LayoutEngineNode> = {
       parent: rootFrame("parent", {

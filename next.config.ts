@@ -28,6 +28,15 @@ const nextConfig: NextConfig = {
     "playwright",
     "openfig-core",
   ],
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        fsevents: false,
+      };
+    }
+    return config;
+  },
 };
 
 export default nextConfig;

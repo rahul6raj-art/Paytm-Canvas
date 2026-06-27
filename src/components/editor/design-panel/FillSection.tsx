@@ -659,6 +659,7 @@ export function FillSection({
             pickerTitle="Fill color"
             libraryName={fillToken?.name}
             libraryTokenId={node.fillTokenId}
+            colorLibraryPicker
             instanceKey={instanceKey}
             disabled={locked}
             onToggleVisible={toggleFillVisible}

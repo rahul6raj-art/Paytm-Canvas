@@ -42,14 +42,8 @@ function promoteInferredAutoLayoutOnce(
       layoutGap: inferred.gap,
       primaryAxisAlign: parent.primaryAxisAlign ?? "start",
       counterAxisAlign: parent.counterAxisAlign ?? "start",
+      layoutDirty: true,
     };
-
-    // Preserve browser-measured positions; absolute children won't be reflowed.
-    for (const kidId of kids) {
-      const child = next[kidId];
-      if (!child?.visible) continue;
-      next[kidId] = { ...child, layoutPositioning: "absolute" };
-    }
   }
 
   return next;

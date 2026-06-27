@@ -4,13 +4,13 @@ import type { Page } from "playwright";
 async function waitForLazyIcons(page: Page): Promise<void> {
   await page
     .waitForFunction(
-      () => {
+      `() => {
         const wraps = document.querySelectorAll("[class*='__icon-wrap']");
         if (wraps.length === 0) return true;
         return Array.from(wraps).every((w) =>
           w.querySelector("svg path, svg line, svg polyline, svg rect, svg circle"),
         );
-      },
+      }`,
       { timeout: 12_000 },
     )
     .catch(() => undefined);
@@ -24,8 +24,8 @@ const PAINT_SELECTOR = "path,rect,circle,ellipse,line,polyline,polygon,text";
  */
 async function prepareSvgGraphics(page: Page): Promise<void> {
   await page.evaluate(
-    ({ paintSelector }: { paintSelector: string }) => {
-      function inlineSvgPaints(svg: SVGSVGElement): void {
+    `(paintSelector) => {
+      function inlineSvgPaints(svg) {
         const svgColor = getComputedStyle(svg).color;
         const w = svg.getAttribute("width");
         const h = svg.getAttribute("height");
@@ -34,7 +34,7 @@ async function prepareSvgGraphics(page: Page): Promise<void> {
         if (h) svg.setAttribute("height", h);
         if (vb) svg.setAttribute("viewBox", vb);
 
-        for (const node of svg.querySelectorAll<SVGElement>(paintSelector)) {
+        for (const node of svg.querySelectorAll(paintSelector)) {
           const cs = getComputedStyle(node);
           const fillAttr = node.getAttribute("fill");
           if (cs.fill && cs.fill !== "none") {
@@ -83,8 +83,8 @@ async function prepareSvgGraphics(page: Page): Promise<void> {
       for (const svg of Array.from(document.querySelectorAll("svg"))) {
         inlineSvgPaints(svg);
       }
-    },
-    { paintSelector: PAINT_SELECTOR },
+    }`,
+    PAINT_SELECTOR,
   );
 }
 
@@ -114,6 +114,9 @@ async function expandScrollRegionsForCapture(page: Page): Promise<void> {
       ".pml-more__scroll",
       ".pml-stocks__scroll",
       "[class*='__scroll']",
+      "main",
+      "[role='main']",
+      "[data-craft-screen]",
     ];
     for (const sel of scrollSelectors) {
       document.querySelectorAll(sel).forEach((el) => {
@@ -124,7 +127,7 @@ async function expandScrollRegionsForCapture(page: Page): Promise<void> {
         node.style.maxHeight = "none";
       });
     }
-    document.querySelectorAll(".pml-home, .pml-more, .pml-stocks, .pml-signup, .pml-onboarding").forEach((el) => {
+    document.querySelectorAll(".pml-home, .pml-more, .pml-stocks, .pml-signup, .pml-onboarding, [data-craft-screen], main, [role='main']").forEach((el) => {
       el.style.overflow = "visible";
       el.style.height = "auto";
       el.style.maxHeight = "none";

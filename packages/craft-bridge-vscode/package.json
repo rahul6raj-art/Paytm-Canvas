@@ -2,7 +2,7 @@
   "name": "craft-bridge",
   "displayName": "Craft Bridge",
   "description": "Push React/HTML page folders (.tsx or .html + .css) to Paytm Craft canvas; Send to code round-trip",
-  "version": "0.1.8",
+  "version": "0.1.11",
   "publisher": "paytm-craft",
   "license": "MIT",
   "repository": {
@@ -177,13 +177,19 @@
         },
         "craftBridge.openBrowserOnPush": {
           "type": "boolean",
-          "default": false,
-          "description": "Open Craft editor in browser after push (keep one /editor tab open; imports appear on that canvas)"
+          "default": true,
+          "description": "Open Craft editor after push with bridgeImport=1 so the canvas applies the pending screen immediately"
         },
         "craftBridge.bridgeToken": {
           "type": "string",
           "default": "",
           "description": "Bearer token when Craft requires CRAFT_BRIDGE_TOKEN"
+        },
+        "craftBridge.captureTheme": {
+          "type": "string",
+          "enum": ["light", "dark"],
+          "default": "light",
+          "description": "Live preview color mode for push (?theme= on capture URL). Use dark when previewing dark screens."
         }
       }
     }

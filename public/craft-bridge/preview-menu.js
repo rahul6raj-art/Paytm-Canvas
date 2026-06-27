@@ -9,11 +9,14 @@
   var MENU_ID = "craft-bridge-preview-menu";
   var TOAST_ID = "craft-bridge-preview-toast";
   var SCREEN_SELECTOR =
-    ".pml-home, .pml-more, .pml-stocks, .pml-signup, .pml-onboarding, [data-craft-screen]";
+    "[data-craft-screen], #root, main, [role='main'], .pml-home, .pml-more, .pml-stocks, .pml-signup, .pml-onboarding";
 
   function isCraftScreenTarget(target) {
     if (!(target instanceof Element)) return false;
-    return Boolean(target.closest(SCREEN_SELECTOR));
+    if (target.closest("[data-craft-screen-ignore]")) return false;
+    if (target.closest("input, textarea, select, [contenteditable='true']")) return false;
+    if (target.closest(SCREEN_SELECTOR)) return true;
+    return target === document.body || Boolean(target.closest("body > *"));
   }
 
   function removeEl(id) {
@@ -109,6 +112,9 @@
           " layers)",
         "ok",
       );
+      if (body.openUrl) {
+        window.open(craftUrl.replace(/\/$/, "") + body.openUrl, "_blank", "noopener,noreferrer");
+      }
     } catch (e) {
       showToast(
         "Could not reach Craft at " + craftUrl + ". Is npm run dev running?",

@@ -5,12 +5,12 @@ import { applyPageCssToSlice } from "./applyPageCssToSlice";
 import { relayoutFlowChildrenInSlice } from "./flowSiblingLayout";
 import { finalizeImportedGraph } from "./finalizeImportedGraph";
 import { pinPhoneShellBottomChromeNodes } from "@/lib/webImport/phoneShellBottomChrome";
-import { normalizeBottomNavTextNodes } from "@/lib/webImport/normalizeWebImportLayers";
+import { normalizeBottomNavTextNodes, normalizeListItemTextNodes } from "@/lib/webImport/normalizeWebImportLayers";
 import { isPhoneShellClassName } from "@/lib/webImport/phoneShellViewport";
 import { placeScreenFrameOnCanvas } from "@/lib/codeExport/frameRelativeExport";
 import {
-  designTokensFromProjectCss,
   mergeDesignTokenRecords,
+  projectDesignTokensWithColorModesFromCssSources,
 } from "@/lib/codeRoundTrip/designTokensFromProjectCss";
 import { tokenizeImportedNodes } from "@/lib/craftBridge/tokenizeImportedNodes";
 import {
@@ -47,6 +47,7 @@ function finalizePageCssSlice(
     844;
   pinPhoneShellBottomChromeNodes(nodes, slice.childOrder, shellHeight);
   normalizeBottomNavTextNodes(nodes);
+  normalizeListItemTextNodes(nodes, slice.childOrder);
   nodes = placeScreenFrameOnCanvas(nodes, rootIds);
   for (const rootId of rootIds) {
     const root = nodes[rootId];
@@ -69,15 +70,21 @@ export function importReactPageBundle(input: ReactPageBundleInput): ReactImportR
   if (!result.ok) return result;
 
   const cssSources = (input.cssSources ?? []).filter((c) => c?.trim());
+  const importTheme = input.theme ?? "light";
   const withCss =
-    cssSources.length > 0 ? applyPageCssToSlice(result.slice, cssSources) : result.slice;
+    cssSources.length > 0
+      ? applyPageCssToSlice(result.slice, cssSources, importTheme)
+      : result.slice;
   let slice = finalizePageCssSlice(withCss, cssSources, input.fileName);
-  const projectTokens = designTokensFromProjectCss(cssSources, input.theme ?? "light");
+  const projectTokens = projectDesignTokensWithColorModesFromCssSources(cssSources);
   const designTokens = mergeDesignTokenRecords(slice.designTokens, projectTokens);
   slice = {
     ...slice,
     designTokens,
-    nodes: tokenizeImportedNodes(slice.nodes, designTokens),
+    nodes: tokenizeImportedNodes(slice.nodes, designTokens, {
+      importMode: importTheme,
+      cssSources,
+    }),
   };
   const cssNote =
     cssSources.length > 0

@@ -12,6 +12,12 @@ import {
 import { effectiveVariantValuesForInstance } from "@/lib/components/componentInteractions";
 import { nestedInstanceRootsInSubtree } from "@/lib/components/stablePaths";
 import { applyInstanceSwapProperties } from "@/lib/components/componentInstanceSwap";
+import {
+  instanceRootStableIdForMaster,
+  isMasterShellStableId,
+  masterSubtreeSyncRootId,
+  unwrapComponentInstanceContentShell,
+} from "@/lib/components/componentInstanceShell";
 import { applySlotProperties } from "@/lib/components/componentSlots";
 
 export type ResolveComponentInstanceResult = {
@@ -72,7 +78,7 @@ function syncChildOrderFromMaster(
     }
   };
 
-  syncRec(masterRootId, instanceRootId);
+  syncRec(masterSubtreeSyncRootId(nodes, masterRootId), instanceRootId);
   return nextOrder;
 }
 
@@ -101,12 +107,14 @@ function syncMissingLayersFromMaster(
 
   for (const [masterNodeId, stableId] of Object.entries(masterStable)) {
     if (knownStable.has(stableId)) continue;
+    if (isMasterShellStableId(master, masterRootId, stableId)) continue;
     const masterNode = nodes[masterNodeId];
     if (!masterNode) continue;
 
+    const syncMasterRootId = masterSubtreeSyncRootId(nodes, masterRootId);
     const masterParentId = masterNode.parentId ?? masterRootId;
     const instanceParentId =
-      masterParentId === masterRootId
+      masterParentId === masterRootId || masterParentId === syncMasterRootId
         ? instanceRootId
         : masterToInstance.get(masterStable[masterParentId] ?? "") ?? instanceRootId;
 
@@ -233,7 +241,7 @@ export function resolveComponentInstance(
   instanceRootId: string,
   opts?: { force?: boolean; debug?: boolean },
 ): ResolveComponentInstanceResult {
-  const instanceRoot = nodes[instanceRootId];
+  let instanceRoot = nodes[instanceRootId];
   if (!instanceRoot?.sourceComponentId || instanceRoot.instanceDetached) {
     return {
       nodes,
@@ -263,6 +271,17 @@ export function resolveComponentInstance(
       cacheStatus: "hit",
       stale: false,
     };
+  }
+
+  const unwrappedRootId = unwrapComponentInstanceContentShell(
+    nodes,
+    childOrder,
+    instanceRootId,
+    masterId,
+  );
+  if (unwrappedRootId !== instanceRootId) {
+    instanceRootId = unwrappedRootId;
+    instanceRoot = nodes[instanceRootId]!;
   }
 
   const masterVersion = master.componentVersion ?? 1;
@@ -310,7 +329,7 @@ export function resolveComponentInstance(
     dropped.push(...nested.droppedOverrides);
   }
 
-  const rootStableId = master.componentLayerStableIds?.[masterId];
+  const rootStableId = instanceRootStableIdForMaster(master, masterId);
   const rootOverride = rootStableId
     ? readInstanceOverrideMap(nextNodes[instanceRootId]!)[rootStableId]
     : undefined;
@@ -338,10 +357,12 @@ export function resolveComponentInstance(
   );
 
   const rootOverrideMap = readInstanceOverrideMap(nextNodes[instanceRootId]!);
-  const rootSid = master.componentLayerStableIds?.[masterId];
+  const rootSid = instanceRootStableIdForMaster(master, masterId);
   const rootPaths = rootSid ? rootOverrideMap[rootSid] : undefined;
-  const rootW = rootPaths?.width !== undefined ? instanceRoot.width : master.width;
-  const rootH = rootPaths?.height !== undefined ? instanceRoot.height : master.height;
+  const syncMasterRootId = masterSubtreeSyncRootId(nextNodes, masterId);
+  const syncMaster = nextNodes[syncMasterRootId];
+  const rootW = rootPaths?.width !== undefined ? instanceRoot.width : (syncMaster?.width ?? master.width);
+  const rootH = rootPaths?.height !== undefined ? instanceRoot.height : (syncMaster?.height ?? master.height);
 
   nextNodes[instanceRootId] = {
     ...nextNodes[instanceRootId]!,

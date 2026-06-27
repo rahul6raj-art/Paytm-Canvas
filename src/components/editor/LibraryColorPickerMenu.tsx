@@ -3,14 +3,24 @@
 import { useMemo } from "react";
 import { useEditorStore } from "@/stores/useEditorStore";
 import type { DesignToken } from "@/lib/designTokens";
-import { isColorValue } from "@/lib/designTokens";
+import { isColorValue, resolvedColorForMode } from "@/lib/designTokens";
+import {
+  flattenGroupedColorTokens,
+  groupColorDesignTokens,
+  type ColorTokenCategoryGroup,
+} from "@/lib/colorTokenCategories";
+import { useCanvasColorMode } from "@/hooks/useCanvasColorMode";
 import { cn } from "@/lib/utils";
 import { EditorHintWrap } from "./EditorHoverHint";
 
+export function getGroupedColorDesignTokens(
+  tokens: Record<string, DesignToken>,
+): ColorTokenCategoryGroup[] {
+  return groupColorDesignTokens(Object.values(tokens));
+}
+
 export function getColorDesignTokens(tokens: Record<string, DesignToken>): DesignToken[] {
-  return Object.values(tokens)
-    .filter((t) => t.type === "color" && isColorValue(t.value))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  return flattenGroupedColorTokens(getGroupedColorDesignTokens(tokens));
 }
 
 type LibraryColorPickerMenuProps = {
@@ -28,9 +38,10 @@ export function LibraryColorPickerMenu({
   hideWhenEmpty = false,
 }: LibraryColorPickerMenuProps) {
   const designTokens = useEditorStore((s) => s.designTokens);
-  const colors = useMemo(() => getColorDesignTokens(designTokens), [designTokens]);
+  const colorMode = useCanvasColorMode();
+  const groups = useMemo(() => getGroupedColorDesignTokens(designTokens), [designTokens]);
 
-  if (colors.length === 0) {
+  if (groups.length === 0) {
     if (hideWhenEmpty) return null;
     return (
       <p className="px-3 py-4 text-center text-ui leading-snug text-app-subtle">
@@ -39,33 +50,45 @@ export function LibraryColorPickerMenu({
     );
   }
 
+  const gridClass = variant === "compact" ? "grid grid-cols-6 gap-1" : "grid grid-cols-5 gap-1.5";
+  const sectionHeadingClass = "mb-1.5 px-0.5 text-ui font-semibold text-app-subtle";
+
+  const renderSwatch = (token: DesignToken, active: boolean) => {
+    const raw = token.value;
+    if (!isColorValue(raw)) return null;
+    const v = resolvedColorForMode(raw, colorMode);
+    return (
+      <EditorHintWrap key={token.id} title={`${token.name} · ${v.hex}`}>
+        <button
+          type="button"
+          onClick={() => onPick(token.id)}
+          className={cn(
+            "aspect-square min-h-[32px] rounded-md border transition-all hover:scale-105 hover:shadow-md",
+            active
+              ? "border-accent ring-2 ring-accent/40"
+              : "border-white/[0.15] hover:border-white/30",
+          )}
+          style={{
+            backgroundColor: v.hex,
+            opacity: v.opacity ?? 1,
+          }}
+        >
+          <span className="sr-only">{token.name}</span>
+        </button>
+      </EditorHintWrap>
+    );
+  };
+
   const grid = (
-    <div className={variant === "compact" ? "grid grid-cols-6 gap-1" : "grid grid-cols-5 gap-1.5"}>
-        {colors.map((token) => {
-          const v = token.value;
-          if (!isColorValue(v)) return null;
-          const active = activeTokenId === token.id;
-          return (
-            <EditorHintWrap key={token.id} title={`${token.name} · ${v.hex}`}>
-              <button
-                type="button"
-                onClick={() => onPick(token.id)}
-                className={cn(
-                  "aspect-square min-h-[32px] rounded-md border transition-all hover:scale-105 hover:shadow-md",
-                  active
-                    ? "border-accent ring-2 ring-accent/40"
-                    : "border-white/[0.15] hover:border-white/30",
-                )}
-                style={{
-                  backgroundColor: v.hex,
-                  opacity: v.opacity ?? 1,
-                }}
-              >
-                <span className="sr-only">{token.name}</span>
-              </button>
-            </EditorHintWrap>
-          );
-        })}
+    <div className="space-y-3">
+      {groups.map((group) => (
+        <section key={group.id}>
+          <h4 className={sectionHeadingClass}>{group.label}</h4>
+          <div className={gridClass}>
+            {group.tokens.map((token) => renderSwatch(token, activeTokenId === token.id))}
+          </div>
+        </section>
+      ))}
     </div>
   );
 
@@ -77,33 +100,41 @@ export function LibraryColorPickerMenu({
     <div className="p-2">
       <p className="mb-2 px-0.5 text-ui font-medium text-app-subtle">Choose library color</p>
       {grid}
-      <ul className="thin-scroll mt-2 max-h-48 space-y-0.5 overflow-y-auto border-t border-app-border-subtle pt-2">
-        {colors.map((token) => {
-          const v = token.value;
-          if (!isColorValue(v)) return null;
-          const active = activeTokenId === token.id;
-          return (
-            <li key={token.id}>
-              <button
-                type="button"
-                onClick={() => onPick(token.id)}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui transition-colors hover:bg-app-hover",
-                  active && "bg-app-inset text-app-fg",
-                )}
-              >
-                <span
-                  className="h-4 w-4 shrink-0 rounded border border-app-border"
-                  style={{ backgroundColor: v.hex, opacity: v.opacity ?? 1 }}
-                  aria-hidden
-                />
-                <span className="min-w-0 flex-1 truncate font-medium">{token.name}</span>
-                <span className="shrink-0 font-mono text-ui text-app-subtle">{v.hex}</span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+      <div className="thin-scroll mt-2 max-h-48 space-y-3 overflow-y-auto border-t border-app-border-subtle pt-2">
+        {groups.map((group) => (
+          <section key={group.id}>
+            <h4 className={sectionHeadingClass}>{group.label}</h4>
+            <ul className="space-y-0.5">
+              {group.tokens.map((token) => {
+                const raw = token.value;
+                if (!isColorValue(raw)) return null;
+                const v = resolvedColorForMode(raw, colorMode);
+                const active = activeTokenId === token.id;
+                return (
+                  <li key={token.id}>
+                    <button
+                      type="button"
+                      onClick={() => onPick(token.id)}
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui transition-colors hover:bg-app-hover",
+                        active && "bg-app-inset text-app-fg",
+                      )}
+                    >
+                      <span
+                        className="h-4 w-4 shrink-0 rounded border border-app-border"
+                        style={{ backgroundColor: v.hex, opacity: v.opacity ?? 1 }}
+                        aria-hidden
+                      />
+                      <span className="min-w-0 flex-1 truncate font-medium">{token.name}</span>
+                      <span className="shrink-0 font-mono text-ui text-app-subtle">{v.hex}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ))}
+      </div>
     </div>
   );
 }

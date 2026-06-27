@@ -2,6 +2,7 @@ import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import type { EditorNode } from "@/stores/useEditorStore";
 import type { CodeRoundTripLink } from "@/lib/craftBridge/types";
 import { canvasScreenLabelFromSource } from "@/lib/craftBridge/canvasScreenLabels";
+import { canvasScreenLabelFromPreviewUrl } from "@/lib/craftBridge/previewRouteKey";
 
 export type BridgeImportStrategy =
   | { mode: "replace" }
@@ -9,6 +10,10 @@ export type BridgeImportStrategy =
   | { mode: "replace-root"; rootId: string; x: number; y: number };
 
 export function screenLabelFromSourcePath(sourcePath: string): string {
+  if (sourcePath.startsWith("preview://")) {
+    const route = sourcePath.slice("preview://".length);
+    return canvasScreenLabelFromPreviewUrl(`http://local/${route.replace(/^\//, "")}`);
+  }
   return canvasScreenLabelFromSource(sourcePath);
 }
 
@@ -23,6 +28,13 @@ function rootMatchesSourcePath(
 ): boolean {
   const tagged = node.bridgeSourcePath?.trim();
   if (tagged && normalizeSourcePath(tagged) === normalizedSourcePath) return true;
+  if (
+    normalizedSourcePath.startsWith("preview://") &&
+    tagged &&
+    normalizeSourcePath(tagged) === normalizedSourcePath
+  ) {
+    return true;
+  }
   return node.name === label;
 }
 

@@ -31,11 +31,13 @@ function readManifest(cwd) {
 
 function getConfig() {
   const cfg = vscode.workspace.getConfiguration("craftBridge");
+  const captureTheme = cfg.get("captureTheme", "light");
   return {
     craftUrl: (cfg.get("craftUrl", "http://localhost:3000") || "").replace(/\/$/, ""),
     cliPath: cfg.get("cliPath", "") || "",
-    openBrowserOnPush: cfg.get("openBrowserOnPush", false) === true,
+    openBrowserOnPush: cfg.get("openBrowserOnPush", true) !== false,
     bridgeToken: cfg.get("bridgeToken", "") || process.env.CRAFT_BRIDGE_TOKEN || "",
+    captureTheme: captureTheme === "dark" ? "dark" : "light",
   };
 }
 
@@ -67,9 +69,10 @@ function resolveCli(context) {
 function runBridge(context, args, cwd) {
   const { bin, prefixArgs } = resolveCli(context);
   const env = { ...process.env };
-  const { bridgeToken, craftUrl } = getConfig();
+  const { bridgeToken, craftUrl, captureTheme } = getConfig();
   if (bridgeToken) env.CRAFT_BRIDGE_TOKEN = bridgeToken;
   if (craftUrl) env.CRAFT_BRIDGE_URL = craftUrl;
+  env.CRAFT_BRIDGE_CAPTURE_THEME = captureTheme;
 
   log(`$ ${bin} ${[...prefixArgs, ...args].join(" ")}`);
   return new Promise((resolve, reject) => {
@@ -190,6 +193,15 @@ async function ensureCraftReachable(context) {
   }
 }
 
+/** @param {string} out @param {string} craftUrl */
+function parseOpenUrlFromCliOutput(out, craftUrl) {
+  const match = out.match(/^\s*Open:\s*(\S+)/m);
+  if (!match?.[1]) return `${craftUrl}/editor?bridgeImport=1`;
+  const raw = match[1];
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return `${craftUrl}${raw.startsWith("/") ? raw : `/${raw}`}`;
+}
+
 /** @param {vscode.ExtensionContext} context @param {vscode.Uri | undefined} fileUri @param {"push"|"setup"} mode */
 async function pushSource(context, fileUri, mode = "push") {
   const uri = resolvePushUri(fileUri);
@@ -245,8 +257,9 @@ async function pushSource(context, fileUri, mode = "push") {
         }
         const out = await runBridge(context, [cliCmd, rel, "--repo", repoRoot, "--no-open"], cwd);
         const { craftUrl, openBrowserOnPush } = getConfig();
+        const openTarget = parseOpenUrlFromCliOutput(out, craftUrl);
         if (openBrowserOnPush) {
-          vscode.env.openExternal(vscode.Uri.parse(`${craftUrl}/editor`));
+          vscode.env.openExternal(vscode.Uri.parse(openTarget));
         }
         const cssNote = /Page CSS:/i.test(out) ? " (with CSS)" : "";
         vscode.window.showInformationMessage(
@@ -372,7 +385,7 @@ function activate(context) {
       try {
         await runBridge(context, ["install-preview-menu"], cwd);
         vscode.window.showInformationMessage(
-          "Craft Bridge: right-click a phone screen in the live preview → Push to Craft canvas",
+          "Craft Bridge: right-click anywhere in the live app preview (any route) → Push to Craft canvas",
         );
       } catch (e) {
         vscode.window.showErrorMessage(`Craft Bridge: ${e.message}`);
@@ -418,7 +431,7 @@ function activate(context) {
     }),
   );
 
-  log("Craft Bridge extension activated (page folder .tsx/.html + .css round-trip)");
+  log("Craft Bridge v0.1.11 — page folders, any preview route, light/dark capture theme");
 }
 
 function deactivate() {

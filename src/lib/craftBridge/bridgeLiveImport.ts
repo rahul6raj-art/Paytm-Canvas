@@ -15,7 +15,7 @@ import {
   canvasScreenLabelFromPageTitle,
   canvasScreenLabelFromSource,
 } from "@/lib/craftBridge/canvasScreenLabels";
-import { defaultCaptureColorTheme } from "@/lib/webImport/captureTheme";
+import { resolveBridgeImportColorTheme } from "@/lib/webImport/captureTheme";
 import { assertPreviewReachable } from "@/lib/webImport/server/assertPreviewReachable";
 import { runImportWebCapture } from "@/lib/webImport/server/playwrightCaptureService";
 import { importWebResponseToPersistSlice } from "@/lib/webImport/webImportToPersistSlice";
@@ -29,6 +29,8 @@ export type BridgeLiveImportInput = {
   /** Raw CSS file contents (page + src/tokens/*.css) for color token library import. */
   cssSources?: string[];
   theme?: "light" | "dark";
+  /** Override canvas artboard name (e.g. from preview URL route). */
+  screenLabel?: string;
 };
 
 export type BridgeLiveImportResult =
@@ -100,8 +102,9 @@ export async function importBridgeFromLivePreview(
         "ImportedScreen",
     );
     const screenLabel =
-      (input.fileName ? canvasScreenLabelFromSource(input.fileName) : null) ??
-      canvasScreenLabelFromPageTitle(capture.page.title) ??
+      input.screenLabel?.trim() ||
+      (input.fileName ? canvasScreenLabelFromSource(input.fileName) : null) ||
+      canvasScreenLabelFromPageTitle(capture.page.title) ||
       canvasScreenLabelFromSource(componentName);
     nodes = applyCanvasScreenLabelToRoots(nodes, rootIds, screenLabel);
 
@@ -116,10 +119,11 @@ export async function importBridgeFromLivePreview(
       selectedIds: rootIds,
       canvasBackgroundColor: DEFAULT_CANVAS_BACKGROUND,
     });
+    const importTheme = resolveBridgeImportColorTheme(validated.url, input.theme);
     let finalSlice = prepareImportedSliceForCanvas(wrapped);
     finalSlice = await enrichSliceWithProjectColorTokens(finalSlice, {
       cssSources: input.cssSources,
-      theme: input.theme ?? defaultCaptureColorTheme(),
+      theme: importTheme,
     });
 
     const layerCount = Object.keys(finalSlice.nodes).length;

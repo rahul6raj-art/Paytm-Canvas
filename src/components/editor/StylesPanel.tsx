@@ -11,14 +11,18 @@ import {
   isGradientValue,
   isSpacingValue,
   isTypographyValue,
+  resolvedColorForMode,
   tokenValueSummary,
   type DesignToken,
   type EffectTokenValue,
 } from "@/lib/designTokens";
+import { useCanvasColorMode } from "@/hooks/useCanvasColorMode";
 import { buildNodeEffectRenderStyle } from "@/lib/nodeEffects";
 import { fillPaintCss, normalizeFillGradient } from "@/lib/fillGradient";
 import { ColorInput } from "@/components/editor/ColorInput";
 import { ColorLibrary } from "@/components/editor/ColorLibrary";
+import { DesignColorModeSection } from "@/components/editor/DesignColorModeSection";
+import { getGroupedColorDesignTokens } from "@/components/editor/LibraryColorPickerMenu";
 import { cn } from "@/lib/utils";
 import { EditorHintWrap } from "./EditorHoverHint";
 
@@ -60,8 +64,9 @@ function groupByType(tokens: DesignToken[]) {
 }
 
 function TokenPreview({ token }: { token: DesignToken }) {
+  const colorMode = useCanvasColorMode();
   if (token.type === "color" && isColorValue(token.value)) {
-    const v = token.value;
+    const v = resolvedColorForMode(token.value, colorMode);
     const op = v.opacity ?? 1;
     return (
       <EditorHintWrap title={tokenValueSummary(token)} anchorClassName="contents">
@@ -206,6 +211,7 @@ export function StylesPanel() {
   const [spaceVal, setSpaceVal] = useState("16");
 
   const grouped = useMemo(() => groupByType(Object.values(designTokens)), [designTokens]);
+  const colorGroups = useMemo(() => getGroupedColorDesignTokens(designTokens), [designTokens]);
   const hasColors = grouped.colors.length > 0;
 
   const addColor = () => {
@@ -225,10 +231,15 @@ export function StylesPanel() {
           <Library className="h-4 w-4 text-accent" strokeWidth={1.75} />
           <div>
             <p className="text-ui font-semibold text-app-fg">Design system</p>
-            <p className="text-ui text-app-subtle">Reusable colors, type, and effects</p>
+            <p className="text-ui text-app-subtle">
+              Apply to imported screens and anything you draw — select a layer, then pick a token or
+              click Apply.
+            </p>
           </div>
         </div>
       </div>
+
+      <DesignColorModeSection compact className="mb-3 rounded-lg border border-app-border bg-app-field px-3 py-2.5" />
 
       <Section title="Colors">
         {!hasColors ? (
@@ -295,11 +306,21 @@ export function StylesPanel() {
         </div>
 
         {hasColors ? (
-          <ul className="mt-2 space-y-1.5">
-            {grouped.colors.map((t) => (
-              <TokenRow key={t.id} token={t} />
+          <div className="mt-2 space-y-3">
+            {colorGroups.map((group, groupIndex) => (
+              <section
+                key={group.id}
+                className={groupIndex > 0 ? "border-t border-app-border-subtle pt-3" : ""}
+              >
+                <h4 className="mb-1.5 px-1 section-heading">{group.label}</h4>
+                <ul className="space-y-1.5">
+                  {group.tokens.map((t) => (
+                    <TokenRow key={t.id} token={t} />
+                  ))}
+                </ul>
+              </section>
             ))}
-          </ul>
+          </div>
         ) : null}
       </Section>
 

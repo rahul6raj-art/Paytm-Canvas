@@ -48,7 +48,7 @@ export function importHtmlPageBundle(input: HtmlPageBundleInput): HtmlImportResu
   slice = {
     ...slice,
     designTokens,
-    nodes: tokenizeImportedNodes(slice.nodes, designTokens),
+    nodes: tokenizeImportedNodes(slice.nodes, designTokens, { cssSources }),
   };
   const cssCount = cssSources.length;
   const tokenCount = Object.keys(projectTokens).length;

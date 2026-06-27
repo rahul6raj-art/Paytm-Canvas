@@ -6,6 +6,7 @@ import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import { topLevelSelectedIds } from "@/lib/editorGraph";
 import { nextNumberedLayerName } from "@/lib/layerNaming";
 import { worldRect } from "@/lib/tree";
+import { isManualScreenFrame, rootFrameIds } from "@/lib/webImport/manualScreenFrames";
 import {
   applyDeepAutoLayout,
   defaultFixedSizingForContainer,
@@ -184,7 +185,7 @@ function enableAutoLayoutOnContainer(
 
   if ((n.layoutMode ?? "none") === "none") {
     sortChildOrderInPlace(nextOrder, containerId, nodes, mode);
-    const layout = layoutFieldsForChildren(nodes, kids, n.width, n.height, "fixed");
+    const layout = layoutFieldsForChildren(nodes, kids, n.width, n.height, "hug");
     let next = {
       ...nodes,
       [containerId]: { ...n, ...layout, expanded: true },
@@ -291,7 +292,6 @@ function wrapInAutoLayoutFrame(
     locked: false,
     expanded: true,
     fillEnabled: false,
-    fill: "#ffffff",
     ...layout,
   };
 
@@ -377,7 +377,6 @@ function wrapInPlainFrame(
     locked: false,
     expanded: true,
     fillEnabled: false,
-    fill: "#ffffff",
     layoutMode: "none",
   };
 
@@ -429,6 +428,7 @@ export function applyAutoLayoutToContainer(
 ): ApplyAutoLayoutSelectionResult | null {
   const n = nodes[containerId];
   if (!n || !isContainer(n)) return null;
+  if (isManualScreenFrame(n, rootFrameIds(childOrder))) return null;
   const result = enableAutoLayoutOnContainer(nodes, childOrder, containerId);
   return {
     nodes: result.nodes,

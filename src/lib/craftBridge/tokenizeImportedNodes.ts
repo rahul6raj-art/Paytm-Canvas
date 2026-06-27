@@ -1,42 +1,17 @@
+import type { EditorNode } from "@/stores/useEditorStore";
 import {
-  colorTokenMatchKey,
+  pickFillColorTokenId,
+  pickTextColorTokenId,
+  type TokenizeImportedNodesOptions,
+} from "@/lib/colorTokenMatching";
+import type { DesignToken } from "@/lib/designTokens";
+import {
   isTypographyUtilityClassName,
-  tokenColorMatchKey,
   typographyClassToTokenId,
   typographyMatchesNode,
 } from "@/lib/codeRoundTrip/designTokensFromProjectCss";
-import type { DesignToken } from "@/lib/designTokens";
-import type { EditorNode } from "@/stores/useEditorStore";
 
-export type ColorTokenHint = "text" | "fill" | "stroke" | "icon";
-
-const COLOR_HINT_PREFIXES: Record<ColorTokenHint, string[]> = {
-  text: ["text-", "icon-"],
-  fill: ["background-", "surface-", "colour-", "brand-", "glass-"],
-  stroke: ["border-"],
-  icon: ["icon-", "text-"],
-};
-
-function pickColorTokenId(
-  hex: string | undefined,
-  opacity: number | undefined,
-  tokens: Record<string, DesignToken>,
-  hint: ColorTokenHint,
-): string | undefined {
-  if (!hex?.trim()) return undefined;
-  const key = colorTokenMatchKey(hex, opacity);
-  const candidates = Object.values(tokens).filter((t) => tokenColorMatchKey(t) === key);
-  if (candidates.length === 0) return undefined;
-  if (candidates.length === 1) return candidates[0]!.id;
-
-  for (const prefix of COLOR_HINT_PREFIXES[hint]) {
-    const match = candidates.find((c) => c.name.startsWith(prefix));
-    if (match) return match.id;
-  }
-
-  const semantic = candidates.find((c) => !c.name.startsWith("primitive-"));
-  return semantic?.id ?? candidates[0]!.id;
-}
+export type { TokenizeImportedNodesOptions };
 
 function pickTypographyTokenId(
   node: EditorNode,
@@ -87,27 +62,23 @@ function pickSpacingTokenId(
   return matches[0]!.id;
 }
 
-function colorHintForNode(node: EditorNode): ColorTokenHint {
-  if (node.type === "text") return "text";
-  const cls = node.codeClassName ?? "";
-  if (/\bicon|svg|path\b/i.test(cls) || node.type === "path") return "icon";
-  return "fill";
-}
-
 /** Bind imported canvas nodes to project CSS tokens instead of leaving raw hex values. */
 export function tokenizeImportedNodes(
   nodes: Record<string, EditorNode>,
   designTokens: Record<string, DesignToken>,
+  options: TokenizeImportedNodesOptions = {},
 ): Record<string, EditorNode> {
   if (Object.keys(designTokens).length === 0) return nodes;
+
+  const importMode = options.importMode ?? "light";
+  const cssSources = (options.cssSources ?? []).filter((c) => c?.trim());
 
   const next: Record<string, EditorNode> = {};
   for (const [id, node] of Object.entries(nodes)) {
     let patched: EditorNode = { ...node };
 
     if (node.type === "text") {
-      const textHex = node.textColor ?? node.fill;
-      const textToken = pickColorTokenId(textHex, node.fillOpacity, designTokens, "text");
+      const textToken = pickTextColorTokenId(node, designTokens, cssSources, importMode);
       if (textToken) {
         patched = { ...patched, fillTokenId: textToken };
       }
@@ -116,15 +87,14 @@ export function tokenizeImportedNodes(
       if (typoToken) {
         patched = { ...patched, textStyleTokenId: typoToken };
       }
-    } else if (node.fillEnabled !== false && node.fill) {
-      const fillToken = pickColorTokenId(
-        node.fill,
-        node.fillOpacity ?? node.opacity,
-        designTokens,
-        colorHintForNode(node),
-      );
+    } else if (node.type !== "text") {
+      const fillToken = pickFillColorTokenId(node, designTokens, cssSources, importMode);
       if (fillToken) {
-        patched = { ...patched, fillTokenId: fillToken };
+        patched = {
+          ...patched,
+          fillTokenId: fillToken,
+          fillEnabled: patched.fillEnabled === false ? false : true,
+        };
       }
     }
 

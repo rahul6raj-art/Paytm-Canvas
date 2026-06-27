@@ -10,6 +10,7 @@ describe("resolvePreviewPushLink", () => {
     assert.equal(previewScreenId("http://localhost:5173/?screen=home"), "home");
     assert.equal(previewScreenId("http://localhost:5173/?screen=more&theme=dark"), "more");
     assert.equal(previewScreenId("http://localhost:5173/"), "home");
+    assert.equal(previewScreenId("http://localhost:5173/settings/profile"), "settings-profile");
   });
 
   it("resolves PML home link from manifest when repo is present", async () => {
@@ -27,6 +28,7 @@ describe("resolvePreviewPushLink", () => {
     );
     assert.equal(result.ok, true);
     if (result.ok) {
+      assert.equal(result.mode, "linked");
       assert.match(result.pagePath, /PMLHomePage/i);
     }
   });

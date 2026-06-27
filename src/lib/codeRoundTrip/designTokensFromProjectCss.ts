@@ -120,6 +120,41 @@ function spacingTokensFromCssVars(
   return tokens;
 }
 
+function colorTokenFromCssVar(
+  varName: string,
+  lightVars: Record<string, string>,
+  darkVars: Record<string, string>,
+  darkScope: Record<string, string>,
+): ColorTokenValue | null {
+  const lightRaw = lightVars[varName] ?? darkVars[varName];
+  if (!lightRaw) return null;
+  const lightResolved = resolveCssValue(lightRaw, lightVars).trim();
+  const lightParsed = parseCssColor(lightResolved);
+  if (!lightParsed) return null;
+
+  const value: ColorTokenValue = {
+    hex: lightParsed.hex,
+    ...(lightParsed.opacity != null ? { opacity: lightParsed.opacity } : {}),
+  };
+
+  if (darkScope[varName]) {
+    const darkResolved = resolveCssValue(darkScope[varName]!, darkVars).trim();
+    const darkParsed = parseCssColor(darkResolved);
+    if (darkParsed) {
+      const lightOp = value.opacity ?? 1;
+      const darkOp = darkParsed.opacity ?? 1;
+      if (darkParsed.hex !== value.hex || darkOp !== lightOp) {
+        value.dark = {
+          hex: darkParsed.hex,
+          ...(darkParsed.opacity != null ? { opacity: darkParsed.opacity } : {}),
+        };
+      }
+    }
+  }
+
+  return value;
+}
+
 /** Build Craft design tokens from project `src/tokens/*.css` (colors, typography, spacing). */
 export function projectDesignTokensFromCssSources(
   cssSources: string[],
@@ -157,6 +192,44 @@ export function projectDesignTokensFromCssSources(
   return tokens;
 }
 
+/** Import color tokens with both light and dark values from project CSS. */
+export function projectDesignTokensWithColorModesFromCssSources(
+  cssSources: string[],
+): Record<string, DesignToken> {
+  const scopes = parseCssCustomProperties(cssSources);
+  const lightVars = { ...scopes.light };
+  const darkVars = { ...scopes.light, ...scopes.dark };
+  const now = designTokenTimestamp();
+  const tokens: Record<string, DesignToken> = {};
+
+  const varNames = new Set([
+    ...Object.keys(scopes.light),
+    ...Object.keys(scopes.dark),
+  ]);
+
+  for (const varName of varNames) {
+    if (!varName.startsWith("--")) continue;
+    const colorValue = colorTokenFromCssVar(varName, lightVars, darkVars, scopes.dark);
+    if (!colorValue) continue;
+
+    const name = cssVarDisplayName(varName);
+    const id = cssVarTokenId(varName);
+    tokens[id] = {
+      id,
+      name,
+      type: "color",
+      value: colorValue,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  Object.assign(tokens, spacingTokensFromCssVars(lightVars, now));
+  Object.assign(tokens, typographyTokensFromCssSources(cssSources, lightVars, "light", now));
+
+  return tokens;
+}
+
 /** @deprecated Use projectDesignTokensFromCssSources */
 export function designTokensFromProjectCss(
   cssSources: string[],
@@ -182,6 +255,15 @@ export function tokenColorMatchKey(token: DesignToken): string | null {
   if (token.type !== "color") return null;
   const v = token.value as ColorTokenValue;
   return colorTokenMatchKey(v.hex, v.opacity);
+}
+
+/** Match keys for light and dark stops (import tokenization). */
+export function tokenColorMatchKeys(token: DesignToken): string[] {
+  if (token.type !== "color") return [];
+  const v = token.value as ColorTokenValue;
+  const keys = [colorTokenMatchKey(v.hex, v.opacity)];
+  if (v.dark?.hex) keys.push(colorTokenMatchKey(v.dark.hex, v.dark.opacity));
+  return keys;
 }
 
 export function typographyClassToTokenId(className: string): string {

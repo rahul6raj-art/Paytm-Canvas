@@ -20,7 +20,7 @@ function isSemanticNode(node: EditorNode): boolean {
   return false;
 }
 
-function isPassThroughWrapper(node: EditorNode, children: EditorNode[]): boolean {
+export function isPassThroughWrapper(node: EditorNode, children: EditorNode[]): boolean {
   if (children.length !== 1) return false;
   if (node.type !== "frame" && node.type !== "group") return false;
   if (isSemanticNode(node)) return false;
@@ -172,6 +172,27 @@ function importedTextLineHeightPx(node: EditorNode): number {
   return lineHeight <= 4 ? fontSize * lineHeight : lineHeight;
 }
 
+const BOTTOM_NAV_LABEL_RE = /\bbn__label\b/;
+const IMPORTED_LABEL_CLASS_RE =
+  /\b(?:bn__label|pml-more-theme-card__label|sh__title|sh-section__title|sh-section__heading)\b/;
+const LIST_ITEM_TEXT_CLASS_RE = /\b(?:li-item__primary|li-item__secondary)\b/;
+
+function expandNarrowImportedTextNode(
+  node: EditorNode,
+  content: string,
+): EditorNode {
+  const fontSize = node.fontSize ?? 14;
+  const estW = Math.ceil(content.length * fontSize * 0.58) + 12;
+  let next: EditorNode = {
+    ...node,
+    width: Math.max(node.width, estW),
+    ...textResizePatch("auto-width"),
+  };
+  const layoutPatch = expandImportedTextLayout(next, content);
+  if (layoutPatch) next = { ...next, ...layoutPatch };
+  return next;
+}
+
 /** Re-measure imported text so short labels are not clipped to narrow DOM boxes. */
 export function normalizeWebImportTextNodes(nodes: Record<string, EditorNode>): void {
   for (const [id, n] of Object.entries(nodes)) {
@@ -184,12 +205,11 @@ export function normalizeWebImportTextNodes(nodes: Record<string, EditorNode>): 
     const estW = Math.ceil(content.length * fontSize * 0.58) + 8;
     const singleLine = n.height <= lineH * 1.6;
     const clipped = singleLine && estW > n.width + 2;
+    const severelyNarrow = content.length > 1 && n.width < Math.min(estW * 0.45, fontSize * 2);
 
     let next: EditorNode;
-    if (clipped) {
-      next = { ...n, ...textResizePatch("auto-width") };
-      const layoutPatch = expandImportedTextLayout(next, content);
-      if (layoutPatch) next = { ...next, ...layoutPatch };
+    if (clipped || severelyNarrow) {
+      next = expandNarrowImportedTextNode(n, content);
     } else if (singleLine && estW <= n.width + 2) {
       // Short single-line labels (bottom nav tabs, chips) — keep point text, do not wrap.
       next = {
@@ -221,7 +241,296 @@ export function normalizeWebImportTextNodes(nodes: Record<string, EditorNode>): 
   }
 }
 
-const BOTTOM_NAV_LABEL_RE = /\bbn__label\b/;
+/** Expand theme-card and section labels squeezed by flex rows during live capture. */
+export function normalizeImportedLabelTextNodes(nodes: Record<string, EditorNode>): void {
+  for (const [id, n] of Object.entries(nodes)) {
+    if (n.type !== "text") continue;
+    const cls = n.codeClassName ?? "";
+    if (!IMPORTED_LABEL_CLASS_RE.test(cls)) continue;
+    const content = n.content?.trim();
+    if (!content) continue;
+
+    const fontSize = n.fontSize ?? 14;
+    const estW = Math.ceil(content.length * fontSize * 0.58) + 12;
+    if (n.width >= estW - 2) continue;
+
+    nodes[id] = expandNarrowImportedTextNode(n, content);
+  }
+}
+
+const LIST_ITEM_ROW_CLASS_RE = /\bli-item\b/;
+
+function isListItemRowRoot(node: EditorNode): boolean {
+  if (node.codeJsxTag === "ListItem") return true;
+  const cls = node.codeClassName ?? "";
+  return LIST_ITEM_ROW_CLASS_RE.test(cls) && !LIST_ITEM_TEXT_CLASS_RE.test(cls);
+}
+
+function findListItemRowRoot(
+  node: EditorNode,
+  nodes: Record<string, EditorNode>,
+): EditorNode | undefined {
+  let cur: EditorNode | undefined = node;
+  while (cur) {
+    if (isListItemRowRoot(cur)) return cur;
+    cur = cur.parentId ? nodes[cur.parentId] : undefined;
+  }
+  return undefined;
+}
+
+function isDescendantOf(
+  nodeId: string,
+  ancestorId: string,
+  nodes: Record<string, EditorNode>,
+): boolean {
+  let cur = nodes[nodeId]?.parentId ?? null;
+  while (cur) {
+    if (cur === ancestorId) return true;
+    cur = nodes[cur]?.parentId ?? null;
+  }
+  return false;
+}
+
+function listItemTextsInRow(
+  rowId: string,
+  nodes: Record<string, EditorNode>,
+): { primary?: EditorNode; secondary?: EditorNode } {
+  let primary: EditorNode | undefined;
+  let secondary: EditorNode | undefined;
+  for (const n of Object.values(nodes)) {
+    if (n.type !== "text" || !isDescendantOf(n.id, rowId, nodes)) continue;
+    const cls = n.codeClassName ?? "";
+    if (/\bli-item__primary\b/.test(cls)) primary = n;
+    if (/\bli-item__secondary\b/.test(cls)) secondary = n;
+  }
+  return { primary, secondary };
+}
+
+function listItemContentInsetX(
+  rowRoot: EditorNode,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): number {
+  let inset = 16;
+  for (const cid of childOrder[rowRoot.id] ?? []) {
+    const kid = nodes[cid];
+    if (!kid || kid.visible === false) continue;
+    if (kid.type === "text") continue;
+    if (LIST_ITEM_TEXT_CLASS_RE.test(kid.codeClassName ?? "")) continue;
+    if (/\bli-item__content\b/.test(kid.codeClassName ?? "")) continue;
+    if (listItemTextsInRow(rowRoot.id, nodes).primary?.parentId === kid.id) continue;
+    if (
+      (kid.type === "frame" || kid.type === "group" || kid.type === "rectangle") &&
+      kid.height >= rowRoot.height * 0.85 &&
+      kid.width >= rowRoot.width * 0.85
+    ) {
+      continue;
+    }
+    inset = Math.max(inset, kid.x + kid.width + 12);
+  }
+  return inset;
+}
+
+function findListItemTextColumn(
+  primary: EditorNode,
+  secondary: EditorNode | undefined,
+  rowId: string,
+  nodes: Record<string, EditorNode>,
+): EditorNode | undefined {
+  const primaryParent = primary.parentId ? nodes[primary.parentId] : undefined;
+  if (!secondary) return primaryParent;
+  const secondaryParent = secondary.parentId ? nodes[secondary.parentId] : undefined;
+  if (primaryParent && primaryParent.id === secondaryParent?.id) return primaryParent;
+
+  const chainA = new Set<string>();
+  let cur: EditorNode | undefined = primary;
+  while (cur && cur.id !== rowId) {
+    chainA.add(cur.id);
+    cur = cur.parentId ? nodes[cur.parentId] : undefined;
+  }
+  cur = secondary;
+  while (cur && cur.id !== rowId) {
+    if (chainA.has(cur.id) && (cur.type === "frame" || cur.type === "group")) return cur;
+    cur = cur.parentId ? nodes[cur.parentId] : undefined;
+  }
+  return primaryParent;
+}
+
+function layoutListItemSecondaryText(
+  node: EditorNode,
+  content: string,
+  maxWidth: number,
+): EditorNode {
+  let next: EditorNode = {
+    ...node,
+    x: 0,
+    width: maxWidth,
+    ...textResizePatch("auto-height"),
+  };
+  try {
+    const layoutPatch = textLayoutPatchForNode(next, content);
+    if (layoutPatch?.height && layoutPatch.height > next.height) {
+      next = { ...next, height: layoutPatch.height };
+    }
+    if (layoutPatch?.width && layoutPatch.width < maxWidth) {
+      next = { ...next, width: layoutPatch.width };
+    }
+  } catch {
+    const fontSize = next.fontSize ?? 14;
+    const lines = Math.ceil((content.length * fontSize * 0.52) / maxWidth);
+    next = { ...next, height: Math.max(next.height, lines * (fontSize * 1.35)) };
+  }
+  return next;
+}
+
+function layoutListItemPrimaryText(
+  node: EditorNode,
+  content: string,
+  maxWidth: number,
+): EditorNode {
+  const fontSize = node.fontSize ?? 16;
+  const estW = Math.min(maxWidth, Math.ceil(content.length * fontSize * 0.55) + 8);
+  return {
+    ...node,
+    x: 0,
+    y: Math.max(12, node.y),
+    width: estW,
+    ...textResizePatch("auto-width"),
+  };
+}
+
+function expandListItemBackground(
+  rowRoot: EditorNode,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  contentBottom: number,
+): void {
+  const padBottom = 12;
+  const targetHeight = Math.ceil(contentBottom + padBottom);
+
+  if (rowRoot.fillEnabled !== false && rowRoot.fill?.trim()) {
+    if (targetHeight > rowRoot.height) {
+      nodes[rowRoot.id] = {
+        ...nodes[rowRoot.id]!,
+        height: targetHeight,
+        clipChildren: rowRoot.clipChildren ?? true,
+      };
+    }
+    return;
+  }
+
+  for (const cid of childOrder[rowRoot.id] ?? []) {
+    const c = nodes[cid];
+    if (!c || c.visible === false) continue;
+    if (c.type !== "frame" && c.type !== "rectangle") continue;
+    if (c.fillEnabled === false || !c.fill?.trim()) continue;
+    if (c.width < rowRoot.width * 0.8) continue;
+    nodes[cid] = {
+      ...c,
+      x: 0,
+      y: 0,
+      width: rowRoot.width,
+      height: Math.max(c.height, targetHeight),
+      clipChildren: true,
+    };
+    if (targetHeight > rowRoot.height) {
+      nodes[rowRoot.id] = { ...nodes[rowRoot.id]!, height: targetHeight };
+    }
+    return;
+  }
+}
+
+function normalizeListItemRow(
+  rowRoot: EditorNode,
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): void {
+  const { primary, secondary } = listItemTextsInRow(rowRoot.id, nodes);
+  if (!primary?.content?.trim()) return;
+
+  const padRight = 48;
+  const insetX = listItemContentInsetX(rowRoot, nodes, childOrder);
+  const maxWidth = Math.max(80, rowRoot.width - insetX - padRight);
+  const textColumn = findListItemTextColumn(primary, secondary, rowRoot.id, nodes);
+
+  if (textColumn && textColumn.id !== rowRoot.id) {
+    nodes[textColumn.id] = {
+      ...textColumn,
+      x: insetX,
+      y: textColumn.y,
+      width: maxWidth,
+      layoutMode: "none",
+      layoutGap: 0,
+    };
+  }
+
+  const primaryParentId = textColumn?.id ?? rowRoot.id;
+  const primaryContent = primary.content.trim();
+  let nextPrimary = layoutListItemPrimaryText(primary, primaryContent, maxWidth);
+  if (primaryParentId === rowRoot.id) {
+    nextPrimary = { ...nextPrimary, x: insetX };
+  }
+  nodes[primary.id] = nextPrimary;
+
+  let contentBottom = nextPrimary.y + nextPrimary.height;
+  if (secondary?.content?.trim()) {
+    const secondaryContent = secondary.content.trim();
+    let nextSecondary = layoutListItemSecondaryText(secondary, secondaryContent, maxWidth);
+    const secondaryParentId = textColumn?.id ?? rowRoot.id;
+    nextSecondary = {
+      ...nextSecondary,
+      y: nextPrimary.y + nextPrimary.height + 4,
+    };
+    if (secondaryParentId === rowRoot.id) {
+      nextSecondary = { ...nextSecondary, x: insetX };
+    }
+    nodes[secondary.id] = nextSecondary;
+    contentBottom = nextSecondary.y + nextSecondary.height;
+  }
+
+  if (textColumn && textColumn.id !== rowRoot.id) {
+    nodes[textColumn.id] = {
+      ...nodes[textColumn.id]!,
+      height: Math.max(nodes[textColumn.id]!.height, contentBottom + 12),
+    };
+  }
+
+  const targetRowHeight = Math.ceil(contentBottom + 12);
+  if (targetRowHeight > rowRoot.height) {
+    nodes[rowRoot.id] = {
+      ...nodes[rowRoot.id]!,
+      height: targetRowHeight,
+      clipChildren: rowRoot.clipChildren ?? true,
+    };
+  }
+
+  expandListItemBackground(
+    nodes[rowRoot.id]!,
+    nodes,
+    childOrder,
+    contentBottom,
+  );
+}
+
+/** Keep list row primary/secondary copy inside the row frame (wrap long secondary lines). */
+export function normalizeListItemTextNodes(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+): void {
+  const rowIds = new Set<string>();
+  for (const n of Object.values(nodes)) {
+    if (n.type !== "text") continue;
+    if (!LIST_ITEM_TEXT_CLASS_RE.test(n.codeClassName ?? "")) continue;
+    const row = findListItemRowRoot(n, nodes);
+    if (row) rowIds.add(row.id);
+  }
+
+  for (const rowId of rowIds) {
+    const rowRoot = nodes[rowId];
+    if (!rowRoot) continue;
+    normalizeListItemRow(rowRoot, nodes, childOrder);
+  }
+}
 
 /** Keep bottom nav tab labels on one centered line after import normalization. */
 export function normalizeBottomNavTextNodes(
@@ -428,6 +737,15 @@ export function dedupeOverlappingFormSiblings(
   }
 }
 
+function shouldPreserveFrameHeight(parent: EditorNode): boolean {
+  if ((parent.cornerRadius ?? 0) > 0) return true;
+  if (parent.cornerRadii?.some((r) => (r ?? 0) > 0)) return true;
+  const cls = parent.codeClassName ?? "";
+  if (/\bcard\b/i.test(cls) || /\bpml-more-theme-card\b/.test(cls)) return true;
+  if (/^card$/i.test(parent.name.trim())) return true;
+  return false;
+}
+
 /** Shrink wrapper frames to the bottom of their children (fixes extra input wrapper height). */
 export function trimFramesToChildBounds(
   nodes: Record<string, EditorNode>,
@@ -437,13 +755,15 @@ export function trimFramesToChildBounds(
     const parent = nodes[id];
     if (!parent || parent.type !== "frame") continue;
     if (kids.length === 0) continue;
+    if (shouldPreserveFrameHeight(parent)) continue;
     let maxY = 0;
     for (const cid of kids) {
       const c = nodes[cid];
       if (!c || c.visible === false) continue;
       maxY = Math.max(maxY, c.y + c.height);
     }
-    const contentH = Math.ceil(maxY);
+    const padB = parent.paddingBottom ?? 0;
+    const contentH = Math.ceil(maxY + padB);
     const excess = parent.height - contentH;
     if (excess >= 4 && excess <= 48) {
       nodes[id] = {

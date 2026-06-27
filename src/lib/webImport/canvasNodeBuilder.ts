@@ -167,8 +167,12 @@ function buildSceneNode(
   if (children.length > 0) {
     base.children = children;
     if (base.type === "rectangle") base.type = "frame";
-    if (isLayoutContainer(layout) && !base.layoutMode) {
-      base.layoutMode = layout.layoutMode ?? "vertical";
+    if (isLayoutContainer(layout)) {
+      base.layoutMode = layout.layoutMode ?? base.layoutMode ?? "vertical";
+      base.layoutGap = base.layoutGap ?? layout.layoutGap ?? 0;
+      base.layoutWrap = base.layoutWrap ?? layout.layoutWrap;
+      base.primaryAxisAlign = base.primaryAxisAlign ?? layout.primaryAxisAlign;
+      base.counterAxisAlign = base.counterAxisAlign ?? layout.counterAxisAlign;
     }
   }
 
@@ -301,11 +305,8 @@ function preserveStyledBadgeFrame(
     type: "frame",
     name: node.name || "Badge",
     fillEnabled: base.fillEnabled || Boolean(chipBg),
-    layoutMode: "horizontal",
-    layoutGap: base.layoutGap ?? 2,
-    primaryAxisAlign: "center",
-    counterAxisAlign: "center",
-    layoutPositioning: "absolute",
+    layoutMode: "none",
+    layoutGap: 0,
     children: kids,
   };
 }

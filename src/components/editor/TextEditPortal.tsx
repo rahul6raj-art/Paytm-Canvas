@@ -28,6 +28,7 @@ export function TextEditPortal({ nodeId }: TextEditPortalProps) {
 
   const nodes = useEditorStore((s) => s.nodes);
   const designTokens = useEditorStore((s) => s.designTokens);
+  const canvasColorMode = useEditorStore((s) => s.canvasColorMode);
   const selection = useEditorStore((s) => s.textEditSelection);
   const updateNodeStyle = useEditorStore((s) => s.updateNodeStyle);
   const setEditingTextId = useEditorStore((s) => s.setEditingTextId);
@@ -36,7 +37,7 @@ export function TextEditPortal({ nodeId }: TextEditPortalProps) {
   const nodeRaw = nodes[nodeId];
   const node =
     nodeRaw?.type === "text"
-      ? resolveNodeWithDesignTokens(mergeInstanceOverrides(nodeRaw, nodes), designTokens)
+      ? resolveNodeWithDesignTokens(mergeInstanceOverrides(nodeRaw, nodes), designTokens, canvasColorMode)
       : null;
 
   const syncTextareaSelection = useCallback(
@@ -79,6 +80,7 @@ export function TextEditPortal({ nodeId }: TextEditPortalProps) {
     const merged = resolveNodeWithDesignTokens(
       mergeInstanceOverrides(raw, st.nodes),
       st.designTokens,
+      st.canvasColorMode,
     );
     const el = textareaRef.current;
     if (!el) return;

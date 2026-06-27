@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { ColorInput } from "./ColorInput";
+import { DesignColorModeSection } from "./DesignColorModeSection";
 import { PropertiesSection } from "./PropertiesSection";
 import { StrokeWidthToolbar } from "./StrokeWidthToolbar";
 import { useTheme } from "@/components/ThemeProvider";
@@ -42,9 +43,14 @@ export function CanvasInspector() {
           <StrokeWidthToolbar />
         </PropertiesSection>
       ) : null}
+      <DesignColorModeSection compact className="border-b border-app-panel-edge" />
       <PropertiesSection title="Canvas">
+        <p className="mb-2 text-ui text-app-subtle">
+          Pasteboard follows the app theme (moon icon). Use Design color mode above for light/dark
+          tokens on layers.
+        </p>
         <ColorInput
-          label="Background"
+          label="Pasteboard"
           hex={effectiveBackground}
           onCommitHex={(hex, opts) => setCanvasBackgroundColor(hex, opts)}
         />

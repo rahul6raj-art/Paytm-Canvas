@@ -1,6 +1,6 @@
 import {
   applyCaptureThemeToUrl,
-  defaultCaptureColorTheme,
+  resolveBridgeImportColorTheme,
 } from "@/lib/webImport/captureTheme";
 
 const SCREEN_ROUTE_BY_COMPONENT: Record<string, string> = {
@@ -40,7 +40,7 @@ export function derivePreviewCaptureUrl(previewUrl: string, pageLabel?: string):
   const trimmed = previewUrl.trim();
   if (!trimmed) return trimmed;
 
-  const theme = defaultCaptureColorTheme();
+  const theme = resolveBridgeImportColorTheme(trimmed);
 
   let parsed: URL;
   try {

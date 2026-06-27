@@ -1,7 +1,7 @@
 import type { EditorComment } from "@/lib/comments";
 import { parseCommentsArray } from "@/lib/comments";
 import type { CodeRoundTripLink } from "@/lib/craftBridge/types";
-import type { DesignToken } from "@/lib/designTokens";
+import type { DesignToken, CanvasColorMode } from "@/lib/designTokens";
 import {
   captureActivePage,
   createEmptyPage,
@@ -128,9 +128,17 @@ export interface PaytmCraftDocument {
     showGrid: boolean;
     showRulers?: boolean;
     backgroundColor?: string;
+    /** Semantic color token preview mode (light/dark). */
+    colorMode?: CanvasColorMode;
   };
   /** Linked source file for design ↔ code round-trip bridge. */
   codeRoundTripLink?: CodeRoundTripLink | null;
+  /** Page + token CSS text for class→var color binding (bridge round-trip). */
+  projectCssSources?: string[];
+  /** Storybook dev server used for design-system component import. */
+  storybookUrl?: string;
+  /** Hash of imported story ids — refresh when Storybook catalog changes. */
+  storybookCatalogHash?: string;
 }
 
 export interface EditorPersistSlice {
@@ -147,6 +155,8 @@ export interface EditorPersistSlice {
   showGrid: boolean;
   showRulers: boolean;
   canvasBackgroundColor: string;
+  /** Canvas preview mode for semantic color tokens. Defaults to light when omitted. */
+  canvasColorMode?: CanvasColorMode;
   comments: EditorComment[];
   pages: Record<string, EditorPage>;
   pageOrder: string[];
@@ -157,6 +167,10 @@ export interface EditorPersistSlice {
   layoutGuides?: LayoutGuide[];
   /** Linked source file for design ↔ code round-trip bridge. */
   codeRoundTripLink?: CodeRoundTripLink | null;
+  /** Linked page + token CSS text for class→var color binding at preview time. */
+  projectCssSources?: string[];
+  storybookUrl?: string;
+  storybookCatalogHash?: string;
 }
 
 export function wrapPersistSliceWithPages(
@@ -221,8 +235,12 @@ export function serializePersistStable(slice: EditorPersistSlice): string {
     showGrid: synced.showGrid,
     showRulers: synced.showRulers,
     canvasBackgroundColor: synced.canvasBackgroundColor,
+    canvasColorMode: synced.canvasColorMode ?? "light",
     comments: synced.comments,
     codeRoundTripLink: synced.codeRoundTripLink ?? null,
+    projectCssSources: synced.projectCssSources ?? [],
+    storybookUrl: synced.storybookUrl,
+    storybookCatalogHash: synced.storybookCatalogHash,
   });
 }
 
@@ -249,8 +267,12 @@ export function editorStateToDocument(slice: EditorPersistSlice): PaytmCraftDocu
       showGrid: active.showGrid,
       showRulers: active.showRulers,
       backgroundColor: active.canvasBackgroundColor,
+      colorMode: synced.canvasColorMode ?? "light",
     },
     codeRoundTripLink: synced.codeRoundTripLink ?? null,
+    projectCssSources: synced.projectCssSources ?? [],
+    storybookUrl: synced.storybookUrl,
+    storybookCatalogHash: synced.storybookCatalogHash,
   };
 }
 
@@ -307,6 +329,9 @@ export function documentToEditorPatch(
     fileName: doc.name,
     comments: parseCommentsArray(doc.comments),
     codeRoundTripLink: doc.codeRoundTripLink ?? null,
+    projectCssSources: doc.projectCssSources ?? [],
+    storybookUrl: doc.storybookUrl,
+    storybookCatalogHash: doc.storybookCatalogHash,
   };
 
   if (doc.pages && doc.pages.length > 0) {
@@ -329,6 +354,7 @@ export function documentToEditorPatch(
       showGrid: activePage.showGrid,
       showRulers: activePage.showRulers,
       canvasBackgroundColor: activePage.canvasBackgroundColor,
+      canvasColorMode: doc.canvas?.colorMode === "dark" ? "dark" : "light",
       layoutGuides: activePage.layoutGuides ?? [],
     };
   }
@@ -361,6 +387,7 @@ export function documentToEditorPatch(
     showGrid: doc.canvas?.showGrid ?? false,
     showRulers: doc.canvas?.showRulers ?? false,
     canvasBackgroundColor: doc.canvas?.backgroundColor ?? DEFAULT_CANVAS_BACKGROUND,
+    canvasColorMode: doc.canvas?.colorMode === "dark" ? "dark" : "light",
     layoutGuides: legacyPage.layoutGuides ?? [],
   };
 }

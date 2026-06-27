@@ -24,6 +24,7 @@ import { SelectionColorsSection } from "./SelectionColorsSection";
 import { AppearanceSection } from "./design-panel/AppearanceSection";
 import { EffectsSection } from "./design-panel/EffectsSection";
 import { FillSection } from "./design-panel/FillSection";
+import { DesignColorModeSection } from "./DesignColorModeSection";
 import { PositionSection } from "./design-panel/PositionSection";
 import { StrokeSection } from "./design-panel/StrokeSection";
 import { InspectorLayerHeaderActions } from "./design-panel/InspectorLayerHeaderActions";
@@ -34,6 +35,7 @@ export function SelectionDesignInspector() {
   const nodesAll = useEditorStore((s) => s.nodes);
   const childOrder = useEditorStore((s) => s.childOrder);
   const designTokens = useEditorStore((s) => s.designTokens);
+  const canvasColorMode = useEditorStore((s) => s.canvasColorMode);
   const addAutoLayoutToSelection = useEditorStore((s) => s.addAutoLayoutToSelection);
   const updateSelectionStyle = useEditorStore((s) => s.updateSelectionStyle);
   const updateSelectionNodes = useEditorStore((s) => s.updateSelectionNodes);
@@ -83,8 +85,8 @@ export function SelectionDesignInspector() {
   const locked = model.allLocked;
   const node = primary;
   const resolved = useMemo(
-    () => resolveNodeWithDesignTokens(node, designTokens),
-    [node, designTokens],
+    () => resolveNodeWithDesignTokens(node, designTokens, canvasColorMode),
+    [node, designTokens, canvasColorMode],
   );
 
   const style = (patch: NodeStylePatch, opts?: { skipHistory?: boolean }) =>
@@ -215,6 +217,8 @@ export function SelectionDesignInspector() {
         onCornerStyle={applyCornerStyle}
         onArcStyle={style}
       />
+
+      <DesignColorModeSection compact className="border-b border-app-panel-edge" />
 
       {caps.canFillStroke ? (
         <FillSection

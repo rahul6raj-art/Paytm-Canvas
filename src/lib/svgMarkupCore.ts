@@ -1,5 +1,5 @@
 import type { EditorAsset } from "@/lib/documentPersistence";
-import type { DesignToken } from "@/lib/designTokens";
+import type { CanvasColorMode } from "@/lib/designTokens";
 import { legacyEffectShadowAppend, resolveEffectBoxShadow, resolveNodeWithDesignTokens } from "@/lib/designTokens";
 import { mergeInstanceOverrides } from "@/lib/componentModel";
 import { effectiveFillType, effectiveStrokeType, fillPaintCss, svgFillPaint } from "@/lib/fillGradient";
@@ -19,6 +19,7 @@ import {
   clampCornerRadii,
   cornerRadiiMax,
   getNodeCornerRadii,
+  roundedRectPathD,
   roundedRectPathDForNode,
 } from "@/lib/cornerRadius";
 import {
@@ -799,8 +800,9 @@ export function registerRootArtboardShadow(defs: string[], nodeId: string): stri
 export function resolveNodeForMarkup(
   node: EditorNode,
   designTokens: Record<string, DesignToken>,
+  colorMode: CanvasColorMode = "light",
 ): EditorNode {
-  return resolveNodeWithDesignTokens(node, designTokens);
+  return resolveNodeWithDesignTokens(node, designTokens, colorMode);
 }
 
 /** Scene render node — instance overrides + design tokens (matches inspector display). */
@@ -808,8 +810,15 @@ export function resolveSceneRenderNode(
   node: EditorNode,
   nodes: Record<string, EditorNode>,
   designTokens: Record<string, DesignToken>,
+  colorMode: CanvasColorMode = "light",
+  cssSources?: string[],
 ): EditorNode {
-  return resolveNodeWithDesignTokens(mergeInstanceOverrides(node, nodes), designTokens);
+  return resolveNodeWithDesignTokens(
+    mergeInstanceOverrides(node, nodes),
+    designTokens,
+    colorMode,
+    cssSources,
+  );
 }
 
 export function collectNodeEffects(

@@ -34,19 +34,44 @@ export async function loadPageForImport(
 }
 
 async function waitForReactPreviewScreen(page: Page, url: string): Promise<void> {
-  let selector: string | null = null;
+  const selectors: string[] = [
+    "[data-craft-screen]",
+    "#root > *",
+    "main",
+    "[role='main']",
+    ".pml-signup",
+    ".pml-home",
+    ".pml-onboarding",
+    "[class*='pml-']",
+  ];
+
   try {
     const parsed = new URL(url);
+    if (parsed.pathname.includes("iframe.html")) {
+      selectors.unshift(
+        "#storybook-root",
+        "#storybook-root > *",
+        ".sb-pml-preview-canvas",
+        ".sb-show-main",
+        "button",
+        ".btn",
+        ".badge",
+      );
+    }
     const screen = parsed.searchParams.get("screen")?.trim();
     if (screen) {
-      selector = `.pml-${screen.replace(/[^a-z0-9-]/gi, "")}`;
+      selectors.unshift(`.pml-${screen.replace(/[^a-z0-9-]/gi, "")}`);
+    }
+    if (parsed.pathname && parsed.pathname !== "/") {
+      selectors.unshift(`[data-craft-route="${parsed.pathname}"]`);
     }
   } catch {
-    selector = null;
+    /* use defaults */
   }
-  if (!selector) selector = ".pml-signup, .pml-home, .pml-onboarding, [class*='pml-']";
 
-  await page.waitForSelector(selector, { timeout: 12_000 }).catch(() => undefined);
+  await page
+    .waitForSelector(selectors.join(", "), { timeout: 12_000 })
+    .catch(() => undefined);
   await page.waitForLoadState("networkidle", { timeout: 4_000 }).catch(() => undefined);
 }
 

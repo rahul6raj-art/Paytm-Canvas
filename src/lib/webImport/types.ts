@@ -18,7 +18,7 @@ export interface ImportWebRequest {
   mode: ImportWebMode;
   viewport: ImportWebViewport;
   /** When `react-preview`, localhost / 127.0.0.1 are allowed (Storybook, dev server). */
-  urlPolicy?: "public" | "react-preview";
+  urlPolicy?: "public" | "react-preview" | "storybook-iframe";
 }
 
 export interface ImportWebPageMeta {

@@ -292,11 +292,26 @@ function LayerRow({
     setLayerRenameId(null);
   };
 
+  const beginRename = (e: MouseEvent<HTMLElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (node.locked || isRenaming) return;
+    if (!selectedIds.includes(node.id)) {
+      onLayerSelect(node.id, parentId, e);
+    }
+    setDraftName(node.name);
+    setLayerRenameId(node.id);
+  };
+
   return (
     <div>
       <div
         data-layer-row={layerRowKey(parentId, node.id)}
-        draggable={!node.locked}
+        draggable={!node.locked && !isRenaming}
+        onDoubleClick={(e) => {
+          if ((e.target as HTMLElement).closest("[data-layer-row-action]")) return;
+          beginRename(e);
+        }}
         onDragStart={(e) => {
           if (node.locked) {
             e.preventDefault();
@@ -334,6 +349,7 @@ function LayerRow({
           <EditorHintWrap title={node.expanded ? "Collapse" : "Expand"}>
             <button
               type="button"
+              data-layer-row-action
               className={cn(
                 "flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-subtle transition-opacity hover:bg-app-hover hover:text-app-fg",
                 panelHovered ? "opacity-100" : "pointer-events-none opacity-0",
@@ -432,13 +448,6 @@ function LayerRow({
                         : "text-[#f0f0f0]"
                       : "text-app-fg",
                 )}
-                onDoubleClick={(e) => {
-                  e.stopPropagation();
-                  if (!node.locked) {
-                    setDraftName(node.name);
-                    setLayerRenameId(node.id);
-                  }
-                }}
               >
                 {node.isBooleanGroup && node.booleanOperation
                   ? BOOLEAN_OPERATION_LABELS[node.booleanOperation]
@@ -455,6 +464,7 @@ function LayerRow({
         <EditorHintWrap title="Visibility">
           <button
             type="button"
+            data-layer-row-action
             className={cn(
               "flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-subtle transition-opacity hover:bg-app-hover hover:text-app-fg",
               active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
@@ -470,6 +480,7 @@ function LayerRow({
         <EditorHintWrap title="Lock">
           <button
             type="button"
+            data-layer-row-action
             className={cn(
               "flex h-6 w-6 shrink-0 items-center justify-center rounded text-app-subtle transition-opacity hover:bg-app-hover hover:text-app-fg",
               active ? "opacity-100" : "opacity-0 group-hover:opacity-100",

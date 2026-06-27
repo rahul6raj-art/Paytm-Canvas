@@ -23,6 +23,9 @@ export function parseCssCustomProperties(
     for (const m of css.matchAll(/\[data-theme\s*=\s*['"]dark['"]\]\s*\{([^}]*)\}/gi)) {
       parseDeclBlock(m[1]!, scopes.dark);
     }
+    for (const m of css.matchAll(/(?:^|[\s,{])(?:html|body|:root)?\.dark\s*\{([^}]*)\}/g)) {
+      parseDeclBlock(m[1]!, scopes.dark);
+    }
   }
 
   return scopes;

@@ -39,6 +39,8 @@ type ColorInputProps = {
   libraryName?: string;
   /** Token id for the linked library color — enables picker on name click */
   libraryTokenId?: string;
+  /** When true, show color library picker if design tokens exist (fill / text color). */
+  colorLibraryPicker?: boolean;
   hex: string;
   opacity?: number;
   onCommitHex: (hex: string, opts?: ColorCommitOptions) => void;
@@ -60,6 +62,7 @@ export function ColorInput({
   label,
   libraryName,
   libraryTokenId,
+  colorLibraryPicker = false,
   hex,
   opacity = 1,
   onCommitHex,
@@ -89,8 +92,15 @@ export function ColorInput({
   const libraryAnchorRef = useRef<HTMLButtonElement>(null);
   const swatchRef = useRef<HTMLButtonElement>(null);
   const applyTokenToSelection = useEditorStore((s) => s.applyTokenToSelection);
+  const colorLibraryCount = useEditorStore((s) => {
+    let count = 0;
+    for (const token of Object.values(s.designTokens)) {
+      if (token.type === "color" || token.type === "gradient") count += 1;
+    }
+    return count;
+  });
 
-  const canPickLibrary = Boolean(libraryName && libraryTokenId && !disabled);
+  const canPickLibrary = Boolean(!disabled && colorLibraryPicker && colorLibraryCount > 0);
 
   useEffect(() => {
     if (focused) return;
@@ -278,27 +288,33 @@ export function ColorInput({
                   style={{ background: fillCss(previewHex, opacity, visible) }}
                 />
               </button>
-              {libraryName ? (
-                canPickLibrary ? (
-                  <EditorHintWrap title={`${libraryName} — change library color`}>
-                    <button
-                      ref={libraryAnchorRef}
-                      type="button"
-                      disabled={rowDisabled}
-                      onClick={() => setLibraryPickerOpen((o) => !o)}
-                      className={cn(
-                        "max-w-[5.5rem] shrink-0 truncate border-r border-app-border bg-app-surface px-1.5 text-left text-ui font-medium text-accent hover:bg-app-hover",
-                        libraryPickerOpen && "bg-accent/10",
-                      )}
-                    >
-                      {libraryName}
-                    </button>
-                  </EditorHintWrap>
-                ) : (
-                  <span className="max-w-[5.5rem] shrink-0 truncate border-r border-app-border bg-app-surface px-1.5 text-ui font-medium text-accent">
-                    {libraryName}
-                  </span>
-                )
+              {canPickLibrary ? (
+                <EditorHintWrap
+                  title={
+                    libraryName
+                      ? `${libraryName} — change library color`
+                      : "Choose color from library"
+                  }
+                >
+                  <button
+                    ref={libraryAnchorRef}
+                    type="button"
+                    disabled={rowDisabled}
+                    onClick={() => setLibraryPickerOpen((o) => !o)}
+                    className={cn(
+                      "max-w-[5.5rem] shrink-0 truncate border-r border-app-border bg-app-surface px-1.5 text-left text-ui font-medium text-accent hover:bg-app-hover",
+                      libraryPickerOpen && "bg-accent/10",
+                    )}
+                    aria-expanded={libraryPickerOpen}
+                    aria-haspopup="dialog"
+                  >
+                    {libraryName ?? "Library"}
+                  </button>
+                </EditorHintWrap>
+              ) : libraryName ? (
+                <span className="max-w-[5.5rem] shrink-0 truncate border-r border-app-border bg-app-surface px-1.5 text-ui font-medium text-accent">
+                  {libraryName}
+                </span>
               ) : null}
               <EditorHintWrap
                 title={showMixedHex ? "Mixed colors" : "6-digit hex"}
@@ -447,38 +463,42 @@ export function ColorInput({
               style={{ background: fillCss(previewHex, opacity, visible) }}
             />
           </button>
-          {libraryName ? (
-            canPickLibrary ? (
-              <EditorHintWrap title={`${libraryName} — click to change library color`}>
-                <button
-                  ref={libraryAnchorRef}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => setLibraryPickerOpen((o) => !o)}
+          {canPickLibrary ? (
+            <EditorHintWrap
+              title={
+                libraryName
+                  ? `${libraryName} — click to change library color`
+                  : "Choose color from library"
+              }
+            >
+              <button
+                ref={libraryAnchorRef}
+                type="button"
+                disabled={disabled}
+                onClick={() => setLibraryPickerOpen((o) => !o)}
+                className={cn(
+                  "flex max-w-[5.5rem] shrink-0 items-center gap-0.5 truncate border-r border-app-border bg-app-surface px-1.5 text-left text-ui font-medium leading-4 text-app-fg transition-colors hover:bg-app-hover",
+                  libraryPickerOpen && "bg-app-inset",
+                )}
+                aria-expanded={libraryPickerOpen}
+                aria-haspopup="dialog"
+              >
+                <span className="truncate">{libraryName ?? "Library"}</span>
+                <ChevronDown
                   className={cn(
-                    "flex max-w-[5.5rem] shrink-0 items-center gap-0.5 truncate border-r border-app-border bg-app-surface px-1.5 text-left text-ui font-medium leading-4 text-app-fg transition-colors hover:bg-app-hover",
-                    libraryPickerOpen && "bg-app-inset",
+                    "h-3 w-3 shrink-0 opacity-70 transition-transform",
+                    libraryPickerOpen && "rotate-180",
                   )}
-                  aria-expanded={libraryPickerOpen}
-                  aria-haspopup="dialog"
-                >
-                  <span className="truncate">{libraryName}</span>
-                  <ChevronDown
-                    className={cn(
-                      "h-3 w-3 shrink-0 opacity-70 transition-transform",
-                      libraryPickerOpen && "rotate-180",
-                    )}
-                    aria-hidden
-                  />
-                </button>
-              </EditorHintWrap>
-            ) : (
-              <EditorHintWrap title={libraryName}>
-                <span className="flex max-w-[5.5rem] shrink-0 items-center truncate border-r border-app-border bg-app-surface px-1.5 text-ui font-medium leading-4 text-app-fg">
-                  {libraryName}
-                </span>
-              </EditorHintWrap>
-            )
+                  aria-hidden
+                />
+              </button>
+            </EditorHintWrap>
+          ) : libraryName ? (
+            <EditorHintWrap title={libraryName}>
+              <span className="flex max-w-[5.5rem] shrink-0 items-center truncate border-r border-app-border bg-app-surface px-1.5 text-ui font-medium leading-4 text-app-fg">
+                {libraryName}
+              </span>
+            </EditorHintWrap>
           ) : null}
           <EditorHintWrap
             title={disabled ? "Enable fill to edit color" : "Type 6-digit hex — shape updates when complete"}

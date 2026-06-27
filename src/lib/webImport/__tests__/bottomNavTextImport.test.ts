@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { EditorNode } from "@/stores/useEditorStore";
 import {
   normalizeBottomNavTextNodes,
+  normalizeImportedLabelTextNodes,
   normalizeWebImportTextNodes,
 } from "../normalizeWebImportLayers";
 
@@ -79,5 +80,34 @@ describe("bottom nav text import", () => {
     assert.equal(nodes.home?.textAlign, "center");
     assert.ok((nodes.home?.x ?? 0) >= 10 && (nodes.home?.x ?? 0) <= 20);
     assert.ok((nodes.home?.height ?? 0) <= 20);
+  });
+
+  it("expands squeezed theme-card labels like Dark theme", () => {
+    const nodes: Record<string, EditorNode> = {
+      label: {
+        id: "label",
+        parentId: "card",
+        type: "text",
+        name: "Dark theme",
+        x: 16,
+        y: 20,
+        width: 8,
+        height: 20,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        expanded: true,
+        content: "Dark theme",
+        codeClassName: "pml-more-theme-card__label body-medium",
+        fontSize: 14,
+        lineHeight: 1.27,
+        fill: "#111111",
+        textColor: "#111111",
+      },
+    };
+
+    normalizeImportedLabelTextNodes(nodes);
+    assert.ok((nodes.label?.width ?? 0) >= 80, `width ${nodes.label?.width}`);
+    assert.equal(nodes.label?.textResizeMode, "auto-width");
   });
 });

@@ -35,7 +35,7 @@ export async function POST(req: Request) {
       message: imported.message,
       layerCount: imported.layerCount,
       cssPaths: imported.cssPaths,
-      openUrl: "/editor",
+      openUrl: imported.openUrl,
     });
   } catch (e) {
     console.error("[craft-bridge/import-page]", e);

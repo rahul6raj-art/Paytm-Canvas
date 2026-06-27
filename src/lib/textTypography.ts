@@ -52,7 +52,10 @@ export function resolveTextTypo(node: Pick<
 >): ResolvedTextTypo {
   const paint = textNodeAsFillPaint(node);
   const color =
-    resolveSolidFillCss(paint) || node.textColor || node.fill || defaultCanvasForegroundColor();
+    node.textColor ||
+    resolveSolidFillCss(paint) ||
+    node.fill ||
+    defaultCanvasForegroundColor();
   return {
     color,
     fontFamily: node.fontFamily ?? DEFAULT_TEXT_FONT_FAMILY,

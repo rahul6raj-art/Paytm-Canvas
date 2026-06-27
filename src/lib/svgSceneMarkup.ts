@@ -1,5 +1,5 @@
 import type { EditorAsset } from "@/lib/documentPersistence";
-import type { DesignToken } from "@/lib/designTokens";
+import type { CanvasColorMode, DesignToken } from "@/lib/designTokens";
 import { CANVAS_VISUAL } from "@/lib/canvasVisual";
 import { getNodeWorldMatrixFromChildOrder, layerPanelChildIds, topLevelSelectedIds } from "@/lib/editorGraph";
 import { applyMatrixToPoint, composeSvgTransform, matrixToSvgTransform } from "@/lib/transformMath";
@@ -67,6 +67,10 @@ export type SvgSceneBuildInput = {
   selectedIds?: readonly string[];
   /** Viewport zoom — boosts angular/diamond gradient raster resolution when > 1. */
   zoom?: number;
+  /** Semantic color token preview mode for library-linked fills. */
+  colorMode?: CanvasColorMode;
+  /** Linked page + token CSS for class→var color binding. */
+  cssSources?: string[];
 };
 
 function collectMovingSubtreeIds(
@@ -122,12 +126,20 @@ type BuildCtx = {
   ellipseArcPreview?: EllipseArcPreview;
   objectEditModeNodeId?: string | null;
   selectedIds?: readonly string[];
+  colorMode: CanvasColorMode;
+  cssSources?: string[];
 };
 
 function maxEffectBleedInSubtree(nodeId: string, ctx: BuildCtx): number {
   const node = ctx.nodes[nodeId];
   if (!node) return 0;
-  const resolved = resolveSceneRenderNode(node, ctx.nodes, ctx.designTokens);
+  const resolved = resolveSceneRenderNode(
+    node,
+    ctx.nodes,
+    ctx.designTokens,
+    ctx.colorMode,
+    ctx.cssSources,
+  );
   let pad = maxEffectBleedPad(resolved.effects);
   for (const cid of ctx.childOrder[nodeId] ?? []) {
     pad = Math.max(pad, maxEffectBleedInSubtree(cid, ctx));
@@ -172,7 +184,13 @@ function renderNode(nodeId: string, ctx: BuildCtx): string {
   }
 
   ctx.rendered += 1;
-  const resolved = resolveSceneRenderNode(node, ctx.nodes, ctx.designTokens);
+  const resolved = resolveSceneRenderNode(
+    node,
+    ctx.nodes,
+    ctx.designTokens,
+    ctx.colorMode,
+    ctx.cssSources,
+  );
   let paintNode = resolved;
   if (node.type === "ellipse" && ctx.ellipseArcPreview?.nodeId === nodeId) {
     paintNode = {
@@ -390,6 +408,8 @@ export function buildSvgScene(input: SvgSceneBuildInput): SvgSceneBuildResult {
     ellipseArcPreview: input.ellipseArcPreview ?? null,
     objectEditModeNodeId: effectiveObjectEditMode,
     selectedIds: input.selectedIds,
+    colorMode: input.colorMode ?? "light",
+    cssSources: input.cssSources,
   };
 
   const bodyParts: string[] = [];

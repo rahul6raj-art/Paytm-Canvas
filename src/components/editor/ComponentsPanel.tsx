@@ -1,56 +1,27 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { Component, Grid3X3, LayoutList, Package, Plus, Search, X } from "lucide-react";
+import { Component, Grid3X3, LayoutList, Package, Plus, RefreshCw, Search, X } from "lucide-react";
 import { useEditorStore, type EditorNode } from "@/stores/useEditorStore";
 import {
   canCreateComponentFromSelection,
   filterComponentLibraryGroups,
   groupComponentMasters,
+  libraryPanelMasters,
   primaryMasterForGroup,
   type ComponentLibraryGroup,
 } from "@/lib/componentModel";
 import {
   buildComponentFolderTree,
   componentDisplayName,
-  localComponentMasters,
-  localComponentPanelMasters,
   type ComponentFolderNode,
 } from "@/lib/components/folders";
+import { listStorybookComponentMasters } from "@/lib/craftBridge/storybookComponentLibrary";
+import { localComponentMasters } from "@/lib/components/folders";
 import { trySelectAllPanelField } from "@/lib/panelFieldKeyboard";
 import { recordRecentComponent } from "@/lib/componentUx";
+import { ComponentMasterThumbnail } from "@/components/editor/ComponentMasterThumbnail";
 import { cn } from "@/lib/utils";
-
-function ComponentPreview({
-  width,
-  height,
-  compact = false,
-}: {
-  width: number;
-  height: number;
-  compact?: boolean;
-}) {
-  const w = Math.max(1, width);
-  const h = Math.max(1, height);
-  const ar = w / h;
-  const max = compact ? 18 : 56;
-  const boxW = ar >= 1 ? max : max * ar;
-  const boxH = ar >= 1 ? max / ar : max;
-  return (
-    <div
-      className={cn(
-        "flex shrink-0 items-center justify-center rounded border border-violet-400/30 bg-violet-400/[0.1]",
-        compact ? "h-7 w-7" : "h-14 w-full",
-      )}
-      aria-hidden
-    >
-      <div
-        className="rounded-sm border border-violet-300/45 bg-violet-300/25"
-        style={{ width: boxW, height: boxH }}
-      />
-    </div>
-  );
-}
 
 function variantSubtitle(node: EditorNode): string | null {
   const vp = node.variantProperties;
@@ -127,7 +98,12 @@ function ComponentCard({
     >
       {listView ? (
         <>
-          <ComponentPreview width={master.width} height={master.height} compact />
+          <ComponentMasterThumbnail
+            masterId={master.id}
+            width={master.width}
+            height={master.height}
+            compact
+          />
           <span className="min-w-0 flex-1 truncate text-ui font-medium text-app-fg">{displayName}</span>
           {variantCount > 1 ? (
             <span className="shrink-0 rounded bg-app-hover px-1 py-0.5 text-ui text-app-muted">
@@ -137,7 +113,11 @@ function ComponentCard({
         </>
       ) : (
         <>
-          <ComponentPreview width={master.width} height={master.height} />
+          <ComponentMasterThumbnail
+            masterId={master.id}
+            width={master.width}
+            height={master.height}
+          />
           <div className="mt-1.5 flex items-center gap-1.5">
             <Component className="h-3.5 w-3.5 shrink-0 text-violet-200" strokeWidth={1.75} />
             <span className="min-w-0 flex-1 truncate text-ui font-medium text-app-fg">{displayName}</span>
@@ -239,15 +219,25 @@ export function ComponentsPanel({ embedded = false }: { embedded?: boolean } = {
 
   const [query, setQuery] = useState("");
   const [activeMasterId, setActiveMasterId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [viewMode, setViewMode] = useState<"grid" | "list">("list");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; master: EditorNode } | null>(
     null,
   );
+  const [storybookBusy, setStorybookBusy] = useState(false);
+  const [storybookMessage, setStorybookMessage] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const importStorybookComponents = useEditorStore((s) => s.importStorybookComponents);
+  const storybookSyncMessage = useEditorStore((s) => s.storybookSyncMessage);
+  const codeRoundTripLink = useEditorStore((s) => s.codeRoundTripLink);
 
-  const localGroups = useMemo(
-    () => groupComponentMasters(localComponentMasters(nodes), nodes),
+  const storybookMasters = useMemo(() => listStorybookComponentMasters(nodes), [nodes]);
+  const localOnlyMasters = useMemo(
+    () => localComponentMasters(nodes).filter((m) => !m.remoteComponentId),
     [nodes],
+  );
+  const localGroups = useMemo(
+    () => groupComponentMasters(localOnlyMasters, nodes),
+    [nodes, localOnlyMasters],
   );
   const filteredGroups = useMemo(
     () => filterComponentLibraryGroups(localGroups, query),
@@ -257,7 +247,18 @@ export function ComponentsPanel({ embedded = false }: { embedded?: boolean } = {
     () => filteredGroups.map((g) => primaryMasterForGroup(g)),
     [filteredGroups],
   );
-  const panelMasters = useMemo(() => localComponentPanelMasters(nodes), [nodes]);
+  const panelMasters = useMemo(
+    () => libraryPanelMasters(localOnlyMasters, nodes),
+    [localOnlyMasters, nodes],
+  );
+  const storybookGroups = useMemo(
+    () => groupComponentMasters(storybookMasters, nodes),
+    [storybookMasters, nodes],
+  );
+  const filteredStorybookGroups = useMemo(
+    () => filterComponentLibraryGroups(storybookGroups, query),
+    [storybookGroups, query],
+  );
   const folderTree = useMemo(() => buildComponentFolderTree(panelMasters), [panelMasters]);
   const groupsByMasterId = useMemo(() => {
     const map = new Map<string, ComponentLibraryGroup>();
@@ -378,8 +379,8 @@ export function ComponentsPanel({ embedded = false }: { embedded?: boolean } = {
     }
   };
 
-  const totalCount = localGroups.length;
-  const resultCount = flatFiltered.length;
+  const totalCount = localGroups.length + storybookGroups.length;
+  const resultCount = flatFiltered.length + filteredStorybookGroups.length;
   const searching = query.trim().length > 0;
 
   return (
@@ -470,6 +471,41 @@ export function ComponentsPanel({ embedded = false }: { embedded?: boolean } = {
             <LayoutList className="h-3.5 w-3.5" strokeWidth={2} />
           </button>
         </div>
+        {codeRoundTripLink?.repoRoot ? (
+          <div className="mt-2 space-y-1">
+            <button
+              type="button"
+              disabled={storybookBusy}
+              onClick={async () => {
+                setStorybookBusy(true);
+                setStorybookMessage(null);
+                const result = await importStorybookComponents({ force: true });
+                setStorybookBusy(false);
+                setStorybookMessage(result.message);
+              }}
+              className={cn(
+                "flex h-8 w-full items-center justify-center gap-1.5 rounded-md border text-ui font-semibold transition-colors",
+                storybookBusy
+                  ? "cursor-wait border-app-border-subtle text-app-subtle"
+                  : "border-violet-400/35 bg-violet-400/10 text-violet-50 hover:bg-violet-400/20",
+              )}
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", storybookBusy && "animate-spin")} strokeWidth={2} />
+              {storybookBusy ? "Importing from Storybook…" : "Sync Storybook components"}
+            </button>
+            {storybookMessage || storybookSyncMessage ? (
+              <p className="px-0.5 text-ui leading-snug text-app-subtle">
+                {storybookMessage ?? storybookSyncMessage}
+              </p>
+            ) : (
+              <p className="px-0.5 text-ui text-app-subtle">
+                Start Storybook in your repo (<code className="text-app-muted">npm run storybook</code>
+                , port 6006), then sync. Imports stories under{" "}
+                <code className="text-app-muted">Components/*</code> (large libraries sync in batches).
+              </p>
+            )}
+          </div>
+        ) : null}
       </div>
 
       <div className="thin-scroll min-h-0 flex-1 overflow-y-auto p-2">
@@ -490,6 +526,31 @@ export function ComponentsPanel({ embedded = false }: { embedded?: boolean } = {
           </div>
         ) : (
           <div className="space-y-4">
+            {filteredStorybookGroups.length > 0 ? (
+              <div>
+                <p className="mb-1.5 px-0.5 section-heading">Storybook components</p>
+                <ul className="space-y-1.5">
+                  {filteredStorybookGroups.map((group) => {
+                    const master = primaryMasterForGroup(group);
+                    return (
+                      <li key={group.id}>
+                        <ComponentCard
+                          master={master}
+                          group={group}
+                          active={activeMasterId === master.id}
+                          listView={viewMode === "list"}
+                          onActivate={() => startPlacement(master.id)}
+                          onDragStart={onDragStart(master.id, master.name)}
+                          onDragEnd={onDragEnd(master.id)}
+                          onContextMenu={(e) => openContextMenu(master, e)}
+                        />
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ) : null}
+            {localGroups.length > 0 ? (
             <div>
               <p className="mb-1.5 px-0.5 section-heading">Local components</p>
               {searching ? (
@@ -528,6 +589,7 @@ export function ComponentsPanel({ embedded = false }: { embedded?: boolean } = {
                 </ul>
               )}
             </div>
+            ) : null}
           </div>
         )}
       </div>

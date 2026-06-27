@@ -2,6 +2,7 @@ import path from "node:path";
 import { importReactPageBundle } from "@/lib/codeRoundTrip/importReactPageBundle";
 import { importHtmlPageBundle } from "@/lib/codeRoundTrip/importHtmlPageBundle";
 import { importBridgeFromLivePreview } from "@/lib/craftBridge/bridgeLiveImport";
+import { buildBridgeEditorOpenUrl } from "@/lib/craftBridge/buildBridgeEditorOpenUrl";
 import { defaultCaptureColorTheme } from "@/lib/webImport/captureTheme";
 import { writePendingImport } from "@paytm-craft/bridge";
 import {
@@ -25,6 +26,7 @@ export type RunBridgePageImportResult =
       message: string;
       layerCount: number;
       cssPaths: string[];
+      openUrl: string;
     }
   | { ok: false; error: string; status: number };
 
@@ -61,6 +63,8 @@ export async function runBridgePageImport(
   let message = "";
   let sourceHeader: string | undefined;
 
+  let liveCaptureError: string | undefined;
+
   if (previewUrl) {
     const live = await importBridgeFromLivePreview({
       previewUrl,
@@ -75,8 +79,8 @@ export async function runBridgePageImport(
       message = live.message;
       sourceHeader = live.sourceHeader;
     } else {
-      console.warn("[craft-bridge] live capture failed:", live.error);
-      return { ok: false, error: live.error, status: 503 };
+      liveCaptureError = live.error;
+      console.warn("[craft-bridge] live capture failed, falling back to source parse:", live.error);
     }
   }
 
@@ -98,7 +102,10 @@ export async function runBridgePageImport(
     }
     slice = result.slice;
     componentName = result.componentName;
-    message = message ? `${message} ${result.message}` : result.message;
+    const parseMessage = message ? `${message} ${result.message}` : result.message;
+    message = liveCaptureError
+      ? `Live preview unavailable (${liveCaptureError}). Used source parse instead. ${parseMessage}`
+      : parseMessage;
     sourceHeader = result.sourceHeader;
   }
 
@@ -140,5 +147,6 @@ export async function runBridgePageImport(
     message,
     layerCount: Object.keys(slice.nodes).length,
     cssPaths: cssRelPaths,
+    openUrl: buildBridgeEditorOpenUrl(pending.id),
   };
 }

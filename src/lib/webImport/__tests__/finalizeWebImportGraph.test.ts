@@ -337,6 +337,29 @@ describe("finalizeWebImportGraph", () => {
     assert.ok(nodes.card);
     assert.equal(nodes.row?.parentId, "card");
     assert.equal(nodes.card?.cornerRadius, 24);
+    assert.equal(nodes.card?.height, 76);
+  });
+
+  it("does not trim card height when bottom padding is below children", () => {
+    const nodes: Record<string, EditorNode> = {
+      root: frame("root", null, 0, 0, 360, 200),
+      card: frame("card", "root", 16, 72, 328, 76, {
+        name: "Card",
+        codeClassName: "card pml-more-theme-card",
+        fill: "#ffffff",
+        fillEnabled: true,
+        cornerRadius: 24,
+        paddingBottom: 24,
+      }),
+      row: frame("row", "card", 16, 24, 296, 28, {
+        name: "pml-more-theme-card__row",
+        fillEnabled: false,
+      }),
+    };
+    const childOrder = { [EDITOR_ROOT_KEY]: ["root"], root: ["card"], card: ["row"] };
+
+    finalizeWebImportGraph(nodes, childOrder, 360, 200);
+    assert.equal(nodes.card?.height, 76);
   });
 
   it("collapses single-child Div wrappers", () => {

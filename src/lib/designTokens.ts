@@ -6,12 +6,23 @@ import {
 } from "@/lib/nodeEffects";
 import type { FillGradient } from "@/lib/fillGradient";
 import { normalizeFillGradient, resolveEditableFillGradient } from "@/lib/fillGradient";
+import { pickFillColorTokenId, pickTextColorTokenId } from "@/lib/colorTokenMatching";
 
 export type DesignTokenType = "color" | "gradient" | "typography" | "spacing" | "effect";
+
+/** Canvas preview mode for semantic color tokens (Figma-style light/dark variables). */
+export type CanvasColorMode = "light" | "dark";
+
+export interface ColorTokenStop {
+  hex: string;
+  opacity?: number;
+}
 
 export interface ColorTokenValue {
   hex: string;
   opacity?: number;
+  /** Dark-mode override when imported from project CSS or set manually. */
+  dark?: ColorTokenStop;
 }
 
 export interface TypographyTokenValue {
@@ -62,7 +73,36 @@ export function newDesignTokenId(prefix: string): string {
 export function isColorValue(v: unknown): v is ColorTokenValue {
   if (!v || typeof v !== "object") return false;
   const o = v as Record<string, unknown>;
-  return typeof o.hex === "string" && o.hex.length > 0;
+  if (typeof o.hex !== "string" || o.hex.length === 0) return false;
+  if (o.dark != null) {
+    const d = o.dark as Record<string, unknown>;
+    if (typeof d.hex !== "string" || d.hex.length === 0) return false;
+  }
+  return true;
+}
+
+export function colorTokenHasDarkMode(value: ColorTokenValue): boolean {
+  return Boolean(value.dark?.hex);
+}
+
+/** Resolve a library color token for the active canvas color mode. */
+export function resolvedColorForMode(
+  value: ColorTokenValue,
+  mode: CanvasColorMode = "light",
+): ColorTokenStop {
+  if (mode === "dark" && value.dark?.hex) {
+    return {
+      hex: value.dark.hex,
+      opacity: value.dark.opacity ?? value.opacity,
+    };
+  }
+  return { hex: value.hex, opacity: value.opacity };
+}
+
+export function designTokensHaveDarkColorModes(tokens: Record<string, DesignToken>): boolean {
+  return Object.values(tokens).some(
+    (t) => t.type === "color" && isColorValue(t.value) && colorTokenHasDarkMode(t.value),
+  );
 }
 
 export function isGradientValue(v: unknown): v is GradientTokenValue {
@@ -146,6 +186,11 @@ export function tokenValueSummary(t: DesignToken): string {
     case "color": {
       const v = t.value as ColorTokenValue;
       const op = v.opacity != null ? ` / ${Math.round((v.opacity ?? 1) * 100)}%` : "";
+      if (v.dark?.hex) {
+        const darkOp =
+          v.dark.opacity != null ? ` / ${Math.round(v.dark.opacity * 100)}%` : "";
+        return `${v.hex}${op} · dark ${v.dark.hex}${darkOp}`;
+      }
       return `${v.hex}${op}`;
     }
     case "gradient": {
@@ -177,38 +222,54 @@ export function tokenValueSummary(t: DesignToken): string {
 export function resolveNodeWithDesignTokens(
   node: EditorNode,
   tokens: Record<string, DesignToken>,
+  colorMode: CanvasColorMode = "light",
+  cssSources?: string[],
 ): EditorNode {
   let out: EditorNode = { ...node };
 
-  if (node.fillTokenId) {
-    const tok = tokens[node.fillTokenId];
-    if (tok?.type === "color" && isColorValue(tok.value)) {
-      const v = tok.value;
-      if (node.type === "text") {
-        out = {
-          ...out,
-          textColor: v.hex,
-          fill: v.hex,
-          fillOpacity: v.opacity ?? out.fillOpacity ?? 1,
-        };
-      } else {
-        out = {
-          ...out,
-          fill: v.hex,
-          fillOpacity: v.opacity ?? out.fillOpacity ?? 1,
-        };
-      }
-    } else if (tok?.type === "gradient" && isGradientValue(tok.value)) {
-      const localStops = node.fillGradient?.stops;
-      const gradient =
-        localStops && localStops.length >= 2
-          ? normalizeFillGradient(node.fillGradient, node.fill)
-          : normalizeFillGradient(tok.value);
+  const applyColorToken = (tokenId: string | undefined) => {
+    if (!tokenId) return;
+    const tok = tokens[tokenId];
+    if (tok?.type !== "color" || !isColorValue(tok.value)) return;
+    const v = resolvedColorForMode(tok.value, colorMode);
+    if (node.type === "text") {
       out = {
         ...out,
-        fillType: "gradient",
-        fillGradient: gradient,
+        textColor: v.hex,
+        fill: v.hex,
+        fillOpacity: v.opacity ?? out.fillOpacity ?? 1,
       };
+    } else {
+      out = {
+        ...out,
+        fill: v.hex,
+        fillOpacity: v.opacity ?? out.fillOpacity ?? 1,
+      };
+    }
+  };
+
+  if (node.type === "text") {
+    applyColorToken(pickTextColorTokenId(node, tokens, cssSources, colorMode));
+  } else {
+    const fillColorTokenId = pickFillColorTokenId(node, tokens, cssSources, colorMode);
+    if (fillColorTokenId) {
+      applyColorToken(fillColorTokenId);
+    } else if (node.fillTokenId) {
+      const tok = tokens[node.fillTokenId];
+      if (tok?.type === "color" && isColorValue(tok.value)) {
+        applyColorToken(node.fillTokenId);
+      } else if (tok?.type === "gradient" && isGradientValue(tok.value)) {
+        const localStops = node.fillGradient?.stops;
+        const gradient =
+          localStops && localStops.length >= 2
+            ? normalizeFillGradient(node.fillGradient, node.fill)
+            : normalizeFillGradient(tok.value);
+        out = {
+          ...out,
+          fillType: "gradient",
+          fillGradient: gradient,
+        };
+      }
     }
   }
 
@@ -240,6 +301,34 @@ export function resolveNodeWithDesignTokens(
   }
 
   return out;
+}
+
+/** After token linking, bake resolved token colors onto nodes for the import theme (matches code appearance). */
+export function applyImportedTokenColorsToNodes(
+  nodes: Record<string, EditorNode>,
+  tokens: Record<string, DesignToken>,
+  mode: CanvasColorMode = "light",
+): Record<string, EditorNode> {
+  const next: Record<string, EditorNode> = {};
+  for (const [id, node] of Object.entries(nodes)) {
+    const hasFill = node.fillEnabled !== false && Boolean(node.fill?.trim());
+    if (!node.fillTokenId && node.type !== "text" && !hasFill) {
+      next[id] = node;
+      continue;
+    }
+    const resolved = resolveNodeWithDesignTokens(node, tokens, mode);
+    const patch: Partial<EditorNode> = {};
+    if (hasFill || node.fillTokenId) {
+      if (resolved.fill) patch.fill = resolved.fill;
+      if (resolved.fillOpacity != null) patch.fillOpacity = resolved.fillOpacity;
+    }
+    if (node.type === "text") {
+      if (resolved.textColor) patch.textColor = resolved.textColor;
+      if (resolved.fill) patch.fill = resolved.fill;
+    }
+    next[id] = Object.keys(patch).length > 0 ? { ...node, ...patch } : node;
+  }
+  return next;
 }
 
 /** Gradient for editing / canvas handles — merges linked style tokens with local overrides. */

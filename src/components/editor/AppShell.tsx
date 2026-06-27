@@ -31,6 +31,8 @@ import { WorkspaceTeamModals } from "./WorkspaceTeamModals";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { CodeRoundTripModal } from "@/components/code/CodeRoundTripModal";
 import { CraftBridgeImportListener } from "@/components/craftBridge/CraftBridgeImportListener";
+import { ProjectColorRehydrator } from "@/components/craftBridge/ProjectColorRehydrator";
+import { ProjectStorybookRehydrator } from "@/components/craftBridge/ProjectStorybookRehydrator";
 import { CraftBridgeSourceWatcher } from "@/components/craftBridge/CraftBridgeSourceWatcher";
 import { CraftBridgeConflictBanner } from "@/components/craftBridge/CraftBridgeConflictBanner";
 import { CraftBridgeSyncToast } from "@/components/craftBridge/CraftBridgeSyncToast";
@@ -238,6 +240,8 @@ export function AppShell() {
       <CraftBridgeSyncToast />
       <Suspense fallback={null}>
         <CraftBridgeImportListener />
+        <ProjectColorRehydrator />
+        <ProjectStorybookRehydrator />
       </Suspense>
       <CommandMenu />
       <ShortcutOverlay />

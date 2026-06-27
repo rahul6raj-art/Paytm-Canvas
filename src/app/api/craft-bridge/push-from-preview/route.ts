@@ -2,6 +2,7 @@ import { craftBridgeGuard } from "@/lib/craftBridge/apiGuard";
 import { bridgeCorsHeaders, jsonWithBridgeCors } from "@/lib/craftBridge/bridgeCors";
 import { resolvePreviewPushLink } from "@/lib/craftBridge/resolvePreviewPushLink";
 import { runBridgePageImport } from "@/lib/craftBridge/runBridgePageImport";
+import { runBridgePreviewCapture } from "@/lib/craftBridge/runBridgePreviewCapture";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -31,7 +32,7 @@ export async function POST(req: Request) {
   try {
     const body = (await req.json()) as PushFromPreviewBody;
     const previewUrl = body.previewUrl?.trim();
-    let repoRoot = body.repoRoot?.trim();
+    const repoRoot = body.repoRoot?.trim();
 
     if (!previewUrl) {
       return jsonWithBridgeCors(req, { error: "previewUrl is required." }, { status: 400 });
@@ -50,11 +51,18 @@ export async function POST(req: Request) {
       return jsonWithBridgeCors(req, { error: resolved.error }, { status: 404 });
     }
 
-    const imported = await runBridgePageImport({
-      repoRoot: resolved.repoRoot,
-      pagePath: resolved.pagePath,
-      previewUrl: resolved.captureUrl,
-    });
+    const imported =
+      resolved.mode === "linked"
+        ? await runBridgePageImport({
+            repoRoot: resolved.repoRoot,
+            pagePath: resolved.pagePath,
+            previewUrl: resolved.captureUrl,
+          })
+        : await runBridgePreviewCapture({
+            previewUrl,
+            repoRoot: resolved.repoRoot,
+            pagePath: undefined,
+          });
 
     if (!imported.ok) {
       return jsonWithBridgeCors(req, { error: imported.error }, { status: imported.status });
@@ -66,9 +74,11 @@ export async function POST(req: Request) {
       componentName: imported.componentName,
       message: imported.message,
       layerCount: imported.layerCount,
-      pagePath: resolved.pagePath,
+      pagePath: resolved.mode === "linked" ? resolved.pagePath : resolved.virtualSourcePath,
+      route: resolved.mode === "capture-only" ? resolved.routeKey : undefined,
+      captureMode: resolved.mode,
       screen: previewUrl,
-      openUrl: "/editor",
+      openUrl: imported.openUrl,
     });
   } catch (e) {
     console.error("[craft-bridge/push-from-preview]", e);

@@ -55,6 +55,8 @@ import {
   canAddAutoLayoutToSelection,
   type ApplyAutoLayoutSelectionResult,
 } from "@/lib/autoLayoutSelection";
+import { releaseAutoLayoutContainerToManual } from "@/lib/autoLayout/releaseAutoLayoutToManual";
+import { isManualScreenFrame, rootFrameIds, ensureManualScreenLayout } from "@/lib/webImport/manualScreenFrames";
 import { isUngroupableContainer } from "@/lib/ungroupSelection";
 import { freezeAutoLayoutGapBeforeChildInsert } from "@/lib/layoutEngine/inferGap";
 import { idsToDetachForAutoLayoutDrag } from "@/lib/autoLayoutDrag";
@@ -233,7 +235,9 @@ import type {
 } from "@/lib/documentPersistence";
 import type { CodeRoundTripLink } from "@/lib/craftBridge/types";
 import { normalizeCodeRoundTripLink } from "@/lib/craftBridge/normalizeLink";
-import type { DesignToken, DetachableTokenKind, EffectTokenValue } from "@/lib/designTokens";
+import { rehydrateProjectColorContext } from "@/lib/craftBridge/projectTokenCss";
+import { bridgeFetch } from "@/lib/craftBridge/bridgeFetch";
+import type { DesignToken, DetachableTokenKind, EffectTokenValue, CanvasColorMode } from "@/lib/designTokens";
 import {
   newDesignTokenId,
   designTokenTimestamp,
@@ -770,6 +774,8 @@ export interface EditorNode {
 
   /** Master: stable internal layer id per descendant (nodeId → stableLayerId) */
   componentLayerStableIds?: Record<string, string>;
+  /** Master: when set, instances skip this pass-through shell and use the inner layer as root. */
+  componentInstanceContentStableId?: string;
   componentDescription?: string;
   componentPropertyDefs?: import("@/lib/components/types").ComponentPropertyDef[];
   componentVersion?: number;
@@ -842,6 +848,8 @@ export interface EditorNode {
   /** Design ↔ Code: true for lowercase HTML elements */
   codeJsxIntrinsic?: boolean;
   /** Design ↔ Code: original className for export */
+  /** Web-imported screen artboard — keep manual layout (not every top-level canvas frame). */
+  manualScreenLayout?: boolean;
   codeClassName?: string;
   /** Craft bridge: linked repo source path for this screen artboard root. */
   bridgeSourcePath?: string;
@@ -1000,6 +1008,12 @@ export interface EditorState {
   showGrid: boolean;
   showRulers: boolean;
   canvasBackgroundColor: string;
+  /** Preview mode for semantic color tokens on canvas (light/dark). */
+  canvasColorMode: CanvasColorMode;
+  /** Linked page + token CSS for runtime class→var color binding. */
+  projectCssSources: string[];
+  storybookUrl?: string;
+  storybookCatalogHash?: string;
   comments: EditorComment[];
   commentsPanelOpen: boolean;
   activeCommentId: string | null;
@@ -1166,6 +1180,10 @@ export interface EditorState {
   setNodeTextColorHex: (nodeId: string, hex: string, opts?: { skipHistory?: boolean }) => void;
   /** Apply solid fill / text color to all fill-capable layers in the current selection. */
   setSelectionFillHex: (hex: string, opts?: { skipHistory?: boolean }) => void;
+  /** Apply a style patch to each editable top-level selected layer. */
+  updateSelectionStyle: (patch: NodeStylePatch, opts?: { skipHistory?: boolean }) => void;
+  /** Apply a node patch to each editable top-level selected layer. */
+  updateSelectionNodes: (patch: Partial<EditorNode>, opts?: { skipHistory?: boolean }) => void;
   toggleVisible: (id: string) => void;
   toggleLock: (id: string) => void;
   setNodeVisible: (id: string, visible: boolean) => void;
@@ -1344,6 +1362,19 @@ export interface EditorState {
   toggleGrid: () => void;
   toggleRulers: () => void;
   setCanvasBackgroundColor: (hex: string, opts?: { skipHistory?: boolean }) => void;
+  setCanvasColorMode: (mode: CanvasColorMode) => void;
+  /** Fetch linked CSS + relink fill tokens when missing from a saved bridge document. */
+  rehydrateProjectColorTokensIfNeeded: () => Promise<void>;
+  /** Import Components/* stories from Storybook into the local component library. */
+  importStorybookComponents: (opts?: { force?: boolean }) => Promise<{
+    ok: boolean;
+    message: string;
+    imported?: number;
+    remaining?: number;
+    storyCount?: number;
+    totalImported?: number;
+  }>;
+  rehydrateProjectStorybookComponentsIfNeeded: () => Promise<void>;
 
   startPlacingComment: () => void;
   cancelPlacingComment: () => void;
@@ -1687,6 +1718,9 @@ export interface EditorState {
     status: "idle" | "syncing" | "synced" | "error",
     error?: string | null,
   ) => void;
+  /** Last Storybook component sync result (not persisted). */
+  storybookSyncMessage: string | null;
+  setStorybookSyncMessage: (message: string | null) => void;
   /** True while applying source→canvas import (pauses outbound auto-sync). */
   craftBridgeInboundActive: boolean;
   setCraftBridgeInboundActive: (active: boolean) => void;
@@ -3737,6 +3771,46 @@ function buildSetSelectionFillHexResult(
   return { nodes, childOrder: s.childOrder, ui: {} };
 }
 
+function buildUpdateSelectionStyleResult(
+  s: EditorState,
+  patch: NodeStylePatch,
+): StructuralDocumentResult | null {
+  const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+    const n = s.nodes[id];
+    return n && !n.locked;
+  });
+  if (tops.length === 0) return null;
+
+  let nodes = s.nodes;
+  let childOrder = s.childOrder;
+  let changed = false;
+  for (const id of tops) {
+    const slice = buildUpdateNodeStyleResult({ ...s, nodes, childOrder }, id, patch);
+    if (!slice) continue;
+    nodes = slice.nodes;
+    childOrder = slice.childOrder;
+    changed = true;
+  }
+  if (!changed) return null;
+  return { nodes, childOrder, ui: {} };
+}
+
+function buildUpdateSelectionNodesResult(
+  s: EditorState,
+  patch: Partial<EditorNode>,
+): StructuralDocumentResult | null {
+  const tops = topLevelSelectedIds(s.selectedIds, s.nodes).filter((id) => {
+    const n = s.nodes[id];
+    return n && !n.locked;
+  });
+  if (tops.length === 0) return null;
+  const patches: Record<string, Partial<EditorNode>> = {};
+  for (const id of tops) {
+    patches[id] = patch;
+  }
+  return buildUpdateNodesResult(s, patches);
+}
+
 function buildSetNodeTextColorHexResult(
   s: Pick<EditorState, "nodes" | "childOrder">,
   nodeId: string,
@@ -3784,11 +3858,11 @@ function buildApplyTokenToSelectionResult(
     const raw = nodes[id];
     if (!raw || raw.locked) continue;
     if (t.type === "color") {
-      if (["frame", "rectangle", "ellipse", "path", "text"].includes(raw.type)) {
+      if (["frame", "rectangle", "ellipse", "polygon", "path", "text"].includes(raw.type)) {
         nodes[id] = { ...raw, fillTokenId: tokenId, fillType: "solid", fillEnabled: true };
       }
     } else if (t.type === "gradient") {
-      if (["frame", "rectangle", "ellipse", "path"].includes(raw.type)) {
+      if (["frame", "rectangle", "ellipse", "polygon", "path"].includes(raw.type)) {
         nodes[id] = { ...raw, fillTokenId: tokenId, fillType: "gradient", fillEnabled: true };
       }
     } else if (t.type === "typography") {
@@ -4511,7 +4585,29 @@ function buildUpdateLayoutResult(
 ): StructuralDocumentResult | null {
   const n = s.nodes[id];
   if (!n || n.locked || (n.type !== "frame" && n.type !== "group")) return null;
-  const nodes = applyLayoutPatchWithAutoLayout(s.nodes, s.childOrder, id, patch) as EditorState["nodes"];
+
+  let nodes = ensureManualScreenLayout(s.nodes, s.childOrder, id);
+  const current = nodes[id]!;
+
+  const rootIds = rootFrameIds(s.childOrder);
+  if (
+    isManualScreenFrame(current, rootIds) &&
+    patch.layoutMode &&
+    patch.layoutMode !== "none"
+  ) {
+    return null;
+  }
+
+  if (patch.layoutMode === "none" && (current.layoutMode ?? "none") !== "none") {
+    nodes = releaseAutoLayoutContainerToManual(nodes, s.childOrder, id);
+    const { layoutMode: _ignored, ...rest } = patch;
+    if (Object.keys(rest).length > 0) {
+      nodes = applyLayoutPatchWithAutoLayout(nodes, s.childOrder, id, rest) as EditorState["nodes"];
+    }
+    return { nodes, childOrder: s.childOrder, ui: {} };
+  }
+
+  nodes = applyLayoutPatchWithAutoLayout(nodes, s.childOrder, id, patch) as EditorState["nodes"];
   return { nodes, childOrder: s.childOrder, ui: {} };
 }
 
@@ -6782,18 +6878,20 @@ function buildResizeFrameWithConstraintsResult(
 ): StructuralDocumentResult | null {
   const n = s.nodes[frameId];
   if (!n || n.locked || (n.type !== "frame" && n.type !== "group")) return null;
-  const oldW = n.width;
-  const oldH = n.height;
+  let nodes = ensureManualScreenLayout(s.nodes, s.childOrder, frameId);
+  const base = nodes[frameId]!;
+  const oldW = base.width;
+  const oldH = base.height;
   const W = Math.max(RESIZE_MIN_DIMENSION, newBounds.width);
   const H = Math.max(RESIZE_MIN_DIMENSION, newBounds.height);
   const next: EditorNode = {
-    ...n,
+    ...base,
     width: W,
     height: H,
     ...(newBounds.x !== undefined ? { x: newBounds.x } : {}),
     ...(newBounds.y !== undefined ? { y: newBounds.y } : {}),
   };
-  let nodes: Record<string, EditorNode> = { ...s.nodes, [frameId]: next };
+  nodes = { ...nodes, [frameId]: next };
   const layoutMode = next.layoutMode ?? "none";
   if (layoutMode === "none") {
     const cp = constraintResizeChildPatches(
@@ -7378,12 +7476,16 @@ export function toPersistSlice(s: EditorState): EditorPersistSlice {
     showGrid: s.showGrid,
     showRulers: s.showRulers,
     canvasBackgroundColor: s.canvasBackgroundColor,
+    canvasColorMode: s.canvasColorMode,
     comments: s.comments,
     pages,
     pageOrder,
     activePageId: s.activePageId,
     activeSubPageId: s.activeSubPageId,
     codeRoundTripLink: s.codeRoundTripLink ?? null,
+    projectCssSources: s.projectCssSources,
+    storybookUrl: s.storybookUrl,
+    storybookCatalogHash: s.storybookCatalogHash,
   };
 }
 
@@ -7639,6 +7741,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
   showGrid: initialDoc.showGrid,
   showRulers: initialDoc.showRulers ?? false,
   canvasBackgroundColor: initialDoc.canvasBackgroundColor,
+  canvasColorMode: initialDoc.canvasColorMode ?? "light",
+  projectCssSources: initialDoc.projectCssSources ?? [],
+  storybookUrl: initialDoc.storybookUrl,
+  storybookCatalogHash: initialDoc.storybookCatalogHash,
   comments: initialDoc.comments,
   commentsPanelOpen: false,
   activeCommentId: null,
@@ -7915,6 +8021,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
   craftBridgeSyncError: null,
   setCraftBridgeSyncStatus: (status, error = null) =>
     set({ craftBridgeSyncStatus: status, craftBridgeSyncError: error }),
+  storybookSyncMessage: null,
+  setStorybookSyncMessage: (message) => set({ storybookSyncMessage: message }),
   craftBridgeInboundActive: false,
   setCraftBridgeInboundActive: (active) => set({ craftBridgeInboundActive: active }),
   craftBridgeConflict: null,
@@ -8798,6 +8906,38 @@ export const useEditorStore = create<EditorState>((set, get) => {
     if (tops.length === 0) return;
     if (!opts?.skipHistory && !get().isApplyingHistory) get().pushHistory();
     commitStructuralResult(buildSetSelectionFillHexResult(get(), hex));
+  },
+
+  updateSelectionStyle: (patch, opts) => {
+    const tops = topLevelSelectedIds(get().selectedIds, get().nodes).filter((id) => {
+      const n = get().nodes[id];
+      return n && !n.locked;
+    });
+    if (tops.length === 0) return;
+    if (!opts?.skipHistory && !get().isApplyingHistory) get().pushHistory();
+    commitStructuralResult(buildUpdateSelectionStyleResult(get(), patch));
+  },
+
+  updateSelectionNodes: (patch, opts) => {
+    const tops = topLevelSelectedIds(get().selectedIds, get().nodes).filter((id) => {
+      const n = get().nodes[id];
+      return n && !n.locked;
+    });
+    if (tops.length === 0) return;
+    if (!opts?.skipHistory && !get().isApplyingHistory) get().pushHistory();
+    commitStructuralResult(buildUpdateSelectionNodesResult(get(), patch));
+    const st = get();
+    const entries = tops
+      .map((nodeId) => {
+        const node = st.nodes[nodeId];
+        if (!node) return null;
+        return { nodeId, patch, node };
+      })
+      .filter((e): e is NonNullable<typeof e> => e != null);
+    if (!isRotateGeometryLockActive(get())) {
+      const mirrored = mirrorGeometryPatchesToWasm(entries);
+      if (!mirrored) syncWasmDocumentAfterStoreUpdate();
+    }
   },
 
   setNodeVisible: (id, visible) => {
@@ -10679,6 +10819,191 @@ export const useEditorStore = create<EditorState>((set, get) => {
     commitStructuralResult(buildSetCanvasBackgroundColorResult(get(), hex));
   },
 
+  setCanvasColorMode: (mode) => {
+    const s = get();
+    if (s.canvasColorMode === mode) return;
+    set({ canvasColorMode: mode });
+    bumpTextLayoutEpoch();
+  },
+
+  rehydrateProjectColorTokensIfNeeded: async () => {
+    const s = get();
+    if (!s.codeRoundTripLink?.repoRoot && s.projectCssSources.length === 0) return;
+    try {
+      const patch = await rehydrateProjectColorContext({
+        nodes: s.nodes,
+        designTokens: s.designTokens,
+        projectCssSources: s.projectCssSources,
+        codeRoundTripLink: s.codeRoundTripLink,
+        canvasColorMode: s.canvasColorMode,
+      });
+      if (!patch) return;
+      set((state) => {
+        const merged = {
+          ...state,
+          nodes: patch.nodes,
+          designTokens: patch.designTokens,
+          projectCssSources: patch.projectCssSources,
+        };
+        return { ...merged, ...syncActivePageRecord(merged) };
+      });
+      bumpTextLayoutEpoch();
+    } catch (e) {
+      console.warn("[Paytm Craft] project color rehydrate failed", e);
+    }
+  },
+
+  importStorybookComponents: async (opts = {}) => {
+    const s = get();
+    if (!s.codeRoundTripLink?.repoRoot && !s.storybookUrl) {
+      return {
+        ok: false,
+        message: "Connect a linked repo and run Storybook (npm run storybook, usually port 6006).",
+      };
+    }
+    try {
+      type ImportBody =
+        | {
+            ok: true;
+            slice: EditorPersistSlice;
+            message: string;
+            imported: number;
+            remaining: number;
+            storyCount: number;
+            totalImported: number;
+          }
+        | { error: string };
+
+      let slice = toPersistSlice(s);
+      let lastBody: Extract<ImportBody, { ok: true }> | null = null;
+      let importedTotal = 0;
+
+      for (let batch = 0; batch < 12; batch++) {
+        const res = await bridgeFetch("/api/craft-bridge/import-storybook-components", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            slice,
+            link: s.codeRoundTripLink,
+            storybookUrl: s.storybookUrl,
+            force: opts.force ?? true,
+          }),
+        });
+        const body = (await res.json()) as ImportBody;
+        if (!res.ok || !("slice" in body)) {
+          const message = "error" in body ? body.error : `Storybook import failed (${res.status})`;
+          set({ storybookSyncMessage: message });
+          return {
+            ok: false,
+            message,
+          };
+        }
+        lastBody = body;
+        importedTotal += body.imported;
+        slice = body.slice;
+        if (body.remaining <= 0 || body.imported <= 0) break;
+      }
+
+      if (!lastBody) {
+        return { ok: false, message: "Storybook import failed." };
+      }
+
+      set((state) => {
+        const merged = {
+          ...state,
+          nodes: lastBody.slice.nodes,
+          childOrder: lastBody.slice.childOrder,
+          assets: lastBody.slice.assets ?? state.assets,
+          designTokens: lastBody.slice.designTokens ?? state.designTokens,
+          projectCssSources: lastBody.slice.projectCssSources ?? state.projectCssSources,
+          storybookUrl: lastBody.slice.storybookUrl,
+          storybookCatalogHash: lastBody.slice.storybookCatalogHash,
+          leftTab: "components" as LeftTab,
+          storybookSyncMessage: lastBody.message,
+        };
+        return { ...merged, ...syncActivePageRecord(merged) };
+      });
+      bumpTextLayoutEpoch();
+      get().saveToLocal();
+      return {
+        ok: true,
+        message: lastBody.message,
+        imported: importedTotal,
+        remaining: lastBody.remaining,
+        storyCount: lastBody.storyCount,
+        totalImported: lastBody.totalImported,
+      };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Storybook import failed.";
+      set({ storybookSyncMessage: message });
+      return {
+        ok: false,
+        message,
+      };
+    }
+  },
+
+  rehydrateProjectStorybookComponentsIfNeeded: async () => {
+    const s = get();
+    if (!s.codeRoundTripLink?.repoRoot && !s.storybookUrl) return;
+    try {
+      const res = await bridgeFetch("/api/craft-bridge/rehydrate-storybook-components", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nodes: s.nodes,
+          childOrder: s.childOrder,
+          assets: s.assets,
+          designTokens: s.designTokens,
+          projectCssSources: s.projectCssSources,
+          codeRoundTripLink: s.codeRoundTripLink,
+          canvasColorMode: s.canvasColorMode,
+          storybookUrl: s.storybookUrl,
+          storybookCatalogHash: s.storybookCatalogHash,
+        }),
+      });
+      const body = (await res.json()) as
+        | {
+            ok: true;
+            patch: {
+              nodes: typeof s.nodes;
+              childOrder: typeof s.childOrder;
+              assets: typeof s.assets;
+              storybookUrl?: string;
+              storybookCatalogHash?: string;
+            } | null;
+            hint?: string;
+          }
+        | { error: string };
+      if (!res.ok || !("ok" in body)) {
+        const message = "error" in body ? body.error : "Storybook rehydrate failed.";
+        set({ storybookSyncMessage: message });
+        return;
+      }
+      if (body.hint && !body.patch) {
+        set({ storybookSyncMessage: body.hint });
+        return;
+      }
+      if (!body.patch) return;
+      const patch = body.patch;
+      set({ storybookSyncMessage: null });
+      set((state) => {
+        const merged = {
+          ...state,
+          nodes: patch.nodes,
+          childOrder: patch.childOrder,
+          assets: patch.assets,
+          storybookUrl: patch.storybookUrl,
+          storybookCatalogHash: patch.storybookCatalogHash,
+        };
+        return { ...merged, ...syncActivePageRecord(merged) };
+      });
+      bumpTextLayoutEpoch();
+    } catch (e) {
+      console.warn("[Paytm Craft] Storybook component rehydrate failed", e);
+    }
+  },
+
   startPlacingComment: () => {
     const s = get();
     if (s.editorMode !== "design") return;
@@ -11606,6 +11931,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       showGrid: sliceFromDoc.showGrid,
       showRulers: sliceFromDoc.showRulers,
       canvasBackgroundColor: sliceFromDoc.canvasBackgroundColor,
+      canvasColorMode: sliceFromDoc.canvasColorMode,
       comments: sliceFromDoc.comments,
       pages: sliceFromDoc.pages,
       pageOrder: sliceFromDoc.pageOrder,
@@ -11806,6 +12132,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       showGrid: slice.showGrid,
       showRulers: slice.showRulers,
       canvasBackgroundColor: slice.canvasBackgroundColor,
+      canvasColorMode: slice.canvasColorMode ?? "light",
       comments: slice.comments,
       pages: slice.pages,
       pageOrder: slice.pageOrder,
@@ -12012,6 +12339,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
           showGrid: appliedSlice.showGrid,
           showRulers: appliedSlice.showRulers,
           canvasBackgroundColor: appliedSlice.canvasBackgroundColor,
+          canvasColorMode: appliedSlice.canvasColorMode ?? s.canvasColorMode,
+          projectCssSources: appliedSlice.projectCssSources ?? s.projectCssSources ?? [],
           comments: appliedSlice.comments,
           pages: appliedSlice.pages,
           pageOrder: appliedSlice.pageOrder,
@@ -12067,6 +12396,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
           assets: mergedAssets,
           designTokens: mergedDesignTokens,
           selectedIds: newRootIds,
+          canvasColorMode: merged.canvasColorMode ?? s.canvasColorMode,
+          projectCssSources: merged.projectCssSources ?? s.projectCssSources ?? [],
           fileName: s.fileName,
           comments: s.comments,
           ...uiReset(s),
@@ -12118,6 +12449,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       showGrid: empty.showGrid,
       showRulers: empty.showRulers ?? false,
       canvasBackgroundColor: empty.canvasBackgroundColor,
+      canvasColorMode: empty.canvasColorMode ?? "light",
       comments: empty.comments,
       commentsPanelOpen: false,
       activeCommentId: null,
@@ -12493,6 +12825,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         showGrid: empty.showGrid,
         showRulers: empty.showRulers ?? false,
         canvasBackgroundColor: empty.canvasBackgroundColor,
+        canvasColorMode: empty.canvasColorMode ?? "light",
         comments: empty.comments,
         layoutGuides: empty.pages[empty.activePageId]?.layoutGuides ?? [],
         documentSaveStatus: "saved",
