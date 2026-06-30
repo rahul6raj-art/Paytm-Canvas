@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
 import { EditorHintWrap } from "./EditorHoverHint";
 
 const MITRA_MENU_Z = "z-[120]";
-const MITRA_PROMPT_PLACEHOLDER = "Ask Mitra to create...";
+const MITRA_PROMPT_PLACEHOLDER = "Ask Nova to create...";
 const MITRA_COMPOSER_BOX_MAX_HEIGHT_PX = 200;
 const MITRA_TEXTAREA_MIN_HEIGHT_PX = 48;
 const MITRA_HEADER_HEIGHT_PX = 40;
@@ -226,7 +226,7 @@ export function EditorSidebarJulesPanel({
 
   return (
     <SidebarCollapsibleSection
-      title="Mitra"
+      title="Nova"
       variant="card"
       open={open}
       defaultOpen
@@ -278,7 +278,7 @@ export function EditorSidebarJulesPanel({
                   className="max-w-full min-w-0 text-ui"
                 />
               </div>
-              <EditorHintWrap title="Send to Mitra" disabled={!canGenerate || busy}>
+              <EditorHintWrap title="Send to Nova" disabled={!canGenerate || busy}>
                 <button
                   type="button"
                   aria-label="Send"

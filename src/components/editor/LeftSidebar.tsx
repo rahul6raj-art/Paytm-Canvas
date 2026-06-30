@@ -168,7 +168,7 @@ export function LeftSidebar({ onToggleSidebar }: { onToggleSidebar: () => void }
           <div className="h-2 shrink-0" aria-hidden />
         )}
 
-        {/* Card 3 — Mitra */}
+        {/* Card 3 — Nova */}
         <EditorSidebarJulesPanel
           open={mitraOpen}
           className={cn(
