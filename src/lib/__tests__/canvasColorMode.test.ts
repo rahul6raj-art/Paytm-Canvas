@@ -9,6 +9,37 @@ import {
   type DesignToken,
 } from "@/lib/designTokens";
 import type { EditorNode } from "@/stores/useEditorStore";
+import { isDesignColorModeSectionVisible } from "@/hooks/useDesignColorModeSectionVisible";
+import type { CodeRoundTripLink } from "@/lib/craftBridge/types";
+
+describe("design color mode section visibility", () => {
+  it("is hidden by default", () => {
+    assert.equal(isDesignColorModeSectionVisible(null, {}), false);
+  });
+
+  it("shows when a code round-trip link exists", () => {
+    const link: CodeRoundTripLink = {
+      sourcePath: "src/App.tsx",
+      repoRoot: "/repo",
+      syncMode: "manual",
+    };
+    assert.equal(isDesignColorModeSectionVisible(link, {}), true);
+  });
+
+  it("shows when design tokens include dark-mode color stops", () => {
+    const tokens: Record<string, DesignToken> = {
+      bg: {
+        id: "bg",
+        name: "background",
+        type: "color",
+        value: { hex: "#fff", dark: { hex: "#000" } },
+        createdAt: "",
+        updatedAt: "",
+      },
+    };
+    assert.equal(isDesignColorModeSectionVisible(null, tokens), true);
+  });
+});
 
 describe("canvas color mode tokens", () => {
   const tokenValue: ColorTokenValue = {

@@ -45,10 +45,6 @@ export function CanvasInspector() {
       ) : null}
       <DesignColorModeSection compact className="border-b border-app-panel-edge" />
       <PropertiesSection title="Canvas">
-        <p className="mb-2 text-ui text-app-subtle">
-          Pasteboard follows the app theme (moon icon). Use Design color mode above for light/dark
-          tokens on layers.
-        </p>
         <ColorInput
           label="Pasteboard"
           hex={effectiveBackground}
