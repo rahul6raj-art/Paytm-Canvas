@@ -61,7 +61,7 @@ export function LeftSidebar({ onToggleSidebar }: { onToggleSidebar: () => void }
     panelLayout,
   );
   const [panelOpen, setPanelOpen] = useState(true);
-  const [mitraOpen, setMitraOpen] = useState(true);
+  const [mitraOpen, setMitraOpen] = useState(false);
   const {
     containerRef: splitContainerRef,
     layersHeight,

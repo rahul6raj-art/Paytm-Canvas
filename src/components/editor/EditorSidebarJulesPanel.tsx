@@ -229,7 +229,7 @@ export function EditorSidebarJulesPanel({
       title="Nova"
       variant="card"
       open={open}
-      defaultOpen
+      defaultOpen={false}
       hideFooterWhenCollapsed
       compactWhenCollapsed
       fillAvailable={false}
