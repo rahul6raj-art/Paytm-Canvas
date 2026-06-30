@@ -1,4 +1,4 @@
-import { strokeAttrsForSvgMarkup } from "@/lib/stroke";
+import { strokeAttrsForSvgMarkup, svgNativeLinecap } from "@/lib/stroke";
 import {
   resolveStrokeSpec,
   strokeSpecCanvasDash,
@@ -36,7 +36,7 @@ export function applyCanvasTextLayerStroke(
   ctx.lineWidth = stroke.spec.width;
   ctx.strokeStyle = stroke.color;
   ctx.lineJoin = stroke.spec.join;
-  ctx.lineCap = stroke.spec.cap;
+  ctx.lineCap = svgNativeLinecap(stroke.spec.cap);
   if (stroke.canvasDash.length > 0) {
     ctx.setLineDash(stroke.canvasDash);
   }

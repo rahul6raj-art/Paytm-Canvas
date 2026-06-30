@@ -3,6 +3,7 @@ import {
   clampCornerRadii,
   getNodeCornerRadii,
   roundedRectPathDForNode,
+  type CornerRadii,
 } from "@/lib/cornerRadius";
 import { newPathPointId, normalizePathNode, pathToSvgD, type PathPoint } from "@/lib/pathGeometry";
 import type { EditorNode } from "@/stores/useEditorStore";
@@ -126,6 +127,8 @@ export function shapeToPathPoints(
     | "arcSweepDeg"
     | "arcInnerRadiusRatio"
     | "polygonSides"
+    | "starPoints"
+    | "starInnerRadius"
   >,
 ): { pathPoints: PathPoint[]; pathClosed: boolean } | null {
   const w = Math.max(1, node.width);

@@ -129,7 +129,7 @@ export function computeSwapTargetSlotPath(
   return segments.join("/");
 }
 
-export function slotPathExistsInMaster(
+function slotPathExistsInMaster(
   nodes: Record<string, EditorNode>,
   masterRootId: string,
   slotPath: string,

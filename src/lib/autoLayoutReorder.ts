@@ -318,7 +318,7 @@ export function resolveAutoLayoutDropTarget(
   const parentOf = buildParentMapFromChildOrder(childOrder);
   let cur: string | null = hit;
   while (cur) {
-    const n = nodes[cur];
+    const n: EditorNode | undefined = nodes[cur];
     if (
       isAutoLayoutContainer(n) &&
       pointerInsideAutoLayoutContent(cur, worldX, worldY, nodes, childOrder)

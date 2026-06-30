@@ -86,7 +86,12 @@ export function runTextLayoutPipeline(
   const metrics = resolveTextFontMetrics(
     input.typo,
     lineHeightPx,
-    prepared.canonical.fontMetrics,
+    {
+      ascender: prepared.canonical.firstLineAscent,
+      descender: prepared.canonical.firstLineDescent,
+      baselineOffset: prepared.canonical.firstLineAscent,
+      lineHeightPx: prepared.canonical.lineHeightPx,
+    },
   );
 
   const paint = buildTextPaintPlan(prepared, metrics, layoutNode);

@@ -64,21 +64,18 @@ export function CanvasToolRail({ className }: { className?: string }) {
       data-canvas-tool-rail
       aria-label="Canvas tools"
     >
-      {CANVAS_TOOL_RAIL_TOOLS.slice(0, 1).map(({ id, label, shortcut }) => {
-        const Icon = RAIL_ICONS[id];
-        return (
-          <ToolButton
-            key={id}
-            active={tool === id}
-            aria-label={label}
-            title={canvasToolRailTitle(label, shortcut)}
-            className={CANVAS_TOOL_RAIL_BUTTON_CLASS}
-            onClick={() => pickTool(id)}
-          >
-            <CanvasToolRailIcon icon={Icon} />
-          </ToolButton>
-        );
-      })}
+      {CANVAS_TOOL_RAIL_TOOLS.slice(0, 1).map(({ id, label, shortcut }) => (
+        <ToolButton
+          key={id}
+          active={tool === id}
+          aria-label={label}
+          title={canvasToolRailTitle(label, shortcut)}
+          className={CANVAS_TOOL_RAIL_BUTTON_CLASS}
+          onClick={() => pickTool(id)}
+        >
+          <CanvasToolRailIcon icon={RAIL_ICONS[id as Exclude<Tool, "pen">]} />
+        </ToolButton>
+      ))}
       <FrameToolDropdown />
       <ShapeToolDropdown />
       {CANVAS_TOOL_RAIL_TOOLS.slice(1).map(({ id, label, shortcut }) => {

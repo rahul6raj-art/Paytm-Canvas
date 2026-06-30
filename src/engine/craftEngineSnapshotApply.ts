@@ -121,7 +121,7 @@ function preserveStoreGeometryOverWasmMirror(
   for (const key of WASM_MIRROR_GEOMETRY_KEYS) {
     const prev = previous[key];
     if (prev !== undefined) {
-      (out as Record<string, unknown>)[key] = prev;
+      (out as unknown as Record<string, unknown>)[key] = prev;
     }
   }
   return out;

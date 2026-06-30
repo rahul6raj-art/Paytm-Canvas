@@ -1,4 +1,4 @@
-import opentype from "opentype.js";
+import * as opentype from "opentype.js";
 import { primaryFontName } from "@/lib/fonts/fontCatalog";
 import type { EditorFontAsset } from "@/lib/documentPersistence";
 import { resolveTextTypo } from "@/lib/textTypography";

@@ -1,4 +1,4 @@
-import type opentype from "opentype.js";
+import type * as opentype from "opentype.js";
 import { effectiveFillType } from "@/lib/fillGradient";
 import { resolveSolidFillCss } from "@/lib/gradient/cssPaint";
 import { outlineStroke, type OutlineStrokeResult } from "@/lib/outlineStroke";

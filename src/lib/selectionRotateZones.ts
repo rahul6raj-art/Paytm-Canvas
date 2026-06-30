@@ -1,5 +1,6 @@
 import type { ResizeHandle } from "@/lib/resize";
 import { CANVAS_HANDLE_SCREEN_PX, screenPxToWorld } from "@/lib/canvasVisual";
+import { useEditorStore } from "@/stores/useEditorStore";
 
 /** Corner handles that support Figma-style rotate-from-corner. */
 export const ROTATE_CORNER_HANDLES: ResizeHandle[] = ["nw", "ne", "se", "sw"];
@@ -172,6 +173,7 @@ export function applyRotateDragCursor(
 }
 
 export function clearRotateDragCursor(captureEl?: HTMLElement | null): void {
+  document.body.style.userSelect = "";
   document.body.style.cursor = "";
   const viewport = canvasViewportEl();
   if (viewport) {
@@ -179,6 +181,15 @@ export function clearRotateDragCursor(captureEl?: HTMLElement | null): void {
     viewport.removeAttribute("data-rotate-active");
   }
   if (captureEl) captureEl.style.cursor = "";
+}
+
+/** Clear rotate cursor DOM overrides and hover flags that keep the viewport on the rotate glyph. */
+export function resetCanvasRotateCursorState(captureEl?: HTMLElement | null): void {
+  clearRotateDragCursor(captureEl);
+  const st = useEditorStore.getState();
+  if (st.rotateHandleHovered || st.rotateHandleHoverHandle) {
+    st.setRotateHandleHovered(false);
+  }
 }
 
 export type RotateZone = {

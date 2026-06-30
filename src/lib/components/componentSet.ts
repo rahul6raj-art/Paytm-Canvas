@@ -75,7 +75,7 @@ export function isInsideComponentSet(
 ): boolean {
   let cur: string | null = nodeId;
   while (cur) {
-    const n = nodes[cur];
+    const n: EditorNode | undefined = nodes[cur];
     if (!n) return false;
     if (n.isComponentSet) return true;
     cur = n.parentId;

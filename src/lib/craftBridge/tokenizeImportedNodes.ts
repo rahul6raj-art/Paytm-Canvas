@@ -87,7 +87,7 @@ export function tokenizeImportedNodes(
       if (typoToken) {
         patched = { ...patched, textStyleTokenId: typoToken };
       }
-    } else if (node.type !== "text") {
+    } else {
       const fillToken = pickFillColorTokenId(node, designTokens, cssSources, importMode);
       if (fillToken) {
         patched = {

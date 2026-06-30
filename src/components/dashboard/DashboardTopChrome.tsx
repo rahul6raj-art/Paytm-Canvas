@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { CanvasFloatingPageName } from "@/components/editor/CanvasFloatingPageName";
 import { EditorRightActionsCard } from "@/components/editor/EditorRightActionsCard";
 
@@ -15,7 +16,9 @@ export function DashboardTopChrome({
         data-dashboard-right-actions
         className="pointer-events-auto fixed right-2 top-2 z-40"
       >
-        <EditorRightActionsCard />
+        <Suspense fallback={null}>
+          <EditorRightActionsCard />
+        </Suspense>
       </div>
     </>
   );

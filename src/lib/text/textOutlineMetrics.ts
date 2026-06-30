@@ -1,4 +1,4 @@
-import type opentype from "opentype.js";
+import type * as opentype from "opentype.js";
 import type { ResolvedTextTypo } from "@/lib/textTypography";
 import { buildFontString, getTextMeasureContext } from "@/lib/text/textMeasure";
 

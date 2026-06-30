@@ -32,8 +32,11 @@ export function FrameToolDropdown() {
   const menuRef = useRef<HTMLDivElement>(null);
   const tool = useEditorStore((s) => s.tool);
   const framePresetId = useEditorStore((s) => s.framePresetId);
+  const selectedIds = useEditorStore((s) => s.selectedIds);
+  const nodes = useEditorStore((s) => s.nodes);
   const setTool = useEditorStore((s) => s.setTool);
   const setFramePresetId = useEditorStore((s) => s.setFramePresetId);
+  const applyFramePresetToSelection = useEditorStore((s) => s.applyFramePresetToSelection);
 
   const position = useAnchoredDropdownPosition(wrapRef, open, 4, {
     viewportClamp: true,
@@ -53,9 +56,15 @@ export function FrameToolDropdown() {
     requestAnimationFrame(() => activateCanvasForShortcuts());
   };
 
+  const canApplyPresetToSelection =
+    selectedIds.length === 1 &&
+    nodes[selectedIds[0]!]?.type === "frame" &&
+    !nodes[selectedIds[0]!]?.locked;
+
   const pickPreset = (id: string) => {
     setFramePresetId(id);
-    setTool("frame");
+    const applied = applyFramePresetToSelection(id);
+    setTool(applied ? "move" : "frame");
     setOpen(false);
     requestAnimationFrame(() => activateCanvasForShortcuts());
   };
@@ -103,7 +112,9 @@ export function FrameToolDropdown() {
           <span className="shrink-0 text-ui text-app-subtle">drag</span>
         </button>
         <p className="px-3.5 pb-2 pt-1 text-ui leading-snug text-app-subtle">
-          Click canvas to place preset · drag to draw any size
+          {canApplyPresetToSelection
+            ? "Applies preset size to selected frame · click canvas to place new"
+            : "Click canvas to place preset · drag to draw any size"}
         </p>
       </div>
     ) : null;

@@ -154,7 +154,7 @@ export function LetterSpacingInput({
       <div className="inspector-field-label">Letter spacing</div>
       <div className={cn(appFieldShellClass, disabled && "opacity-45")}>
         <span className={inspectorFieldIconSlotClass} aria-hidden>
-          <TextLetterSpacingIcon className={inspectorInlineSvgClass} />
+          <TextLetterSpacingIcon className={inspectorInlineSvgClass()} />
         </span>
         <input
           type="text"

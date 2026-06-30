@@ -8,7 +8,7 @@ import {
   parsePageCssRules,
   type PageCssRule,
 } from "@/lib/codeRoundTrip/parsePageCss";
-import type { CanvasColorMode, DesignToken } from "@/lib/designTokens";
+import type { CanvasColorMode, ColorTokenValue, DesignToken } from "@/lib/designTokens";
 import type { EditorNode } from "@/stores/useEditorStore";
 
 export type TokenizeImportedNodesOptions = {

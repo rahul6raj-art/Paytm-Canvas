@@ -1,5 +1,5 @@
 import type { EditorAsset } from "@/lib/documentPersistence";
-import type { CanvasColorMode } from "@/lib/designTokens";
+import type { CanvasColorMode, DesignToken } from "@/lib/designTokens";
 import { legacyEffectShadowAppend, resolveEffectBoxShadow, resolveNodeWithDesignTokens } from "@/lib/designTokens";
 import { mergeInstanceOverrides } from "@/lib/componentModel";
 import { effectiveFillType, effectiveStrokeType, fillPaintCss, svgFillPaint } from "@/lib/fillGradient";
@@ -50,7 +50,7 @@ import {
   shouldUseOutlinedOpenPathStroke,
   strokeRingLayersBeforeFill,
 } from "@/lib/strokeAlign";
-import { filledStrokeOutlineFromPathD, outlineStroke } from "@/lib/outlineStroke";
+import { filledStrokeOutlineFromPathD, outlineStroke, type OutlineStrokeResult } from "@/lib/outlineStroke";
 import {
   shouldRenderSvgPerSideStroke,
   svgPerSideStrokeBeforeFill,
@@ -164,6 +164,7 @@ function svgGradientOutlineStrokeMarkup(
     renderScale: opts.renderScale,
     assets: opts.assets,
   });
+  const outlinePaint = outlined as OutlineStrokeResult;
   const strokeFill =
     stroke.strokeAttr !== "none"
       ? stroke.strokeAttr.startsWith("url(")
@@ -171,8 +172,8 @@ function svgGradientOutlineStrokeMarkup(
         : escXml(stroke.strokeAttr)
       : escXml(
           effectColorToRgba(
-            outlined.fill ?? n.strokeColor ?? DEFAULT_SHAPE_STROKE,
-            outlined.fillOpacity ?? n.strokeOpacity ?? 1,
+            outlinePaint.fill ?? n.strokeColor ?? DEFAULT_SHAPE_STROKE,
+            outlinePaint.fillOpacity ?? n.strokeOpacity ?? 1,
           ),
         );
   const fillRuleAttr =

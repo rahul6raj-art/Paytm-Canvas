@@ -2,6 +2,7 @@
 
 import { useEditorStore, type EditorState, type Tool } from "@/stores/useEditorStore";
 import { isRotateGeometryLockActive } from "@/lib/rotation/rotateGeometryLock";
+import { resetCanvasRotateCursorState } from "@/lib/selectionRotateZones";
 
 const TOOL_SHORTCUT_MAP: Record<string, Tool> = {
   v: "move",
@@ -289,8 +290,7 @@ export function focusCanvasViewport(el: HTMLElement | null | undefined): void {
 /** Clear stuck drag/resize body styles that can block clicks and keyboard routing. */
 export function recoverCanvasInteractionState(): void {
   if (typeof document === "undefined") return;
-  document.body.style.userSelect = "";
-  document.body.style.cursor = "";
+  resetCanvasRotateCursorState();
 }
 
 /** Blur property fields and move focus to the canvas for global shortcuts. */

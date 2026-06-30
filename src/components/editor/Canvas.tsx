@@ -104,6 +104,7 @@ import {
   activateCanvasForShortcuts,
   focusCanvasViewport,
   isEditableFieldElement,
+  recoverCanvasInteractionState,
   releaseFieldFocusForCanvas,
   shouldTrackSpaceForCanvasPan,
   syncCanvasPointerModifiers,
@@ -365,12 +366,14 @@ export function Canvas() {
       setOptionDown(false);
       setCommandDown(false);
       setSpaceDown(false);
+      recoverCanvasInteractionState();
     };
     const onVisibility = () => {
       if (document.visibilityState === "hidden") {
         setOptionDown(false);
         setCommandDown(false);
         setSpaceDown(false);
+        recoverCanvasInteractionState();
       }
     };
     window.addEventListener("keydown", down);

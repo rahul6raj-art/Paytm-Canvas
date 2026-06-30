@@ -1055,7 +1055,7 @@ function nodeUsesLocalTransformBox(node: EditorNode): boolean {
 function nodeHasTransformedAncestor(
   nodeId: string,
   nodes: Record<string, EditorNode>,
-  parentOf: Map<string, string>,
+  parentOf: Map<string, string | null>,
 ): boolean {
   let parentId = parentOf.get(nodeId) ?? null;
   while (parentId) {

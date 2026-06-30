@@ -161,7 +161,7 @@ export function LineHeightInput({
       <div className="inspector-field-label">Line height</div>
       <div className={cn(appFieldShellClass, disabled && "opacity-45")}>
         <span className={inspectorFieldIconSlotClass} aria-hidden>
-          <TextLineHeightIcon className={inspectorInlineSvgClass} />
+          <TextLineHeightIcon className={inspectorInlineSvgClass()} />
         </span>
         <input
           type="text"

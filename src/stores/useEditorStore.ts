@@ -178,6 +178,7 @@ import {
   syncInteractionsToVariantGroup,
   type ComponentInteraction,
   type ComponentInteractionTrigger,
+  type InstanceInteractionState,
 } from "@/lib/components/componentInteractions";
 import {
   addPropertyToSet,
@@ -305,6 +306,7 @@ import {
   textGeometryPatchFromDrag,
 } from "@/lib/text/textCreation";
 import { createFrameNodeFromDrag, frameGeometryPatchFromDrag } from "@/lib/frameDrawing";
+import { cancelActiveRotateDragFromKeyboard } from "@/lib/canvasRotateDragController";
 import { MIN_TEXT_BOX, textResizePatch } from "@/lib/text/textNodeModel";
 import {
   DEFAULT_TEXT_FONT_FAMILY,
@@ -330,7 +332,7 @@ import {
   linePatchFromEndpoints,
   lineEndpointsFromNode,
 } from "@/lib/shapes/lineGeometry";
-import { polygonGeometryPatch } from "@/lib/shapes/polygonGeometry";
+import { isPolygonNode, polygonGeometryPatch } from "@/lib/shapes/polygonGeometry";
 import { isStarNode, starGeometryPatch } from "@/lib/shapes/starGeometry";
 import {
   DEFAULT_FRAME_FILL,
@@ -473,6 +475,7 @@ import { parseEditorClipboardPayload, type EditorClipboardPayloadV1 } from "@/li
 import type { PresenceActivityEntry, PresenceUser } from "@/lib/presence";
 import {
   DEFAULT_FRAME_PRESET_ID,
+  FRAME_CUSTOM_PRESET_ID,
   resolveFramePresetSize,
 } from "@/lib/framePresets";
 import {
@@ -1151,6 +1154,8 @@ export interface EditorState {
   setTextEditSelection: (anchor: number, focus: number) => void;
   setTool: (t: Tool) => void;
   setFramePresetId: (id: string) => void;
+  /** Resize the sole selected frame to a device preset, when applicable. */
+  applyFramePresetToSelection: (presetId: string) => boolean;
   setEditorMode: (t: EditorMode) => void;
   /** @deprecated Use setEditorMode */
   setRightTab: (t: EditorMode) => void;
@@ -1646,9 +1651,6 @@ export interface EditorState {
   navigateSlotEditBreadcrumb: (index: number) => void;
   pasteIntoActiveSlot: () => void;
 
-  /** When true, canvas pointer events drive interactive component variant switching. */
-  componentInteractionPreview: boolean;
-  activeSlotEdit: ActiveSlotEditState | null;
   setComponentInteractionPreview: (enabled: boolean) => void;
   setComponentInteractions: (masterId: string, interactions: ComponentInteraction[]) => void;
   addComponentInteraction: (masterId: string, interaction: ComponentInteraction) => void;
@@ -1674,6 +1676,9 @@ export interface EditorState {
   shortcutOverlayOpen: boolean;
   /** Left/right panels, top toolbar, and footer (Figma-style hide UI). */
   uiChromeVisible: boolean;
+  /** Brief canvas acknowledgment (copy PNG, etc.). */
+  ackToast: string | null;
+  setAckToast: (message: string | null) => void;
   /** Constrain W/H proportions in the inspector and on canvas resize handles. */
   inspectorAspectRatioLocked: boolean;
   setCommandMenuOpen: (open: boolean) => void;
@@ -1766,6 +1771,9 @@ export interface EditorState {
   closeImportFigmaModal: () => void;
   openCodeRoundTrip: (tab?: "export" | "import") => void;
   closeCodeRoundTrip: () => void;
+  mcpConnectionsModalOpen: boolean;
+  openMcpConnectionsModal: () => void;
+  closeMcpConnectionsModal: () => void;
 
   applyGeneratedDesign: (
     slice: EditorPersistSlice,
@@ -7389,9 +7397,7 @@ function toLayoutNode(n: EditorNode): LayoutNode {
     fontSize: n.fontSize,
     fontWeight: n.fontWeight,
     lineHeight: n.lineHeight,
-    lineHeightUnit: n.lineHeightUnit,
     letterSpacing: n.letterSpacing,
-    letterSpacingUnit: n.letterSpacingUnit,
     textResizeMode: n.textResizeMode,
   };
 }
@@ -7940,6 +7946,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
   commandMenuOpen: false,
   shortcutOverlayOpen: false,
   uiChromeVisible: true,
+  ackToast: null,
+  setAckToast: (message) => set({ ackToast: message }),
   inspectorAspectRatioLocked: false,
   setCommandMenuOpen: (open) =>
     set(() => ({
@@ -8165,6 +8173,19 @@ export const useEditorStore = create<EditorState>((set, get) => {
       aiModalSource: null,
     })),
   closeCodeRoundTrip: () => set({ codeRoundTripOpen: false }),
+  mcpConnectionsModalOpen: false,
+  openMcpConnectionsModal: () =>
+    set(() => ({
+      mcpConnectionsModalOpen: true,
+      importHubOpen: false,
+      importWebModalOpen: false,
+      importFigmaModalOpen: false,
+      codeRoundTripOpen: false,
+      commandMenuOpen: false,
+      aiModalOpen: false,
+      aiModalSource: null,
+    })),
+  closeMcpConnectionsModal: () => set({ mcpConnectionsModalOpen: false }),
 
   pluginMarketplaceOpen: false,
   installedPluginIds: readInstalledPluginIds(),
@@ -8652,6 +8673,24 @@ export const useEditorStore = create<EditorState>((set, get) => {
     });
   },
   setFramePresetId: (framePresetId) => set({ framePresetId }),
+
+  applyFramePresetToSelection: (presetId) => {
+    if (presetId === FRAME_CUSTOM_PRESET_ID) return false;
+    const s = get();
+    if (s.editorMode !== "design") return false;
+    if (s.selectedIds.length !== 1) return false;
+    const frameId = s.selectedIds[0]!;
+    const node = s.nodes[frameId];
+    if (!node || node.locked || node.type !== "frame") return false;
+
+    const { width, height } = resolveFramePresetSize(presetId);
+    if (s.responsivePreview?.frameId === frameId) {
+      get().updateResponsivePreviewBounds(width, height);
+      return true;
+    }
+    get().resizeFrameWithConstraints(frameId, { width, height });
+    return true;
+  },
   setEditorMode: (editorMode) =>
     set((s) => ({
       editorMode,
@@ -8793,6 +8832,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     }),
 
   select: (id, additive) => {
+    cancelActiveRotateDragFromKeyboard();
     set((s) => {
       if (!id)
         return {
@@ -8803,6 +8843,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
           shapeEditModeNodeId: null,
           objectEditModeNodeId: null,
           selectedPathPointIds: [],
+          rotateHandleHovered: false,
+          rotateHandleHoverHandle: null,
         };
       if (additive) {
         const has = s.selectedIds.includes(id);
@@ -8814,6 +8856,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
           shapeEditModeNodeId: null,
           objectEditModeNodeId: null,
           selectedPathPointIds: [],
+          rotateHandleHovered: false,
+          rotateHandleHoverHandle: null,
         };
       }
       const preserveObjectEdit =
@@ -8830,6 +8874,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
         shapeEditModeNodeId: null,
         objectEditModeNodeId: preserveObjectEdit ? s.objectEditModeNodeId : null,
         selectedPathPointIds: [],
+        rotateHandleHovered: false,
+        rotateHandleHoverHandle: null,
       };
     });
     const st = get();
@@ -8844,6 +8890,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   },
 
   clearSelection: () => {
+    cancelActiveRotateDragFromKeyboard();
     set((s) => {
       const next = {
         selectedIds: [] as string[],
@@ -8859,6 +8906,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
         objectEditModeNodeId: null,
         selectedPathPointIds: [],
         prototypeWireDrag: null,
+        rotateHandleHovered: false,
+        rotateHandleHoverHandle: null,
       };
       return { ...next, ...syncActivePageRecord({ ...s, ...next }) };
     });

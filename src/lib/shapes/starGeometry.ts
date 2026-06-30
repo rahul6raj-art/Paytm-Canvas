@@ -410,6 +410,7 @@ export function starPathDForNode(
     | "cornerRadii"
     | "starOuterCornerRadius"
     | "starInnerCornerRadius"
+    | "cornerSmoothing"
   >,
   override?: Partial<StarParams>,
 ): string {

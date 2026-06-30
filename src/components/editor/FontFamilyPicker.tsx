@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
-  type KeyboardEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, RefreshCw, Upload, X } from "lucide-react";
@@ -137,7 +137,7 @@ export function FontFamilyPicker({
     el?.scrollIntoView({ block: "nearest" });
   }, []);
 
-  const onMenuKeyDown = (e: KeyboardEvent) => {
+  const onMenuKeyDown = (e: ReactKeyboardEvent) => {
     if (trySelectAllPanelField(e)) return;
     if (e.key === "Escape") {
       e.preventDefault();
@@ -186,7 +186,7 @@ export function FontFamilyPicker({
 
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { clonePathPoints } from "@/lib/pathGeometry";
 import { useEditorStore, finalizeResizeWasmSync, type EditorNode } from "@/stores/useEditorStore";
 import { findInstanceRoot } from "@/lib/componentModel";
@@ -38,7 +38,7 @@ import {
 import { isCanvasBgCreationTool } from "@/lib/canvasInteractionGuards";
 import {
   applyRotateDragCursor,
-  clearRotateDragCursor,
+  resetCanvasRotateCursorState,
   cornerOnOverlayBounds,
   rotateCursorCssForHandle,
   rotateCursorCssForWorldOutward,
@@ -65,6 +65,7 @@ import { isRotateGeometryLockActive } from "@/lib/rotation/rotateGeometryLock";
 import { anchorWorldAtBoundsFromChildOrder } from "@/lib/resizeTransform";
 import { EDGE_RESIZE_HANDLES, type ResizeHandle } from "@/lib/resize";
 import { CANVAS_CLICK_SLOP_SCREEN_PX } from "@/lib/canvasInteractionGuards";
+import { registerRotateDragAbortHandler } from "@/lib/canvasRotateDragController";
 import { useCanvasToWorld } from "./CanvasToWorldContext";
 import { clientToWorldFromDocument } from "@/lib/canvasCoordinates";
 import {
@@ -136,6 +137,17 @@ export function SelectionBox() {
     }),
     [setRotateHandleHovered],
   );
+
+  useEffect(() => {
+    return () => {
+      registerRotateDragAbortHandler(null);
+      resetCanvasRotateCursorState();
+    };
+  }, []);
+
+  useEffect(() => {
+    resetCanvasRotateCursorState();
+  }, [selectedIds]);
 
   const creationToolActive = isCanvasBgCreationTool(tool, editorMode, { isPlacingComment });
 
@@ -500,18 +512,19 @@ export function SelectionBox() {
           });
         });
       };
-      const onUp = (ev: PointerEvent) => {
+      const detachRotateListeners = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+        registerRotateDragAbortHandler(null);
+      };
+
+      const finishRotateDragSession = (opts?: { flushScheduler?: boolean }) => {
         const d = rotateDragRef.current;
-        if (!d || ev.pointerId !== d.pointerId) return;
-        forEachCoalescedPointerEvent(ev, (pe) => {
-          rotateScheduler.schedule({
-            world: clientToWorld(pe.clientX, pe.clientY),
-            shiftKey: pe.shiftKey,
-          });
-        });
-        rotateScheduler.flush();
+        if (!d) return false;
+        if (opts?.flushScheduler) rotateScheduler.flush();
         rotateScheduler.cancel();
-        const { captureEl, session } = d;
+        const { captureEl, session, pointerId } = d;
         const stEnd = useEditorStore.getState();
         if (session.kind === "single") {
           const finalRotation =
@@ -524,12 +537,28 @@ export function SelectionBox() {
         rotateFrozenUnionRef.current = null;
         setRotateFrozenUnion(null);
         setRotateLabel(null);
-        document.body.style.userSelect = "";
-        clearRotateDragCursor(captureEl);
-        window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onUp);
-        window.removeEventListener("pointercancel", onUp);
+        try {
+          captureEl.releasePointerCapture(pointerId);
+        } catch {
+          /* ignore */
+        }
+        resetCanvasRotateCursorState(captureEl);
+        detachRotateListeners();
+        return true;
       };
+
+      const onUp = (ev: PointerEvent) => {
+        const d = rotateDragRef.current;
+        if (!d || ev.pointerId !== d.pointerId) return;
+        forEachCoalescedPointerEvent(ev, (pe) => {
+          rotateScheduler.schedule({
+            world: clientToWorld(pe.clientX, pe.clientY),
+            shiftKey: pe.shiftKey,
+          });
+        });
+        finishRotateDragSession({ flushScheduler: true });
+      };
+      registerRotateDragAbortHandler(() => finishRotateDragSession());
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
       window.addEventListener("pointercancel", onUp);

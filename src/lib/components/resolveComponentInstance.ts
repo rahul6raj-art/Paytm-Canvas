@@ -423,7 +423,7 @@ export function collectInstanceRelayoutKeys(
 
   let cur = nodes[instanceRootId]?.parentId ?? null;
   while (cur) {
-    const n = nodes[cur];
+    const n: EditorNode | undefined = nodes[cur];
     if (n?.sourceComponentId) keys.add(cur);
     cur = n.parentId ?? null;
   }

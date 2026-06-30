@@ -126,7 +126,12 @@ async function callLLM(
   return { raw: out.content, apiError: out.error };
 }
 
-function buildParseFailureMessage(model: string, llmRaw: string | null, apiError?: string): string {
+function buildParseFailureMessage(
+  model: string,
+  llmRaw: string | null,
+  apiError?: string,
+  apiKeys?: ResolvedAIApiKeys,
+): string {
   if (apiError) return apiError;
   if (isOllamaModelId(model)) {
     if (!llmRaw?.trim()) {
@@ -135,7 +140,7 @@ function buildParseFailureMessage(model: string, llmRaw: string | null, apiError
     return "Ollama returned invalid layout JSON. Try GPT-4o Mini for structured layouts.";
   }
   if (isCursorModelId(model)) {
-    if (!isCursorConfigured() && !request.apiKeys?.cursor) {
+    if (!isCursorConfigured() && !apiKeys?.cursor) {
       return "Add your Cursor key in the model menu, or set CURSOR_API_KEY in .env.local.";
     }
     if (!llmRaw?.trim()) {
@@ -144,7 +149,7 @@ function buildParseFailureMessage(model: string, llmRaw: string | null, apiError
     return "Cursor returned invalid layout JSON. Attach Design.md and use a specific screen prompt, or try GPT-4o Mini.";
   }
   if (isOpenAIModelId(model)) {
-    if (!isOpenAIConfigured() && !request.apiKeys?.openai) {
+    if (!isOpenAIConfigured() && !apiKeys?.openai) {
       return "Add your OpenAI key in the model menu, or set OPENAI_API_KEY in .env.local.";
     }
     if (!llmRaw?.trim()) {
@@ -218,7 +223,7 @@ async function runLLMPath(
       ok: false,
       model,
       detectedIntent: intentLabel,
-      error: buildParseFailureMessage(model, llmCall.raw, llmCall.apiError),
+      error: buildParseFailureMessage(model, llmCall.raw, llmCall.apiError, request.apiKeys),
     };
   }
 

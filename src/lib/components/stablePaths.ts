@@ -129,7 +129,7 @@ export function findDeepestInstanceRoot(
   const chain: string[] = [];
   let cur: string | null = nodeId;
   while (cur) {
-    const n = nodes[cur];
+    const n: EditorNode | undefined = nodes[cur];
     if (!n) break;
     if (n.sourceComponentId) chain.push(cur);
     cur = n.parentId ?? null;
@@ -152,7 +152,7 @@ export function findDeepestInteractiveInstanceRoot(
 ): string | null {
   let cur: string | null = nodeId;
   while (cur) {
-    const n = nodes[cur];
+    const n: EditorNode | undefined = nodes[cur];
     if (!n) break;
     if (n.sourceComponentId && n.variantGroupId) return cur;
     cur = n.parentId ?? null;
@@ -169,7 +169,7 @@ export function isDescendantOfNestedInstanceRoot(
   if (nodeId === outerInstanceRootId) return false;
   let cur: string | null = nodes[nodeId]?.parentId ?? null;
   while (cur && cur !== outerInstanceRootId) {
-    const n = nodes[cur];
+    const n: EditorNode | undefined = nodes[cur];
     if (n?.sourceComponentId && findInstanceRoot(nodes, cur) === cur) return true;
     cur = n.parentId ?? null;
   }

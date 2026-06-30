@@ -35,6 +35,7 @@ import { isVectorEditableShape } from "@/lib/shapes/shapeToPath";
 import { clientToWorld } from "@/lib/canvasCoordinates";
 import { tryDeleteActiveGradientStop } from "@/lib/gradientStopKeyboard";
 import { cancelActiveMarqueeFromKeyboard } from "@/lib/canvasMarqueeController";
+import { cancelActiveRotateDragFromKeyboard } from "@/lib/canvasRotateDragController";
 
 export function EditorKeyboardShortcuts() {
   useEffect(() => {
@@ -74,6 +75,11 @@ export function EditorKeyboardShortcuts() {
 
       if (e.key === "Escape") {
         if (cancelActiveMarqueeFromKeyboard()) {
+          e.preventDefault();
+          escapeToMovePointer();
+          return;
+        }
+        if (cancelActiveRotateDragFromKeyboard()) {
           e.preventDefault();
           escapeToMovePointer();
           return;

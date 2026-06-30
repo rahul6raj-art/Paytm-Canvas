@@ -56,6 +56,7 @@ import {
 } from "@/lib/cornerRadius";
 import type { LayoutMode } from "@/lib/autoLayout";
 import { getRenderedWorldBounds, getRenderedWorldTopLeft } from "@/lib/editorGraph";
+import { buildSinglePageJpegPdf, jpegDataUrlToBytes } from "@/lib/pdfExport";
 
 export function nearestAncestorFrameId(
   nodes: Record<string, EditorNode>,

@@ -26,6 +26,9 @@ export type InitialDocumentFields = Pick<
   | "fileName"
   | "comments"
   | "codeRoundTripLink"
+  | "projectCssSources"
+  | "storybookUrl"
+  | "storybookCatalogHash"
 >;
 
 export function readInitialDocumentFields(): InitialDocumentFields | null {
