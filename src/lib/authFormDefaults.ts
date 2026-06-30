@@ -1,7 +1,7 @@
 const LAST_LOGIN_EMAIL_KEY = "paytm-craft-last-login-email-v1";
 const SAVED_PASSWORDS_KEY = "paytm-craft-saved-login-passwords-v1";
 
-export const DEFAULT_DEV_LOGIN_EMAIL = "rahul6.raj@paytm.com";
+export const DEFAULT_DEV_LOGIN_EMAIL = "demo@paytm.com";
 export const DEFAULT_DEV_SEED_PASSWORD = "1234";
 
 type SavedPasswords = Record<string, string>;

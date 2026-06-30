@@ -114,7 +114,7 @@ export function RemoteAuthLoginModal({
         </div>
 
         <p className="mt-4 text-ui text-app-subtle">
-          Dev seed: <span className="font-medium">rahul.verma@paytm.com</span> / <span className="font-medium">craft-dev</span>
+          Dev seed: <span className="font-medium">demo@paytm.com</span> / <span className="font-medium">craft-dev</span>
           {" · "}
           <Link href="/signup" className={authSecondaryLinkClassName}>
             Create account

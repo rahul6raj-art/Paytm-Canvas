@@ -46,11 +46,11 @@ export interface MockPendingInvite {
 
 const MOCK_USER: MockUser = {
   id: "user-you",
-  name: "Rahul Raj",
-  email: "rahul6.raj@paytm.com",
-  initials: "RR",
+  name: "Craft Demo User",
+  email: "demo@paytm.com",
+  initials: "CD",
   avatarHue: 210,
-  avatarUrl: "/avatars/rahul-raj.webp",
+  avatarUrl: null,
 };
 
 export const DEFAULT_MOCK_WORKSPACE: MockWorkspace = {
@@ -59,7 +59,7 @@ export const DEFAULT_MOCK_WORKSPACE: MockWorkspace = {
   slug: "personal",
   section: "personal",
   members: [
-    { userId: "user-you", name: "Rahul Raj", email: "rahul6.raj@paytm.com", initials: "RR", role: "owner" },
+    { userId: "user-you", name: "Craft Demo User", email: "demo@paytm.com", initials: "CD", role: "owner" },
   ],
 };
 
@@ -70,7 +70,7 @@ const MOCK_WORKSPACES: MockWorkspace[] = [
     slug: "personal",
     section: "personal",
     members: [
-      { userId: "user-you", name: "Rahul Raj", email: "rahul6.raj@paytm.com", initials: "RR", role: "owner" },
+      { userId: "user-you", name: "Craft Demo User", email: "demo@paytm.com", initials: "CD", role: "owner" },
     ],
   },
   {
@@ -79,7 +79,7 @@ const MOCK_WORKSPACES: MockWorkspace[] = [
     slug: "paytm-design",
     section: "paytm-design",
     members: [
-      { userId: "user-you", name: "Rahul Raj", email: "rahul6.raj@paytm.com", initials: "RR", role: "owner" },
+      { userId: "user-you", name: "Craft Demo User", email: "demo@paytm.com", initials: "CD", role: "owner" },
       { userId: "u2", name: "Aisha Khan", email: "aisha.khan@paytm.com", initials: "AK", role: "editor" },
       { userId: "u3", name: "Dev Sharma", email: "dev.sharma@paytm.com", initials: "DS", role: "editor" },
       { userId: "u4", name: "Meera N.", email: "meera@paytm.com", initials: "MN", role: "viewer" },
@@ -91,7 +91,7 @@ const MOCK_WORKSPACES: MockWorkspace[] = [
     slug: "product-team",
     section: "product-team",
     members: [
-      { userId: "user-you", name: "Rahul Raj", email: "rahul6.raj@paytm.com", initials: "RR", role: "editor" },
+      { userId: "user-you", name: "Craft Demo User", email: "demo@paytm.com", initials: "CD", role: "editor" },
       { userId: "u5", name: "Priya Rao", email: "priya.rao@paytm.com", initials: "PR", role: "owner" },
       { userId: "u6", name: "Karan Mehta", email: "karan@paytm.com", initials: "KM", role: "viewer" },
     ],
@@ -102,7 +102,7 @@ const MOCK_WORKSPACES: MockWorkspace[] = [
     slug: "experiments",
     section: "experiments",
     members: [
-      { userId: "user-you", name: "Rahul Raj", email: "rahul6.raj@paytm.com", initials: "RR", role: "owner" },
+      { userId: "user-you", name: "Craft Demo User", email: "demo@paytm.com", initials: "CD", role: "owner" },
       { userId: "u7", name: "Sana Ali", email: "sana@paytm.com", initials: "SA", role: "editor" },
     ],
   },

@@ -422,7 +422,7 @@ function buildProfile(p: Palette, name: string): AIGenerateResult {
     "ai-pr-head": nr("ai-pr-head", f, "Header", 0, 0, 390, 56, p.surface, 0),
     "ai-pr-t": nt("ai-pr-t", f, "Title", 20, 16, 200, 28, "Account", { fontSize: 17, fontWeight: 700, fill: p.text }),
     "ai-pr-av": nr("ai-pr-av", f, "Avatar", 155, 88, 80, 80, p.surface2, 40),
-    "ai-pr-name": nt("ai-pr-name", f, "Name", 24, 188, 340, 28, "Rahul Raj", { fontSize: 20, fontWeight: 700, fill: p.text }),
+    "ai-pr-name": nt("ai-pr-name", f, "Name", 24, 188, 340, 28, "Craft Demo User", { fontSize: 20, fontWeight: 700, fill: p.text }),
     "ai-pr-row1": nr("ai-pr-row1", f, "Settings row", 16, 240, 358, 56, p.surface, 10),
     "ai-pr-r1t": nt("ai-pr-r1t", f, "Row label", 32, 256, 200, 24, "Notifications", { fontSize: 14, fill: p.text }),
     "ai-pr-row2": nr("ai-pr-row2", f, "Settings row", 16, 308, 358, 56, p.surface, 10),

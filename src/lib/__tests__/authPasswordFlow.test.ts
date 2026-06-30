@@ -17,10 +17,10 @@ describe("authFormDefaults", () => {
 describe("mockApiStore password reset", () => {
   it("resets password with a valid token", () => {
     resetMockApiStoreForTests();
-    const reset = mockApiStore.requestPasswordReset("rahul6.raj@paytm.com");
+    const reset = mockApiStore.requestPasswordReset(DEFAULT_DEV_LOGIN_EMAIL);
     assert.ok(reset?.token);
     const user = mockApiStore.resetPasswordWithToken(reset!.token, "new-pass-99");
-    assert.equal(user.email, "rahul6.raj@paytm.com");
+    assert.equal(user.email, DEFAULT_DEV_LOGIN_EMAIL);
     mockApiStore.loginUser({ email: user.email, password: "new-pass-99" });
   });
 });

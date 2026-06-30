@@ -25,7 +25,7 @@ export function defaultStackLiveConfig(env: NodeJS.ProcessEnv = process.env): St
     apiBase,
     syncHttpBase: syncHost,
     syncWsUrl: env.CRAFT_SYNC_URL ?? "ws://localhost:4001/yjs",
-    email: env.CRAFT_LIVE_EMAIL ?? "rahul.verma@paytm.com",
+    email: env.CRAFT_LIVE_EMAIL ?? "demo@paytm.com",
     password: env.CRAFT_LIVE_PASSWORD ?? "craft-dev",
     apiToken: env.CRAFT_API_TOKEN?.trim() || undefined,
     timeoutMs: Number(env.CRAFT_LIVE_TIMEOUT_MS ?? 8000),

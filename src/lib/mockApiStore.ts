@@ -163,10 +163,10 @@ function seedStore(): MockApiStoreState {
   const users: MockApiUserRow[] = [
     {
       id: "user-you",
-      email: "rahul6.raj@paytm.com",
-      displayName: "Rahul Raj",
+      email: "demo@paytm.com",
+      displayName: "Craft Demo User",
       passwordHash: hashMockApiPassword("1234"),
-      avatarUrl: "/avatars/rahul-raj.webp",
+      avatarUrl: null,
     },
     { id: "u2", email: "aisha.khan@paytm.com", displayName: "Aisha Khan", passwordHash: hashMockApiPassword("craft-dev") },
     { id: "u3", email: "dev.sharma@paytm.com", displayName: "Dev Sharma", passwordHash: hashMockApiPassword("craft-dev") },

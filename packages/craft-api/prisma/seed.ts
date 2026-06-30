@@ -25,8 +25,8 @@ async function main() {
     update: { passwordHash: hashPassword("craft-dev") },
     create: {
       id: "user-you",
-      email: "rahul.verma@paytm.com",
-      displayName: "Rahul Verma",
+      email: "demo@paytm.com",
+      displayName: "Craft Demo User",
       passwordHash: hashPassword("craft-dev"),
     },
   });

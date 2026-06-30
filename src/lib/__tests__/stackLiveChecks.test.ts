@@ -21,7 +21,7 @@ describe("stackLiveChecks", () => {
     const config = defaultStackLiveConfig({});
     assert.equal(config.apiBase, "http://localhost:4000");
     assert.equal(config.syncWsUrl, "ws://localhost:4001/yjs");
-    assert.equal(config.email, "rahul.verma@paytm.com");
+    assert.equal(config.email, "demo@paytm.com");
   });
 
   it("parses v1 data envelope", () => {
@@ -42,7 +42,7 @@ describe("stackLiveChecks", () => {
   });
 
   it("validates seeded workspace and team shapes", () => {
-    validateMeUser({ email: "rahul.verma@paytm.com" });
+    validateMeUser({ email: "demo@paytm.com" });
     const ws = validateWorkspaces([{ id: "ws-personal", teamId: "team-paytm", name: "Personal", slug: "personal" }]);
     assert.equal(ws[0]!.id, "ws-personal");
     const teams = validateTeams([
