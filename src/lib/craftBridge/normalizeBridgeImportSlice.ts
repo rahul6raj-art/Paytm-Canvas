@@ -59,5 +59,5 @@ export function normalizeBridgeImportSlice(slice: EditorPersistSlice): EditorPer
     });
   }
 
-  return prepareImportedSliceForCanvas(next);
+  return prepareImportedSliceForCanvas(next, { preserveCaptureGeometry: true });
 }

@@ -5,6 +5,7 @@ import type { ImportWebStep } from "@/lib/webImport/importWebApi";
 import { IMPORT_WEB_STEPS } from "@/lib/webImport/importWebApi";
 import type { EditorNode } from "@/stores/useEditorStore";
 import { importReactFromJsx } from "./reactJsxToGraph";
+import { PML_PHONE_VIEWPORT } from "@/lib/craftBridge/pmlScreenMetrics";
 
 export type ReactLiveImportInput = {
   previewUrl: string;
@@ -27,9 +28,15 @@ export type ReactLiveImportResult =
 const PROGRESS_STEPS: ImportWebStep[] = ["loading", "screenshot", "extracting", "converting"];
 
 /** Merge component tags from structure parse onto live-captured nodes (match by className). */
+export type MergeStructureMetadataOptions = {
+  /** Bridge push: attach export tags only — keep captured names and avoid placeholder rendering. */
+  bridgeCapture?: boolean;
+};
+
 export function mergeStructureMetadataOntoLiveNodes(
   liveNodes: Record<string, EditorNode>,
   sourceCode: string,
+  opts?: MergeStructureMetadataOptions,
 ): Record<string, EditorNode> {
   const parsed = importReactFromJsx(sourceCode);
   if (!parsed.ok) return liveNodes;
@@ -39,16 +46,24 @@ export function mergeStructureMetadataOntoLiveNodes(
     if (n.codeClassName) byClass.set(n.codeClassName, n);
   }
 
+  const bridgeCapture = opts?.bridgeCapture === true;
   const next: Record<string, EditorNode> = {};
   for (const [id, n] of Object.entries(liveNodes)) {
     const meta = n.codeClassName ? byClass.get(n.codeClassName) : undefined;
     if (meta) {
-      next[id] = {
-        ...n,
-        codeJsxTag: meta.codeJsxTag ?? n.codeJsxTag,
-        codeJsxIntrinsic: meta.codeJsxIntrinsic ?? n.codeJsxIntrinsic,
-        name: meta.codeJsxTag && !meta.codeJsxIntrinsic ? meta.codeJsxTag : n.name,
-      };
+      if (bridgeCapture) {
+        next[id] = {
+          ...n,
+          ...(meta.codeJsxTag ? { codeJsxTag: meta.codeJsxTag } : {}),
+        };
+      } else {
+        next[id] = {
+          ...n,
+          codeJsxTag: meta.codeJsxTag ?? n.codeJsxTag,
+          codeJsxIntrinsic: meta.codeJsxIntrinsic ?? n.codeJsxIntrinsic,
+          name: meta.codeJsxTag && !meta.codeJsxIntrinsic ? meta.codeJsxTag : n.name,
+        };
+      }
     } else {
       next[id] = n;
     }
@@ -87,7 +102,7 @@ export async function importReactFromLivePreview(
   input: ReactLiveImportInput,
   onStep?: (step: ImportWebStep) => void,
 ): Promise<ReactLiveImportResult> {
-  const viewport = input.viewport ?? { width: 390, height: 844 };
+  const viewport = input.viewport ?? PML_PHONE_VIEWPORT;
 
   onStep?.("launching");
   let progressIdx = 0;

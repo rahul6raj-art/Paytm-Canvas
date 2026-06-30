@@ -8,6 +8,7 @@ const SCREEN_ROOT_CLASS_TOKENS = new Set([
   "pml-onboarding",
   "pml-more",
   "pml-stocks",
+  "ob-flow",
 ]);
 
 function isLikelyScreenRoot(node: DomSnapshotNode): boolean {

@@ -4,6 +4,10 @@ import { nodeMatchesCssRule, parsePageCssRules } from "../parsePageCss";
 import { applyPageCssToSlice } from "../applyPageCssToSlice";
 import { importReactPageBundle } from "../importReactPageBundle";
 import { EDITOR_ROOT_KEY } from "../../editorConstants";
+import {
+  PML_PHONE_COLUMN_WIDTH,
+  PML_PHONE_VIEWPORT_HEIGHT,
+} from "@/lib/craftBridge/pmlScreenMetrics";
 
 describe("parsePageCssRules", () => {
   it("parses compound class selectors", () => {
@@ -138,5 +142,65 @@ export default function PMLSignupPage() {
     assert.ok((main?.height ?? 0) > 40, `main height ${main?.height}`);
     assert.ok((scroll?.height ?? 0) > 40, `scroll height ${scroll?.height}`);
     assert.equal(main?.clipChildren, false);
+  });
+
+  it("locks PML screen artboard to phone viewport with clipped bounds", () => {
+    const css = `
+      .pml-signup { display: flex; flex-direction: column; width: 390px; height: 844px; }
+      .pml-signup__main { display: flex; flex-direction: column; flex: 1; width: 390px; }
+    `;
+    const tsx = `
+      export default function PMLSignupPage() {
+        return (
+          <div className="pml-signup">
+            <div className="pml-signup__main">
+              <h1 className="pml-signup__hero-title">Hello</h1>
+            </div>
+          </div>
+        );
+      }
+    `;
+    const result = importReactPageBundle({ tsxSource: tsx, cssSources: [css], fileName: "PMLSignupPage.tsx" });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    const root = Object.values(result.slice.nodes).find((n) => n.codeClassName === "pml-signup");
+    assert.ok(root);
+    assert.equal(root!.width, PML_PHONE_COLUMN_WIDTH);
+    assert.equal(root!.height, PML_PHONE_VIEWPORT_HEIGHT);
+    assert.equal(root!.clipChildren, true);
+
+    const main = Object.values(result.slice.nodes).find((n) => n.codeClassName === "pml-signup__main");
+    assert.ok(main);
+    assert.ok(main!.width <= PML_PHONE_COLUMN_WIDTH, `main width ${main!.width} exceeds column`);
+    assert.ok(main!.x + main!.width <= PML_PHONE_COLUMN_WIDTH, "main spills past screen width");
+  });
+
+  it("preserves flex metadata while pinning children absolute for 1:1 geometry", () => {
+    const css = `
+      .pml-signup { display: flex; flex-direction: column; width: 390px; height: 844px; }
+      .pml-signup__main { display: flex; flex-direction: column; flex: 1; }
+    `;
+    const tsx = `
+      export default function PMLSignupPage() {
+        return (
+          <div className="pml-signup">
+            <div className="pml-signup__main">
+              <h1 className="pml-signup__hero-title">Hello</h1>
+            </div>
+          </div>
+        );
+      }
+    `;
+    const result = importReactPageBundle({ tsxSource: tsx, cssSources: [css], fileName: "PMLSignupPage.tsx" });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    const main = Object.values(result.slice.nodes).find((n) => n.codeClassName === "pml-signup__main");
+    assert.ok(main, "main stack should exist");
+    assert.equal(main!.layoutMode, "vertical");
+    const title = Object.values(result.slice.nodes).find((n) => n.codeClassName === "pml-signup__hero-title");
+    assert.ok(title);
+    assert.equal(title!.layoutPositioning, "absolute");
   });
 });

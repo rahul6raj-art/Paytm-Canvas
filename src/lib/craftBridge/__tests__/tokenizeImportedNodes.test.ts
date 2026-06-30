@@ -224,9 +224,10 @@ describe("tokenizeImportedNodes", () => {
         codeClassName: "bn_bar",
       },
     };
+    const cardCss = `.card { background: var(--surface-level-1); }`;
     const out = tokenizeImportedNodes(nodes, tokens, {
       importMode: "light",
-      cssSources: [PAGE_CSS, DUAL_THEME_CSS],
+      cssSources: [cardCss, PAGE_CSS, DUAL_THEME_CSS],
     });
     assert.equal(out.card!.fillTokenId, "css-var-surface-level-4");
     assert.equal(out.nav!.fillTokenId, "css-var-surface-level-1");

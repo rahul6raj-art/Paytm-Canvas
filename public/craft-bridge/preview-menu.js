@@ -8,15 +8,13 @@
 
   var MENU_ID = "craft-bridge-preview-menu";
   var TOAST_ID = "craft-bridge-preview-toast";
-  var SCREEN_SELECTOR =
-    "[data-craft-screen], #root, main, [role='main'], .pml-home, .pml-more, .pml-stocks, .pml-signup, .pml-onboarding";
 
   function isCraftScreenTarget(target) {
     if (!(target instanceof Element)) return false;
     if (target.closest("[data-craft-screen-ignore]")) return false;
     if (target.closest("input, textarea, select, [contenteditable='true']")) return false;
-    if (target.closest(SCREEN_SELECTOR)) return true;
-    return target === document.body || Boolean(target.closest("body > *"));
+    if (target.closest("#" + MENU_ID)) return false;
+    return true;
   }
 
   function removeEl(id) {

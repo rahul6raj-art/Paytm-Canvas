@@ -101,7 +101,8 @@ describe("phoneShell full-page layout", () => {
     applyPhoneShellFullPageLayout(nodes, childOrder, 376, 844);
 
     assert.equal(nodes.root?.height, 2600);
-    assert.equal(nodes.root?.clipChildren, false);
+    assert.equal(nodes.root?.width, 376);
+    assert.equal(nodes.root?.clipChildren, true);
     assert.equal(nodes.scroll?.clipChildren, false);
     assert.equal(nodes.scroll?.height, 2400);
   });

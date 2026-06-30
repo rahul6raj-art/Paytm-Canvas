@@ -1,5 +1,9 @@
 import type { CrossAxisAlign, LayoutMode, PrimaryAxisAlign } from "@/lib/autoLayout";
 import type { EditorNode } from "@/stores/useEditorStore";
+import { PML_PHONE_COLUMN_WIDTH, PML_PHONE_VIEWPORT_HEIGHT } from "@/lib/craftBridge/pmlScreenMetrics";
+
+const SCREEN_W = PML_PHONE_COLUMN_WIDTH;
+const SCREEN_H = PML_PHONE_VIEWPORT_HEIGHT;
 
 /** Map common utility class tokens → editor layout/style (Tailwind-like). */
 export function classNameToNodePatch(className: string | undefined): Partial<EditorNode> {
@@ -8,8 +12,8 @@ export function classNameToNodePatch(className: string | undefined): Partial<Edi
   const tokens = className.split(/\s+/).filter(Boolean);
 
   if (className.includes("pml-home") && !className.includes("__")) {
-    patch.width = 390;
-    patch.height = 844;
+    patch.width = SCREEN_W;
+    patch.height = SCREEN_H;
     patch.layoutMode = "vertical" as LayoutMode;
     patch.layoutGap = 0;
     patch.fill = "#0f1117";
@@ -17,8 +21,8 @@ export function classNameToNodePatch(className: string | undefined): Partial<Edi
   }
 
   if (className.includes("pml-signup") && !className.includes("__")) {
-    patch.width = 390;
-    patch.height = 844;
+    patch.width = SCREEN_W;
+    patch.height = SCREEN_H;
     patch.layoutMode = "vertical" as LayoutMode;
     patch.layoutGap = 0;
     patch.fill = "#0f1117";
@@ -26,8 +30,8 @@ export function classNameToNodePatch(className: string | undefined): Partial<Edi
   }
 
   if (className.includes("pml-more") && !className.includes("__")) {
-    patch.width = 390;
-    patch.height = 844;
+    patch.width = SCREEN_W;
+    patch.height = SCREEN_H;
     patch.layoutMode = "vertical" as LayoutMode;
     patch.layoutGap = 0;
     patch.fill = "#0f1117";
@@ -39,18 +43,18 @@ export function classNameToNodePatch(className: string | undefined): Partial<Edi
       patch.layoutMode = "vertical" as LayoutMode;
       patch.layoutGap = patch.layoutGap ?? 0;
       patch.height = patch.height ?? 640;
-      patch.width = patch.width ?? 390;
+      patch.width = patch.width ?? SCREEN_W;
       patch.layoutSizingVertical = "fill";
     }
     if (t === "pml-signup__main") {
       patch.layoutMode = "vertical" as LayoutMode;
       patch.layoutGap = 0;
-      patch.width = patch.width ?? 390;
+      patch.width = patch.width ?? SCREEN_W;
       patch.layoutSizingVertical = "fill";
     }
     if (t === "pml-signup__body" || t === "pml-signup__hero" || t === "pml-signup__footer-zone") {
       patch.layoutMode = "vertical" as LayoutMode;
-      patch.width = patch.width ?? 390;
+      patch.width = patch.width ?? SCREEN_W;
     }
     if (t === "pml-signup__hero") {
       patch.layoutGap = 8;
@@ -65,15 +69,19 @@ export function classNameToNodePatch(className: string | undefined): Partial<Edi
     }
     if (t === "pml-signup__footer" || t === "pml-signup__form") {
       patch.layoutMode = "vertical" as LayoutMode;
-      patch.width = patch.width ?? 390;
+      patch.width = patch.width ?? SCREEN_W;
       patch.layoutGap = patch.layoutGap ?? 12;
     }
     if (t.startsWith("pml-home__") || t.startsWith("pml-signup__") || t.startsWith("pml-more__") || t.startsWith("sh-section")) {
-      patch.width = patch.width ?? 390;
+      patch.width = patch.width ?? SCREEN_W;
     }
-    if (t === "bn" || t === "bn__tabs") {
+    if (t === "sh-section__content" || t === "sh-section") {
+      patch.layoutMode = "vertical";
+      patch.layoutGap = patch.layoutGap ?? 16;
+    }
+    if (t === "bn" || t === "bn__tabs" || t === "bn__bar") {
       patch.layoutMode = "horizontal";
-      patch.width = patch.width ?? 390;
+      patch.width = patch.width ?? SCREEN_W;
       patch.layoutGap = patch.layoutGap ?? 0;
       patch.counterAxisAlign = "stretch";
     }
@@ -119,7 +127,7 @@ export function classNameToNodePatch(className: string | undefined): Partial<Edi
     const wPx = t.match(/^w-(?:\[(\d+)px\]|full|screen)$/);
     if (wPx) {
       if (wPx[1]) patch.width = parseInt(wPx[1], 10);
-      else if (t === "w-full" || t === "w-screen") patch.width = 390;
+      else if (t === "w-full" || t === "w-screen") patch.width = SCREEN_W;
     }
 
     const hPx = t.match(/^h-(?:\[(\d+)px\]|full|screen)$/);

@@ -29,6 +29,36 @@ const COLOR_HINT_PREFIXES: Record<ColorTokenHint, string[]> = {
 
 const CSS_VAR_REF_RE = /var\(\s*(--[\w-]+)/;
 
+/** Phone shell + card surfaces from PML DS — used when component CSS was not in import bundle. */
+const PHONE_SHELL_CLASS_TOKENS: Record<string, string> = {
+  "pml-more": "css-var-surface-level-4",
+  "pml-home": "css-var-surface-level-4",
+  "pml-stocks": "css-var-surface-level-4",
+  "pml-signup": "css-var-surface-level-4",
+  "pml-onboarding": "css-var-surface-level-4",
+};
+
+function pickSemanticFillTokenId(
+  codeClassName: string | undefined,
+  tokens: Record<string, DesignToken>,
+): string | undefined {
+  if (!codeClassName?.trim()) return undefined;
+  const classes = codeClassName.split(/\s+/).filter(Boolean);
+  for (const cls of classes) {
+    const shellId = PHONE_SHELL_CLASS_TOKENS[cls];
+    if (shellId && tokens[shellId]?.type === "color") return shellId;
+    if (cls === "card" || cls.endsWith("-card")) {
+      const cardId = "css-var-surface-level-1";
+      if (tokens[cardId]?.type === "color") return cardId;
+    }
+    if (cls === "bn__bar" || cls === "bn") {
+      const navId = "css-var-surface-level-1";
+      if (tokens[navId]?.type === "color") return navId;
+    }
+  }
+  return undefined;
+}
+
 function colorStopForMatchKey(
   token: DesignToken,
   key: string,
@@ -196,6 +226,8 @@ export function pickFillColorTokenId(
     );
     if (fromCss) return fromCss;
   }
+  const semantic = pickSemanticFillTokenId(node.codeClassName, tokens);
+  if (semantic) return semantic;
   if (node.fillEnabled === false || !node.fill?.trim()) return undefined;
   const fromClass = pickColorTokenFromClassNames(node.codeClassName, tokens);
   if (fromClass) return fromClass;

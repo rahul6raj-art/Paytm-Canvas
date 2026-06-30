@@ -166,9 +166,9 @@ describe("canvas color mode tokens", () => {
 
   it("resolveNodeWithDesignTokens resolves linked card fillTokenId in dark mode", () => {
     const tokens: Record<string, DesignToken> = {
-      "css-var-surface-level-4": {
-        id: "css-var-surface-level-4",
-        name: "surface-level-4",
+      "css-var-surface-level-1": {
+        id: "css-var-surface-level-1",
+        name: "surface-level-1",
         type: "color",
         value: { hex: "#f5f5f5", dark: { hex: "#101010" } },
         createdAt: "",
@@ -185,10 +185,36 @@ describe("canvas color mode tokens", () => {
       height: 80,
       fill: "#f5f5f5",
       fillEnabled: true,
-      fillTokenId: "css-var-surface-level-4",
+      fillTokenId: "css-var-surface-level-1",
       codeClassName: "pml-more-theme-card",
     };
     assert.equal(resolveNodeWithDesignTokens(node, tokens, "light").fill, "#f5f5f5");
     assert.equal(resolveNodeWithDesignTokens(node, tokens, "dark").fill, "#101010");
+  });
+
+  it("resolves card fill via semantic class when Card.css was not imported", () => {
+    const tokens: Record<string, DesignToken> = {
+      "css-var-surface-level-1": {
+        id: "css-var-surface-level-1",
+        name: "surface-level-1",
+        type: "color",
+        value: { hex: "#ffffff", dark: { hex: "#161616" } },
+        createdAt: "",
+        updatedAt: "",
+      },
+    };
+    const node: EditorNode = {
+      id: "card",
+      type: "frame",
+      name: "card",
+      x: 0,
+      y: 0,
+      width: 344,
+      height: 76,
+      fill: "#ffffff",
+      fillEnabled: true,
+      codeClassName: "card pml-more-theme-card",
+    };
+    assert.equal(resolveNodeWithDesignTokens(node, tokens, "dark").fill, "#161616");
   });
 });

@@ -2,6 +2,7 @@ import path from "node:path";
 import { importReactPageBundle } from "@/lib/codeRoundTrip/importReactPageBundle";
 import { importHtmlPageBundle } from "@/lib/codeRoundTrip/importHtmlPageBundle";
 import { importBridgeFromLivePreview } from "@/lib/craftBridge/bridgeLiveImport";
+import { bridgeLiveCaptureFailureMessage } from "@/lib/craftBridge/bridgeLiveCaptureError";
 import { buildBridgeEditorOpenUrl } from "@/lib/craftBridge/buildBridgeEditorOpenUrl";
 import { defaultCaptureColorTheme } from "@/lib/webImport/captureTheme";
 import { writePendingImport } from "@paytm-craft/bridge";
@@ -63,8 +64,6 @@ export async function runBridgePageImport(
   let message = "";
   let sourceHeader: string | undefined;
 
-  let liveCaptureError: string | undefined;
-
   if (previewUrl) {
     const live = await importBridgeFromLivePreview({
       previewUrl,
@@ -79,8 +78,11 @@ export async function runBridgePageImport(
       message = live.message;
       sourceHeader = live.sourceHeader;
     } else {
-      liveCaptureError = live.error;
-      console.warn("[craft-bridge] live capture failed, falling back to source parse:", live.error);
+      return {
+        ok: false,
+        error: bridgeLiveCaptureFailureMessage(live.error, previewUrl),
+        status: 503,
+      };
     }
   }
 
@@ -102,10 +104,7 @@ export async function runBridgePageImport(
     }
     slice = result.slice;
     componentName = result.componentName;
-    const parseMessage = message ? `${message} ${result.message}` : result.message;
-    message = liveCaptureError
-      ? `Live preview unavailable (${liveCaptureError}). Used source parse instead. ${parseMessage}`
-      : parseMessage;
+    message = result.message;
     sourceHeader = result.sourceHeader;
   }
 

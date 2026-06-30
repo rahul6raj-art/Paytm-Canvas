@@ -2,7 +2,7 @@ import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import type { HtmlImportResult } from "@/lib/codeImport/htmlImport";
 import { importHtmlFromString } from "@/lib/codeImport/htmlImport";
 import { applyPageCssToSlice } from "./applyPageCssToSlice";
-import { finalizeImportedGraph } from "./finalizeImportedGraph";
+import { finalizeCodeImportGraph } from "./finalizeImportedGraph";
 import { placeScreenFrameOnCanvas } from "@/lib/codeExport/frameRelativeExport";
 import {
   designTokensFromProjectCss,
@@ -20,14 +20,12 @@ function finalizePageCssSlice(
   slice: import("@/lib/documentPersistence").EditorPersistSlice,
 ): import("@/lib/documentPersistence").EditorPersistSlice {
   const rootIds = slice.childOrder[EDITOR_ROOT_KEY] ?? [];
-  let nodes = finalizeImportedGraph(slice.nodes, slice.childOrder, {
-    preserveAbsoluteLayout: true,
-  });
+  let nodes = finalizeCodeImportGraph(slice.nodes, slice.childOrder);
   nodes = placeScreenFrameOnCanvas(nodes, rootIds);
   for (const rootId of rootIds) {
     const root = nodes[rootId];
     if (root) {
-      nodes[rootId] = { ...root, parentId: null, clipChildren: false };
+      nodes[rootId] = { ...root, parentId: null };
     }
   }
   return { ...slice, nodes, selectedIds: rootIds.length ? rootIds : slice.selectedIds };

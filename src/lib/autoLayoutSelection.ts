@@ -7,6 +7,7 @@ import { topLevelSelectedIds } from "@/lib/editorGraph";
 import { nextNumberedLayerName } from "@/lib/layerNaming";
 import { worldRect } from "@/lib/tree";
 import { isManualScreenFrame, rootFrameIds } from "@/lib/webImport/manualScreenFrames";
+import { isUnderBridgeCaptureScreen } from "@/lib/craftBridge/bridgeCaptureLayout";
 import {
   applyDeepAutoLayout,
   defaultFixedSizingForContainer,
@@ -429,6 +430,7 @@ export function applyAutoLayoutToContainer(
   const n = nodes[containerId];
   if (!n || !isContainer(n)) return null;
   if (isManualScreenFrame(n, rootFrameIds(childOrder))) return null;
+  if (isUnderBridgeCaptureScreen(nodes, containerId, childOrder)) return null;
   const result = enableAutoLayoutOnContainer(nodes, childOrder, containerId);
   return {
     nodes: result.nodes,

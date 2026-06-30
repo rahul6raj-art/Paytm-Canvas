@@ -1,8 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { resolvePageSource } from "@paytm-craft/bridge";
 import { derivePreviewCaptureUrl } from "@/lib/codeRoundTrip/derivePreviewCaptureUrl";
 import type { CodeRoundTripLink } from "@/lib/craftBridge/types";
+import {
+  discoverPreviewPagePath,
+  pagePathExists,
+} from "@/lib/craftBridge/discoverPreviewPage";
 import {
   linkPreviewUrlMatchesRoute,
   previewCaptureSourcePath,
@@ -25,18 +28,10 @@ const SCREEN_TO_COMPONENT: Record<string, string> = {
   signup: "PMLSignupPage",
   stocks: "PMLStocksPage",
   more: "PMLMorePage",
+  fno: "PMLHomePage",
+  mf: "PMLHomePage",
+  onboarding: "OnboardingFlow",
 };
-
-function craftLinkPageExists(repoRoot: string, sourcePath: string): boolean {
-  const abs = path.resolve(repoRoot, sourcePath);
-  if (!fs.existsSync(abs)) return false;
-  try {
-    resolvePageSource(abs);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function linkMatchesScreen(link: CodeRoundTripLink, screen: string, component?: string): boolean {
   const sp = link.sourcePath.replace(/\\/g, "/");
@@ -49,10 +44,6 @@ function linkMatchesScreen(link: CodeRoundTripLink, screen: string, component?: 
 function linkMatchesPreviewRoute(link: CodeRoundTripLink, previewUrl: string): boolean {
   if (!link.previewUrl?.trim()) return false;
   return linkPreviewUrlMatchesRoute(link.previewUrl, previewUrl);
-}
-
-function inferredPagePath(component: string): string {
-  return `src/screens/${component}`;
 }
 
 function captureUrlForPreview(previewUrl: string, pageLabel?: string): string {
@@ -120,24 +111,14 @@ export function resolvePreviewPushLink(
 ): PreviewPushResolution {
   const absRepo = path.resolve(repoRoot);
   const manifest = readCraftLinkManifest(absRepo);
-  const captureUrl = captureUrlForPreview(previewUrl);
   const routeKey = previewRouteKey(previewUrl);
   const virtualSourcePath = previewCaptureSourcePath(previewUrl);
-
-  if (!manifest?.links?.length) {
-    return {
-      ok: true,
-      mode: "capture-only",
-      captureUrl,
-      repoRoot: absRepo,
-      routeKey,
-      virtualSourcePath,
-    };
-  }
-
+  const captureUrl = captureUrlForPreview(previewUrl);
   const screen = previewScreenId(previewUrl);
   const component = SCREEN_TO_COMPONENT[screen];
-  const validLinks = manifest.links.filter((l) => craftLinkPageExists(absRepo, l.sourcePath));
+
+  const validLinks =
+    manifest?.links?.filter((l) => pagePathExists(absRepo, l.sourcePath)) ?? [];
 
   let link = validLinks.find((l) => linkMatchesPreviewRoute(l, previewUrl));
 
@@ -145,35 +126,31 @@ export function resolvePreviewPushLink(
     link = validLinks.find((l) => linkMatchesScreen(l, screen, component));
   }
 
-  if (!link && previewUsesScreenParam(previewUrl) && component && craftLinkPageExists(absRepo, inferredPagePath(component))) {
-    link = {
-      sourcePath: inferredPagePath(component),
-      repoRoot: absRepo,
-      previewUrl: validLinks.find((l) => l.previewUrl)?.previewUrl ?? manifest.links[0]?.previewUrl,
-      syncMode: "manual",
-      watchSource: false,
-    };
+  if (!link && previewUsesScreenParam(previewUrl)) {
+    const discovered = discoverPreviewPagePath(absRepo, screen);
+    if (discovered) {
+      link = {
+        sourcePath: discovered,
+        repoRoot: absRepo,
+        previewUrl:
+          validLinks.find((l) => l.previewUrl)?.previewUrl ??
+          manifest?.links?.find((l) => l.previewUrl)?.previewUrl,
+        syncMode: "manual",
+        watchSource: false,
+      };
+    }
   }
 
   if (link) {
     const pageLabel = path.basename(link.sourcePath.replace(/\\/g, "/"));
+    const themedCaptureUrl = captureUrlForPreview(previewUrl, pageLabel);
     return {
       ok: true,
       mode: "linked",
       pagePath: link.sourcePath.replace(/\\/g, "/"),
-      captureUrl: captureUrlForPreview(previewUrl, pageLabel),
-      link: { ...link, repoRoot: absRepo, previewUrl: captureUrlForPreview(previewUrl, pageLabel) },
+      captureUrl: themedCaptureUrl,
+      link: { ...link, repoRoot: absRepo, previewUrl: themedCaptureUrl },
       repoRoot: absRepo,
-    };
-  }
-
-  const stale = manifest.links.find(
-    (l) => linkMatchesPreviewRoute(l, previewUrl) || linkMatchesScreen(l, screen, component),
-  );
-  if (stale && !craftLinkPageExists(absRepo, stale.sourcePath)) {
-    return {
-      ok: false,
-      error: `Linked path missing on disk: ${stale.sourcePath}. Update craft.link.json or run craft-bridge link.`,
     };
   }
 

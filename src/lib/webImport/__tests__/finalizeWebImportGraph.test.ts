@@ -448,4 +448,38 @@ describe("finalizeWebImportGraph", () => {
     finalizeWebImportGraph(nodes, childOrder, 390, 844);
     assert.equal(nodes.wrap?.clipChildren, false);
   });
+
+  it("bridgeCapture preserves captured text bounds and section inset", () => {
+    const nodes: Record<string, EditorNode> = {
+      screen: frame("screen", null, 0, 0, 376, 844, { codeClassName: "pml-more" }),
+      section: frame("section", "screen", 16, 120, 344, 200, { codeClassName: "sh-section" }),
+      card: frame("card", "section", 0, 56, 344, 96, { codeClassName: "card" }),
+      label: {
+        id: "label",
+        parentId: "card",
+        type: "text",
+        name: "Dark theme",
+        x: 16,
+        y: 16,
+        width: 92,
+        height: 20,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        content: "Dark theme",
+        fontSize: 16,
+      },
+    };
+    const childOrder = {
+      [EDITOR_ROOT_KEY]: ["screen"],
+      screen: ["section"],
+      section: ["card"],
+      card: ["label"],
+    };
+
+    finalizeWebImportGraph(nodes, childOrder, 376, 844, { bridgeCapture: true });
+    assert.equal(nodes.section?.x, 16);
+    assert.equal(nodes.label?.width, 92);
+    assert.equal(nodes.label?.x, 16);
+  });
 });

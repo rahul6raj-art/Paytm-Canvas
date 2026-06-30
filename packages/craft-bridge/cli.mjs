@@ -16,6 +16,7 @@ const SCREEN_ROUTE_BY_COMPONENT = {
   PMLHomePage: "home",
   PMLStocksPage: "stocks",
   PMLMorePage: "more",
+  OnboardingFlow: "onboarding",
 };
 
 const DEFAULT_PREVIEW_BASE_URL =
@@ -251,7 +252,7 @@ function installPreviewMenu(cwd = process.cwd()) {
   writeFileSync(indexPath, html, "utf8");
 
   console.log(`Preview menu installed → ${path.relative(cwd, indexPath)}`);
-  console.log("  Right-click a phone screen in the live app preview → Push to Craft canvas");
+  console.log("  Right-click anywhere on the live app preview → Push to Craft canvas");
   console.log(`  Script: ${craftBase}/craft-bridge/preview-menu.js`);
 }
 

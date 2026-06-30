@@ -338,8 +338,8 @@ export function extractDomTreeInBrowser(): DomSnapshotNode {
           tagName: "span",
           text: trimmed,
           rect: {
-            x: textRect.x,
-            y: textRect.y,
+            x: textRect.x + window.scrollX,
+            y: textRect.y + window.scrollY,
             width: Math.max(1, textRect.width),
             height: Math.max(1, textRect.height),
           },

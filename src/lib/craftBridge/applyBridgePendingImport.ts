@@ -5,9 +5,9 @@ import {
   resolveBridgeImportStrategy,
   tagSliceRootsWithBridgeSource,
 } from "@/lib/craftBridge/bridgeImportStrategy";
-import {
-  enrichSliceWithProjectColorTokens,
-} from "@/lib/craftBridge/projectTokenCss";
+import { enrichSliceWithProjectColorTokens } from "@/lib/craftBridge/projectTokenCss";
+import { finalizeBridgeLiveCapture } from "@/lib/craftBridge/finalizeBridgeLiveCapture";
+import { PML_PHONE_COLUMN_WIDTH } from "@/lib/craftBridge/pmlScreenMetrics";
 import { resolveBridgeImportColorTheme } from "@/lib/webImport/captureTheme";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import {
@@ -74,7 +74,13 @@ export async function applyBridgePendingImport(
   slice = await enrichSliceWithProjectColorTokens(slice, {
     link: pending.link ?? null,
     theme: resolveBridgeImportColorTheme(pending.link?.previewUrl),
+    preserveCaptureGeometry: true,
+    rebakeColors: false,
   });
+
+  const finalizedNodes = { ...slice.nodes };
+  finalizeBridgeLiveCapture(finalizedNodes, slice.childOrder, PML_PHONE_COLUMN_WIDTH);
+  slice = { ...slice, nodes: finalizedNodes };
 
   const rootCount = slice.childOrder[EDITOR_ROOT_KEY]?.length ?? 0;
   const layerCount = Object.keys(slice.nodes).length;
@@ -90,6 +96,7 @@ export async function applyBridgePendingImport(
     await useEditorStore.getState().applyGeneratedDesign(slice, applyMode, {
       recordHistory: true,
       zoomToFit: false,
+      preserveCaptureGeometry: true,
     });
   } catch (e) {
     return {

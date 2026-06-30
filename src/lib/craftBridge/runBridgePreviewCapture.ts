@@ -1,5 +1,5 @@
 import path from "node:path";
-import { readSourceFile, writePendingImport } from "@paytm-craft/bridge";
+import { readSourceFile, resolvePageSource, toRepoRelativePaths, writePendingImport } from "@paytm-craft/bridge";
 import { importBridgeFromLivePreview } from "@/lib/craftBridge/bridgeLiveImport";
 import { buildBridgeEditorOpenUrl } from "@/lib/craftBridge/buildBridgeEditorOpenUrl";
 import {
@@ -7,7 +7,11 @@ import {
   previewCaptureSourcePath,
   previewRouteKey,
 } from "@/lib/craftBridge/previewRouteKey";
-import { readCraftLinkManifest } from "@/lib/craftBridge/resolvePreviewPushLink";
+import {
+  discoverPreviewPagePath,
+  pagePathExists,
+} from "@/lib/craftBridge/discoverPreviewPage";
+import { previewScreenId, readCraftLinkManifest } from "@/lib/craftBridge/resolvePreviewPushLink";
 import { applyCaptureThemeToUrl, defaultCaptureColorTheme } from "@/lib/webImport/captureTheme";
 import type { CraftBridgePendingImport } from "@/lib/craftBridge/types";
 import type { RunBridgePageImportResult } from "@/lib/craftBridge/runBridgePageImport";
@@ -27,6 +31,51 @@ function collectManifestCss(repoRoot: string): string[] {
     if (read.ok) out.push(read.content);
   }
   return out;
+}
+
+function resolveCaptureSource(
+  repoRoot: string,
+  input: RunBridgePreviewCaptureInput,
+): {
+  pagePath?: string;
+  sourceCode: string;
+  cssRelPaths: string[];
+  companionCss: string[];
+} {
+  let pagePath = input.pagePath?.trim().replace(/\\/g, "/");
+  let sourceCode = input.sourceCode?.trim() ?? "";
+  let cssRelPaths = (input.cssPaths ?? []).map((p) => p.replace(/\\/g, "/"));
+  const companionCss: string[] = [];
+
+  if (!pagePath && input.previewUrl.trim()) {
+    pagePath = discoverPreviewPagePath(repoRoot, previewScreenId(input.previewUrl)) ?? undefined;
+  }
+
+  if (pagePath && pagePathExists(repoRoot, pagePath)) {
+    try {
+      const resolved = resolvePageSource(path.join(repoRoot, pagePath));
+      const tsxRel = path.relative(repoRoot, resolved.tsxPath).replace(/\\/g, "/");
+      if (!sourceCode) {
+        const tsxRead = readSourceFile(repoRoot, tsxRel);
+        if (tsxRead.ok) sourceCode = tsxRead.content;
+      }
+      if (cssRelPaths.length === 0) {
+        cssRelPaths = toRepoRelativePaths(repoRoot, resolved.cssPaths);
+      }
+    } catch {
+      /* capture-only without source merge */
+    }
+  }
+
+  for (const rel of cssRelPaths) {
+    const cssRead = readSourceFile(repoRoot, rel);
+    if (cssRead.ok) companionCss.push(cssRead.content);
+  }
+  if (companionCss.length === 0) {
+    companionCss.push(...collectManifestCss(repoRoot));
+  }
+
+  return { pagePath, sourceCode, cssRelPaths, companionCss };
 }
 
 export type RunBridgePreviewCaptureInput = {
@@ -52,30 +101,12 @@ export async function runBridgePreviewCapture(
   const routeKey = previewRouteKey(previewUrl);
   const virtualSource = previewCaptureSourcePath(previewUrl);
 
-  let sourceCode = input.sourceCode?.trim() ?? "";
-  const cssRelPaths = input.cssPaths ?? [];
-  const companionCss: string[] = [];
-
-  if (input.pagePath?.trim()) {
-    const tsxRead = readSourceFile(
-      repoRoot,
-      input.pagePath.replace(/\\/g, "/"),
-    );
-    if (tsxRead.ok) sourceCode = tsxRead.content;
-  }
-
-  for (const rel of cssRelPaths) {
-    const cssRead = readSourceFile(repoRoot, rel);
-    if (cssRead.ok) companionCss.push(cssRead.content);
-  }
-  if (companionCss.length === 0) {
-    companionCss.push(...collectManifestCss(repoRoot));
-  }
+  const { pagePath, sourceCode, cssRelPaths, companionCss } = resolveCaptureSource(repoRoot, input);
 
   const live = await importBridgeFromLivePreview({
     previewUrl: captureUrl,
     sourceCode: sourceCode || undefined,
-    fileName: input.pagePath ? path.basename(input.pagePath) : undefined,
+    fileName: pagePath ? path.basename(pagePath) : undefined,
     cssSources: companionCss,
     theme: defaultCaptureColorTheme(),
     screenLabel: canvasScreenLabelFromPreviewUrl(previewUrl),
@@ -86,7 +117,7 @@ export async function runBridgePreviewCapture(
   }
 
   const link = {
-    sourcePath: input.pagePath?.replace(/\\/g, "/") ?? virtualSource,
+    sourcePath: pagePath ?? virtualSource,
     repoRoot,
     cssPaths: cssRelPaths.length ? cssRelPaths : undefined,
     previewUrl: captureUrl,

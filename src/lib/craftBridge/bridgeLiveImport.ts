@@ -19,7 +19,9 @@ import { resolveBridgeImportColorTheme } from "@/lib/webImport/captureTheme";
 import { assertPreviewReachable } from "@/lib/webImport/server/assertPreviewReachable";
 import { runImportWebCapture } from "@/lib/webImport/server/playwrightCaptureService";
 import { importWebResponseToPersistSlice } from "@/lib/webImport/webImportToPersistSlice";
+import { PML_PHONE_COLUMN_WIDTH, PML_PHONE_VIEWPORT } from "@/lib/craftBridge/pmlScreenMetrics";
 import type { ImportWebRequest } from "@/lib/webImport/types";
+import { finalizeBridgeLiveCapture } from "@/lib/craftBridge/finalizeBridgeLiveCapture";
 
 export type BridgeLiveImportInput = {
   previewUrl: string;
@@ -56,7 +58,7 @@ export async function importBridgeFromLivePreview(
     return { ok: false, error: validated.error };
   }
 
-  const viewport = input.viewport ?? { width: 390, height: 844 };
+  const viewport = input.viewport ?? PML_PHONE_VIEWPORT;
   const request: ImportWebRequest = {
     url: validated.url,
     mode: "editable",
@@ -67,12 +69,14 @@ export async function importBridgeFromLivePreview(
   try {
     await assertPreviewReachable(validated.url);
     const capture = await runImportWebCapture(request);
-    let slice = importWebResponseToPersistSlice(capture);
+    let slice = importWebResponseToPersistSlice(capture, { bridgeCapture: true });
 
     if (input.sourceCode?.trim()) {
       slice = {
         ...slice,
-        nodes: mergeStructureMetadataOntoLiveNodes(slice.nodes, input.sourceCode.trim()),
+        nodes: mergeStructureMetadataOntoLiveNodes(slice.nodes, input.sourceCode.trim(), {
+          bridgeCapture: true,
+        }),
       };
     }
 
@@ -80,7 +84,7 @@ export async function importBridgeFromLivePreview(
     let nodes = placeScreenFrameOnCanvas(slice.nodes, rootIds);
     const phoneColumnWidth =
       capture.page.width >= 280 && capture.page.width <= 420
-        ? Math.round(capture.page.width)
+        ? PML_PHONE_COLUMN_WIDTH
         : null;
     for (const rootId of rootIds) {
       const root = nodes[rootId];
@@ -120,11 +124,17 @@ export async function importBridgeFromLivePreview(
       canvasBackgroundColor: DEFAULT_CANVAS_BACKGROUND,
     });
     const importTheme = resolveBridgeImportColorTheme(validated.url, input.theme);
-    let finalSlice = prepareImportedSliceForCanvas(wrapped);
+    let finalSlice = prepareImportedSliceForCanvas(wrapped, { preserveCaptureGeometry: true });
     finalSlice = await enrichSliceWithProjectColorTokens(finalSlice, {
       cssSources: input.cssSources,
       theme: importTheme,
+      preserveCaptureGeometry: true,
+      rebakeColors: false,
     });
+
+    const finalNodes = { ...finalSlice.nodes };
+    finalizeBridgeLiveCapture(finalNodes, finalSlice.childOrder, PML_PHONE_COLUMN_WIDTH);
+    finalSlice = { ...finalSlice, nodes: finalNodes };
 
     const layerCount = Object.keys(finalSlice.nodes).length;
     const tokenCount = Object.keys(finalSlice.designTokens ?? {}).length;

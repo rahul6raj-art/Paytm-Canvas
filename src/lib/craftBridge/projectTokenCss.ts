@@ -10,12 +10,40 @@ import type { EditorPersistSlice } from "@/lib/documentPersistence";
 import type { CaptureColorTheme } from "@/lib/webImport/captureTheme";
 import { resolveBridgeImportColorTheme } from "@/lib/webImport/captureTheme";
 import { expandImportedFrameHeights } from "@/lib/webImport/finalizeWebImportGraph";
+import { PML_PHONE_COLUMN_WIDTH } from "@/lib/craftBridge/pmlScreenMetrics";
+import { clampPhoneShellFrameWidths } from "@/lib/webImport/phoneShellViewport";
 import {
   normalizeImportedLabelTextNodes,
   normalizeWebImportTextNodes,
 } from "@/lib/webImport/normalizeWebImportLayers";
 import { tokenizeImportedNodes } from "@/lib/craftBridge/tokenizeImportedNodes";
 import { applyImportedTokenColorsToNodes } from "@/lib/designTokens";
+import type { EditorNode } from "@/stores/useEditorStore";
+
+type NodeGeometry = Pick<EditorNode, "x" | "y" | "width" | "height">;
+
+function snapshotNodeGeometry(
+  nodes: Record<string, EditorNode>,
+): Record<string, NodeGeometry> {
+  const out: Record<string, NodeGeometry> = {};
+  for (const [id, node] of Object.entries(nodes)) {
+    out[id] = { x: node.x, y: node.y, width: node.width, height: node.height };
+  }
+  return out;
+}
+
+function restoreNodeGeometry(
+  nodes: Record<string, EditorNode>,
+  snapshot: Record<string, NodeGeometry>,
+): Record<string, EditorNode> {
+  const out = { ...nodes };
+  for (const [id, geom] of Object.entries(snapshot)) {
+    const node = out[id];
+    if (!node) continue;
+    out[id] = { ...node, ...geom };
+  }
+  return out;
+}
 
 export function isProjectTokenCssPath(cssPath: string): boolean {
   const norm = cssPath.replace(/\\/g, "/").toLowerCase();
@@ -78,6 +106,8 @@ export async function enrichSliceWithProjectColorTokens(
     rebakeColors?: boolean;
     /** When true, do not overwrite the slice canvas color mode (editor rehydrate). */
     preserveCanvasColorMode?: boolean;
+    /** Bridge live capture: do not expand frame sizes after CSS apply — keeps browser geometry. */
+    preserveCaptureGeometry?: boolean;
   } = {},
 ): Promise<EditorPersistSlice> {
   let cssSources = (input.cssSources ?? slice.projectCssSources ?? []).filter((c) => c?.trim());
@@ -105,17 +135,27 @@ export async function enrichSliceWithProjectColorTokens(
   }
 
   if (cssSources.length > 0 && input.rebakeColors !== false) {
+    const geometryBefore =
+      input.preserveCaptureGeometry === true ? snapshotNodeGeometry(nodes) : null;
     const layoutSlice = applyPageCssToSlice(
       { ...slice, nodes, designTokens, projectCssSources: cssSources } as EditorPersistSlice,
       cssSources,
       theme,
     );
     nodes = layoutSlice.nodes;
-    expandImportedFrameHeights(nodes, slice.childOrder);
+    if (geometryBefore) {
+      nodes = restoreNodeGeometry(nodes, geometryBefore);
+    }
+    if (input.preserveCaptureGeometry !== true) {
+      expandImportedFrameHeights(nodes, slice.childOrder);
+    }
+    clampPhoneShellFrameWidths(nodes, slice.childOrder, PML_PHONE_COLUMN_WIDTH);
   }
 
-  normalizeWebImportTextNodes(nodes);
-  normalizeImportedLabelTextNodes(nodes);
+  if (input.preserveCaptureGeometry !== true) {
+    normalizeWebImportTextNodes(nodes);
+    normalizeImportedLabelTextNodes(nodes);
+  }
 
   return {
     ...slice,

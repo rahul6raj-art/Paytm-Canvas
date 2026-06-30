@@ -8,6 +8,7 @@ const SCREEN_ROUTE_BY_COMPONENT: Record<string, string> = {
   PMLHomePage: "home",
   PMLStocksPage: "stocks",
   PMLMorePage: "more",
+  OnboardingFlow: "onboarding",
 };
 
 /** Default Vite/dev preview when craft.link.json omits previewUrl. Override via CRAFT_BRIDGE_PREVIEW_URL. */

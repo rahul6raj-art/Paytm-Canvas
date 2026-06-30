@@ -3,7 +3,7 @@ import type { ReactImportResult } from "./reactImport";
 import { importReactSource } from "./reactImport";
 import { applyPageCssToSlice } from "./applyPageCssToSlice";
 import { relayoutFlowChildrenInSlice } from "./flowSiblingLayout";
-import { finalizeImportedGraph } from "./finalizeImportedGraph";
+import { finalizeCodeImportGraph } from "./finalizeImportedGraph";
 import { pinPhoneShellBottomChromeNodes } from "@/lib/webImport/phoneShellBottomChrome";
 import { normalizeBottomNavTextNodes, normalizeListItemTextNodes } from "@/lib/webImport/normalizeWebImportLayers";
 import { isPhoneShellClassName } from "@/lib/webImport/phoneShellViewport";
@@ -38,9 +38,7 @@ function finalizePageCssSlice(
     ? canvasScreenLabelFromSource(sourceFileName)
     : canvasScreenLabelFromSource(slice.fileName);
   let nodes = relayoutFlowChildrenInSlice(slice, cssSources).nodes;
-  nodes = finalizeImportedGraph(nodes, slice.childOrder, {
-    preserveAbsoluteLayout: true,
-  });
+  nodes = finalizeCodeImportGraph(nodes, slice.childOrder);
   const shellHeight =
     Object.values(nodes).find((n) => isPhoneShellClassName(n.codeClassName))?.height ??
     nodes[rootIds[0] ?? ""]?.height ??
@@ -52,7 +50,7 @@ function finalizePageCssSlice(
   for (const rootId of rootIds) {
     const root = nodes[rootId];
     if (root) {
-      nodes[rootId] = { ...root, parentId: null, clipChildren: false };
+      nodes[rootId] = { ...root, parentId: null };
     }
   }
   nodes = applyCanvasScreenLabelToRoots(nodes, rootIds, screenLabel);

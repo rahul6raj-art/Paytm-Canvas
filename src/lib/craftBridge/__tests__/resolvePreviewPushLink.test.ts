@@ -61,7 +61,31 @@ describe("resolvePreviewPushLink", () => {
     );
     assert.equal(result.ok, true);
     if (result.ok) {
+      assert.equal(result.mode, "linked");
       assert.match(result.pagePath, /PMLHomePage/);
+    }
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("resolves onboarding from disk without a valid manifest link", async () => {
+    const { resolvePreviewPushLink } = await import("../resolvePreviewPushLink");
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "craft-onboarding-link-"));
+    const repoRoot = path.join(tmp, "repo");
+    fs.mkdirSync(path.join(repoRoot, "src/features/onboarding-flow"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repoRoot, "src/features/onboarding-flow/OnboardingFlow.tsx"),
+      "export default function OnboardingFlow() { return null; }\n",
+    );
+
+    const result = resolvePreviewPushLink(
+      repoRoot,
+      "http://localhost:5173/?screen=onboarding&theme=light",
+    );
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.mode, "linked");
+      assert.match(result.pagePath, /onboarding-flow/);
     }
 
     fs.rmSync(tmp, { recursive: true, force: true });

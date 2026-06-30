@@ -59,9 +59,8 @@ export async function POST(req: Request) {
             previewUrl: resolved.captureUrl,
           })
         : await runBridgePreviewCapture({
-            previewUrl,
+            previewUrl: resolved.captureUrl,
             repoRoot: resolved.repoRoot,
-            pagePath: undefined,
           });
 
     if (!imported.ok) {

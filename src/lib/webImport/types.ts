@@ -2,6 +2,7 @@ import type { LayoutMode, PrimaryAxisAlign, CrossAxisAlign, LayoutSizingMode } f
 import type { CornerRadii } from "@/lib/cornerRadius";
 import type { FillGradient, FillType } from "@/lib/fillGradient";
 import type { NodeEffect } from "@/lib/nodeEffects";
+import { PML_PHONE_VIEWPORT } from "@/lib/craftBridge/pmlScreenMetrics";
 
 export type ImportWebMode = "editable" | "screenshot" | "editable_with_reference";
 
@@ -409,5 +410,5 @@ export const VIEWPORT_PRESETS: Record<
 > = {
   desktop: { width: 1440, height: 900 },
   tablet: { width: 768, height: 1024 },
-  mobile: { width: 390, height: 844 },
+  mobile: PML_PHONE_VIEWPORT,
 };

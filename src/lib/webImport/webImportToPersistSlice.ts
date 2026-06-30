@@ -93,7 +93,10 @@ function sceneNodeToEditor(
   return id;
 }
 
-export function importWebResponseToPersistSlice(response: ImportWebResponse): EditorPersistSlice {
+export function importWebResponseToPersistSlice(
+  response: ImportWebResponse,
+  opts?: { bridgeCapture?: boolean },
+): EditorPersistSlice {
   const nodes: Record<string, EditorNode> = {};
   const childOrder: Record<string, string[]> = { [EDITOR_ROOT_KEY]: [] };
   const assets: Record<string, EditorAsset> = {};
@@ -159,6 +162,7 @@ export function importWebResponseToPersistSlice(response: ImportWebResponse): Ed
       childOrder,
       response.page.width,
       response.page.height,
+      { bridgeCapture: opts?.bridgeCapture },
     );
     for (const [id, n] of Object.entries(finalizedNodes)) {
       nodes[id] = n;

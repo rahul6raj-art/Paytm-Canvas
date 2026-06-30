@@ -4,6 +4,7 @@ import { importHtmlPageBundle } from "@/lib/codeRoundTrip/importHtmlPageBundle";
 import { importReactSource } from "@/lib/codeRoundTrip/reactImport";
 import { importHtmlFromString } from "@/lib/codeImport/htmlImport";
 import { importBridgeFromLivePreview } from "@/lib/craftBridge/bridgeLiveImport";
+import { bridgeLiveCaptureFailureMessage } from "@/lib/craftBridge/bridgeLiveCaptureError";
 import { buildBridgeEditorOpenUrl } from "@/lib/craftBridge/buildBridgeEditorOpenUrl";
 import { defaultCaptureColorTheme } from "@/lib/webImport/captureTheme";
 import { writePendingImport } from "@paytm-craft/bridge";
@@ -43,7 +44,6 @@ export async function POST(req: Request) {
     const pageLabel =
       body.fileName?.replace(/\.[^.]+$/, "") ?? body.link?.sourcePath?.split("/").pop();
     const captureUrl = resolvePreviewCaptureUrl(body.link?.previewUrl, pageLabel);
-    let liveCaptureError: string | undefined;
     if (captureUrl && format === "react") {
       const live = await importBridgeFromLivePreview({
         previewUrl: captureUrl,
@@ -58,10 +58,9 @@ export async function POST(req: Request) {
         message = live.message;
         sourceHeader = live.sourceHeader;
       } else {
-        liveCaptureError = live.error;
-        console.warn(
-          "[craft-bridge/import-source] live capture failed, falling back to source parse:",
-          live.error,
+        return NextResponse.json(
+          { error: bridgeLiveCaptureFailureMessage(live.error, captureUrl) },
+          { status: 503 },
         );
       }
     }
@@ -95,10 +94,7 @@ export async function POST(req: Request) {
         if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
         slice = result.slice;
         componentName = result.componentName;
-        const parseMessage = message ? `${message} ${result.message}` : result.message;
-        message = liveCaptureError
-          ? `Live preview unavailable (${liveCaptureError}). Used source parse instead. ${parseMessage}`
-          : parseMessage;
+        message = result.message;
         sourceHeader = result.sourceHeader;
       }
     }

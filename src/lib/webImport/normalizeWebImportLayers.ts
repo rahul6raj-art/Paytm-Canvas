@@ -252,9 +252,22 @@ export function normalizeImportedLabelTextNodes(nodes: Record<string, EditorNode
 
     const fontSize = n.fontSize ?? 14;
     const estW = Math.ceil(content.length * fontSize * 0.58) + 12;
-    if (n.width >= estW - 2) continue;
+    const capturedHeight = n.height;
+    let next =
+      n.width >= estW - 2
+        ? { ...n, ...textResizePatch("auto-width") }
+        : expandNarrowImportedTextNode(n, content);
 
-    nodes[id] = expandNarrowImportedTextNode(n, content);
+    try {
+      const layoutPatch = textLayoutPatchForNode(next, content);
+      if (layoutPatch) next = { ...next, ...layoutPatch };
+    } catch {
+      /* keep expanded width */
+    }
+    if (next.height < capturedHeight) {
+      next = { ...next, height: capturedHeight };
+    }
+    nodes[id] = next;
   }
 }
 
@@ -390,13 +403,26 @@ function layoutListItemPrimaryText(
 ): EditorNode {
   const fontSize = node.fontSize ?? 16;
   const estW = Math.min(maxWidth, Math.ceil(content.length * fontSize * 0.55) + 8);
-  return {
+  let next: EditorNode = {
     ...node,
     x: 0,
     y: Math.max(12, node.y),
     width: estW,
     ...textResizePatch("auto-width"),
   };
+  try {
+    const layoutPatch = textLayoutPatchForNode(next, content);
+    if (layoutPatch?.height && layoutPatch.height > next.height) {
+      next = { ...next, height: layoutPatch.height };
+    }
+    if (layoutPatch?.width && layoutPatch.width > next.width) {
+      next = { ...next, width: layoutPatch.width };
+    }
+  } catch {
+    const lineH = importedTextLineHeightPx(next);
+    next = { ...next, height: Math.max(next.height, Math.ceil(lineH)) };
+  }
+  return next;
 }
 
 function expandListItemBackground(

@@ -385,7 +385,7 @@ function activate(context) {
       try {
         await runBridge(context, ["install-preview-menu"], cwd);
         vscode.window.showInformationMessage(
-          "Craft Bridge: right-click anywhere in the live app preview (any route) → Push to Craft canvas",
+          "Craft Bridge: right-click anywhere in the live app preview → Push to Craft canvas (all ?screen= routes)",
         );
       } catch (e) {
         vscode.window.showErrorMessage(`Craft Bridge: ${e.message}`);
@@ -431,7 +431,7 @@ function activate(context) {
     }),
   );
 
-  log("Craft Bridge v0.1.11 — page folders, any preview route, light/dark capture theme");
+  log("Craft Bridge v0.1.12 — push any preview screen, stable editable layers on canvas");
 }
 
 function deactivate() {

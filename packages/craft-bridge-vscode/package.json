@@ -2,7 +2,7 @@
   "name": "craft-bridge",
   "displayName": "Craft Bridge",
   "description": "Push React/HTML page folders (.tsx or .html + .css) to Paytm Craft canvas; Send to code round-trip",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "publisher": "paytm-craft",
   "license": "MIT",
   "repository": {
@@ -82,7 +82,7 @@
       },
       {
         "command": "craft-bridge.installPreviewMenu",
-        "title": "Install Live Preview Right-Click Menu",
+        "title": "Install Live Preview Right-Click Menu (Push Any Screen)",
         "category": "Craft",
         "icon": "$(browser)"
       }

@@ -168,6 +168,14 @@ function svgBlendAttrForNode(nodeId: string, node: EditorNode, ctx: BuildCtx): s
   return svgLayerBlendStyleAttr(nodeBlendModeForPreview(nodeId, node, ctx.blendModePreview ?? null));
 }
 
+function frameHasVisibleChildren(parentId: string, ctx: BuildCtx): boolean {
+  for (const cid of layerPanelChildIds(parentId, ctx.nodes, ctx.childOrder)) {
+    const child = ctx.nodes[cid];
+    if (child?.visible !== false && child.width >= 1 && child.height >= 1) return true;
+  }
+  return false;
+}
+
 function renderChildren(parentId: string, ctx: BuildCtx): string {
   const kids = layerPanelChildIds(parentId, ctx.nodes, ctx.childOrder);
   let out = "";
@@ -376,6 +384,7 @@ function renderNode(nodeId: string, ctx: BuildCtx): string {
     const body = clip ? `<g clip-path="url(#${clipId})">${children}</g>` : children;
     const componentLabel =
       !isRoot &&
+      !frameHasVisibleChildren(nodeId, ctx) &&
       node.codeJsxIntrinsic === false &&
       node.codeJsxTag &&
       /^[A-Z]/.test(node.codeJsxTag)

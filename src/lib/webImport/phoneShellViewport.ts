@@ -1,6 +1,7 @@
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import type { EditorNode } from "@/stores/useEditorStore";
 import { expandWebImportScrollFrames } from "@/lib/webImport/normalizeWebImportLayers";
+import { PML_PHONE_COLUMN_WIDTH } from "@/lib/craftBridge/pmlScreenMetrics";
 
 const PHONE_SHELL_CLASS_TOKENS = new Set([
   "pml-home",
@@ -61,7 +62,7 @@ export function applyPhoneShellFullPageLayout(
 
     nodes[shellId] = {
       ...shell,
-      clipChildren: false,
+      clipChildren: true,
       width: phoneColumn ? pageWidth : shell.width,
       height: Math.max(Math.ceil(maxBottom), shell.height, pageHeight),
     };
@@ -70,13 +71,39 @@ export function applyPhoneShellFullPageLayout(
   for (const rootId of childOrder[EDITOR_ROOT_KEY] ?? []) {
     const root = nodes[rootId];
     if (!root) continue;
-    if (!isPhoneShellClassName(root.codeClassName) && !phoneColumn) continue;
+    if (!isPhoneShellClassName(root.codeClassName) && !(phoneColumn && root.width <= 420)) continue;
     nodes[rootId] = {
       ...root,
-      clipChildren: false,
-      width: phoneColumn ? pageWidth : Math.max(root.width, pageWidth),
+      clipChildren: true,
+      width: phoneColumn ? pageWidth : root.width,
       height: Math.max(root.height, pageHeight),
     };
+  }
+}
+
+/** After CSS re-apply / frame expansion, keep phone shells at the design column width. */
+export function clampPhoneShellFrameWidths(
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  columnWidth: number = PML_PHONE_COLUMN_WIDTH,
+): void {
+  for (const rootId of childOrder[EDITOR_ROOT_KEY] ?? []) {
+    const root = nodes[rootId];
+    if (!root) continue;
+    const isPhone =
+      isPhoneShellClassName(root.codeClassName) ||
+      (root.width > columnWidth && root.width <= 420);
+    if (!isPhone) continue;
+    if (root.width !== columnWidth || root.clipChildren !== true) {
+      nodes[rootId] = { ...root, width: columnWidth, clipChildren: true };
+    }
+  }
+
+  for (const [id, node] of Object.entries(nodes)) {
+    if (!isPhoneShellClassName(node.codeClassName)) continue;
+    if (node.width > columnWidth) {
+      nodes[id] = { ...node, width: columnWidth };
+    }
   }
 }
 

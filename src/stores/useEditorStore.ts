@@ -17,6 +17,11 @@ import { clampCanvasZoom, DEFAULT_CANVAS_ZOOM, viewportForRootNodes } from "@/li
 import { deferFigImportSave } from "@/lib/figImport/figImportRuntime";
 import { fitCanvasToImportedDocument } from "@/lib/viewportZoom";
 import { prepareImportedSliceForCanvas } from "@/lib/prepareImportedSliceForCanvas";
+import { PML_PHONE_COLUMN_WIDTH } from "@/lib/craftBridge/pmlScreenMetrics";
+import {
+  filterBridgeCaptureRelayoutParents,
+  isUnderBridgeCaptureScreen,
+} from "@/lib/craftBridge/bridgeCaptureLayout";
 import { buildAIGenerateSkeletonSlice } from "@/lib/aiGenerateSkeleton";
 import { normalizeHex } from "@/lib/color";
 import type { StrokeSpec } from "@/lib/strokeSpec";
@@ -1765,7 +1770,7 @@ export interface EditorState {
   applyGeneratedDesign: (
     slice: EditorPersistSlice,
     mode: "replace" | "append",
-    opts?: { recordHistory?: boolean; zoomToFit?: boolean },
+    opts?: { recordHistory?: boolean; zoomToFit?: boolean; preserveCaptureGeometry?: boolean },
   ) => Promise<void>;
 
   pluginMarketplaceOpen: boolean;
@@ -2033,7 +2038,7 @@ function ensureInsertParentFrame(
   if (hasFrame) return null;
 
   const id = `frame-${Date.now()}`;
-  const W = 390;
+  const W = PML_PHONE_COLUMN_WIDTH;
   const H = 844;
   const node: EditorNode = {
     id,
@@ -4606,6 +4611,14 @@ function buildUpdateLayoutResult(
 
   const rootIds = rootFrameIds(s.childOrder);
   if (
+    patch.layoutMode &&
+    patch.layoutMode !== "none" &&
+    isUnderBridgeCaptureScreen(nodes, id, s.childOrder)
+  ) {
+    return null;
+  }
+
+  if (
     isManualScreenFrame(current, rootIds) &&
     patch.layoutMode &&
     patch.layoutMode !== "none"
@@ -4640,8 +4653,14 @@ function buildUpdateLayoutSizingResult(
       : { layoutSizingVertical: mode };
   let nodes = { ...s.nodes, [id]: { ...n, ...patch, layoutDirty: true } };
   const refresh = new Set<string>();
-  if (n.parentId) refresh.add(n.parentId);
-  if ((n.type === "frame" || n.type === "group") && (n.layoutMode ?? "none") !== "none") {
+  if (n.parentId && !isUnderBridgeCaptureScreen(s.nodes, n.parentId, s.childOrder)) {
+    refresh.add(n.parentId);
+  }
+  if (
+    (n.type === "frame" || n.type === "group") &&
+    (n.layoutMode ?? "none") !== "none" &&
+    !isUnderBridgeCaptureScreen(s.nodes, id, s.childOrder)
+  ) {
     refresh.add(id);
   }
   nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, refresh);
@@ -4657,7 +4676,9 @@ function buildUpdateLayoutPositioningResult(
   if (!n || n.locked) return null;
   let nodes = { ...s.nodes, [id]: { ...n, layoutPositioning: positioning, layoutDirty: true } };
   const par = n.parentId;
-  if (par) nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [par]);
+  if (par && !isUnderBridgeCaptureScreen(s.nodes, par, s.childOrder)) {
+    nodes = relayoutParentsWithAutoLayout(nodes, s.childOrder, [par]);
+  }
   return { nodes, childOrder: s.childOrder, ui: {} };
 }
 
@@ -6450,8 +6471,17 @@ function buildUpdateNodeResult(
   const refresh = new Set<string>();
   if (layoutSelf) refresh.add(id);
   if (positionGeom && !rotationOnly) {
-    if (merged.parentId) refresh.add(merged.parentId);
-    if ((merged.type === "frame" || merged.type === "group") && (merged.layoutMode ?? "none") !== "none") {
+    if (
+      merged.parentId &&
+      !isUnderBridgeCaptureScreen(s.nodes, merged.parentId, s.childOrder)
+    ) {
+      refresh.add(merged.parentId);
+    }
+    if (
+      (merged.type === "frame" || merged.type === "group") &&
+      (merged.layoutMode ?? "none") !== "none" &&
+      !isUnderBridgeCaptureScreen(s.nodes, id, s.childOrder)
+    ) {
       refresh.add(id);
     }
   }
@@ -6459,7 +6489,8 @@ function buildUpdateNodeResult(
     n.type === "text" &&
     patchAffectsTextLayout(patch) &&
     (layoutAwarePatch.width != null || layoutAwarePatch.height != null) &&
-    n.parentId
+    n.parentId &&
+    !isUnderBridgeCaptureScreen(s.nodes, n.parentId, s.childOrder)
   ) {
     refresh.add(n.parentId);
   }
@@ -7469,12 +7500,14 @@ function relayoutParentsWithAutoLayout(
   childOrder: Record<string, string[]>,
   parentKeys: Iterable<string>,
 ): Record<string, EditorNode> {
+  const keys = filterBridgeCaptureRelayoutParents(nodes, childOrder, parentKeys);
+  if (keys.length === 0) return nodes;
   let layoutMap = toLayoutMap(nodes);
-  for (const pk of parentKeys) {
+  for (const pk of keys) {
     if (pk === ROOT) continue;
     layoutMap = markLayoutDirty(layoutMap, pk);
   }
-  layoutMap = relayoutDirtyTree(layoutMap, childOrder, parentKeys);
+  layoutMap = relayoutDirtyTree(layoutMap, childOrder, keys);
   return mergeLayoutMapIntoNodes(nodes, layoutMap);
 }
 
@@ -12353,7 +12386,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     let appliedSlice = slice;
     if (mode === "replace") {
-      appliedSlice = prepareImportedSliceForCanvas(slice);
+      appliedSlice = prepareImportedSliceForCanvas(slice, {
+        preserveCaptureGeometry: opts?.preserveCaptureGeometry === true,
+      });
     }
     if (zoomToFit) {
       const el =

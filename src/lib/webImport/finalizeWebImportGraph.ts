@@ -76,31 +76,47 @@ export function finalizeWebImportGraph(
   childOrder: Record<string, string[]>,
   pageWidth: number,
   pageHeight: number,
-  opts?: { composition?: "screen" | "component" },
+  opts?: { composition?: "screen" | "component"; bridgeCapture?: boolean },
 ): Record<string, EditorNode> {
-  dedupeOverlappingFormSiblings(nodes, childOrder);
-  collapsePassThroughWrappers(nodes, childOrder);
-  trimFramesToChildBounds(nodes, childOrder);
-  fixOverlappingStackedSiblings(nodes, childOrder);
-  normalizeFooterLegalText(nodes, childOrder);
-  normalizeEmailToButtonGap(nodes, childOrder);
-  normalizeWebImportTextNodes(nodes);
-  normalizeImportedLabelTextNodes(nodes);
-  normalizeListItemTextNodes(nodes, childOrder);
-  normalizeBottomNavTextNodes(nodes);
+  const bridge = opts?.bridgeCapture === true;
+
+  if (!bridge) {
+    dedupeOverlappingFormSiblings(nodes, childOrder);
+    collapsePassThroughWrappers(nodes, childOrder);
+    trimFramesToChildBounds(nodes, childOrder);
+    fixOverlappingStackedSiblings(nodes, childOrder);
+    normalizeFooterLegalText(nodes, childOrder);
+    normalizeEmailToButtonGap(nodes, childOrder);
+  }
+
+  if (!bridge) {
+    normalizeWebImportTextNodes(nodes);
+    normalizeImportedLabelTextNodes(nodes);
+    normalizeListItemTextNodes(nodes, childOrder);
+    normalizeBottomNavTextNodes(nodes);
+  }
+
   normalizeWebImportSvgPaths(nodes);
   normalizeWebImportColors(nodes);
 
-  expandImportedFrameHeights(nodes, childOrder);
+  if (!bridge) {
+    expandImportedFrameHeights(nodes, childOrder);
+  }
   preserveWebImportOverflowEffects(nodes, childOrder);
   if (opts?.composition === "component") {
     enforceManualComponentComposition(nodes, childOrder);
   } else {
     applyPhoneShellFullPageLayout(nodes, childOrder, pageWidth, pageHeight);
-    applyWebImportAutoLayoutStructure(nodes, childOrder);
-    normalizeListItemTextNodes(nodes, childOrder);
+    if (!bridge) {
+      applyWebImportAutoLayoutStructure(nodes, childOrder);
+    }
+    if (!bridge) {
+      normalizeListItemTextNodes(nodes, childOrder);
+    }
     enforceManualScreenFrames(nodes, childOrder);
-    disableAutoLayoutForAbsoluteChildren(nodes, childOrder);
+    if (!bridge) {
+      disableAutoLayoutForAbsoluteChildren(nodes, childOrder);
+    }
   }
 
   if (opts?.composition !== "component") {

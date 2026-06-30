@@ -170,7 +170,7 @@ export default PMLHomePage;
     assert.ok(tags.has("NewsWidget"));
     const root = imported.slice.nodes[imported.slice.selectedIds[0]!];
     assert.ok(root && root.height > 400, `root height ${root?.height}`);
-    assert.ok(root && root.width >= 390, `root width ${root?.width}`);
+    assert.ok(root && root.width >= 376, `root width ${root?.width}`);
     const narrowFrames = Object.values(imported.slice.nodes).filter(
       (n) => (n.type === "frame" || n.type === "group") && n.width < 200,
     );
@@ -198,7 +198,7 @@ export default PMLSignupPage;
     assert.equal(imported.ok, true);
     if (!imported.ok) return;
     const root = imported.slice.nodes[imported.slice.selectedIds[0]!];
-    assert.ok(root && root.width >= 390, `root width ${root?.width}`);
+    assert.ok(root && root.width >= 376, `root width ${root?.width}`);
     assert.ok(root && root.height >= 600, `root height ${root?.height}`);
     const title = Object.values(imported.slice.nodes).find((n) => n.content === "Create your account");
     assert.ok(title);
@@ -278,7 +278,7 @@ export default PMLSignupPage;
     assert.equal(imported.ok, true);
     if (!imported.ok) return;
     const root = imported.slice.nodes[imported.slice.selectedIds[0]!];
-    assert.equal(root?.width, 390, `root width ${root?.width}`);
+    assert.equal(root?.width, 376, `root width ${root?.width}`);
     assert.ok((root?.height ?? 0) >= 600);
     const checkbox = Object.values(imported.slice.nodes).find((n) => n.codeJsxTag === "Checkbox");
     assert.ok(checkbox && checkbox.width <= 64, `checkbox width ${checkbox?.width}`);
@@ -289,7 +289,7 @@ export default PMLSignupPage;
 
   it("imports flex className and applies auto-layout positions", () => {
     const source = `
-const SCREEN_W = 390;
+const SCREEN_W = 376;
 function Header() {
   return <header className="h-[56px] w-full">Top</header>;
 }
@@ -501,6 +501,34 @@ export default PMLHomePage;
     const merged = mergeStructureMetadataOntoLiveNodes(liveNodes, jsx);
     assert.equal(merged.w1?.codeClassName, "pml-home");
     assert.equal(merged.w1?.codeJsxTag, "div");
+  });
+
+  it("bridgeCapture merge keeps captured names and skips placeholder intrinsic flag", () => {
+    const jsx = `export default function Screen() {
+  return <div className="app-header"><Header /></div>;
+}`;
+    const parsed = importReactSource(jsx);
+    assert.equal(parsed.ok, true);
+    if (!parsed.ok) return;
+
+    const headerShell = Object.values(parsed.slice.nodes).find(
+      (n) => n.codeClassName === "app-header",
+    );
+    assert.ok(headerShell);
+
+    const liveNodes = {
+      cap1: {
+        ...headerShell!,
+        id: "cap1",
+        name: "captured-header-shell",
+        codeJsxIntrinsic: true,
+      },
+    };
+
+    const merged = mergeStructureMetadataOntoLiveNodes(liveNodes, jsx, { bridgeCapture: true });
+    assert.equal(merged.cap1?.name, "captured-header-shell");
+    assert.equal(merged.cap1?.codeJsxTag, "div");
+    assert.equal(merged.cap1?.codeJsxIntrinsic, true);
   });
 
   it("round-trips payload after canvas export", () => {

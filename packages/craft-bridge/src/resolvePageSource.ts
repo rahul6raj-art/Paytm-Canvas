@@ -63,6 +63,60 @@ function collectCssFromSourceImports(sourcePath: string, format: PageSourceForma
   return cssPaths;
 }
 
+function resolveRelativeModulePath(fromDir: string, spec: string): string | null {
+  if (!spec.startsWith(".")) return null;
+  const base = path.resolve(fromDir, spec);
+  const candidates = [
+    base,
+    `${base}.tsx`,
+    `${base}.ts`,
+    path.join(base, "index.tsx"),
+    path.join(base, "index.ts"),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
+  }
+  return null;
+}
+
+/** Walk relative TS/TSX imports so component CSS (e.g. Card.css) is included for token linking. */
+function collectCssFromReactModuleGraph(
+  sourcePath: string,
+  visited: Set<string> = new Set(),
+  depth = 0,
+): string[] {
+  const abs = path.resolve(sourcePath);
+  if (visited.has(abs) || depth > 20) return [];
+  visited.add(abs);
+
+  const cssPaths = collectCssFromSourceImports(sourcePath, "react");
+  const dir = path.dirname(sourcePath);
+  let src: string;
+  try {
+    src = readFileSync(sourcePath, "utf8");
+  } catch {
+    return cssPaths;
+  }
+
+  for (const m of src.matchAll(/import\s+['"](\.\.?\/[^'"]+\.css)['"]/g)) {
+    const rel = m[1]!.replace(/^\.\//, "");
+    const p = path.resolve(dir, rel);
+    if (existsSync(p) && !cssPaths.includes(p)) cssPaths.push(p);
+  }
+
+  for (const m of src.matchAll(
+    /import\s+(?:type\s+)?(?:[\w*{}\s,$]+)\s+from\s+['"](\.\.?\/[^'"]+)['"]/g,
+  )) {
+    const resolved = resolveRelativeModulePath(dir, m[1]!);
+    if (!resolved || !/\.(tsx|ts)$/.test(resolved)) continue;
+    for (const extra of collectCssFromReactModuleGraph(resolved, visited, depth + 1)) {
+      if (!cssPaths.includes(extra)) cssPaths.push(extra);
+    }
+  }
+
+  return cssPaths;
+}
+
 function resolvePageInDirectory(dir: string): ResolvedPageSource {
   const files = readdirSync(dir);
   const indexTs = path.join(dir, "index.ts");
@@ -131,8 +185,12 @@ function resolvePageInDirectory(dir: string): ResolvedPageSource {
     .filter((f) => f.endsWith(".css"))
     .map((f) => path.join(dir, f));
 
-  for (const imported of collectCssFromSourceImports(mainPath, format)) {
-    if (!cssPaths.includes(imported)) cssPaths.push(imported);
+  if (format === "react") {
+    cssPaths = appendUniqueCss(cssPaths, collectCssFromReactModuleGraph(mainPath));
+  } else {
+    for (const imported of collectCssFromSourceImports(mainPath, format)) {
+      if (!cssPaths.includes(imported)) cssPaths.push(imported);
+    }
   }
   cssPaths = appendUniqueCss(cssPaths, discoverDesignTokenCss(dir));
 
@@ -163,7 +221,7 @@ export function resolvePageSource(absPath: string): ResolvedPageSource {
       tsxPath: absPath,
       format: "react",
       cssPaths: appendUniqueCss(
-        collectCssFromSourceImports(absPath, "react"),
+        collectCssFromReactModuleGraph(absPath),
         discoverDesignTokenCss(dir),
       ),
       linkPath: absPath,

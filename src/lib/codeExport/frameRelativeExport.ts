@@ -1,6 +1,7 @@
 import type { EditorNode } from "@/stores/useEditorStore";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import { PC_ROOT_ATTR } from "./pcMetadata";
+import { PML_PHONE_VIEWPORT } from "@/lib/craftBridge/pmlScreenMetrics";
 
 /** Nearest ancestor frame (or the node itself if it is a frame). */
 export function findEnclosingFrameId(
@@ -41,7 +42,7 @@ export function frameDimensionsForExport(
   nodes: Record<string, EditorNode>,
 ): { width: number; height: number } {
   const n = nodes[rootId];
-  if (!n) return { width: 390, height: 844 };
+  if (!n) return { width: PML_PHONE_VIEWPORT.width, height: PML_PHONE_VIEWPORT.height };
   return {
     width: Math.max(1, Math.ceil(n.width)),
     height: Math.max(1, Math.ceil(n.height)),

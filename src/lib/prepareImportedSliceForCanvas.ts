@@ -10,6 +10,7 @@ import {
   normalizeListItemTextNodes,
   normalizeWebImportTextNodes,
 } from "@/lib/webImport/normalizeWebImportLayers";
+import { isPhoneShellClassName } from "@/lib/webImport/phoneShellViewport";
 
 function hasUnresolvableCssColor(value: string | undefined): boolean {
   if (!value?.trim()) return false;
@@ -72,7 +73,8 @@ function ensureRootFrameVisible(
       ...node,
       fill: "#FFFFFF",
       fillEnabled: true,
-      clipChildren: false,
+      clipChildren:
+        node.clipChildren === true || isPhoneShellClassName(node.codeClassName) ? true : false,
     };
   }
   return next;
@@ -102,12 +104,18 @@ function syncPagesWithCanvas(slice: EditorPersistSlice): EditorPersistSlice {
 }
 
 /** Ensure bridge/import slices paint on SVG (no var() fills, no clip hiding children). */
-export function prepareImportedSliceForCanvas(slice: EditorPersistSlice): EditorPersistSlice {
+export function prepareImportedSliceForCanvas(
+  slice: EditorPersistSlice,
+  opts?: { preserveCaptureGeometry?: boolean },
+): EditorPersistSlice {
+  const freezeGeometry = opts?.preserveCaptureGeometry === true;
   let nodes = sanitizeNodesRecord(slice.nodes);
-  normalizeWebImportTextNodes(nodes);
-  normalizeImportedLabelTextNodes(nodes);
-  normalizeListItemTextNodes(nodes, slice.childOrder);
-  normalizeBottomNavTextNodes(nodes);
+  if (!freezeGeometry) {
+    normalizeWebImportTextNodes(nodes);
+    normalizeImportedLabelTextNodes(nodes);
+    normalizeListItemTextNodes(nodes, slice.childOrder);
+    normalizeBottomNavTextNodes(nodes);
+  }
   nodes = ensureRootFrameVisible(nodes, slice.childOrder);
   enforceManualScreenFrames(nodes, slice.childOrder);
 
@@ -116,10 +124,12 @@ export function prepareImportedSliceForCanvas(slice: EditorPersistSlice): Editor
     const pages = { ...next.pages };
     for (const [pageId, page] of Object.entries(pages)) {
       let pageNodes = sanitizeNodesRecord(page.nodes);
-      normalizeWebImportTextNodes(pageNodes);
-      normalizeImportedLabelTextNodes(pageNodes);
-      normalizeListItemTextNodes(pageNodes, page.childOrder);
-      normalizeBottomNavTextNodes(pageNodes);
+      if (!freezeGeometry) {
+        normalizeWebImportTextNodes(pageNodes);
+        normalizeImportedLabelTextNodes(pageNodes);
+        normalizeListItemTextNodes(pageNodes, page.childOrder);
+        normalizeBottomNavTextNodes(pageNodes);
+      }
       pageNodes = ensureRootFrameVisible(pageNodes, page.childOrder);
       enforceManualScreenFrames(pageNodes, page.childOrder);
       pages[pageId] = { ...page, nodes: pageNodes };
