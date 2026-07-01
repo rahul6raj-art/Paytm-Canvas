@@ -2,12 +2,14 @@ import type { CraftBridgePendingImport } from "@/lib/craftBridge/types";
 import { normalizeBridgeImportSlice } from "@/lib/craftBridge/normalizeBridgeImportSlice";
 import {
   removeRootSubtree,
+  resolveBridgeCanvasIdentity,
   resolveBridgeImportStrategy,
   tagSliceRootsWithBridgeSource,
 } from "@/lib/craftBridge/bridgeImportStrategy";
 import { enrichSliceWithProjectColorTokens } from "@/lib/craftBridge/projectTokenCss";
+import { resolveApplyCaptureContext } from "@/lib/craftBridge/bridgeCaptureContext";
 import { finalizeBridgeLiveCapture } from "@/lib/craftBridge/finalizeBridgeLiveCapture";
-import { PML_PHONE_COLUMN_WIDTH } from "@/lib/craftBridge/pmlScreenMetrics";
+import { assertBridgeCaptureFidelity } from "@/lib/craftBridge/bridgeCaptureValidate";
 import { resolveBridgeImportColorTheme } from "@/lib/webImport/captureTheme";
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import {
@@ -47,7 +49,8 @@ export async function applyBridgePendingImport(
   }
 
   const store = useEditorStore.getState();
-  const strategy = resolveBridgeImportStrategy(store, pending.link?.sourcePath);
+  const canvasIdentity = resolveBridgeCanvasIdentity(pending.link);
+  const strategy = resolveBridgeImportStrategy(store, canvasIdentity);
   let applyMode: "replace" | "append" = strategy.mode === "append" ? "append" : "replace";
   let replaceRootPosition: { x: number; y: number } | null = null;
 
@@ -68,18 +71,43 @@ export async function applyBridgePendingImport(
     nodes: tagSliceRootsWithBridgeSource(
       slice.nodes,
       slice.childOrder,
-      pending.link?.sourcePath,
+      canvasIdentity,
     ),
   };
-  slice = await enrichSliceWithProjectColorTokens(slice, {
-    link: pending.link ?? null,
-    theme: resolveBridgeImportColorTheme(pending.link?.previewUrl),
-    preserveCaptureGeometry: true,
-    rebakeColors: false,
-  });
+
+  const alreadyHasProjectTokens =
+    (slice.projectCssSources?.length ?? 0) > 0 &&
+    Object.values(slice.designTokens ?? {}).some((t) => t.type === "color");
+  if (!alreadyHasProjectTokens) {
+    slice = await enrichSliceWithProjectColorTokens(slice, {
+      link: pending.link ?? null,
+      theme: resolveBridgeImportColorTheme(pending.link?.previewUrl),
+      preserveCaptureGeometry: true,
+      rebakeColors: false,
+    });
+  }
 
   const finalizedNodes = { ...slice.nodes };
-  finalizeBridgeLiveCapture(finalizedNodes, slice.childOrder, PML_PHONE_COLUMN_WIDTH);
+  const captureContext = resolveApplyCaptureContext(pending, finalizedNodes);
+  finalizeBridgeLiveCapture(finalizedNodes, slice.childOrder, captureContext.columnWidth, {
+    cssSources: slice.projectCssSources,
+    theme: resolveBridgeImportColorTheme(pending.link?.previewUrl),
+  });
+
+  try {
+    assertBridgeCaptureFidelity(finalizedNodes, slice.childOrder, {
+      strict: true,
+      tolerancePx: 1,
+      requireRoundTripMetadata: captureContext.requireRoundTripMetadata,
+      expectPhoneArtboard: captureContext.expectPhoneArtboard,
+    });
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Capture fidelity check failed.",
+    };
+  }
+
   slice = { ...slice, nodes: finalizedNodes };
 
   const rootCount = slice.childOrder[EDITOR_ROOT_KEY]?.length ?? 0;

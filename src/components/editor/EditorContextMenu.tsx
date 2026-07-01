@@ -6,9 +6,9 @@ import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/useEditorStore";
 import {
   useCanExportToLinkedSource,
-  useExportToLinkedSource,
 } from "@/lib/craftBridge/useExportToLinkedSource";
 import { topLevelSelectedIds } from "@/lib/editorGraph";
+import { pickCodeExportRootIds } from "@/lib/codeExport/frameRelativeExport";
 import { hasEditorClipboardContent } from "@/lib/editorClipboardAvailability";
 import { canCreateComponentFromSelection, findInstanceRoot } from "@/lib/componentModel";
 import { buildSlotTextContentSnapshot } from "@/lib/components/componentSlots";
@@ -77,7 +77,6 @@ export function EditorContextMenu() {
   const useSelectionAsMask = useEditorStore((s) => s.useSelectionAsMask);
   const releaseMask = useEditorStore((s) => s.releaseMask);
   const canUpdateSource = useCanExportToLinkedSource();
-  const exportToLinkedSource = useExportToLinkedSource();
   const codeRoundTripLink = useEditorStore((s) => s.codeRoundTripLink);
   const openCodeRoundTrip = useEditorStore((s) => s.openCodeRoundTrip);
   const setSelection = useEditorStore((s) => s.setSelection);
@@ -176,8 +175,17 @@ export function EditorContextMenu() {
       ? [{ type: "item", id: "mask-rel", label: "Release mask", onSelect: () => releaseMask(nodeId) }]
       : [];
 
+    const exportRootId = pickCodeExportRootIds(
+      selectedIds.includes(nodeId) ? selectedIds : [nodeId],
+      nodes,
+      childOrder,
+    )[0];
+    const exportRoot = exportRootId ? nodes[exportRootId] : node;
     const isCodeFrame =
-      editorMode === "design" && (node.type === "frame" || node.type === "group");
+      editorMode === "design" &&
+      exportRoot != null &&
+      (exportRoot.type === "frame" || exportRoot.type === "group");
+
     const codeItems: Item[] = isCodeFrame
       ? [
           {
@@ -185,15 +193,11 @@ export function EditorContextMenu() {
             id: "send-to-code",
             label: "Send to code",
             hint: canUpdateSource
-              ? codeRoundTripLink?.sourcePath?.split("/").pop()
+              ? codeRoundTripLink?.sourcePath?.split("/").pop() ?? exportRoot.name
               : "Link source",
             onSelect: () => {
-              setSelection([nodeId]);
-              void (async () => {
-                const result = await exportToLinkedSource();
-                if (result.ok) return;
-                openCodeRoundTrip("export");
-              })();
+              if (exportRootId) setSelection([exportRootId]);
+              openCodeRoundTrip("export");
             },
           },
           { type: "sep" as const },
@@ -556,7 +560,6 @@ export function EditorContextMenu() {
     releaseMask,
     clipboardReady,
     canUpdateSource,
-    exportToLinkedSource,
     openCodeRoundTrip,
     setSelection,
     codeRoundTripLink?.sourcePath,

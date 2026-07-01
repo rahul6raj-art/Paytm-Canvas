@@ -124,6 +124,7 @@ import {
   parentUsesAutoLayout,
   collectSubtreeIds,
   dedupeChildOrderLists,
+  getRenderedWorldBounds,
   getRenderedWorldTopLeft,
   insertNodeInChildOrder,
   insertDuplicatedSiblingInChildOrder,
@@ -243,6 +244,10 @@ import type { CodeRoundTripLink } from "@/lib/craftBridge/types";
 import { normalizeCodeRoundTripLink } from "@/lib/craftBridge/normalizeLink";
 import { rehydrateProjectColorContext } from "@/lib/craftBridge/projectTokenCss";
 import { bridgeFetch } from "@/lib/craftBridge/bridgeFetch";
+import {
+  bridgeTextfieldHostWidthPatches,
+  isBridgeTextInsideTextfield,
+} from "@/lib/craftBridge/bridgeTextfieldTextLayout";
 import type { DesignToken, DetachableTokenKind, EffectTokenValue, CanvasColorMode } from "@/lib/designTokens";
 import {
   newDesignTokenId,
@@ -867,6 +872,10 @@ export interface EditorNode {
   codeClassName?: string;
   /** Craft bridge: linked repo source path for this screen artboard root. */
   bridgeSourcePath?: string;
+  /** Bridge push: Chromium line/glyph layout — Craft paints without remeasuring */
+  browserTextLayout?: import("@/lib/craftBridge/bridgeParityTypes").BrowserCaptureTextLayout;
+  /** Bridge push: captured box is the DOM line box — skip Craft fixed-text vertical inset. */
+  bridgeDomTextBox?: boolean;
   /** Project CSS spacing token ids matched on bridge import. */
   projectSpacingTokenIds?: {
     paddingTop?: string;
@@ -2892,35 +2901,19 @@ function buildStartTextFromDragResult(
 }
 
 function buildAddRectangleToolbarResult(
-  s: Pick<EditorState, "nodes" | "childOrder">,
+  s: Pick<EditorState, "nodes" | "childOrder" | "selectedIds">,
 ): StructuralDocumentResult {
-  const id = `rect-${Date.now()}`;
-  const roots = [...(s.childOrder[ROOT] ?? [])];
-  roots.push(id);
-  const node: EditorNode = {
-    id,
-    parentId: null,
-    type: "rectangle",
-    name: nextNumberedLayerName(s.nodes, "Rectangle"),
-    x: 120,
-    y: 120,
-    width: 160,
-    height: 100,
-    rotation: 0,
-    visible: true,
-    locked: false,
-    expanded: true,
-    fill: DEFAULT_SHAPE_FILL,
-    cornerRadius: 8,
-    fillEnabled: true,
-    fillOpacity: 1,
-    strokePosition: "center",
-  };
-  return {
-    nodes: { ...s.nodes, [id]: node },
-    childOrder: { ...s.childOrder, [ROOT]: roots },
-    ui: { selectedIds: [id] },
-  };
+  const w = 160;
+  const h = 100;
+  let cx = 200;
+  let cy = 170;
+  const frameId = s.selectedIds.find((id) => s.nodes[id]?.type === "frame") ?? null;
+  if (frameId) {
+    const bounds = getRenderedWorldBounds(frameId, s.nodes, s.childOrder);
+    cx = bounds.x + bounds.width / 2;
+    cy = bounds.y + bounds.height / 2;
+  }
+  return buildAddRectangleResult(s, cx, cy);
 }
 
 function buildRemoveDraftNodeResult(
@@ -6163,11 +6156,13 @@ function buildUpdateNodeStyleResult(
     );
   }
   if (n.type === "text" && "content" in mergedPatch) {
+    const newContent = (mergedPatch as { content?: string }).content ?? n.content;
     finalPatch = {
       ...finalPatch,
-      name: layerNameFromTextContent(
-        (mergedPatch as { content?: string }).content ?? n.content,
-      ),
+      name: layerNameFromTextContent(newContent),
+      ...(n.browserTextLayout && n.browserTextLayout.content !== (newContent ?? "")
+        ? { browserTextLayout: undefined }
+        : {}),
     };
   }
 
@@ -6208,6 +6203,24 @@ function buildUpdateNodeStyleResult(
       }
     } else {
       nodes = { ...s.nodes, [id]: { ...n, ...finalPatch } };
+    }
+  }
+
+  if (
+    n.type === "text" &&
+    isBridgeTextInsideTextfield(n, s.nodes) &&
+    (finalPatch.width != null || finalPatch.height != null || "content" in mergedPatch)
+  ) {
+    const updatedText = nodes[id] ?? { ...n, ...finalPatch };
+    if (updatedText.type === "text") {
+      for (const [hostId, hostPatch] of Object.entries(
+        bridgeTextfieldHostWidthPatches(updatedText, nodes),
+      )) {
+        const host = nodes[hostId];
+        if (host && !host.locked) {
+          nodes[hostId] = { ...host, ...hostPatch };
+        }
+      }
     }
   }
 

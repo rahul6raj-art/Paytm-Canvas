@@ -23,6 +23,139 @@ var __craftDomExtract = (() => {
   __export(domExtractor_exports, {
     extractDomTreeInBrowser: () => extractDomTreeInBrowser
   });
+
+  // src/lib/webImport/bridgeCaptureHairlines.ts
+  var MIN_EDGE_PX = 0.5;
+  function parseEdgeWidth(value) {
+    if (!value) return 0;
+    const n = parseFloat(value);
+    return Number.isFinite(n) ? n : 0;
+  }
+  function isVisibleCssColor(color) {
+    if (!color?.trim()) return false;
+    const c = color.trim().toLowerCase();
+    return c !== "transparent" && c !== "rgba(0, 0, 0, 0)";
+  }
+  function boxShadowEdgeHairline(boxShadow) {
+    if (!boxShadow?.trim() || boxShadow.trim() === "none") return null;
+    for (const layer of boxShadow.split(/,(?![^(]*\))/).map((s) => s.trim())) {
+      if (/^inset\b/i.test(layer)) continue;
+      const nums = layer.match(/-?[\d.]+px/g);
+      if (!nums || nums.length < 2) continue;
+      const offsetY = parseFloat(nums[1]);
+      if (!Number.isFinite(offsetY) || Math.abs(offsetY) < MIN_EDGE_PX) continue;
+      const blur = nums[2] ? parseFloat(nums[2]) : 0;
+      const spread = nums[3] ? parseFloat(nums[3]) : 0;
+      if (Math.abs(blur) >= MIN_EDGE_PX || Math.abs(spread) >= MIN_EDGE_PX) continue;
+      const colorMatch = layer.match(/rgba?\([^)]+\)|#[0-9a-fA-F]{3,8}/i);
+      if (!colorMatch) continue;
+      return {
+        edge: offsetY < 0 ? "top" : "bottom",
+        color: colorMatch[0]
+      };
+    }
+    return null;
+  }
+  function hasFullBoxBorder(styles) {
+    const widths = [
+      parseEdgeWidth(styles.borderTopWidth),
+      parseEdgeWidth(styles.borderRightWidth),
+      parseEdgeWidth(styles.borderBottomWidth),
+      parseEdgeWidth(styles.borderLeftWidth)
+    ];
+    if (!widths.every((w) => w >= MIN_EDGE_PX)) return false;
+    const colors = [
+      styles.borderTopColor,
+      styles.borderRightColor,
+      styles.borderBottomColor,
+      styles.borderLeftColor
+    ];
+    return colors.filter(isVisibleCssColor).length >= 4;
+  }
+  function structuralHairlinesFromStyles(styles, width, height, opts) {
+    const lines = [];
+    const w = Math.max(1, Math.round(width));
+    const h = Math.max(1, Math.round(height));
+    const skipBorderEdges = hasFullBoxBorder(styles) && opts?.includeFullBoxBorder !== true;
+    if (!skipBorderEdges) {
+      const topBorderW = parseEdgeWidth(styles.borderTopWidth);
+      if (topBorderW >= MIN_EDGE_PX && isVisibleCssColor(styles.borderTopColor)) {
+        lines.push({
+          edge: "top",
+          x: 0,
+          y: 0,
+          width: w,
+          height: Math.max(1, Math.round(topBorderW)),
+          color: styles.borderTopColor.trim()
+        });
+      }
+      const bottomBorderW = parseEdgeWidth(styles.borderBottomWidth);
+      if (bottomBorderW >= MIN_EDGE_PX && isVisibleCssColor(styles.borderBottomColor)) {
+        lines.push({
+          edge: "bottom",
+          x: 0,
+          y: Math.max(0, h - Math.max(1, Math.round(bottomBorderW))),
+          width: w,
+          height: Math.max(1, Math.round(bottomBorderW)),
+          color: styles.borderBottomColor.trim()
+        });
+      }
+      const leftBorderW = parseEdgeWidth(styles.borderLeftWidth);
+      if (leftBorderW >= MIN_EDGE_PX && isVisibleCssColor(styles.borderLeftColor)) {
+        lines.push({
+          edge: "left",
+          x: 0,
+          y: 0,
+          width: Math.max(1, Math.round(leftBorderW)),
+          height: h,
+          color: styles.borderLeftColor.trim()
+        });
+      }
+      const rightBorderW = parseEdgeWidth(styles.borderRightWidth);
+      if (rightBorderW >= MIN_EDGE_PX && isVisibleCssColor(styles.borderRightColor)) {
+        lines.push({
+          edge: "right",
+          x: Math.max(0, w - Math.max(1, Math.round(rightBorderW))),
+          y: 0,
+          width: Math.max(1, Math.round(rightBorderW)),
+          height: h,
+          color: styles.borderRightColor.trim()
+        });
+      }
+    }
+    if (!lines.some((l) => l.edge === "top")) {
+      const shadowTop = boxShadowEdgeHairline(styles.boxShadow);
+      if (shadowTop?.edge === "top") {
+        lines.push({ edge: "top", x: 0, y: 0, width: w, height: 1, color: shadowTop.color });
+      }
+    }
+    if (!lines.some((l) => l.edge === "bottom")) {
+      const shadowBottom = boxShadowEdgeHairline(styles.boxShadow);
+      if (shadowBottom?.edge === "bottom") {
+        lines.push({
+          edge: "bottom",
+          x: 0,
+          y: Math.max(0, h - 1),
+          width: w,
+          height: 1,
+          color: shadowBottom.color
+        });
+      }
+    }
+    return lines;
+  }
+
+  // src/lib/webImport/pmlButtonClass.ts
+  function splitDomClassTokens(className) {
+    return (className ?? "").trim().split(/\s+/).filter(Boolean);
+  }
+  function hasPmlStrokeButtonClassToken(className) {
+    return splitDomClassTokens(className).some(
+      (t) => /^btn--(?:stroke|outline|secondary|ghost)$/.test(t)
+    );
+  }
+
+  // src/lib/webImport/domExtractor.ts
   function extractDomTreeInBrowser() {
     const SKIP = /* @__PURE__ */ new Set([
       "script",
@@ -144,6 +277,102 @@ var __craftDomExtract = (() => {
         height: r.height
       };
     }
+    const GLYPH_CAPTURE_LIMIT = 512;
+    function captureBrowserTextLayout(el) {
+      const textNodes = [];
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      let tn;
+      while (tn = walker.nextNode()) {
+        const t = tn;
+        if ((t.textContent ?? "").length > 0) textNodes.push(t);
+      }
+      if (!textNodes.length) return void 0;
+      const fullText = textNodes.map((t) => t.textContent ?? "").join("");
+      if (!fullText.trim()) return void 0;
+      const elRect = el.getBoundingClientRect();
+      if (elRect.width < 0.5 || elRect.height < 0.5) return void 0;
+      function posAt(index) {
+        let rem = index;
+        for (const t of textNodes) {
+          const len = t.textContent?.length ?? 0;
+          if (rem <= len) return { node: t, offset: rem };
+          rem -= len;
+        }
+        const last = textNodes[textNodes.length - 1];
+        return { node: last, offset: last.textContent?.length ?? 0 };
+      }
+      const range = document.createRange();
+      const lines = [];
+      const glyphs = [];
+      let lineStart = 0;
+      while (lineStart < fullText.length) {
+        while (lineStart < fullText.length && fullText[lineStart] === " ") lineStart++;
+        if (lineStart >= fullText.length) break;
+        const startPos = posAt(lineStart);
+        range.setStart(startPos.node, startPos.offset);
+        const probeEnd = posAt(Math.min(lineStart + 1, fullText.length));
+        range.setEnd(probeEnd.node, probeEnd.offset);
+        const lineTop = range.getBoundingClientRect().top;
+        let lo = lineStart + 1;
+        let hi = fullText.length;
+        let lineEnd = lo;
+        while (lo <= hi) {
+          const mid = Math.floor((lo + hi) / 2);
+          const endPos = posAt(mid);
+          range.setStart(startPos.node, startPos.offset);
+          range.setEnd(endPos.node, endPos.offset);
+          const rects = Array.from(range.getClientRects());
+          const sameLine = rects.length > 0 && rects.every((r) => Math.abs(r.top - lineTop) <= 1.5);
+          if (sameLine) {
+            lineEnd = mid;
+            lo = mid + 1;
+          } else {
+            hi = mid - 1;
+          }
+        }
+        if (lineEnd <= lineStart) lineEnd = Math.min(lineStart + 1, fullText.length);
+        range.setStart(startPos.node, startPos.offset);
+        range.setEnd(posAt(lineEnd).node, posAt(lineEnd).offset);
+        const lineRect = range.getBoundingClientRect();
+        const lineText = fullText.slice(lineStart, lineEnd).replace(/\s+$/, "");
+        lines.push({
+          text: lineText,
+          startIndex: lineStart,
+          x: lineRect.left - elRect.left,
+          y: lineRect.top - elRect.top,
+          width: Math.max(1, lineRect.width),
+          height: Math.max(1, lineRect.height),
+          baselineY: lineRect.bottom - elRect.top
+        });
+        if (glyphs.length < GLYPH_CAPTURE_LIMIT) {
+          for (let i = lineStart; i < lineEnd && glyphs.length < GLYPH_CAPTURE_LIMIT; i++) {
+            const ch = fullText[i];
+            if (ch === " " || ch === "\n" || ch === "	") continue;
+            const s = posAt(i);
+            const e = posAt(i + 1);
+            range.setStart(s.node, s.offset);
+            range.setEnd(e.node, e.offset);
+            const gr = range.getBoundingClientRect();
+            if (gr.width < 0.01 || gr.height < 0.01) continue;
+            glyphs.push({
+              index: i,
+              x: gr.left - elRect.left,
+              y: gr.top - elRect.top,
+              width: gr.width,
+              height: gr.height
+            });
+          }
+        }
+        lineStart = lineEnd;
+        if (fullText[lineStart] === "\n") lineStart++;
+      }
+      if (!lines.length) return void 0;
+      return {
+        content: fullText.replace(/\s+/g, " ").trim(),
+        lines,
+        glyphs: glyphs.length ? glyphs : void 0
+      };
+    }
     function pseudoLayers(el) {
       const out = [];
       for (const kind of ["before", "after"]) {
@@ -152,6 +381,12 @@ var __craftDomExtract = (() => {
         const content = cs.content;
         if (!content || content === "none" || content === '""' || content === "normal") continue;
         const text = content.startsWith('"') || content.startsWith("'") ? content.slice(1, -1) : void 0;
+        if (kind === "before" && el.childElementCount > 0) {
+          const bg = cs.backgroundColor;
+          const hasBg = bg && bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent";
+          const decorative = !text?.trim();
+          if (hasBg && decorative) continue;
+        }
         const rect = rectOf(el);
         out.push({
           kind,
@@ -219,6 +454,20 @@ var __craftDomExtract = (() => {
       if (!bg || bg === "none" || bg.includes("gradient")) return void 0;
       const m = bg.match(/url\(["']?([^"')]+)["']?\)/i);
       return m?.[1];
+    }
+    function aggregateBadgeText(el) {
+      const cls = (el.className ?? "").toString().toLowerCase();
+      if (!/\bbadge\b|\bchip\b|\btag\b/.test(cls)) return void 0;
+      const t = (el.textContent ?? "").replace(/\s+/g, " ").trim();
+      return t ? t.slice(0, 200) : void 0;
+    }
+    function aggregateCalloutText(el) {
+      const cls = (el.className ?? "").toString().toLowerCase();
+      if (!/\b(?:callout|alert|notice|info|message|banner|hint|positive|negative|warning)\b/.test(cls) && !/\bob-flow__(?:message|hint|alert|info|callout)\b/.test(cls)) {
+        return void 0;
+      }
+      const t = (el.textContent ?? "").replace(/\s+/g, " ").trim();
+      return t ? t.slice(0, 4e3) : void 0;
     }
     function aggregateControlText(el) {
       const tag = el.tagName.toLowerCase();
@@ -292,6 +541,12 @@ var __craftDomExtract = (() => {
       const t = (el.textContent ?? "").replace(/\s+/g, " ").trim();
       return t ? t.slice(0, 4e3) : void 0;
     }
+    function soleElementText(el) {
+      if (el.children.length > 0) return void 0;
+      const t = (el.textContent ?? "").replace(/\s+/g, " ").trim();
+      if (!t) return void 0;
+      return t.slice(0, 4e3);
+    }
     function leafText(el) {
       const tag = el.tagName.toLowerCase();
       if (["input", "textarea", "select"].includes(tag)) return void 0;
@@ -316,6 +571,7 @@ var __craftDomExtract = (() => {
     function walkChildNodes(el, depth) {
       const tag = el.tagName.toLowerCase();
       if (tag === "svg") return [];
+      const bridgeCapture = document.documentElement.getAttribute("data-craft-bridge-capture") === "1";
       const splitInlineText = hasMixedInlineContent(el) && (tag === "p" || tag === "span" || tag === "div" || tag === "label");
       const children = [];
       for (const child of Array.from(el.childNodes)) {
@@ -328,17 +584,33 @@ var __craftDomExtract = (() => {
           range.selectNodeContents(child);
           const textRect = range.getBoundingClientRect();
           if (textRect.width < 0.5 && textRect.height < 0.5) continue;
+          const w2 = Math.max(1, textRect.width);
+          const h = Math.max(1, textRect.height);
           children.push({
             id: nextId(),
             tagName: "span",
             text: trimmed,
             rect: {
-              x: textRect.x,
-              y: textRect.y,
-              width: Math.max(1, textRect.width),
-              height: Math.max(1, textRect.height)
+              x: textRect.x + window.scrollX,
+              y: textRect.y + window.scrollY,
+              width: w2,
+              height: h
             },
             styles: stylesOf(el),
+            browserTextLayout: bridgeCapture ? {
+              content: trimmed,
+              lines: [
+                {
+                  text: trimmed,
+                  startIndex: 0,
+                  x: 0,
+                  y: 0,
+                  width: w2,
+                  height: h,
+                  baselineY: h
+                }
+              ]
+            } : void 0,
             children: []
           });
           continue;
@@ -366,13 +638,43 @@ var __craftDomExtract = (() => {
           children: kids
         };
       }
-      const children = walkChildNodes(el, depth);
+      const styles = stylesOf(el);
+      const bridgeCapture = document.documentElement.getAttribute("data-craft-bridge-capture") === "1";
       const rawClass = el.className;
       const className = typeof rawClass === "string" && rawClass.trim() ? rawClass.trim().replace(/\s+/g, " ").slice(0, 512) : void 0;
-      const styles = stylesOf(el);
+      const children = walkChildNodes(el, depth);
+      const outlinedControlCapture = hasPmlStrokeButtonClassToken(className);
+      if (bridgeCapture && rect.width >= 1 && rect.height >= 1) {
+        for (const line of structuralHairlinesFromStyles(styles, rect.width, rect.height, {
+          includeFullBoxBorder: outlinedControlCapture
+        })) {
+          children.push({
+            id: nextId(),
+            tagName: "div",
+            className: `craft-capture-edge-${line.edge}`,
+            rect: {
+              x: rect.x + line.x,
+              y: rect.y + line.y,
+              width: line.width,
+              height: line.height
+            },
+            styles: {
+              backgroundColor: line.color,
+              width: `${line.width}px`,
+              height: `${line.height}px`
+            },
+            children: []
+          });
+        }
+      }
       const controlText = aggregateControlText(el);
       const nestedText = aggregateNestedText(el);
-      const text = leafText(el) ?? controlText ?? nestedText;
+      let text = leafText(el) ?? aggregateBadgeText(el) ?? aggregateCalloutText(el) ?? controlText ?? nestedText ?? soleElementText(el);
+      if (bridgeCapture && tag === "input") {
+        const inputVal = el.value?.replace(/\s+/g, " ").trim();
+        if (inputVal) text = inputVal;
+      }
+      const browserTextLayout = bridgeCapture && text ? captureBrowserTextLayout(el) : void 0;
       const img = tag === "img" ? tryCanvasImgDataUrl(el) : void 0;
       const href = tag === "a" ? el.href : void 0;
       const svgMarkup = inlineSvgMarkup(el);
@@ -393,6 +695,7 @@ var __craftDomExtract = (() => {
         rect,
         styles,
         pseudoElements: pseudoLayers(el),
+        browserTextLayout,
         children
       };
     }

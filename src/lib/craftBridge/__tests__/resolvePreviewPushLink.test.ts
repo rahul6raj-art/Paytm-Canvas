@@ -90,4 +90,49 @@ describe("resolvePreviewPushLink", () => {
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });
+
+  it("uses capture-only when live URL is more specific than craft.link previewUrl", async () => {
+    const { resolvePreviewPushLink } = await import("../resolvePreviewPushLink");
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "craft-specific-route-"));
+    const repoRoot = path.join(tmp, "repo");
+    fs.mkdirSync(path.join(repoRoot, "src/screens/PMLHomePage"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repoRoot, "src/screens/PMLHomePage/PMLHomePage.tsx"),
+      "export default function PMLHomePage() { return null; }\n",
+    );
+    fs.writeFileSync(
+      path.join(repoRoot, "craft.link.json"),
+      JSON.stringify({
+        repoRoot,
+        links: [
+          {
+            sourcePath: "src/screens/PMLHomePage",
+            previewUrl: "http://localhost:5173/?screen=home",
+          },
+        ],
+      }),
+    );
+
+    const homeTab = resolvePreviewPushLink(
+      repoRoot,
+      "http://localhost:5173/?screen=home&homeTab=ipos",
+    );
+    assert.equal(homeTab.ok, true);
+    if (homeTab.ok) {
+      assert.equal(homeTab.mode, "capture-only");
+      assert.equal(homeTab.routeKey, "/?screen=home&homeTab=ipos");
+    }
+
+    const onboardingStep = resolvePreviewPushLink(
+      repoRoot,
+      "http://localhost:5173/?screen=onboarding&step=mobile",
+    );
+    assert.equal(onboardingStep.ok, true);
+    if (onboardingStep.ok) {
+      assert.equal(onboardingStep.mode, "capture-only");
+      assert.match(onboardingStep.routeKey, /step=mobile/);
+    }
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
 });

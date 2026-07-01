@@ -2,27 +2,18 @@ import {
   applyCaptureThemeToUrl,
   resolveBridgeImportColorTheme,
 } from "@/lib/webImport/captureTheme";
-
-const SCREEN_ROUTE_BY_COMPONENT: Record<string, string> = {
-  PMLSignupPage: "signup",
-  PMLHomePage: "home",
-  PMLStocksPage: "stocks",
-  PMLMorePage: "more",
-  OnboardingFlow: "onboarding",
-};
+import {
+  pageComponentLabel,
+  SCREEN_ROUTE_BY_COMPONENT,
+  shouldPreservePreviewCaptureUrl,
+  shouldPreservePreviewScreenParam,
+  isRouteSpecificPreviewUrl,
+} from "@/lib/codeRoundTrip/previewCaptureRoute";
 
 /** Default Vite/dev preview when craft.link.json omits previewUrl. Override via CRAFT_BRIDGE_PREVIEW_URL. */
 export const DEFAULT_PREVIEW_BASE_URL =
   (typeof process !== "undefined" && process.env.CRAFT_BRIDGE_PREVIEW_URL?.trim()) ||
   "http://localhost:5173";
-
-function pageComponentLabel(pageLabel?: string): string {
-  return (pageLabel ?? "")
-    .replace(/\.[^.]+$/, "")
-    .replace(/\/$/, "")
-    .split("/")
-    .pop() ?? "";
-}
 
 /** Resolve preview URL for bridge push — uses explicit URL or localhost default for known screens. */
 export function resolvePreviewCaptureUrl(
@@ -50,14 +41,29 @@ export function derivePreviewCaptureUrl(previewUrl: string, pageLabel?: string):
     return trimmed;
   }
 
-  if (parsed.searchParams.has("screen") || parsed.pathname !== "/") {
+  if (shouldPreservePreviewCaptureUrl(parsed.toString(), pageLabel)) {
     return applyCaptureThemeToUrl(parsed.toString(), theme);
   }
 
+  const existingScreen = parsed.searchParams.get("screen")?.trim() ?? "";
   const label = pageComponentLabel(pageLabel);
-  const screen = label ? SCREEN_ROUTE_BY_COMPONENT[label] : undefined;
-  if (screen && screen !== "home") {
-    parsed.searchParams.set("screen", screen);
+  const screenFromPage = label ? SCREEN_ROUTE_BY_COMPONENT[label] : undefined;
+
+  if (screenFromPage && existingScreen && shouldPreservePreviewScreenParam(pageLabel, existingScreen)) {
+    return applyCaptureThemeToUrl(parsed.toString(), theme);
+  }
+
+  if (screenFromPage) {
+    if (screenFromPage === "home") {
+      parsed.searchParams.delete("screen");
+    } else {
+      parsed.searchParams.set("screen", screenFromPage);
+    }
+    return applyCaptureThemeToUrl(parsed.toString(), theme);
+  }
+
+  if (isRouteSpecificPreviewUrl(parsed.toString())) {
+    return applyCaptureThemeToUrl(parsed.toString(), theme);
   }
 
   return applyCaptureThemeToUrl(parsed.toString(), theme);

@@ -24,20 +24,46 @@ export function previewCaptureSourcePath(url: string): string {
 export function canvasScreenLabelFromPreviewUrl(url: string): string {
   try {
     const parsed = new URL(url.includes("://") ? url : `http://${url}`);
+    const tab = parsed.searchParams.get("homeTab")?.trim() ?? parsed.searchParams.get("tab")?.trim();
+    const onboardingStep = parsed.searchParams.get("step")?.trim();
+    const storyPath = parsed.searchParams.get("path")?.trim();
     const screen = parsed.searchParams.get("screen")?.trim();
+    if (storyPath) {
+      const leaf = storyPath.split("/").filter(Boolean).pop() ?? storyPath;
+      return leaf
+        .replace(/--/g, " — ")
+        .replace(/[-_]+/g, " ")
+        .replace(/\b\w/g, (c) => c.toUpperCase());
+    }
+    if (onboardingStep && screen === "onboarding") {
+      const stepLabel = onboardingStep
+        .replace(/[-_]+/g, " ")
+        .replace(/\b\w/g, (c) => c.toUpperCase());
+      return `Onboarding — ${stepLabel}`;
+    }
+    let base = "Home";
     if (screen) {
       const words = screen
         .replace(/[-_]+/g, " ")
         .replace(/\b\w/g, (c) => c.toUpperCase());
-      if (/^pml/i.test(screen)) return `PML- ${words.replace(/^Pml\s*/i, "")}`;
-      return words;
+      if (/^pml/i.test(screen)) base = `PML- ${words.replace(/^Pml\s*/i, "")}`;
+      else base = words;
+    } else {
+      const segments = parsed.pathname.split("/").filter(Boolean);
+      const last = segments[segments.length - 1];
+      if (last) {
+        base = last
+          .replace(/[-_]+/g, " ")
+          .replace(/\b\w/g, (c) => c.toUpperCase());
+      }
     }
-    const segments = parsed.pathname.split("/").filter(Boolean);
-    const last = segments[segments.length - 1];
-    if (!last) return "Home";
-    return last
-      .replace(/[-_]+/g, " ")
-      .replace(/\b\w/g, (c) => c.toUpperCase());
+    if (tab) {
+      const tabLabel = tab
+        .replace(/[-_]+/g, " ")
+        .replace(/\b\w/g, (c) => c.toUpperCase());
+      return `${base} — ${tabLabel}`;
+    }
+    return base;
   } catch {
     return "Imported screen";
   }

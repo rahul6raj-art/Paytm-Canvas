@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { enterTextEditModeAtWorldPoint } from "@/lib/text/textEditMode";
+import { enterTextEditModeAtWorldPoint, resolveTextEditTargetOnDoubleClick } from "@/lib/text/textEditMode";
 import { beginCanvasNodeDrag, type ClientToWorldFn } from "@/lib/canvasNodeDrag";
 import { prepareAltDragDuplicate } from "@/lib/canvasAltDrag";
 import {
@@ -115,6 +115,19 @@ export function useCanvasHitHandlers(clientToWorld: ClientToWorldFn) {
       }
 
       const w = clientToWorld(e.clientX, e.clientY);
+
+      const textTarget = resolveTextEditTargetOnDoubleClick(
+        nodeId,
+        w.x,
+        w.y,
+        st.nodes,
+        st.childOrder,
+      );
+      if (textTarget) {
+        enterTextEditModeAtWorldPoint(textTarget, w.x, w.y);
+        return;
+      }
+
       const slotDrill = slotDrillTargetForDoubleClick(
         nodeId,
         w.x,
@@ -148,17 +161,6 @@ export function useCanvasHitHandlers(clientToWorld: ClientToWorldFn) {
       if (drill) {
         st.enterObjectEditMode(drill.containerId);
         st.select(drill.selectId);
-        return;
-      }
-
-      let editTextId: string | null = node.type === "text" ? nodeId : null;
-      if (!editTextId) {
-        editTextId = pickDeepestNodeAtWorldPoint(w.x, w.y, st.nodes, st.childOrder, {
-          types: ["text"],
-        });
-      }
-      if (editTextId) {
-        enterTextEditModeAtWorldPoint(editTextId, w.x, w.y);
         return;
       }
 

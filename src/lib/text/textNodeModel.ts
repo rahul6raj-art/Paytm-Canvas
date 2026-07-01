@@ -49,8 +49,12 @@ export const EMPTY_TEXT_CARET_INNER_WIDTH = 2;
 export const DEFAULT_TEXT_ALIGN: TextAlign = "left";
 export const MIN_TEXT_BOX = 8;
 
-/** Inset between the node frame and where glyphs are drawn / measured. */
-export const TEXT_BOX_PAD_X = 4;
+/**
+ * Inset between the node frame and where glyphs are drawn / measured.
+ * Zero to match Figma: a text frame hugs the glyph advance width exactly (no horizontal
+ * padding) so an auto-width box equals the typographic width, like Figma's text tool.
+ */
+export const TEXT_BOX_PAD_X = 0;
 export const TEXT_BOX_PAD_Y = 2;
 
 /** SVG baseline for `<tspan y>` — paired with {@link svgTextTspanY} from canvas line-top coords. */
@@ -60,14 +64,21 @@ export function textInnerWidth(boxWidth: number): number {
   return Math.max(1, boxWidth - TEXT_BOX_PAD_X * 2);
 }
 
+type TextVerticalPadNode = Pick<EditorNode, "bridgeDomTextBox"> | undefined;
+
 /** Vertical inset between node frame and line boxes — zero for auto-width/auto-height (Figma hug). */
-export function textVerticalPad(mode?: TextResizeMode): number {
+export function textVerticalPad(mode?: TextResizeMode, node?: TextVerticalPadNode): number {
+  if (node?.bridgeDomTextBox) return 0;
   if (mode === "auto-width" || mode === "auto-height") return 0;
   return TEXT_BOX_PAD_Y;
 }
 
-export function textInnerHeight(boxHeight: number, mode?: TextResizeMode): number {
-  const padY = textVerticalPad(mode);
+export function textInnerHeight(
+  boxHeight: number,
+  mode?: TextResizeMode,
+  node?: TextVerticalPadNode,
+): number {
+  const padY = textVerticalPad(mode, node);
   return Math.max(1, boxHeight - padY * 2);
 }
 

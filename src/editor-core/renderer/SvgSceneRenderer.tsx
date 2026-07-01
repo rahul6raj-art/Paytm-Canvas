@@ -22,6 +22,7 @@ import type { SceneRendererProps } from "./RendererTypes";
 import { TextFidelityDebugOverlay } from "@/components/editor/TextFidelityDebugOverlay";
 import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
 import { getTextLayoutEpoch, subscribeTextLayoutEpoch } from "@/lib/text/textLayoutEpoch";
+import { useCanvasViewportCull } from "@/components/editor/CanvasViewportContext";
 
 const SCENE_SIZE = 6000;
 
@@ -63,7 +64,9 @@ export function SvgSceneRenderer({
     const set = new Set<string>();
     if (isNativeRendererEnabled()) {
       for (const [id, node] of Object.entries(nodesForScene)) {
-        if (node?.type === "text" && node.visible !== false) set.add(id);
+        if (node?.type === "text" && node.visible !== false) {
+          set.add(id);
+        }
       }
     } else if (editingTextId) {
       set.add(editingTextId);
@@ -76,6 +79,7 @@ export function SvgSceneRenderer({
 
   const canvasColorMode = useEditorStore((s) => s.canvasColorMode);
   const projectCssSources = useEditorStore((s) => s.projectCssSources);
+  const viewportCull = useCanvasViewportCull();
 
   const scene = useMemo(
     () =>
@@ -94,6 +98,7 @@ export function SvgSceneRenderer({
         selectedIds,
         colorMode: canvasColorMode,
         cssSources: projectCssSources,
+        viewportCull,
       }),
     [
       rootIds,
@@ -111,6 +116,7 @@ export function SvgSceneRenderer({
       textLayoutEpoch,
       canvasColorMode,
       projectCssSources,
+      viewportCull,
     ],
   );
 
@@ -119,7 +125,7 @@ export function SvgSceneRenderer({
   return (
     <>
       <svg
-        className="pointer-events-none absolute inset-0 z-0 overflow-visible"
+        className="pointer-events-none absolute inset-0 z-0 select-none overflow-visible"
         width={SCENE_SIZE}
         height={SCENE_SIZE}
         viewBox={`0 0 ${SCENE_SIZE} ${SCENE_SIZE}`}

@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { derivePreviewCaptureUrl } from "@/lib/codeRoundTrip/derivePreviewCaptureUrl";
 import type { CodeRoundTripLink } from "@/lib/craftBridge/types";
 import {
   discoverPreviewPagePath,
+  discoverPreviewPagePathFromUrl,
   pagePathExists,
 } from "@/lib/craftBridge/discoverPreviewPage";
 import {
@@ -12,8 +12,7 @@ import {
   previewRouteKey,
 } from "@/lib/craftBridge/previewRouteKey";
 import {
-  applyCaptureThemeToUrl,
-  defaultCaptureColorTheme,
+  syncCaptureThemeToUrl,
 } from "@/lib/webImport/captureTheme";
 
 export type CraftLinkManifest = {
@@ -46,9 +45,40 @@ function linkMatchesPreviewRoute(link: CodeRoundTripLink, previewUrl: string): b
   return linkPreviewUrlMatchesRoute(link.previewUrl, previewUrl);
 }
 
-function captureUrlForPreview(previewUrl: string, pageLabel?: string): string {
-  if (pageLabel) return derivePreviewCaptureUrl(previewUrl, pageLabel);
-  return applyCaptureThemeToUrl(previewUrl, defaultCaptureColorTheme());
+function captureUrlForPreview(previewUrl: string): string {
+  return syncCaptureThemeToUrl(previewUrl).url;
+}
+
+/** Live browser URL carries finer route detail than a generic craft.link previewUrl. */
+function previewUrlIsMoreSpecificThanLink(
+  currentPreviewUrl: string,
+  linkPreviewUrl?: string,
+): boolean {
+  try {
+    const current = new URL(
+      currentPreviewUrl.includes("://") ? currentPreviewUrl : `http://${currentPreviewUrl}`,
+    );
+
+    for (const key of ["step", "homeTab", "tab"] as const) {
+      if (!current.searchParams.has(key)) continue;
+      const linkPreview = linkPreviewUrl?.trim();
+      if (!linkPreview) return true;
+      const link = new URL(linkPreview.includes("://") ? linkPreview : `http://${linkPreview}`);
+      if (!link.searchParams.has(key)) return true;
+      if (link.searchParams.get(key) !== current.searchParams.get(key)) return true;
+    }
+
+    if (current.pathname !== "/" && current.pathname !== "") {
+      const linkPreview = linkPreviewUrl?.trim();
+      if (!linkPreview) return true;
+      const link = new URL(linkPreview.includes("://") ? linkPreview : `http://${linkPreview}`);
+      if (link.pathname !== current.pathname) return true;
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
 }
 
 export function readCraftLinkManifest(repoRoot: string): CraftLinkManifest | null {
@@ -74,14 +104,13 @@ export function previewScreenId(previewUrl: string): string {
   }
 }
 
-/** True when ?screen= routing applies (root URL or explicit screen param). */
+/** True when the preview URL uses PML-style ?screen= routing. */
 export function previewUsesScreenParam(previewUrl: string): boolean {
   try {
-    const u = new URL(previewUrl);
-    if (u.searchParams.has("screen")) return true;
-    return u.pathname === "/" || u.pathname === "";
+    const u = new URL(previewUrl.includes("://") ? previewUrl : `http://${previewUrl}`);
+    return u.searchParams.has("screen");
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -122,28 +151,40 @@ export function resolvePreviewPushLink(
 
   let link = validLinks.find((l) => linkMatchesPreviewRoute(l, previewUrl));
 
-  if (!link && previewUsesScreenParam(previewUrl)) {
-    link = validLinks.find((l) => linkMatchesScreen(l, screen, component));
-  }
-
-  if (!link && previewUsesScreenParam(previewUrl)) {
-    const discovered = discoverPreviewPagePath(absRepo, screen);
+  if (!link) {
+    const discovered =
+      discoverPreviewPagePathFromUrl(absRepo, previewUrl) ??
+      (previewUsesScreenParam(previewUrl)
+        ? discoverPreviewPagePath(absRepo, screen)
+        : null);
     if (discovered) {
-      link = {
+      link = validLinks.find((l) => l.sourcePath.replace(/\\/g, "/") === discovered) ?? {
         sourcePath: discovered,
         repoRoot: absRepo,
-        previewUrl:
-          validLinks.find((l) => l.previewUrl)?.previewUrl ??
-          manifest?.links?.find((l) => l.previewUrl)?.previewUrl,
+        previewUrl: captureUrl,
         syncMode: "manual",
         watchSource: false,
       };
     }
   }
 
+  if (!link && previewUsesScreenParam(previewUrl)) {
+    link = validLinks.find((l) => linkMatchesScreen(l, screen, component));
+  }
+
   if (link) {
-    const pageLabel = path.basename(link.sourcePath.replace(/\\/g, "/"));
-    const themedCaptureUrl = captureUrlForPreview(previewUrl, pageLabel);
+    if (previewUrlIsMoreSpecificThanLink(previewUrl, link.previewUrl)) {
+      return {
+        ok: true,
+        mode: "capture-only",
+        captureUrl,
+        repoRoot: absRepo,
+        routeKey,
+        virtualSourcePath,
+      };
+    }
+
+    const themedCaptureUrl = captureUrlForPreview(previewUrl);
     return {
       ok: true,
       mode: "linked",

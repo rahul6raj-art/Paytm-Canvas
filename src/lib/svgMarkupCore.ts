@@ -235,7 +235,7 @@ export function svgRectLike(
   const sw = opts?.strokeWidthOverride ?? n.strokeWidth ?? 0;
   const sc = opts?.strokeOverride ?? n.strokeColor ?? "none";
   const filter = opts?.filterRef ? ` filter="url(#${opts.filterRef})"` : "";
-  const showStroke = strokeIsVisible(n) && sw > 0 && !opts?.strokeWidthOverride;
+  const showStroke = strokeIsVisible(n) && sw > 0;
   const strokeExtra = showStroke ? ` ${strokeAttrsForSvgMarkup(n)}` : "";
   const nodeId = opts?.nodeId ?? n.id;
   const filterAttr = opts?.filterRef ? ` filter="url(#${opts.filterRef})"` : "";
@@ -566,8 +566,10 @@ export function svgTextMarkup(n: EditorNode, opts?: SvgTextMarkupOpts): string {
     style.textCase === "small-caps"
       ? { ...typo, fontSize: Math.max(1, typo.fontSize * 0.82) }
       : typo;
-  const toSvgY = (canvasLineTopY: number) =>
-    svgTextTspanY(canvasLineTopY, markupTypo, layout.firstLineAscent);
+  const browserPaint = canonical.browserPaint === true;
+  const dominantBaseline = browserPaint ? "text-before-edge" : SVG_TEXT_DOMINANT_BASELINE;
+  const toSvgY = (lineBoxTopY: number) =>
+    browserPaint ? lineBoxTopY : svgTextTspanY(lineBoxTopY, markupTypo, layout.lineHeightPx);
 
   const tspans: string[] = [];
   for (let i = 0; i < layout.lines.length; i++) {
@@ -607,7 +609,7 @@ export function svgTextMarkup(n: EditorNode, opts?: SvgTextMarkupOpts): string {
   const strokeAttrs = layerStroke
     ? ` stroke="${escXml(layerStroke.color)}" stroke-width="${layerStroke.spec.width}" paint-order="stroke fill" ${layerStroke.svgExtraAttrs}`
     : "";
-  const textAttrs = `font-family="${ff}" font-size="${fontSize}" font-weight="${typo.fontWeight}" dominant-baseline="${SVG_TEXT_DOMINANT_BASELINE}"${ls}${strokeAttrs}`;
+  const textAttrs = `font-family="${ff}" font-size="${fontSize}" font-weight="${typo.fontWeight}" dominant-baseline="${dominantBaseline}"${ls}${strokeAttrs}`;
   const w = Math.max(1, n.width);
   const h = Math.max(1, n.height);
   const fillNode = textNodeAsFillPaint(n);

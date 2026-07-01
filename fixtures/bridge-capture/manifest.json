@@ -1,0 +1,16 @@
+{
+  "description": "Bridge capture component-pattern fixtures (canonical DOM-shape variants, not per-screen lists).",
+  "patternModule": "src/lib/craftBridge/bridgeCapturePatternFixtures.ts",
+  "validator": "src/lib/craftBridge/bridgeCaptureValidate.ts",
+  "tolerancePx": 1,
+  "patterns": [
+    "assurance-badge-inline",
+    "assurance-badge-split-siblings",
+    "assurance-header-row",
+    "chip-badge-with-label",
+    "chip-badge-orphan-label",
+    "selected-sig-card",
+    "checkbox-with-indicator",
+    "footer-assurance-row"
+  ]
+}

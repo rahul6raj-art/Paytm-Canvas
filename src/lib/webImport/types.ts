@@ -2,6 +2,7 @@ import type { LayoutMode, PrimaryAxisAlign, CrossAxisAlign, LayoutSizingMode } f
 import type { CornerRadii } from "@/lib/cornerRadius";
 import type { FillGradient, FillType } from "@/lib/fillGradient";
 import type { NodeEffect } from "@/lib/nodeEffects";
+import type { BrowserCaptureTextLayout } from "@/lib/craftBridge/bridgeParityTypes";
 import { PML_PHONE_VIEWPORT } from "@/lib/craftBridge/pmlScreenMetrics";
 
 export type ImportWebMode = "editable" | "screenshot" | "editable_with_reference";
@@ -20,6 +21,8 @@ export interface ImportWebRequest {
   viewport: ImportWebViewport;
   /** When `react-preview`, localhost / 127.0.0.1 are allowed (Storybook, dev server). */
   urlPolicy?: "public" | "react-preview" | "storybook-iframe";
+  /** Craft bridge: capture the visible preview viewport only (no scroll expansion). */
+  bridgeViewportCapture?: boolean;
 }
 
 export interface ImportWebPageMeta {
@@ -27,6 +30,8 @@ export interface ImportWebPageMeta {
   url: string | null;
   width: number;
   height: number;
+  /** Playwright bridge push — preserve captured DOM text boxes as fixed resize. */
+  bridgeCapture?: boolean;
 }
 
 export interface ImportWebScreenshot {
@@ -143,6 +148,8 @@ export interface DomSnapshotNode {
   componentHint?: "button" | "card" | "input" | "link" | "image" | "text";
   /** Pseudo-element layers (::before / ::after) */
   pseudoElements?: DomPseudoElement[];
+  /** Bridge capture: Chromium line/glyph geometry for editable text parity */
+  browserTextLayout?: BrowserCaptureTextLayout;
 }
 
 export interface DomPseudoElement {
@@ -265,6 +272,8 @@ export interface DesignNode {
   isComponentMaster?: boolean;
   componentId?: string;
   sourceComponentId?: string;
+  /** Bridge capture: paint text at browser-measured positions */
+  browserTextLayout?: BrowserCaptureTextLayout;
 }
 
 export interface WebImportFidelityReport {
@@ -323,6 +332,7 @@ export interface ImportWebSceneNode {
   fontSize?: number;
   fontWeight?: number;
   lineHeight?: number;
+  lineHeightUnit?: import("@/lib/text/lineHeight").LineHeightUnit;
   letterSpacing?: number;
   textDecoration?: string;
   textAlign?: "left" | "center" | "right";
@@ -367,6 +377,8 @@ export interface ImportWebSceneNode {
   codeClassName?: string;
   codeJsxTag?: string;
   codeJsxIntrinsic?: boolean;
+  /** Bridge capture: paint text at browser-measured positions */
+  browserTextLayout?: BrowserCaptureTextLayout;
   children?: ImportWebSceneNode[];
 }
 

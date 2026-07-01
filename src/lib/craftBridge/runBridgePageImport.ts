@@ -2,21 +2,25 @@ import path from "node:path";
 import { importReactPageBundle } from "@/lib/codeRoundTrip/importReactPageBundle";
 import { importHtmlPageBundle } from "@/lib/codeRoundTrip/importHtmlPageBundle";
 import { importBridgeFromLivePreview } from "@/lib/craftBridge/bridgeLiveImport";
+import { canvasScreenLabelFromPreviewUrl } from "@/lib/craftBridge/previewRouteKey";
 import { bridgeLiveCaptureFailureMessage } from "@/lib/craftBridge/bridgeLiveCaptureError";
 import { buildBridgeEditorOpenUrl } from "@/lib/craftBridge/buildBridgeEditorOpenUrl";
-import { defaultCaptureColorTheme } from "@/lib/webImport/captureTheme";
+import { resolveBridgeImportColorTheme } from "@/lib/webImport/captureTheme";
 import { writePendingImport } from "@paytm-craft/bridge";
 import {
   resolvePageSource,
   readSourceFile,
   toRepoRelativePaths,
 } from "@paytm-craft/bridge";
+import type { BridgeCaptureViewportInput } from "@/lib/craftBridge/resolveBridgeCaptureViewport";
+import { parseCaptureViewportInput } from "@/lib/craftBridge/bridgeCaptureContext";
 import type { CraftBridgePendingImport } from "@/lib/craftBridge/types";
 
 export type RunBridgePageImportInput = {
   repoRoot: string;
   pagePath: string;
   previewUrl?: string;
+  viewport?: BridgeCaptureViewportInput;
 };
 
 export type RunBridgePageImportResult =
@@ -70,7 +74,9 @@ export async function runBridgePageImport(
       sourceCode: tsxRead.content,
       fileName: path.basename(resolved.tsxPath),
       cssSources: companionCss,
-      theme: defaultCaptureColorTheme(),
+      theme: resolveBridgeImportColorTheme(previewUrl),
+      screenLabel: canvasScreenLabelFromPreviewUrl(previewUrl),
+      viewport: input.viewport,
     });
     if (live.ok) {
       slice = live.slice;
@@ -131,6 +137,7 @@ export async function runBridgePageImport(
     slice,
     sourceHeader,
     message,
+    captureViewport: parseCaptureViewportInput(input.viewport),
     link,
   };
 

@@ -9,7 +9,11 @@ const PHONE_SHELL_CLASS_TOKENS = new Set([
   "pml-onboarding",
   "pml-more",
   "pml-stocks",
+  "ob-flow",
 ]);
+
+const TOP_CHROME_CLASS_RE =
+  /\b(?:header(?:__|$)|ob-flow__header|statusbar(?:__|$)|header__bar)\b/;
 
 const PHONE_SCROLL_CLASS_RE = /__(?:scroll|main)\b/;
 
@@ -25,7 +29,27 @@ export function isPhoneShellScrollClassName(className?: string | null): boolean 
 /** Scroll regions expand to content height — do not shrink via expandFramesToFitChildren. */
 export function shouldPreserveViewportFrameBounds(node: Pick<EditorNode, "codeClassName">): boolean {
   const cls = node.codeClassName ?? "";
-  return isPhoneShellClassName(cls) || isPhoneShellScrollClassName(cls);
+  return (
+    isPhoneShellClassName(cls) ||
+    isPhoneShellScrollClassName(cls) ||
+    isPhoneTopChromeClassName(cls)
+  );
+}
+
+/** Header/status bar chrome — keep captured width; never grow past the phone column. */
+export function isPhoneTopChromeClassName(className?: string | null): boolean {
+  return TOP_CHROME_CLASS_RE.test(className ?? "");
+}
+
+export function clampPhoneTopChromeWidths(
+  nodes: Record<string, EditorNode>,
+  columnWidth: number = PML_PHONE_COLUMN_WIDTH,
+): void {
+  for (const [id, node] of Object.entries(nodes)) {
+    if (!isPhoneTopChromeClassName(node.codeClassName)) continue;
+    if (node.width <= columnWidth) continue;
+    nodes[id] = { ...node, width: columnWidth };
+  }
 }
 
 /**
@@ -37,15 +61,49 @@ export function applyPhoneShellFullPageLayout(
   childOrder: Record<string, string[]>,
   pageWidth: number,
   pageHeight: number,
+  opts?: { bridgeCapture?: boolean },
 ): void {
-  expandWebImportScrollFrames(nodes, childOrder);
-
+  const bridgeCapture = opts?.bridgeCapture === true;
   const phoneColumn = pageWidth > 0 && pageWidth <= 420;
+
+  if (bridgeCapture) {
+    for (const [id, node] of Object.entries(nodes)) {
+      if (isPhoneShellScrollClassName(node.codeClassName)) {
+        nodes[id] = { ...node, clipChildren: true };
+      }
+    }
+    for (const [shellId, kids] of Object.entries(childOrder)) {
+      const shell = nodes[shellId];
+      if (!shell || !isPhoneShellClassName(shell.codeClassName)) continue;
+      nodes[shellId] = {
+        ...shell,
+        clipChildren: true,
+        width: phoneColumn ? pageWidth : shell.width,
+        height: pageHeight,
+      };
+    }
+    for (const rootId of childOrder[EDITOR_ROOT_KEY] ?? []) {
+      const root = nodes[rootId];
+      if (!root) continue;
+      if (!isPhoneShellClassName(root.codeClassName) && !(phoneColumn && root.width <= 420)) continue;
+      nodes[rootId] = {
+        ...root,
+        clipChildren: true,
+        width: phoneColumn ? pageWidth : root.width,
+        height: pageHeight,
+      };
+    }
+    return;
+  }
+
+  expandWebImportScrollFrames(nodes, childOrder);
 
   for (const [id, node] of Object.entries(nodes)) {
     const cls = node.codeClassName ?? "";
-    if (isPhoneShellScrollClassName(cls)) {
+    if (isPhoneShellScrollClassName(cls) && !bridgeCapture) {
       nodes[id] = { ...node, clipChildren: false };
+    } else if (isPhoneShellScrollClassName(cls) && bridgeCapture) {
+      nodes[id] = { ...node, clipChildren: true };
     }
   }
 

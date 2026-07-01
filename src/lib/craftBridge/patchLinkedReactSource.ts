@@ -1,3 +1,10 @@
+import {
+  buildCanvasAdditionsJsx,
+  collectCanvasAdditionLeafIds,
+  findBridgeScreenRootForSource,
+  patchCanvasAdditionsIntoReactSource,
+} from "@/lib/craftBridge/exportCanvasAdditions";
+import type { CanvasColorMode, DesignToken } from "@/lib/designTokens";
 import type { EditorNode } from "@/stores/useEditorStore";
 
 function escapeRegExp(value: string): string {
@@ -108,11 +115,53 @@ function replaceSpanTextByClass(source: string, classToken: string, value: strin
   return source.replace(re, `$1${value}`);
 }
 
-/** Patch text/props in an existing React screen file from live-captured canvas text layers. */
+export type PatchLinkedReactSourceOptions = {
+  childOrder?: Record<string, string[]>;
+  designTokens?: Record<string, DesignToken>;
+  sourcePath?: string;
+  canvasColorMode?: CanvasColorMode;
+  cssSources?: string[];
+  /** When true, only inject @craft-canvas-additions (no text prop patches). */
+  additionsOnly?: boolean;
+  /** Skip bn__label / generic class text rewrites — they break nav layout. Default true on bridge export. */
+  skipGenericTextPatches?: boolean;
+};
+
+function patchCanvasAdditionsBlock(
+  sourceCode: string,
+  nodes: Record<string, EditorNode>,
+  opts: PatchLinkedReactSourceOptions,
+): string {
+  if (!opts.childOrder || !opts.sourcePath?.trim()) return sourceCode;
+  const screenRootId = findBridgeScreenRootForSource(nodes, opts.sourcePath);
+  if (!screenRootId) return sourceCode;
+  const additionRoots = collectCanvasAdditionLeafIds(
+    screenRootId,
+    nodes,
+    opts.childOrder,
+  );
+  const additionsJsx = buildCanvasAdditionsJsx(
+    additionRoots,
+    screenRootId,
+    nodes,
+    opts.childOrder,
+    opts.designTokens ?? {},
+    opts.canvasColorMode ?? "light",
+    opts.cssSources ?? [],
+  );
+  return patchCanvasAdditionsIntoReactSource(sourceCode, additionsJsx);
+}
+
+/** Patch text/props and canvas-added layers in an existing React screen file. */
 export function patchLinkedReactSourceFromCanvas(
   sourceCode: string,
   nodes: Record<string, EditorNode>,
+  opts?: PatchLinkedReactSourceOptions,
 ): string {
+  if (opts?.additionsOnly) {
+    return patchCanvasAdditionsBlock(sourceCode, nodes, opts ?? {});
+  }
+
   let result = sourceCode;
 
   const headerTitle = nodesWithClass(nodes, "header__bar-title")[0];
@@ -149,7 +198,9 @@ export function patchLinkedReactSourceFromCanvas(
   const secondaryTexts = nodesWithClass(nodes, "li-item__secondary").map((n) => n.content!.trim());
   result = replaceOrderedJsxProps(result, "secondaryText", secondaryTexts);
 
-  result = patchGenericTextNodes(result, nodes);
+  if (!opts?.skipGenericTextPatches) {
+    result = patchGenericTextNodes(result, nodes);
+  }
 
-  return result;
+  return patchCanvasAdditionsBlock(result, nodes, opts ?? {});
 }

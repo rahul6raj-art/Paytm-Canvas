@@ -24,10 +24,41 @@ function codeFields(node: DomSnapshotNode): Pick<DesignNode, "codeClassName" | "
   };
 }
 
+/** Checkbox/radio labels carry indicator + copy — must stay frames, not flat text. */
+function isCompositeFormLabel(node: DomSnapshotNode): boolean {
+  const tag = node.tagName.toLowerCase();
+  const cls = (node.className ?? "").toLowerCase();
+  if (/\b(checkbox|radio|switch|toggle)\b/.test(cls)) return true;
+  if (tag !== "label") return false;
+  return node.children.some((c) => {
+    const ccls = (c.className ?? "").toLowerCase();
+    return ccls.includes("__indicator") || ccls.includes("__input");
+  });
+}
+
+function isTextOnlyLeaf(node: DomSnapshotNode): boolean {
+  if (node.children.length > 0) return false;
+  if (node.svgMarkup) return false;
+  const tag = node.tagName.toLowerCase();
+  if (INPUT_TAGS.has(tag) || tag === "button" || tag === "img" || tag === "svg") return false;
+  if (isCompositeFormLabel(node)) return false;
+  const cls = (node.className ?? "").toLowerCase();
+  if (cls.includes("badge") || cls.includes("chip") || cls.includes("tag")) return false;
+  if (/\bhero__zero\b/.test(cls)) return false;
+  if (node.rect.height > 72 || node.rect.width > 160) return false;
+  return isImportableTextContent(node.text, {
+    className: node.className,
+    tagName: tag,
+    role: node.role,
+  });
+}
+
 function isTextDomNode(node: DomSnapshotNode): boolean {
+  if (isTextOnlyLeaf(node)) return true;
   const tag = node.tagName.toLowerCase();
   const cls = (node.className ?? "").toLowerCase();
   if (INPUT_TAGS.has(tag) || tag === "button" || tag === "img" || tag === "svg") return false;
+  if (isCompositeFormLabel(node)) return false;
   if (cls.includes("badge") || cls.includes("chip") || cls.includes("tag")) return false;
   if (!TEXT_TAGS.has(tag)) return false;
   if (!isImportableTextContent(node.text, {
@@ -38,9 +69,19 @@ function isTextDomNode(node: DomSnapshotNode): boolean {
     return false;
   }
   if (node.children.length === 0) return true;
+  // Keep icon+text composites (e.g. assurance row, badges) as frames so the icon and
+  // its centered/laid-out text survive — flattening drops the icon and the alignment.
   return node.children.every((c) => {
     const ct = c.tagName.toLowerCase();
-    return ["span", "strong", "em", "small", "br", "svg"].includes(ct);
+    if (["span", "strong", "em", "small", "br"].includes(ct)) return true;
+    if (ct === "a") {
+      const role = (c.role ?? "").toLowerCase();
+      if (role === "button") return false;
+      const ccls = (c.className ?? "").toLowerCase();
+      if (/\b(btn|button)\b/.test(ccls)) return false;
+      return true;
+    }
+    return false;
   });
 }
 
@@ -78,7 +119,12 @@ export function buildDesignTree(root: DomSnapshotNode): DesignNode {
     }
     const resolvedTypography =
       typography ??
-      (role === "button" || role === "input" ? extractTypography(node.styles) : undefined);
+      (role === "button" || role === "input" || role === "badge"
+        ? extractTypography(node.styles)
+        : undefined);
+    const carriesLabelText = isText || role === "button" || role === "badge";
+
+    const contentChildren = isText ? [] : node.children.map((c) => build(c, node, depth + 1));
 
     const designNode: DesignNode = {
       id: node.id,
@@ -89,7 +135,7 @@ export function buildDesignTree(root: DomSnapshotNode): DesignNode {
       bounds,
       layout,
       style,
-      typography: isText || role === "button" ? resolvedTypography : undefined,
+      typography: carriesLabelText ? resolvedTypography : undefined,
       cssLayoutHints: isText
         ? {
             width: node.styles.width,
@@ -97,9 +143,8 @@ export function buildDesignTree(root: DomSnapshotNode): DesignNode {
             whiteSpace: node.styles.whiteSpace,
           }
         : undefined,
-      // Buttons are not text nodes, but their label must survive so control
-      // frames can render it. Inputs use placeholder/value instead.
-      text: isText || role === "button" ? node.text : undefined,
+      // Buttons/badges are frames, but their label copy must survive for control/chip frames.
+      text: carriesLabelText ? node.text : undefined,
       href: node.href,
       imageSrc: node.src,
       backgroundImageSrc: node.backgroundImageSrc,
@@ -110,13 +155,18 @@ export function buildDesignTree(root: DomSnapshotNode): DesignNode {
       inputValue: node.inputValue,
       ariaLabel: node.ariaLabel,
       ...codeFields(node),
-      children: isText ? [] : node.children.map((c) => build(c, node, depth + 1)),
+      browserTextLayout: carriesLabelText ? node.browserTextLayout : undefined,
+      children: contentChildren,
     };
 
-    if (node.pseudoElements?.length) {
-      for (const pseudo of node.pseudoElements) {
-        designNode.children.push(buildPseudoNode(pseudo, node, designNode));
-      }
+    if (!isText && node.pseudoElements?.length) {
+      const before = node.pseudoElements
+        .filter((p) => p.kind === "before")
+        .map((p) => buildPseudoNode(p, node, designNode));
+      const after = node.pseudoElements
+        .filter((p) => p.kind === "after")
+        .map((p) => buildPseudoNode(p, node, designNode));
+      designNode.children = [...before, ...contentChildren, ...after];
     }
 
     return designNode;

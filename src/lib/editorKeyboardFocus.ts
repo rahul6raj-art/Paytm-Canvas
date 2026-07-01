@@ -1,8 +1,12 @@
 /** Focus helpers so canvas tool shortcuts work after clicking the canvas. */
 
 import { useEditorStore, type EditorState, type Tool } from "@/stores/useEditorStore";
+import { mergeInstanceOverrides } from "@/lib/componentModel";
+import { enterTextEditMode } from "@/lib/text/textEditMode";
 import { isRotateGeometryLockActive } from "@/lib/rotation/rotateGeometryLock";
 import { resetCanvasRotateCursorState } from "@/lib/selectionRotateZones";
+import { topLevelSelectedIds } from "@/lib/editorGraph";
+import { hasEditorClipboardContent } from "@/lib/editorClipboardAvailability";
 
 const TOOL_SHORTCUT_MAP: Record<string, Tool> = {
   v: "move",
@@ -118,6 +122,91 @@ export function focusActiveTextEditField(nodeId?: string | null): void {
   }
 }
 
+function effectiveTextContentLength(nodeId: string): number {
+  const st = useEditorStore.getState();
+  const raw = st.nodes[nodeId];
+  if (raw?.type !== "text") return 0;
+  return (mergeInstanceOverrides(raw, st.nodes).content ?? "").length;
+}
+
+/** Select all characters in the active canvas text-edit field and sync store selection. */
+export function selectAllInActiveTextEdit(): boolean {
+  const st = useEditorStore.getState();
+  const id = st.editingTextId;
+  if (!id) return false;
+  const len = effectiveTextContentLength(id);
+  st.setTextEditSelection(0, len);
+  if (typeof document === "undefined") return true;
+  focusActiveTextEditField(id);
+  const el = document.querySelector<HTMLTextAreaElement>(`[data-text-editor="${id}"]`);
+  if (!el) return false;
+  const text = useEditorStore.getState().nodes[id];
+  const merged =
+    text?.type === "text" ? mergeInstanceOverrides(text, useEditorStore.getState().nodes) : null;
+  const content = merged?.content ?? "";
+  if (el.value !== content) el.value = content;
+  el.setSelectionRange(0, len);
+  return true;
+}
+
+/** Retry until the hidden text-edit textarea mounts (portal mounts after store update). */
+export function scheduleSelectAllInActiveTextEdit(attempts = 6): void {
+  const schedule =
+    typeof requestAnimationFrame === "function"
+      ? requestAnimationFrame
+      : (cb: () => void) => setTimeout(cb, 0);
+  const run = (left: number) => {
+    if (selectAllInActiveTextEdit()) return;
+    if (left > 0) schedule(() => run(left - 1));
+  };
+  schedule(() => run(attempts));
+}
+
+function selectAllInEditableField(target: EventTarget | null): boolean {
+  const field = resolveKeyboardFieldTarget(target);
+  if (!field) return false;
+  const tag = elementTagName(field);
+  if (tag !== "INPUT" && tag !== "TEXTAREA") return false;
+  const el = field as HTMLInputElement | HTMLTextAreaElement;
+  el.focus();
+  el.select();
+  return true;
+}
+
+/**
+ * ⌘A / Ctrl+A for text: canvas edit mode, inspector fields, or a single selected text layer.
+ * Returns true when handled (caller should preventDefault).
+ */
+export function tryHandleSelectAllShortcut(
+  e: KeyboardEvent,
+  target: EventTarget | null,
+): boolean {
+  if (!(e.metaKey || e.ctrlKey) || e.code !== "KeyA") return false;
+
+  const st = useEditorStore.getState();
+
+  // Inspector / sidebar fields take priority over the hidden canvas textarea.
+  if (selectAllInEditableField(target)) return true;
+
+  if (st.editingTextId) {
+    selectAllInActiveTextEdit();
+    return true;
+  }
+
+  if (st.selectedIds.length === 1) {
+    const selectedId = st.selectedIds[0]!;
+    const node = st.nodes[selectedId];
+    if (node?.type === "text" && node.visible !== false && !node.locked) {
+      const len = effectiveTextContentLength(selectedId);
+      enterTextEditMode(selectedId, { anchor: 0, focus: len });
+      scheduleSelectAllInActiveTextEdit();
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /** Event target or focused field — keydown target can differ from activeElement in some trees. */
 export function resolveKeyboardFieldTarget(target: EventTarget | null): EventTarget | null {
   if (isEditableFieldElement(target)) return target;
@@ -198,20 +287,56 @@ export function isUndoRedoShortcut(e: KeyboardEvent): boolean {
   return e.code === "KeyZ" || e.code === "KeyY";
 }
 
+function hasClippableCanvasSelection(
+  st: Pick<EditorState, "selectedIds" | "nodes">,
+): boolean {
+  return topLevelSelectedIds(st.selectedIds, st.nodes).some((id) => {
+    const n = st.nodes[id];
+    return n && !n.locked && n.visible;
+  });
+}
+
+function fieldHasTextSelection(field: EventTarget): boolean {
+  const tag = elementTagName(field);
+  if (tag === "INPUT" || tag === "TEXTAREA") {
+    const el = field as HTMLInputElement | HTMLTextAreaElement;
+    return el.selectionStart !== el.selectionEnd;
+  }
+  if (typeof HTMLElement !== "undefined" && field instanceof HTMLElement && field.isContentEditable) {
+    const sel = window.getSelection();
+    return Boolean(sel && !sel.isCollapsed && sel.toString().length > 0);
+  }
+  return false;
+}
+
 /** Let inputs/textareas handle clipboard in fields (not undo/redo — those stay on the canvas stack). */
 export function shouldAllowNativeFieldClipboard(
   e: KeyboardEvent,
   target: EventTarget | null,
 ): boolean {
-  if (!resolveKeyboardFieldTarget(target)) return false;
+  const field = resolveKeyboardFieldTarget(target);
+  if (!field) return false;
   if (!(e.metaKey || e.ctrlKey)) return false;
   if (isUndoRedoShortcut(e)) return false;
-  return (
-    e.code === "KeyV" ||
-    e.code === "KeyC" ||
-    e.code === "KeyX" ||
-    e.code === "KeyA"
-  );
+
+  const code = e.code;
+  if (code !== "KeyV" && code !== "KeyC" && code !== "KeyX" && code !== "KeyA") return false;
+
+  if (isCanvasTextEditFieldElement(field)) return true;
+  if (isPageNameEditFieldElement(field) || isPageNameEditActive()) return true;
+
+  const st = useEditorStore.getState();
+  if (st.editingTextId || st.layerRenameId) return true;
+
+  if (st.editorMode === "design") {
+    if (code === "KeyV" && hasEditorClipboardContent()) return false;
+    if ((code === "KeyC" || code === "KeyX") && hasClippableCanvasSelection(st)) {
+      if (fieldHasTextSelection(field)) return true;
+      return false;
+    }
+  }
+
+  return true;
 }
 
 /**
@@ -224,7 +349,10 @@ export function shouldYieldShortcutsToTyping(e: KeyboardEvent, target: EventTarg
 
   const st = useEditorStore.getState();
   if (st.editingTextId || st.layerRenameId) {
-    if (e.metaKey || e.ctrlKey) return false;
+    if (e.metaKey || e.ctrlKey) {
+      if (e.code === "KeyA" || shouldAllowNativeFieldClipboard(e, target)) return true;
+      return false;
+    }
     if (e.key === "Escape") return false;
     return true;
   }

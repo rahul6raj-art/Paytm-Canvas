@@ -1,6 +1,8 @@
 import type { Page } from "playwright";
 import { IMPORT_WEB_LIMITS } from "@/lib/webImport/types";
 import { prepareDomForImportExtract } from "@/lib/webImport/server/prepareDomForImportExtract";
+import { activatePreviewSubTab } from "@/lib/webImport/server/activatePreviewSubTab";
+import { applyBridgeCaptureInteractiveState } from "@/lib/webImport/server/applyBridgeCaptureInteractiveState";
 
 const POST_LOAD_SETTLE_MS = 4_000;
 const LOAD_STATE_TIMEOUT_MS = 15_000;
@@ -11,7 +13,7 @@ const LOAD_STATE_TIMEOUT_MS = 15_000;
  */
 export async function loadPageForImport(
   page: Page,
-  opts: { url: string } | { html: string },
+  opts: ({ url: string } | { html: string }) & { viewportOnlyCapture?: boolean },
 ): Promise<void> {
   const timeout = IMPORT_WEB_LIMITS.navigationTimeoutMs;
 
@@ -24,13 +26,17 @@ export async function loadPageForImport(
     }
     await page.waitForLoadState("load", { timeout: LOAD_STATE_TIMEOUT_MS }).catch(() => undefined);
     await waitForReactPreviewScreen(page, opts.url);
+    await activatePreviewSubTab(page, opts.url);
   } else {
     await page.setContent(opts.html, { waitUntil: "domcontentloaded", timeout });
     await page.waitForLoadState("load", { timeout: LOAD_STATE_TIMEOUT_MS }).catch(() => undefined);
   }
 
   await settlePage(page, POST_LOAD_SETTLE_MS);
-  await prepareDomForImportExtract(page);
+  if ("url" in opts) {
+    await applyBridgeCaptureInteractiveState(page, opts.url);
+  }
+  await prepareDomForImportExtract(page, { viewportOnly: opts.viewportOnlyCapture === true });
 }
 
 async function waitForReactPreviewScreen(page: Page, url: string): Promise<void> {

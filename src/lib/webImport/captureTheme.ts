@@ -9,18 +9,27 @@ export function defaultCaptureColorTheme(): CaptureColorTheme {
 
 /**
  * Theme used for live capture and initial canvas color mode after bridge import.
- * Priority: explicit push theme → CRAFT_BRIDGE_CAPTURE_THEME → preview URL ?theme= → light.
+ * Priority: explicit push theme → preview URL ?theme= → CRAFT_BRIDGE_CAPTURE_THEME → light.
  */
 export function resolveBridgeImportColorTheme(
   previewUrl?: string,
   explicit?: CaptureColorTheme,
 ): CaptureColorTheme {
   if (explicit === "light" || explicit === "dark") return explicit;
-  const envRaw = process.env.CRAFT_BRIDGE_CAPTURE_THEME?.trim().toLowerCase();
-  if (envRaw === "dark" || envRaw === "light") return envRaw;
   const fromUrl = previewUrl ? captureThemeFromUrl(previewUrl) : undefined;
   if (fromUrl) return fromUrl;
+  const envRaw = process.env.CRAFT_BRIDGE_CAPTURE_THEME?.trim().toLowerCase();
+  if (envRaw === "dark" || envRaw === "light") return envRaw;
   return "light";
+}
+
+/** Resolve theme from preview URL and ensure ?theme= matches for Playwright capture. */
+export function syncCaptureThemeToUrl(
+  previewUrl: string,
+  explicit?: CaptureColorTheme,
+): { url: string; theme: CaptureColorTheme } {
+  const theme = resolveBridgeImportColorTheme(previewUrl, explicit);
+  return { url: applyCaptureThemeToUrl(previewUrl, theme), theme };
 }
 
 export function captureThemeFromUrl(url: string): CaptureColorTheme | undefined {

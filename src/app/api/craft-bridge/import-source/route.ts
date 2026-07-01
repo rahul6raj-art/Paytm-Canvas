@@ -6,7 +6,7 @@ import { importHtmlFromString } from "@/lib/codeImport/htmlImport";
 import { importBridgeFromLivePreview } from "@/lib/craftBridge/bridgeLiveImport";
 import { bridgeLiveCaptureFailureMessage } from "@/lib/craftBridge/bridgeLiveCaptureError";
 import { buildBridgeEditorOpenUrl } from "@/lib/craftBridge/buildBridgeEditorOpenUrl";
-import { defaultCaptureColorTheme } from "@/lib/webImport/captureTheme";
+import { resolveBridgeImportColorTheme } from "@/lib/webImport/captureTheme";
 import { writePendingImport } from "@paytm-craft/bridge";
 import type { CraftBridgePendingImport } from "@/lib/craftBridge/types";
 import type { CodeRoundTripLink } from "@/lib/craftBridge/types";
@@ -21,6 +21,7 @@ type ImportSourceBody = {
   format?: "react" | "html";
   fileName?: string;
   companionCss?: string[];
+  viewport?: { width?: number; height?: number };
   link?: Partial<CodeRoundTripLink>;
 };
 
@@ -50,7 +51,8 @@ export async function POST(req: Request) {
         sourceCode: source,
         fileName: body.fileName,
         cssSources: (body.companionCss ?? []).filter((c) => c?.trim()),
-        theme: defaultCaptureColorTheme(),
+        theme: resolveBridgeImportColorTheme(captureUrl),
+        viewport: body.viewport,
       });
       if (live.ok) {
         slice = live.slice;
@@ -112,6 +114,7 @@ export async function POST(req: Request) {
       slice,
       sourceHeader,
       message,
+      captureViewport: body.viewport,
       link: body.link
         ? {
             sourcePath: body.link.sourcePath ?? "",

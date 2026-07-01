@@ -15,6 +15,11 @@ import { validateReactPreviewUrl } from "@/lib/codeRoundTrip/reactPreviewUrlVali
 import type { ImportWebStep } from "@/lib/webImport/importWebApi";
 import { downloadTextFile } from "@/lib/inspectExport";
 import { CodeRoundTripLinkPanel } from "@/components/craftBridge/CodeRoundTripLinkPanel";
+import {
+  useCanExportToLinkedSource,
+  useExportToLinkedSource,
+} from "@/lib/craftBridge/useExportToLinkedSource";
+import { pickCodeExportRootIds } from "@/lib/codeExport/frameRelativeExport";
 import { Button } from "@/components/ui/button";
 import { appFieldClass } from "@/lib/appFieldStyles";
 import { cn } from "@/lib/utils";
@@ -53,6 +58,10 @@ export function CodeRoundTripModal() {
   const setCodeRoundTripLink = useEditorStore((s) => s.setCodeRoundTripLink);
   const updateCodeRoundTripLink = useEditorStore((s) => s.updateCodeRoundTripLink);
   const applyGeneratedDesign = useEditorStore((s) => s.applyGeneratedDesign);
+  const craftBridgeSyncStatus = useEditorStore((s) => s.craftBridgeSyncStatus);
+  const craftBridgeSyncError = useEditorStore((s) => s.craftBridgeSyncError);
+  const exportToLinkedSource = useExportToLinkedSource();
+  const canSendToCode = useCanExportToLinkedSource();
 
   const [tab, setTab] = useState<TabId>("export");
   const [importMethod, setImportMethod] = useState<ImportMethod>("live");
@@ -106,6 +115,40 @@ export function CodeRoundTripModal() {
     codeRoundTripSourceHeader,
     codeRoundTripLink,
   ]);
+
+  const exportRootId = useMemo(
+    () => pickCodeExportRootIds(selectedIds, nodes, childOrder)[0] ?? null,
+    [selectedIds, nodes, childOrder],
+  );
+  const exportRoot = exportRootId ? nodes[exportRootId] : null;
+
+  const onSendToCode = useCallback(async () => {
+    setError(null);
+    setStatus(null);
+    if (!canSendToCode) {
+      setError("Link your repo file first — set repo root and source path below.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await exportToLinkedSource();
+      if (!result.ok) {
+        setError(result.error ?? "Send to code failed.");
+        return;
+      }
+      if (result.skipped) {
+        setStatus("Source already up to date — no file changes written.");
+        return;
+      }
+      setStatus(
+        result.absolutePath
+          ? `Sent to code → ${result.absolutePath}`
+          : "Sent to code successfully.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }, [canSendToCode, exportToLinkedSource]);
 
   const onClose = () => closeCodeRoundTrip();
 
@@ -354,6 +397,50 @@ export function CodeRoundTripModal() {
           {tab === "export" ? (
             <div className="space-y-3">
               <CodeRoundTripLinkPanel />
+              <div className="rounded-xl border border-app-border bg-app-inset p-3">
+                <p className="text-ui leading-relaxed text-app-subtle">
+                  {exportRoot ? (
+                    <>
+                      Selected screen:{" "}
+                      <span className="font-medium text-app-fg">{exportRoot.name}</span>
+                      {codeRoundTripLink?.sourcePath ? (
+                        <>
+                          {" "}
+                          →{" "}
+                          <span className="font-medium text-app-fg">
+                            {codeRoundTripLink.sourcePath}
+                          </span>
+                        </>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>Select a screen frame on the canvas before sending to code.</>
+                  )}
+                </p>
+                <Button
+                  variant="primary"
+                  type="button"
+                  disabled={busy || !exportRoot || craftBridgeSyncStatus === "syncing"}
+                  onClick={() => void onSendToCode()}
+                  className="mt-3 h-10 w-full gap-2 text-ui-sm font-semibold"
+                >
+                  <RefreshCw
+                    className={cn(
+                      "h-4 w-4",
+                      (busy || craftBridgeSyncStatus === "syncing") && "animate-spin",
+                    )}
+                  />
+                  Send to code
+                </Button>
+                {craftBridgeSyncStatus === "error" && craftBridgeSyncError ? (
+                  <p className="mt-2 text-ui text-red-300">{craftBridgeSyncError}</p>
+                ) : null}
+                {error ? (
+                  <pre className="mt-2 whitespace-pre-wrap rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-ui leading-relaxed text-red-200">
+                    {error}
+                  </pre>
+                ) : null}
+              </div>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-ui text-app-subtle">
                   Exporting:{" "}

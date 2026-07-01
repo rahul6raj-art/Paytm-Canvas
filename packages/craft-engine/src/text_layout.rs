@@ -2,8 +2,11 @@ use crate::document::NodeInput;
 use crate::text_font::RuntimeFontRegistry;
 use crate::text_shaping::measure_shaped_width;
 
-pub const TEXT_BOX_PAD_X: f32 = 4.0;
-pub const TEXT_BOX_PAD_Y: f32 = 2.0;
+// Zero to match Figma: a text frame hugs the glyph advance exactly (no horizontal padding) and
+// the line box hugs the line height (no vertical padding). Any breathing room comes from the
+// parent frame's own padding/auto-layout, never from the text node itself.
+pub const TEXT_BOX_PAD_X: f32 = 0.0;
+pub const TEXT_BOX_PAD_Y: f32 = 0.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextLine {
@@ -173,7 +176,9 @@ pub fn layout_text_node(node: &NodeInput, fonts: &RuntimeFontRegistry) -> TextLa
     let content = node.content.as_deref().unwrap_or("Text");
     let font_size = node.font_size.unwrap_or(16.0).max(8.0);
     let line_height = node.line_height.unwrap_or(1.2);
-    let line_height_px = font_size * line_height;
+    // Match JS `resolveAutoLineHeightPx`: round(fontSize × multiplier) so auto line height
+    // is 17 at 14px, not 16.8 — keeps the text frame equal to the line box (Figma parity).
+    let line_height_px = (font_size * line_height).round().max(1.0);
     let letter_spacing = letter_spacing_for(node);
     let paragraph_spacing = node.paragraph_spacing.unwrap_or(0.0).max(0.0);
     let max_width = wrap_width_for(node);

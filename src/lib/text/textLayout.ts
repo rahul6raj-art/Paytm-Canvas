@@ -45,7 +45,10 @@ export function computeTextBoxSize(
   const canonical =
     layoutNode != null ? layoutTextCanonical(layoutNode, { bypassCache: true }) : null;
   if (canonical?.source === "wasm") {
-    return { width: canonical.nodeWidth, height: canonical.nodeHeight };
+    return {
+      width: Math.max(MIN_TEXT_BOX, Math.ceil(canonical.nodeWidth)),
+      height: Math.max(MIN_TEXT_BOX, Math.ceil(canonical.nodeHeight)),
+    };
   }
   const layout =
     canonical != null
@@ -53,7 +56,7 @@ export function computeTextBoxSize(
       : layoutText(displayText, wrapWidth, typo, style);
 
   const contentHeight = hugContentHeightForLayout(layout, typo);
-  const verticalPad = textVerticalPad(mode);
+  const verticalPad = textVerticalPad(mode, node);
 
   if (mode === "auto-width") {
     const isEmpty = displayText.length === 0;

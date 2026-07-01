@@ -140,6 +140,12 @@ export type ExportPageCssInput = {
   filterDeclarations?: (decls: Record<string, string>) => Record<string, string>;
   /** Extra selector → declarations merged after canvas node styles (e.g. icon path → wrapper color). */
   extraSelectorUpdates?: Map<string, Record<string, string>>;
+  /** Optional per-node declaration transform (e.g. preserve CSS theme variables). */
+  mapNodeDeclarations?: (
+    node: EditorNode,
+    decls: Record<string, string>,
+    ctx: { matchedRule: PageCssRule | null },
+  ) => Record<string, string>;
 };
 
 /** Build updated CSS files from canvas node styles (match by className). */
@@ -164,11 +170,14 @@ export function exportPageCssFiles(input: ExportPageCssInput): { path: string; c
 
   for (const node of Object.values(input.nodes)) {
     if (!node.codeClassName?.trim()) continue;
+    const best = pickBestRule(node.codeClassName, allRules);
     const rawDecls = nodeToPageCssDeclarations(node, input.designTokens);
-    const decls = input.filterDeclarations?.(rawDecls) ?? rawDecls;
+    let decls = input.filterDeclarations?.(rawDecls) ?? rawDecls;
+    if (input.mapNodeDeclarations) {
+      decls = input.mapNodeDeclarations(node, decls, { matchedRule: best });
+    }
     if (Object.keys(decls).length === 0) continue;
 
-    const best = pickBestRule(node.codeClassName, allRules);
     const selector = best?.selector ?? selectorFromClassName(node.codeClassName);
     const prev = selectorUpdates.get(selector) ?? {};
     selectorUpdates.set(selector, { ...prev, ...decls });

@@ -92,6 +92,119 @@ describe("exportSafeBridgePageCss", () => {
     assert.doesNotMatch(updated[0]!.content, /width:/);
   });
 
+  it("does not write inactive bottom nav icon colors to global bn__icon-wrap", () => {
+    const css = `.bn__icon-wrap {
+  color: var(--icon-neutral-strong);
+}
+.bn__item--active .bn__icon-wrap {
+  color: var(--text-positive-strong);
+}
+`;
+    const mkTab = (id: string, active: boolean, fill: string) => {
+      const item: EditorNode = {
+        id: `${id}-item`,
+        parentId: "bar",
+        type: "frame",
+        name: id,
+        x: 0,
+        y: 0,
+        width: 72,
+        height: 72,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        expanded: true,
+        codeClassName: active ? "bn__item bn__item--active" : "bn__item",
+      };
+      const wrap: EditorNode = {
+        id: `${id}-wrap`,
+        parentId: item.id,
+        type: "frame",
+        name: "icon",
+        x: 0,
+        y: 0,
+        width: 24,
+        height: 24,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        expanded: true,
+        codeClassName: "bn__icon-wrap",
+      };
+      const svg: EditorNode = {
+        id: `${id}-svg`,
+        parentId: wrap.id,
+        type: "frame",
+        name: "Svg",
+        x: 0,
+        y: 0,
+        width: 24,
+        height: 24,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        expanded: true,
+      };
+      const path: EditorNode = {
+        id: `${id}-path`,
+        parentId: svg.id,
+        type: "path",
+        name: "Vector",
+        x: 0,
+        y: 0,
+        width: 24,
+        height: 24,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        expanded: true,
+        fill,
+        fillEnabled: true,
+      };
+      return { item, wrap, svg, path };
+    };
+
+    const home = mkTab("home", false, "#575757");
+    const more = mkTab("more", true, "#34A34D");
+    const bar: EditorNode = {
+      id: "bar",
+      parentId: "root",
+      type: "frame",
+      name: "bar",
+      x: 0,
+      y: 0,
+      width: 376,
+      height: 72,
+      rotation: 0,
+      visible: true,
+      locked: false,
+      expanded: true,
+      codeClassName: "bn__bar",
+    };
+
+    const updated = exportSafeBridgePageCss({
+      sourcePath: "src/screens/PMLMorePage/PMLMorePage.tsx",
+      cssPaths: ["src/screens/PMLMorePage/PMLMorePage.css"],
+      cssFiles: [{ path: "src/screens/PMLMorePage/PMLMorePage.css", content: css }],
+      nodes: {
+        bar,
+        [home.item.id]: home.item,
+        [home.wrap.id]: home.wrap,
+        [home.svg.id]: home.svg,
+        [home.path.id]: home.path,
+        [more.item.id]: more.item,
+        [more.wrap.id]: more.wrap,
+        [more.svg.id]: more.svg,
+        [more.path.id]: more.path,
+      },
+      designTokens: {},
+    });
+
+    assert.equal(updated.length, 1);
+    assert.match(updated[0]!.content, /color: var\(--icon-neutral-strong\)/);
+    assert.match(updated[0]!.content, /\.bn__item--active \.bn__icon-wrap[\s\S]*color:\s*#34a34d/i);
+  });
+
   it("writes icon path fill as color on nearest icon wrapper class", () => {
     const css = `.pml-home-mood-card__chevron {
   color: var(--icon-neutral-strong);

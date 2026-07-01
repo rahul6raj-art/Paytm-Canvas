@@ -550,6 +550,77 @@ describe("design-native pipeline", () => {
     assert.equal(label?.fill, "#ffffff");
   });
 
+  it("keeps checkbox/radio labels as frames with indicator children (not flat text)", () => {
+    const root = node({
+      id: "root",
+      tagName: "body",
+      rect: { x: 0, y: 0, width: 376, height: 200 },
+      children: [
+        node({
+          id: "cb",
+          tagName: "label",
+          className: "checkbox checkbox--block checkbox--emphasis-low",
+          text: "I am an Indian citizen",
+          rect: { x: 16, y: 40, width: 344, height: 24 },
+          styles: { display: "flex", fontSize: "12px" },
+          children: [
+            node({
+              id: "indicator",
+              tagName: "span",
+              className: "checkbox__indicator",
+              rect: { x: 16, y: 40, width: 24, height: 24 },
+              children: [
+                node({
+                  id: "svg",
+                  tagName: "svg",
+                  svgMarkup:
+                    '<svg viewBox="0 0 24 24"><rect width="24" height="24" fill="rgb(0, 128, 0)"/></svg>',
+                  rect: { x: 16, y: 40, width: 24, height: 24 },
+                }),
+              ],
+            }),
+            node({
+              id: "copy",
+              tagName: "span",
+              className: "checkbox__label",
+              text: "I am an Indian citizen",
+              rect: { x: 44, y: 44, width: 200, height: 16 },
+              styles: { fontSize: "12px" },
+            }),
+          ],
+        }),
+      ],
+    });
+
+    const design = buildDesignTree(root);
+    const cb = design.children[0];
+    assert.ok(cb);
+    assert.equal(cb?.text, undefined);
+    assert.ok(cb?.children.length >= 2);
+
+    const { scene } = runDesignNativeImport(root, {
+      title: "Checkbox",
+      url: null,
+      width: 376,
+      height: 200,
+    });
+
+    const findByClass = (n: typeof scene, token: string): typeof scene | undefined => {
+      if ((n.codeClassName ?? "").includes(token)) return n;
+      for (const c of n.children ?? []) {
+        const hit = findByClass(c, token);
+        if (hit) return hit;
+      }
+      return undefined;
+    };
+
+    const checkbox = findByClass(scene, "checkbox checkbox--block");
+    assert.ok(checkbox);
+    assert.notEqual(checkbox?.type, "text");
+    const indicator = findByClass(scene, "checkbox__indicator");
+    assert.ok(indicator);
+  });
+
   it("adds background image layer behind children when div has CSS background-image", () => {
     const root = node({
       id: "root",

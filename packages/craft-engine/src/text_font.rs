@@ -19,6 +19,7 @@ pub enum EmbeddedFamily {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TextFontSlot {
     Regular,
+    Medium,
     Bold,
 }
 
@@ -29,6 +30,7 @@ struct FontKey {
 }
 
 static INTER_REGULAR: OnceLock<Font> = OnceLock::new();
+static INTER_MEDIUM: OnceLock<Font> = OnceLock::new();
 static INTER_BOLD: OnceLock<Font> = OnceLock::new();
 static ROBOTO_REGULAR: OnceLock<Font> = OnceLock::new();
 static ROBOTO_BOLD: OnceLock<Font> = OnceLock::new();
@@ -39,6 +41,7 @@ static NOTO_TAMIL_REGULAR: OnceLock<Font> = OnceLock::new();
 static NOTO_HEBREW_REGULAR: OnceLock<Font> = OnceLock::new();
 
 pub const INTER_REGULAR_BYTES: &[u8] = include_bytes!("../assets/Inter-Regular.ttf");
+pub const INTER_MEDIUM_BYTES: &[u8] = include_bytes!("../assets/Inter-Medium.ttf");
 pub const INTER_BOLD_BYTES: &[u8] = include_bytes!("../assets/Inter-Bold.ttf");
 pub const ROBOTO_REGULAR_BYTES: &[u8] = include_bytes!("../assets/Roboto-Regular.ttf");
 pub const ROBOTO_BOLD_BYTES: &[u8] = include_bytes!("../assets/Roboto-Bold.ttf");
@@ -57,6 +60,8 @@ pub fn font_weight_from_node(node: &NodeInput) -> TextFontSlot {
     let weight = node.font_weight.unwrap_or(500.0);
     if weight >= 600.0 {
         TextFontSlot::Bold
+    } else if weight >= 500.0 {
+        TextFontSlot::Medium
     } else {
         TextFontSlot::Regular
     }
@@ -128,8 +133,10 @@ fn font_key(node: &NodeInput) -> FontKey {
 pub fn font_bytes_for_key(key: FontKey) -> &'static [u8] {
     match (key.family, key.slot) {
         (EmbeddedFamily::Inter, TextFontSlot::Regular) => INTER_REGULAR_BYTES,
+        (EmbeddedFamily::Inter, TextFontSlot::Medium) => INTER_MEDIUM_BYTES,
         (EmbeddedFamily::Inter, TextFontSlot::Bold) => INTER_BOLD_BYTES,
-        (EmbeddedFamily::Roboto, TextFontSlot::Regular) => ROBOTO_REGULAR_BYTES,
+        // Roboto has no embedded Medium face — fall back to Regular.
+        (EmbeddedFamily::Roboto, TextFontSlot::Regular | TextFontSlot::Medium) => ROBOTO_REGULAR_BYTES,
         (EmbeddedFamily::Roboto, TextFontSlot::Bold) => ROBOTO_BOLD_BYTES,
         (EmbeddedFamily::NotoArabic, _) => NOTO_ARABIC_REGULAR_BYTES,
         (EmbeddedFamily::NotoDevanagari, _) => NOTO_DEVANAGARI_REGULAR_BYTES,
@@ -145,13 +152,19 @@ pub fn engine_font_for_key(key: FontKey) -> &'static Font {
             Font::from_bytes(INTER_REGULAR_BYTES, fontdue::FontSettings::default())
                 .expect("Inter-Regular")
         }),
+        (EmbeddedFamily::Inter, TextFontSlot::Medium) => INTER_MEDIUM.get_or_init(|| {
+            Font::from_bytes(INTER_MEDIUM_BYTES, fontdue::FontSettings::default())
+                .expect("Inter-Medium")
+        }),
         (EmbeddedFamily::Inter, TextFontSlot::Bold) => INTER_BOLD.get_or_init(|| {
             Font::from_bytes(INTER_BOLD_BYTES, fontdue::FontSettings::default()).expect("Inter-Bold")
         }),
-        (EmbeddedFamily::Roboto, TextFontSlot::Regular) => ROBOTO_REGULAR.get_or_init(|| {
-            Font::from_bytes(ROBOTO_REGULAR_BYTES, fontdue::FontSettings::default())
-                .expect("Roboto-Regular")
-        }),
+        (EmbeddedFamily::Roboto, TextFontSlot::Regular | TextFontSlot::Medium) => {
+            ROBOTO_REGULAR.get_or_init(|| {
+                Font::from_bytes(ROBOTO_REGULAR_BYTES, fontdue::FontSettings::default())
+                    .expect("Roboto-Regular")
+            })
+        }
         (EmbeddedFamily::Roboto, TextFontSlot::Bold) => ROBOTO_BOLD.get_or_init(|| {
             Font::from_bytes(ROBOTO_BOLD_BYTES, fontdue::FontSettings::default())
                 .expect("Roboto-Bold")
@@ -241,6 +254,8 @@ fn normalize_family_name(name: &str) -> String {
 fn weight_to_slot(weight: u32) -> TextFontSlot {
     if weight >= 600 {
         TextFontSlot::Bold
+    } else if weight >= 500 {
+        TextFontSlot::Medium
     } else {
         TextFontSlot::Regular
     }
@@ -280,7 +295,13 @@ impl RuntimeFontRegistry {
         if let Some(entry) = self.entries.get(&(key.clone(), slot)) {
             return Some((&entry.font, &entry.bytes));
         }
-        if slot == TextFontSlot::Bold {
+        // Runtime faces are typically registered only as Regular/Bold — a Medium request falls
+        // back to the registered Regular face.
+        if slot == TextFontSlot::Medium {
+            if let Some(entry) = self.entries.get(&(key, TextFontSlot::Regular)) {
+                return Some((&entry.font, &entry.bytes));
+            }
+        } else if slot == TextFontSlot::Bold {
             if let Some(entry) = self.entries.get(&(key, TextFontSlot::Regular)) {
                 return Some((&entry.font, &entry.bytes));
             }
@@ -592,6 +613,65 @@ mod tests {
         let (inter, _) = engine_font_for_node(&node);
         assert_ne!(font as *const Font, inter as *const Font);
         assert!(registry.has_family("Poppins", TextFontSlot::Regular));
+    }
+
+    #[test]
+    fn inter_medium_differs_from_regular_and_bold() {
+        let mut node = NodeInput {
+            id: "t".into(),
+            kind: "text".into(),
+            parent_id: None,
+            visible: true,
+            locked: false,
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 40.0,
+            rotation: 0.0,
+            fill_enabled: true,
+            fill: None,
+            fill_type: None,
+            fill_gradient: None,
+            fill_opacity: 1.0,
+            text_color: None,
+            corner_radius: None,
+            polygon_sides: None,
+            clip_children: None,
+            stroke_enabled: false,
+            stroke: None,
+            stroke_color: None,
+            stroke_width: None,
+            stroke_opacity: 1.0,
+            stroke_style: None,
+            stroke_dash_length: None,
+            stroke_dash_gap: None,
+            stroke_linecap: None,
+            stroke_linejoin: None,
+            effects: None,
+            content: Some("Rahul".into()),
+            font_size: Some(14.0),
+            font_family: Some("Inter, sans-serif".into()),
+            font_weight: Some(500.0),
+            line_height: None,
+            letter_spacing: None,
+            text_align: None,
+            vertical_align: None,
+            text_resize_mode: None,
+            auto_resize: None,
+            paragraph_spacing: None,
+            asset_id: None,
+            image_src: None,
+            path_points: None,
+            path_closed: None,
+        };
+        assert_eq!(font_key(&node).slot, TextFontSlot::Medium);
+        let medium = engine_font_for_node(&node).0 as *const Font;
+        node.font_weight = Some(400.0);
+        let regular = engine_font_for_node(&node).0 as *const Font;
+        node.font_weight = Some(700.0);
+        let bold = engine_font_for_node(&node).0 as *const Font;
+        assert_ne!(medium, regular);
+        assert_ne!(medium, bold);
     }
 
     #[test]

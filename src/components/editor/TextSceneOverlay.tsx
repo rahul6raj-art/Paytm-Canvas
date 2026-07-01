@@ -2,6 +2,7 @@
 
 import { useMemo, useSyncExternalStore } from "react";
 import { collectSceneTextNodeIds, getNodeWorldMatrixFromChildOrder } from "@/lib/editorGraph";
+import { filterVisibleSceneTextNodeIds } from "@/lib/canvasViewportCull";
 import { orientedBoxOverlayStyle } from "@/lib/canvasOverlaySpace";
 import { isNativeRendererEnabled } from "@/lib/rendererMode";
 import { matrixIsFinite } from "@/lib/transformMath";
@@ -10,6 +11,8 @@ import { useEditorStore } from "@/stores/useEditorStore";
 import { TextCanvasView } from "./TextCanvasView";
 import { TextNodeCanvasShell } from "./TextNodeCanvasShell";
 import { useCanvasOverlaySpace } from "./useCanvasOverlaySpace";
+import { useCanvasViewportCull } from "./CanvasViewportContext";
+import { useDragPreviewOffset } from "./useDragPreviewOffset";
 
 type TextSceneOverlayProps = {
   rootIds: readonly string[];
@@ -25,6 +28,7 @@ function TextNodeSceneOverlay({
   const childOrder = useEditorStore((s) => s.childOrder);
   const designTokens = useEditorStore((s) => s.designTokens);
   const overlay = useCanvasOverlaySpace();
+  const dragOffset = useDragPreviewOffset(nodeId);
 
   const boxStyle = useMemo(() => {
     if (!node || node.type !== "text") return null;
@@ -35,10 +39,10 @@ function TextNodeSceneOverlay({
       Math.max(2, node.width),
       Math.max(2, node.height),
       overlay,
-      { dx: 0, dy: 0 },
+      dragOffset,
       { contentAtScreenSize: overlay.screenSpace },
     );
-  }, [nodeId, node, nodes, childOrder, overlay]);
+  }, [nodeId, node, nodes, childOrder, overlay, dragOffset]);
 
   if (!node || node.type !== "text" || !boxStyle) return null;
 
@@ -80,18 +84,22 @@ export function TextSceneOverlay({ rootIds }: TextSceneOverlayProps) {
   const nodes = useEditorStore((s) => s.nodes);
   const childOrder = useEditorStore((s) => s.childOrder);
   const editingTextId = useEditorStore((s) => s.editingTextId);
+  const viewportCull = useCanvasViewportCull();
   const textLayoutEpoch = useSyncExternalStore(subscribeTextLayoutEpoch, getTextLayoutEpoch, () => 0);
 
   const textIds = useMemo(() => {
     if (!isNativeRendererEnabled()) return [];
     void textLayoutEpoch;
-    return collectSceneTextNodeIds(rootIds, nodes, childOrder).filter((id) => id !== editingTextId);
-  }, [rootIds, nodes, childOrder, editingTextId, textLayoutEpoch]);
+    const all = collectSceneTextNodeIds(rootIds, nodes, childOrder).filter(
+      (id) => id !== editingTextId,
+    );
+    return filterVisibleSceneTextNodeIds(all, nodes, childOrder, viewportCull);
+  }, [rootIds, nodes, childOrder, editingTextId, textLayoutEpoch, viewportCull]);
 
   if (!isNativeRendererEnabled() || textIds.length === 0) return null;
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-[8]">
+    <div className="pointer-events-none absolute inset-0 z-[8] select-none">
       {textIds.map((id) => (
         <TextNodeSceneOverlay key={id} nodeId={id} />
       ))}

@@ -9,6 +9,7 @@ import {
 import { useEditorStore } from "@/stores/useEditorStore";
 import type { ClientToWorldFn } from "@/lib/canvasNodeDrag";
 import { forEachCoalescedPointerEvent } from "@/lib/smoothPointer";
+import { beginCanvasNativeTextSelectionSuppression } from "@/lib/canvasNativeTextSelection";
 
 export type MarqueeSessionOptions = {
   pointerId: number;
@@ -43,6 +44,7 @@ export function startCanvasMarqueeSession(opts: MarqueeSessionOptions): void {
   const target = opts.captureTarget;
   const capId = opts.pointerId;
   let ended = false;
+  const endTextSelectionSuppression = beginCanvasNativeTextSelectionSuppression();
 
   const removeListeners = () => {
     window.removeEventListener("pointermove", onMove);
@@ -98,6 +100,7 @@ export function startCanvasMarqueeSession(opts: MarqueeSessionOptions): void {
       rafId = 0;
     }
     removeListeners();
+    endTextSelectionSuppression();
     try {
       target.releasePointerCapture(capId);
     } catch {
@@ -134,6 +137,7 @@ export function startCanvasMarqueeSession(opts: MarqueeSessionOptions): void {
 
   const onMove = (ev: PointerEvent) => {
     if (ev.pointerId !== capId) return;
+    ev.preventDefault();
     forEachCoalescedPointerEvent(ev, (pe) => {
       const ww = opts.clientToWorld(pe.clientX, pe.clientY);
       draft = { ...draft, x1: ww.x, y1: ww.y };
@@ -159,7 +163,7 @@ export function startCanvasMarqueeSession(opts: MarqueeSessionOptions): void {
     finish(ev.type === "pointerup");
   };
 
-  window.addEventListener("pointermove", onMove, { passive: true });
+  window.addEventListener("pointermove", onMove, { passive: false });
   window.addEventListener("pointerup", onPointerEnd);
   window.addEventListener("pointercancel", onPointerEnd);
 }

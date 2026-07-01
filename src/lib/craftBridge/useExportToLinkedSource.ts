@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { syncSourceToLinkedFile } from "@/lib/craftBridge/clientSync";
+import { isWritableLinkedSourcePath } from "@/lib/craftBridge/bridgeCaptureContext";
 
 /** Push current canvas layers to the linked source file (manual export). */
 export function useExportToLinkedSource() {
@@ -17,9 +18,10 @@ export function useExportToLinkedSource() {
   const updateCodeRoundTripLink = useEditorStore((s) => s.updateCodeRoundTripLink);
   const setCraftBridgeSyncStatus = useEditorStore((s) => s.setCraftBridgeSyncStatus);
   const setCraftBridgeInboundActive = useEditorStore((s) => s.setCraftBridgeInboundActive);
+  const canvasColorMode = useEditorStore((s) => s.canvasColorMode);
 
   const canExport =
-    !!link?.repoRoot?.trim() && !!link?.sourcePath?.trim();
+    !!link?.repoRoot?.trim() && isWritableLinkedSourcePath(link?.sourcePath);
 
   return useCallback(async (): Promise<{
     ok: boolean;
@@ -30,7 +32,9 @@ export function useExportToLinkedSource() {
     if (!canExport || !link) {
       return {
         ok: false,
-        error: "Link your repo file first (File → Export React → Source file bridge).",
+        error: link?.sourcePath?.startsWith("preview://")
+          ? "This screen was capture-only. Run craft-bridge link on a source folder, then push again for Send to code round-trip."
+          : "Link your repo file first (File → Export React → Source file bridge).",
       };
     }
 
@@ -46,6 +50,7 @@ export function useExportToLinkedSource() {
         fileName,
         sourceHeader,
         link,
+        canvasColorMode,
         explicitUserExport: true,
       });
 
@@ -82,6 +87,7 @@ export function useExportToLinkedSource() {
     assets,
     fileName,
     sourceHeader,
+    canvasColorMode,
     updateCodeRoundTripLink,
     setCraftBridgeSyncStatus,
     setCraftBridgeInboundActive,
@@ -90,5 +96,5 @@ export function useExportToLinkedSource() {
 
 export function useCanExportToLinkedSource(): boolean {
   const link = useEditorStore((s) => s.codeRoundTripLink);
-  return !!link?.repoRoot?.trim() && !!link?.sourcePath?.trim();
+  return !!link?.repoRoot?.trim() && isWritableLinkedSourcePath(link?.sourcePath);
 }

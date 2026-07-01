@@ -42,8 +42,13 @@ export function preserveImportFontFamily(computedFamily: string): string {
     .map((part) => part.trim().replace(/^['"]|['"]$/g, ""))
     .find((part) => part && !part.toLowerCase().startsWith("var("));
   if (!primary) return computedFamily;
+  // "Inter Subset" (and other Inter variants) are subsetted Inter — Craft bundles real
+  // Inter via next/font, which registers under a HASHED family name reachable only through
+  // `var(--font-inter)`. Emit that token first so the canvas uses the real Inter face and
+  // captured text metrics match the browser/Figma (the literal "Inter" alone falls back to a
+  // wider system font). See canvasFontFamilyStack.
   if (primary.toLowerCase().includes("inter")) {
-    return `${primary}, system-ui, sans-serif`;
+    return `var(--font-inter), Inter, system-ui, sans-serif`;
   }
-  return `${primary}, Inter, system-ui, sans-serif`;
+  return `${primary}, var(--font-inter), Inter, system-ui, sans-serif`;
 }

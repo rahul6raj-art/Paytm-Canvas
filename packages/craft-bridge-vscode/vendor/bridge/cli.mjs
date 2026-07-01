@@ -238,7 +238,7 @@ function installPreviewMenu(cwd = process.cwd()) {
   const token = bridgeToken() || manifest.bridgeToken || "";
 
   let html = readFileSync(indexPath, "utf8");
-  html = html.replace(/^\s*<script[^>]*craft-bridge\/preview-menu\.js[^>]*>\s*<\/script>\s*$/gim, "");
+  html = html.replace(/<script\b[^>]*craft-bridge\/preview-menu\.js[^>]*>\s*<\/script>\s*/gi, "");
 
   const attrs = [
     `src="${craftBase}/craft-bridge/preview-menu.js"`,

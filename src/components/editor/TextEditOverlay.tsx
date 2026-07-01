@@ -9,6 +9,7 @@ import { useEditorStore } from "@/stores/useEditorStore";
 import { TextCanvasView } from "./TextCanvasView";
 import { TextNodeCanvasShell } from "./TextNodeCanvasShell";
 import { useCanvasOverlaySpace } from "./useCanvasOverlaySpace";
+import { useDragPreviewOffset } from "./useDragPreviewOffset";
 
 /** Native path: live text + caret overlay while the GPU compositor paints the scene. */
 export function TextEditOverlay() {
@@ -18,6 +19,7 @@ export function TextEditOverlay() {
   const childOrder = useEditorStore((s) => s.childOrder);
   const designTokens = useEditorStore((s) => s.designTokens);
   const overlay = useCanvasOverlaySpace();
+  const dragOffset = useDragPreviewOffset(editingTextId ?? "");
 
   const node = editingTextId ? nodes[editingTextId] : null;
 
@@ -30,10 +32,10 @@ export function TextEditOverlay() {
       Math.max(2, node.width),
       Math.max(2, node.height),
       overlay,
-      { dx: 0, dy: 0 },
+      dragOffset,
       { contentAtScreenSize: overlay.screenSpace },
     );
-  }, [editingTextId, node, nodes, childOrder, overlay]);
+  }, [editingTextId, node, nodes, childOrder, overlay, dragOffset]);
 
   if (!isNativeRendererEnabled() || !editingTextId || !node || node.type !== "text" || !boxStyle) {
     return null;

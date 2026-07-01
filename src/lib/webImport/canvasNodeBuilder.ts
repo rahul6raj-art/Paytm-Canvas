@@ -5,7 +5,11 @@ import { mapBackgroundSizeToFit } from "@/lib/webImport/backgroundImageFit";
 import { ensureReadableTextColor } from "@/lib/webImport/colorContrast";
 import { isLayoutContainer } from "@/lib/webImport/layoutAnalyzer";
 import { webImportTextResizeMode } from "@/lib/text/ensureTextModeForExplicitWidth";
+import {
+  applyTightBoundsFromBrowserCapture,
+} from "@/lib/craftBridge/browserCaptureTextLayout";
 import { textResizePatch } from "@/lib/text/textNodeModel";
+import { typographyFieldsFromExtracted } from "@/lib/webImport/importTextTypography";
 import { isImportableTextContent, isSemanticTextTag } from "@/lib/webImport/textContentHeuristics";
 import type {
   DesignNode,
@@ -14,12 +18,29 @@ import type {
 } from "@/lib/webImport/types";
 
 let idSeq = 0;
+/** Set during designTreeToScene when importing a bridge live capture. */
+let bridgeCaptureImport = false;
 function nextId(prefix: string): string {
   idSeq += 1;
   return `${prefix}-${idSeq}`;
 }
 
 const INPUT_TAGS = new Set(["input", "textarea", "select"]);
+
+const CALLOUT_FRAME_RE =
+  /\b(?:callout|alert|notice|info|message|banner|hint|positive|negative|warning)\b/i;
+const OB_FLOW_CALLOUT_RE = /\bob-flow__(?:message|hint|alert|info|callout)\b/i;
+const CALLOUT_TEXT_COLOR_RE = /\b(?:text-positive|text-notice|positive|notice)\b/i;
+
+/** PML TextField uses placeholder=" " for floating labels — prefer the typed value. */
+export function resolveInputDisplayText(node: DesignNode): string {
+  const value = node.inputValue?.replace(/\s+/g, " ").trim() ?? "";
+  if (value) return sanitizeImportText(value, 200);
+  const placeholder = node.placeholder?.trim() ?? "";
+  if (placeholder) return sanitizeImportText(placeholder, 200);
+  const copy = node.text?.trim() ?? "";
+  return copy ? sanitizeImportText(copy, 200) : "";
+}
 
 type AssetMap = Record<string, { id: string; dataUrl: string; name: string; mimeType: string }>;
 type MasterMap = Map<string, ImportWebSceneNode>;
@@ -117,19 +138,50 @@ function buildSceneNode(
 
   if (type === "text" && node.text) {
     base.content = sanitizeImportText(node.text, 4000);
-    base.fontFamily = node.typography?.fontFamily ?? "Inter, sans-serif";
-    base.fontSize = node.typography?.fontSize ?? 14;
-    base.fontWeight = node.typography?.fontWeight ?? 400;
-    base.lineHeight = node.typography?.lineHeight;
-    base.letterSpacing = node.typography?.letterSpacing;
-    base.textDecoration = node.typography?.textDecoration;
-    base.textAlign = node.typography?.textAlign ?? "left";
-    base.verticalAlign = node.typography?.verticalAlign;
-    const resizeMode =
-      (node.codeClassName ?? "").includes("bn__label")
-        ? "auto-width"
-        : webImportTextResizeMode(node.cssLayoutHints ?? {});
-    Object.assign(base, textResizePatch(resizeMode));
+    Object.assign(base, typographyFieldsFromExtracted(node.typography));
+    if (node.browserTextLayout?.lines?.length && bridgeCaptureImport) {
+      // Keep Playwright DOM box; paint with Craft text layout (matches native text layers).
+      Object.assign(base, textResizePatch("fixed"));
+      base.verticalAlign = "top";
+      base.bridgeDomTextBox = true;
+    } else if (node.browserTextLayout?.lines?.length) {
+      const tightened = applyTightBoundsFromBrowserCapture({
+        id: base.id,
+        parentId: null,
+        type: "text",
+        name: base.name ?? "Text",
+        x: base.x,
+        y: base.y,
+        width: base.width,
+        height: base.height,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        content: base.content,
+        fontSize: node.typography?.fontSize,
+        lineHeight: node.typography?.lineHeight,
+        browserTextLayout: node.browserTextLayout,
+      } as import("@/stores/useEditorStore").EditorNode);
+      base.x = tightened.x;
+      base.y = tightened.y;
+      base.width = tightened.width;
+      base.height = tightened.height;
+      base.browserTextLayout = tightened.browserTextLayout;
+      Object.assign(base, textResizePatch("fixed"));
+    } else {
+      const isBottomNavLabel = (node.codeClassName ?? "").includes("bn__label");
+      const resizeMode =
+        bridgeCaptureImport && !isBottomNavLabel
+          ? "fixed"
+          : isBottomNavLabel
+            ? "auto-width"
+            : webImportTextResizeMode(node.cssLayoutHints ?? {});
+      Object.assign(base, textResizePatch(resizeMode));
+      if (bridgeCaptureImport && !isBottomNavLabel) {
+        base.bridgeDomTextBox = true;
+        base.verticalAlign = "top";
+      }
+    }
     base.fill = style.fill ?? "#111111";
     base.fillEnabled = true;
     return base;
@@ -180,6 +232,10 @@ function buildSceneNode(
     return preserveStyledBadgeFrame(node, base, children);
   }
 
+  if (isCalloutFrame(node, base) && (node.text || children.length > 0)) {
+    return preserveStyledCalloutFrame(node, base, children);
+  }
+
   if (node.role === "button" && node.tagName.toLowerCase() === "a") {
     if (children.length > 0) {
       if (node.text && !hasDescendantText(children)) {
@@ -206,24 +262,102 @@ function buildSceneNode(
     return buildStyledControlFrame(node, base, "input");
   }
 
-  // Recover a container's own text label (links/tabs/styled divs) that would
-  // otherwise be lost because frames don't render text. Only when no descendant
-  // already carries that text, to avoid duplicating inline-text content.
-  if (
-    node.text &&
-    base.children &&
-    base.children.length > 0 &&
-    !hasDescendantText(base.children)
-  ) {
-    base.children = [...base.children, buildRecoveredLabel(node, base)];
-    base.layoutMode = base.layoutMode ?? "horizontal";
-    base.primaryAxisAlign = base.primaryAxisAlign ?? "center";
-    base.counterAxisAlign = base.counterAxisAlign ?? "center";
-    base.layoutGap = base.layoutGap ?? 8;
-    base.preserveAutoLayout = true;
+  // Recover container text (e.g. hero "0" div, badge copy) when not already a text child.
+  if (node.text?.trim() && !hasDescendantText(base.children ?? [])) {
+    const label = buildRecoveredLabel(node, base);
+    base.children = [...(base.children ?? []), label];
+    if ((base.children?.length ?? 0) > 1) {
+      base.layoutMode = base.layoutMode ?? "horizontal";
+      base.primaryAxisAlign = base.primaryAxisAlign ?? "center";
+      base.counterAxisAlign = base.counterAxisAlign ?? "center";
+      base.layoutGap = base.layoutGap ?? 8;
+      base.preserveAutoLayout = true;
+    } else {
+      base.layoutMode = "none";
+      label.layoutPositioning = "absolute";
+      label.x = 0;
+      label.y = 0;
+      label.width = base.width;
+      label.height = base.height;
+      Object.assign(label, textResizePatch("fixed"));
+    }
   }
 
   return base;
+}
+
+function isCalloutFrame(node: DesignNode, base: ImportWebSceneNode): boolean {
+  const cls = node.codeClassName ?? "";
+  if (OB_FLOW_CALLOUT_RE.test(cls) || CALLOUT_FRAME_RE.test(cls)) return true;
+  return Boolean(
+    base.fillEnabled &&
+      base.fill &&
+      (base.cornerRadius ?? 0) >= 4 &&
+      base.height >= 28 &&
+      base.height <= 160 &&
+      base.width >= 200 &&
+      /\b(?:positive|notice|info|message|alert)\b/i.test(cls),
+  );
+}
+
+function preserveStyledCalloutFrame(
+  node: DesignNode,
+  base: ImportWebSceneNode,
+  children: ImportWebSceneNode[],
+): ImportWebSceneNode {
+  const label = sanitizeImportText(node.text || "", 4000);
+  const calloutBg = base.fillEnabled ? base.fill : undefined;
+  const rawLabelColor = node.typography?.color ?? "#158939";
+  const defaultColor = CALLOUT_TEXT_COLOR_RE.test(node.codeClassName ?? "") ? "#158939" : "#111111";
+  const labelColor =
+    ensureReadableTextColor(rawLabelColor || defaultColor, calloutBg) ??
+    (rawLabelColor || defaultColor);
+
+  const padL = node.layout.paddingLeft ?? 12;
+  const padT = node.layout.paddingTop ?? 8;
+  let kids = [...children];
+  const hasText = kids.some((c) => c.type === "text" && c.content?.trim());
+
+  if (label && !hasText) {
+    kids.push({
+      id: nextId("web"),
+      type: "text",
+      name: label.slice(0, 48) || "Message",
+      x: padL,
+      y: padT,
+      width: Math.max(40, base.width - padL * 2),
+      height: Math.max(16, base.height - padT * 2),
+      content: label,
+      fontFamily: node.typography?.fontFamily ?? "Inter",
+      fontSize: node.typography?.fontSize ?? 12,
+      fontWeight: node.typography?.fontWeight ?? 400,
+      lineHeight: node.typography?.lineHeight,
+      textAlign: node.typography?.textAlign ?? "left",
+      fill: labelColor,
+      fillEnabled: true,
+      layoutPositioning: "absolute",
+      codeClassName: node.codeClassName,
+      bridgeDomTextBox: bridgeCaptureImport ? true : undefined,
+      verticalAlign: bridgeCaptureImport ? "top" : undefined,
+      ...(bridgeCaptureImport ? textResizePatch("fixed") : {}),
+    });
+  } else {
+    kids = kids.map((c) => {
+      if (c.type !== "text") return c;
+      const baseColor = c.fill ?? rawLabelColor ?? defaultColor;
+      const color = ensureReadableTextColor(baseColor, calloutBg) ?? baseColor;
+      return { ...c, fill: color, fillEnabled: true, bridgeDomTextBox: bridgeCaptureImport ? true : c.bridgeDomTextBox };
+    });
+  }
+
+  return {
+    ...base,
+    type: "frame",
+    clipChildren: false,
+    layoutMode: "none",
+    layoutGap: 0,
+    children: kids,
+  };
 }
 
 function hasDescendantText(children: ImportWebSceneNode[]): boolean {
@@ -241,21 +375,26 @@ function buildRecoveredLabel(
   const buttonBg = base.fillEnabled ? base.fill : undefined;
   const rawColor = node.typography?.color ?? "#111111";
   const color = ensureReadableTextColor(rawColor, buttonBg) ?? rawColor;
+  const fontSize = node.typography?.fontSize ?? 14;
+  const lineH = Math.ceil(fontSize * 1.25);
+  const content = sanitizeImportText(node.text || "", 200);
   return {
     id: nextId("web"),
     type: "text",
-    name: "Label",
+    name: content.slice(0, 48) || "Label",
     x: 0,
     y: 0,
     width: Math.max(40, base.width),
-    height: 20,
-    content: sanitizeImportText(node.text || "", 200),
+    height: base.height > 48 ? base.height : Math.max(lineH, 20),
+    content,
     fontFamily: node.typography?.fontFamily ?? "Inter",
-    fontSize: node.typography?.fontSize ?? 14,
+    fontSize,
     fontWeight: node.typography?.fontWeight ?? 500,
     textAlign: node.typography?.textAlign ?? "center",
     fill: color,
     fillEnabled: true,
+    codeClassName: node.codeClassName,
+    browserTextLayout: undefined,
     layoutSizingHorizontal: "hug",
     layoutSizingVertical: "hug",
     layoutPositioning: "auto",
@@ -291,6 +430,8 @@ function preserveStyledBadgeFrame(
       fill: labelColor,
       fillEnabled: true,
       layoutPositioning: "absolute",
+      codeClassName: node.codeClassName,
+      browserTextLayout: node.browserTextLayout,
     });
   } else {
     kids = kids.map((c) =>
@@ -374,9 +515,7 @@ function buildStyledControlFrame(
   const padT = node.layout.paddingTop ?? (kind === "input" ? 8 : 10);
   const padB = node.layout.paddingBottom ?? padT;
   const label =
-    kind === "input"
-      ? sanitizeImportText(node.placeholder || node.inputValue || node.text || "", 200)
-      : sanitizeImportText(node.text || "", 200);
+    kind === "input" ? resolveInputDisplayText(node) : sanitizeImportText(node.text || "", 200);
   const buttonBg = base.fillEnabled ? base.fill : undefined;
   const rawLabelColor =
     kind === "input"
@@ -387,22 +526,57 @@ function buildStyledControlFrame(
       ? ensureReadableTextColor(rawLabelColor, buttonBg) ?? rawLabelColor
       : rawLabelColor;
 
+  const fontSize = node.typography?.fontSize ?? (kind === "input" ? 16 : 15);
+  const lineH = Math.ceil(fontSize * 1.375);
+  let textX = padL;
+  let textY =
+    kind === "button" ? Math.max(padT, (base.height - lineH) / 2) : Math.max(0, (base.height - lineH) / 2);
+  let textW = Math.max(40, base.width - padL - padR);
+  let textH = lineH;
+  let capturedLayout = node.browserTextLayout;
+
+  if (kind === "input" && node.browserTextLayout?.lines?.length) {
+    const tightened = applyTightBoundsFromBrowserCapture({
+      id: "input-capture",
+      parentId: null,
+      type: "text",
+      name: "Value",
+      x: 0,
+      y: 0,
+      width: base.width,
+      height: base.height,
+      rotation: 0,
+      visible: true,
+      locked: false,
+      content: label,
+      fontSize,
+      lineHeight: node.typography?.lineHeight,
+      browserTextLayout: node.browserTextLayout,
+    } as import("@/stores/useEditorStore").EditorNode);
+    textX = tightened.x;
+    textY = tightened.y;
+    textW = tightened.width;
+    textH = tightened.height;
+    capturedLayout = tightened.browserTextLayout;
+  }
+
   const textChild: ImportWebSceneNode = {
     id: nextId("web"),
     type: "text",
-    name: kind === "input" ? "Placeholder" : "Label",
-    x: padL,
-    y: kind === "button" ? Math.max(padT, (base.height - 20) / 2) : padT,
-    width: Math.max(40, base.width - padL - padR),
-    height: 20,
+    name: kind === "input" ? (label ? "Value" : "Placeholder") : "Label",
+    x: textX,
+    y: textY,
+    width: textW,
+    height: textH,
     content: label,
     fontFamily: node.typography?.fontFamily ?? "Inter",
-    fontSize: node.typography?.fontSize ?? (kind === "input" ? 14 : 15),
-    fontWeight: node.typography?.fontWeight ?? (kind === "button" ? 600 : 400),
+    fontSize,
+    fontWeight: node.typography?.fontWeight ?? (kind === "button" ? 600 : 500),
     textAlign: kind === "button" ? "center" : "left",
     fill: labelColor,
     fillEnabled: true,
     layoutPositioning: "absolute",
+    browserTextLayout: capturedLayout,
   };
 
   const existingKids = base.children ?? [];
@@ -705,10 +879,12 @@ export function designTreeToScene(
   page: ImportWebPageMeta,
 ): { scene: ImportWebSceneNode; assets: AssetMap } {
   idSeq = 0;
+  bridgeCaptureImport = page.bridgeCapture === true;
   const assets: AssetMap = {};
   const masters: MasterMap = new Map();
 
   const shell = buildFromDesign(root, assets, masters);
+  bridgeCaptureImport = false;
   if (!shell) {
     const scene: ImportWebSceneNode = {
       id: nextId("web-root"),
@@ -734,7 +910,7 @@ export function designTreeToScene(
     y: 0,
     width: phoneColumn ? page.width : Math.max(shell.width, root.bounds.width, page.width),
     height: phoneColumn ? page.height : Math.max(shell.height, root.bounds.height, page.height),
-    clipChildren: false,
+    clipChildren: phoneColumn ? true : false,
   };
 
   return { scene, assets };

@@ -182,12 +182,12 @@ fn compute_node_dimensions(
         TEXT_BOX_PAD_Y * 2.0
     };
     let width = if auto_w {
-        layout.width + TEXT_BOX_PAD_X * 2.0
+        (layout.width + TEXT_BOX_PAD_X * 2.0).ceil()
     } else {
         node.width
     };
     let height = if auto_w || auto_h {
-        content_height + vertical_pad
+        content_height.ceil() + vertical_pad
     } else {
         node.height
     };
@@ -342,7 +342,11 @@ pub fn layout_text_canonical(
     let block_offset_y =
         vertical_content_offset_y(base_layout.height, inner_h, vertical_align_for(&node));
     let (first_line_ascent, first_line_descent) = font_typo_metrics(font, font_size);
-    let baseline_offset = (base_layout.line_height_px - font_size) * 0.5;
+    // Center the glyph em-box (ascent + descent) within the line box, splitting the leftover
+    // leading half above / half below — exactly like Figma and browsers. Using font_size instead
+    // of the real em height left the glyphs hugging the top with a gap below.
+    let em_height = first_line_ascent + first_line_descent.abs();
+    let baseline_offset = (base_layout.line_height_px - em_height) * 0.5;
     let last_line = base_layout.lines.len().saturating_sub(1);
 
     let mut lines: Vec<CanonicalLine> = Vec::new();
@@ -559,5 +563,28 @@ mod tests {
         assert!(out.contains("\"caretStops\""));
         assert!(out.contains("\"source\":\"wasm\""));
         let _ = req;
+    }
+
+    #[test]
+    fn rahul_auto_width_matches_figma_box() {
+        let fonts = RuntimeFontRegistry::default();
+        let mut node = text_node("Rahul", 100.0);
+        node.font_size = Some(14.0);
+        node.font_weight = Some(500.0);
+        node.line_height = Some(17.0 / 14.0);
+        node.text_resize_mode = Some("auto-width".into());
+        let req = TextLayoutRequest {
+            node,
+            display_content: None,
+            paragraph_spacing: None,
+            vertical_trim_top: None,
+            effective_font_size: None,
+        };
+        let layout = layout_text_canonical(&req, &fonts);
+        assert!((layout.node_width - 38.0).abs() < 0.01, "width {}", layout.node_width);
+        assert!((layout.node_height - 17.0).abs() < 0.01, "height {}", layout.node_height);
+        let line_box = layout.line_boxes.first().expect("line box");
+        assert!((line_box.height - 17.0).abs() < 0.01);
+        assert!((line_box.top - 0.0).abs() < 0.01);
     }
 }

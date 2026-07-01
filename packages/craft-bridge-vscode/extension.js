@@ -385,7 +385,7 @@ function activate(context) {
       try {
         await runBridge(context, ["install-preview-menu"], cwd);
         vscode.window.showInformationMessage(
-          "Craft Bridge: right-click anywhere in the live app preview → Push to Craft canvas (all ?screen= routes)",
+          "Craft Bridge: Push any visible preview screen (floating button, right-click, or Alt+Shift+P)",
         );
       } catch (e) {
         vscode.window.showErrorMessage(`Craft Bridge: ${e.message}`);

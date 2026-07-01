@@ -13,10 +13,9 @@ import {
 import { useEditorStore } from "@/stores/useEditorStore";
 import {
   getDragPreviewSnapshot,
-  getPanPreviewSnapshot,
-  PAN_PREVIEW_IDLE,
+  isViewportPreviewActive,
   subscribeDragPreview,
-  subscribePanPreview,
+  subscribeViewportPreview,
 } from "@/lib/canvasEphemeralTransform";
 import {
   buildPinnedSceneIds,
@@ -54,11 +53,9 @@ export function CanvasViewportProvider({
   const textDrawingNodeId = useEditorStore((s) => s.textDrawingSession?.nodeId ?? null);
   const placingComponentMasterId = useEditorStore((s) => s.placingComponentMasterId);
 
-  const panPreview = useSyncExternalStore(
-    subscribePanPreview,
-    getPanPreviewSnapshot,
-    () => PAN_PREVIEW_IDLE,
-  );
+  // Bump when pan drag / wheel preview moves — cull rect stays on committed store pan/zoom.
+  useSyncExternalStore(subscribeViewportPreview, isViewportPreviewActive, () => false);
+
   const dragPreview = useSyncExternalStore(subscribeDragPreview, getDragPreviewSnapshot, () => null);
 
   const [viewportSize, setViewportSize] = useState({ width: 1200, height: 800 });
@@ -81,7 +78,6 @@ export function CanvasViewportProvider({
   const value = useMemo((): ViewportCullContext => {
     if (!isViewportCullingEnabled()) return disabledCullContext;
 
-    const effectivePan = { x: pan.x + panPreview.dx, y: pan.y + panPreview.dy };
     const nodes = useEditorStore.getState().nodes;
     const pinnedIds = buildPinnedSceneIds({
       selectedIds,
@@ -97,22 +93,24 @@ export function CanvasViewportProvider({
       placingComponentMasterId,
       dragMovingIds: dragPreview?.movingIds ?? [],
       nodes,
+      childOrder: useEditorStore.getState().childOrder,
     });
 
+    // During imperative viewport preview the scene moves via CSS transform — keep cull
+    // stable on committed pan/zoom so buildSvgScene does not rebuild every frame.
     return {
       enabled: true,
       worldViewport: computeWorldViewportRect(
         viewportSize.width,
         viewportSize.height,
-        effectivePan,
+        pan,
         zoom,
       ),
       pinnedIds,
     };
   }, [
-    pan,
-    panPreview.dx,
-    panPreview.dy,
+    pan.x,
+    pan.y,
     zoom,
     viewportSize.width,
     viewportSize.height,

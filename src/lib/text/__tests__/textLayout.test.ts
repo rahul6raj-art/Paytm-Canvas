@@ -36,7 +36,7 @@ import {
   textLayoutPatchForNode,
   withTextLayoutPatch,
 } from "@/lib/text/textLayout";
-import { layoutText } from "@/lib/text/textMeasure";
+import { layoutText, lineBaselineY, lineTopY } from "@/lib/text/textMeasure";
 import { TEXT_BOX_PAD_X, TEXT_BOX_PAD_Y } from "@/lib/text/textNodeModel";
 
 function textNode(): EditorNode {
@@ -146,15 +146,17 @@ describe("text layout patch helpers", () => {
   });
 
   it("expands auto-width frame when typing into caret-only point text", () => {
+    // Empty caret-only shell width (Figma-style zero padding → just the caret inner width).
+    const shell = computeTextBoxSize("", resolveTextTypo(textNode()), "auto-width", 0, 0).width;
     const node = {
       ...textNode(),
       textResizeMode: "auto-width" as const,
       content: "",
-      width: 10,
+      width: shell,
       height: 22,
     };
     const patch = textLayoutPatchForNode(node, "S");
-    assert.ok((patch?.width ?? 0) > 10);
+    assert.ok((patch?.width ?? 0) > shell);
     assert.notEqual(patch?.textResizeMode, "auto-height");
   });
 
@@ -231,5 +233,41 @@ describe("text layout patch helpers", () => {
     const typo = resolveTextTypo({ fontSize: 14, lineHeight: 1.25 });
     const layout = layoutText("superlongword", 22, typo);
     assert.ok(layout.lines.length > 1);
+  });
+});
+
+describe("half-leading line positioning (Figma/browser vertical centering)", () => {
+  before(() => {
+    installTextMeasureDomStub();
+  });
+
+  it("centers the glyph em box within the line box (half-leading above and below)", () => {
+    // Stub metrics: ascent 11 + descent 3 = 14 em height. With a 20px line box the leftover
+    // 6px of leading must split 3px above / 3px below — like a browser line box / Figma.
+    const layout = layoutText("Hello", Number.POSITIVE_INFINITY, resolveTextTypo({ fontSize: 13 }));
+    const withBox = { ...layout, lineHeightPx: 20, firstLineAscent: 11, firstLineDescent: 3 };
+    // em box top = half-leading (not 0 — that was the "text hugs the top" bug).
+    assert.equal(lineTopY(withBox, 0), 3);
+    // baseline = em box top + ascent.
+    assert.equal(lineBaselineY(withBox, 0), 3 + 11);
+  });
+
+  it("stacks subsequent lines by exactly one line height", () => {
+    const layout = layoutText("a\nb", Number.POSITIVE_INFINITY, resolveTextTypo({ fontSize: 13 }));
+    const withBox = { ...layout, lineHeightPx: 20, firstLineAscent: 11, firstLineDescent: 3 };
+    assert.equal(lineTopY(withBox, 1) - lineTopY(withBox, 0), 20);
+  });
+
+  it("does not add half-leading when cap-height trim is active", () => {
+    const layout = layoutText("Hello", Number.POSITIVE_INFINITY, resolveTextTypo({ fontSize: 13 }));
+    const trimmed = {
+      ...layout,
+      lineHeightPx: 20,
+      firstLineAscent: 11,
+      firstLineDescent: 3,
+      verticalTrimTop: 2,
+    };
+    // Trim keeps the existing tight top-anchored behavior (verticalTrimTop only).
+    assert.equal(lineTopY(trimmed, 0), 2);
   });
 });

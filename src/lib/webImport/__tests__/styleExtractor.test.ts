@@ -12,6 +12,20 @@ describe("styleExtractor stroke fidelity", () => {
     assert.equal(style.strokeEnabled, true);
     assert.ok((style.strokeWidth ?? 0) >= 1);
     assert.ok(style.strokeColor?.includes("d1d5db") || style.strokeColor === "#d1d5db");
+    assert.equal(style.effects?.length ?? 0, 0);
+  });
+
+  it("maps PML selected-card inset ring to stroke without duplicating inner-shadow", () => {
+    const style = extractVisualStyle({
+      backgroundColor: "rgb(232, 245, 233)",
+      boxShadow: "rgb(52, 163, 77) 0px 0px 0px 1px inset",
+      borderTopWidth: "0px",
+      borderRadius: "24px",
+    });
+    assert.equal(style.strokeEnabled, true);
+    assert.equal(style.strokeWidth, 1);
+    assert.ok(style.strokeColor?.toLowerCase().includes("34a34d") || style.strokeColor?.includes("52, 163, 77"));
+    assert.equal(style.effects?.length ?? 0, 0);
   });
 
   it("maps outline to stroke when border is absent", () => {

@@ -56,6 +56,17 @@ function addNodeAndAncestors(ids: Set<string>, nodeId: string, nodes: Record<str
   }
 }
 
+function addNodeAndDescendants(
+  ids: Set<string>,
+  nodeId: string,
+  childOrder: Record<string, string[]>,
+): void {
+  ids.add(nodeId);
+  for (const cid of childOrder[nodeId] ?? []) {
+    addNodeAndDescendants(ids, cid, childOrder);
+  }
+}
+
 export function buildPinnedSceneIds(input: {
   selectedIds: readonly string[];
   hoveredId: string | null;
@@ -70,6 +81,7 @@ export function buildPinnedSceneIds(input: {
   placingComponentMasterId: string | null;
   dragMovingIds: readonly string[];
   nodes: Record<string, EditorNode>;
+  childOrder: Record<string, string[]>;
 }): Set<string> {
   const pinned = new Set<string>();
   for (const id of input.selectedIds) addNodeAndAncestors(pinned, id, input.nodes);
@@ -83,7 +95,10 @@ export function buildPinnedSceneIds(input: {
   if (input.frameDrawingNodeId) addNodeAndAncestors(pinned, input.frameDrawingNodeId, input.nodes);
   if (input.textDrawingNodeId) addNodeAndAncestors(pinned, input.textDrawingNodeId, input.nodes);
   if (input.placingComponentMasterId) addNodeAndAncestors(pinned, input.placingComponentMasterId, input.nodes);
-  for (const id of input.dragMovingIds) addNodeAndAncestors(pinned, id, input.nodes);
+  for (const id of input.dragMovingIds) {
+    addNodeAndAncestors(pinned, id, input.nodes);
+    addNodeAndDescendants(pinned, id, input.childOrder);
+  }
   return pinned;
 }
 
@@ -116,4 +131,26 @@ export function shouldRenderCanvasNode(
   if (!ctx.enabled || opts?.skipViewportCull) return true;
   if (ctx.pinnedIds.has(nodeId)) return true;
   return nodeIntersectsViewport(nodeId, nodes, childOrder, ctx.worldViewport, opts?.dragOffset);
+}
+
+/** Filter scene text ids to those intersecting the viewport (native text overlay). */
+export function filterVisibleSceneTextNodeIds(
+  textIds: readonly string[],
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  ctx: ViewportCullContext,
+): string[] {
+  if (!ctx.enabled) return [...textIds];
+  return textIds.filter((id) => shouldRenderCanvasNode(id, nodes, childOrder, ctx));
+}
+
+/** Root artboards intersecting the viewport — cheap pre-filter before SVG scene build. */
+export function filterVisibleRootIds(
+  rootIds: readonly string[],
+  nodes: Record<string, EditorNode>,
+  childOrder: Record<string, string[]>,
+  ctx: ViewportCullContext,
+): string[] {
+  if (!ctx.enabled) return [...rootIds];
+  return rootIds.filter((id) => shouldRenderCanvasNode(id, nodes, childOrder, ctx));
 }

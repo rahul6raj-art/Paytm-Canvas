@@ -1,5 +1,6 @@
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import type { EditorNode } from "@/stores/useEditorStore";
+import { isUnderBridgeCaptureScreen } from "@/lib/craftBridge/bridgeCaptureLayout";
 import { applyWebImportAutoLayoutStructure } from "@/lib/webImport/applyWebImportAutoLayoutStructure";
 import { enforceManualScreenFrames } from "@/lib/webImport/enforceManualScreenFrames";
 import { enforceManualComponentComposition } from "@/lib/webImport/enforceManualComponentComposition";
@@ -31,21 +32,24 @@ export function expandImportedFrameHeights(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
   passes = 3,
+  opts?: { heightOnly?: boolean },
 ): void {
   for (let pass = 0; pass < passes; pass++) {
-    expandFramesToFitChildren(nodes, childOrder);
+    expandFramesToFitChildren(nodes, childOrder, opts);
   }
 }
 
 function expandFramesToFitChildren(
   nodes: Record<string, EditorNode>,
   childOrder: Record<string, string[]>,
+  opts?: { heightOnly?: boolean },
 ): void {
   for (const [parentId, kids] of Object.entries(childOrder)) {
     if (parentId === EDITOR_ROOT_KEY) continue;
     const parent = nodes[parentId];
     if (!parent || (parent.type !== "frame" && parent.type !== "group")) continue;
     if (shouldPreserveViewportFrameBounds(parent)) continue;
+    if (isUnderBridgeCaptureScreen(nodes, parentId, childOrder)) continue;
     if (kids.length === 0) continue;
 
     const padR = parent.paddingRight ?? 0;
@@ -60,11 +64,16 @@ function expandFramesToFitChildren(
     }
     const needW = maxX + padR;
     const needH = maxY + padB;
-    if (needW > parent.width || needH > parent.height) {
+    if (needH > parent.height) {
       nodes[parentId] = {
         ...parent,
-        width: Math.max(parent.width, Math.ceil(needW)),
         height: Math.max(parent.height, Math.ceil(needH)),
+      };
+    }
+    if (!opts?.heightOnly && needW > parent.width) {
+      nodes[parentId] = {
+        ...nodes[parentId] ?? parent,
+        width: Math.max(parent.width, Math.ceil(needW)),
       };
     }
   }
@@ -106,7 +115,9 @@ export function finalizeWebImportGraph(
   if (opts?.composition === "component") {
     enforceManualComponentComposition(nodes, childOrder);
   } else {
-    applyPhoneShellFullPageLayout(nodes, childOrder, pageWidth, pageHeight);
+    applyPhoneShellFullPageLayout(nodes, childOrder, pageWidth, pageHeight, {
+      bridgeCapture: bridge,
+    });
     if (!bridge) {
       applyWebImportAutoLayoutStructure(nodes, childOrder);
     }
@@ -120,9 +131,12 @@ export function finalizeWebImportGraph(
   }
 
   if (opts?.composition !== "component") {
-    const shellHeight =
-      Object.values(nodes).find((n) => isPhoneShellClassName(n.codeClassName))?.height ?? pageHeight;
-    pinPhoneShellBottomChromeNodes(nodes, childOrder, shellHeight);
+    const shellHeight = bridge
+      ? pageHeight
+      : Object.values(nodes).find((n) => isPhoneShellClassName(n.codeClassName))?.height ?? pageHeight;
+    if (!bridge) {
+      pinPhoneShellBottomChromeNodes(nodes, childOrder, shellHeight);
+    }
   }
 
   return nodes;

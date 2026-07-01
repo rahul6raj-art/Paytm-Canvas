@@ -3,7 +3,9 @@ import { parseColor } from "@/lib/webImport/cssParseUtils";
 import { textLayoutPatchForNode } from "@/lib/text/textLayout";
 import { textResizePatch } from "@/lib/text/textNodeModel";
 import type { EditorNode } from "@/stores/useEditorStore";
+import { normalizeImportedTextTypography } from "@/lib/webImport/importTextTypography";
 import { isPhoneShellBottomChrome } from "@/lib/webImport/phoneShellBottomChrome";
+import { hasMeaningfulCaptureClass } from "@/lib/craftBridge/organizeBridgeCaptureLayers";
 import {
   isPhoneShellClassName,
   isPhoneShellScrollClassName,
@@ -20,13 +22,41 @@ function isSemanticNode(node: EditorNode): boolean {
   return false;
 }
 
+/** Never flatten icon hosts or imported SVG subtrees — collapse breaks path layout. */
+function isIconOrVectorWrapper(node: EditorNode, child: EditorNode): boolean {
+  const cls = node.codeClassName ?? "";
+  const childCls = child.codeClassName ?? "";
+  if (/\b__icon-wrap\b/.test(cls) || /\b__icon-wrap\b/.test(childCls)) return true;
+  if (/\bbn__glow\b/.test(cls) || /\bbn__glow\b/.test(childCls)) return true;
+  if (/\bheader__icon-btn\b/.test(cls) || /\bheader__icon-btn\b/.test(childCls)) return true;
+  if (/\bheader__bar\b/.test(cls)) return true;
+  if (/\bbn__tab\b/.test(cls) || /\bbn__tab\b/.test(childCls)) return true;
+  if (/^svg$/i.test(node.name.trim()) || /^svg$/i.test(child.name.trim())) return true;
+  if (node.type === "path" || child.type === "path") return true;
+  return false;
+}
+
 export function isPassThroughWrapper(node: EditorNode, children: EditorNode[]): boolean {
   if (children.length !== 1) return false;
   if (node.type !== "frame" && node.type !== "group") return false;
   if (isSemanticNode(node)) return false;
+  if (node.manualScreenLayout) return false;
+  if (isPhoneShellClassName(node.codeClassName)) return false;
+  if (isPhoneShellScrollClassName(node.codeClassName)) return false;
+  if (isPhoneShellBottomChrome(node.codeClassName, node.codeJsxTag)) return false;
+
+  if (hasMeaningfulCaptureClass(node.codeClassName)) return false;
+  if (/\btextfield(?:__box|__input)?\b/i.test(node.codeClassName ?? "")) return false;
+  if (/\bcraft-capture-edge-(?:top|bottom|left|right)\b/.test(node.codeClassName ?? "")) return false;
+
+  const cls = node.codeClassName ?? "";
+  if (/\bli-item\b/.test(cls) && !/\bli-item__/.test(cls)) return false;
+  if (/\bcard\b/i.test(cls) || /\bpml-more-theme-card\b/.test(cls)) return false;
+  if (/\bsh-section\b/.test(cls) || /\bpml-(?:home|more|stocks)-section\b/.test(cls)) return false;
 
   const child = children[0]!;
-  // Keep 1px (or tiny) layout spacers that position a taller child.
+  if (isIconOrVectorWrapper(node, child)) return false;
+  if (child.type === "frame" && /^svg$/i.test(child.name.trim())) return false;
   if (node.height < 16 && child.height > node.height * 2) return false;
 
   if (node.strokeEnabled && (node.strokeWidth ?? 0) > 0) return false;
@@ -45,7 +75,6 @@ export function isPassThroughWrapper(node: EditorNode, children: EditorNode[]): 
     return false;
   }
 
-  if (/\bcard\b/i.test(node.codeClassName ?? "")) return false;
   if ((node.cornerRadius ?? 0) > 0) return false;
   if (node.cornerRadii?.some((r) => (r ?? 0) > 0)) return false;
   if (/^card$/i.test(node.name.trim())) return false;
@@ -118,6 +147,14 @@ export function normalizeWebImportColors(
     if (n.fill) {
       const hex = parseColor(n.fill);
       if (hex) patch.fill = hex;
+    }
+    if (n.type === "text") {
+      const rawTextColor = n.textColor ?? n.fill;
+      const textHex = rawTextColor ? parseColor(rawTextColor) : undefined;
+      if (textHex) {
+        patch.textColor = textHex;
+        patch.fill = textHex;
+      }
     }
     if (n.strokeColor) {
       const hex = parseColor(n.strokeColor);
@@ -195,6 +232,7 @@ function expandNarrowImportedTextNode(
 
 /** Re-measure imported text so short labels are not clipped to narrow DOM boxes. */
 export function normalizeWebImportTextNodes(nodes: Record<string, EditorNode>): void {
+  normalizeImportedTextTypography(nodes);
   for (const [id, n] of Object.entries(nodes)) {
     if (n.type !== "text") continue;
     const content = n.content?.trim();
@@ -247,6 +285,7 @@ export function normalizeImportedLabelTextNodes(nodes: Record<string, EditorNode
     if (n.type !== "text") continue;
     const cls = n.codeClassName ?? "";
     if (!IMPORTED_LABEL_CLASS_RE.test(cls)) continue;
+    if (/\bbn__label\b/.test(cls)) continue;
     const content = n.content?.trim();
     if (!content) continue;
 
@@ -591,25 +630,35 @@ export function normalizeBottomNavTextNodes(
   }
 }
 
-/** Fill-only SVG paths must not pick up visible center strokes from defaults. */
+/** Fill-only SVG paths must not pick up visible center strokes from defaults; stroke icons keep stroke. */
 export function normalizeWebImportSvgPaths(nodes: Record<string, EditorNode>): void {
   for (const [id, n] of Object.entries(nodes)) {
     if (n.type !== "path") continue;
     const patch: Partial<EditorNode> = {};
-    const hasFill = n.fillEnabled !== false && Boolean(n.fill);
+    const fillRaw = (n.fill ?? "").trim().toLowerCase();
+    const fillIsNone =
+      n.fillEnabled === false ||
+      !fillRaw ||
+      fillRaw === "none" ||
+      fillRaw === "transparent";
     const hasStroke =
       n.strokeEnabled !== false &&
       (n.strokeWidth ?? 0) > 0 &&
       Boolean(n.strokeColor);
+    const hasOpaqueFill = n.fillEnabled !== false && Boolean(n.fill) && !fillIsNone;
 
-    if (hasFill && hasStroke) {
+    if (hasOpaqueFill && hasStroke) {
       patch.strokeEnabled = false;
       patch.strokeWidth = 0;
+    } else if (fillIsNone && hasStroke) {
+      patch.fillEnabled = false;
+      patch.fill = undefined;
+      patch.strokeEnabled = true;
     } else if ((n.strokeWidth ?? 0) <= 0 || n.strokeEnabled === false) {
       patch.strokeEnabled = false;
       patch.strokeWidth = 0;
     }
-    if (hasFill) {
+    if (hasOpaqueFill) {
       patch.fillEnabled = true;
     }
     if (Object.keys(patch).length > 0) {

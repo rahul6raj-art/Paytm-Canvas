@@ -49,6 +49,8 @@
     "verify:editor-gate": "node scripts/verify-editor-gate.mjs",
     "verify:stack-live-gate": "node scripts/verify-stack-live-gate.mjs",
     "verify:migration-gate": "node scripts/verify-migration-gate.mjs",
+    "verify:bridge-capture": "node scripts/verify-bridge-capture-gate.mjs",
+    "verify:bridge-capture-gate": "node scripts/verify-bridge-capture-gate.mjs",
     "verify:docker-stack-gate": "node scripts/verify-docker-stack-gate.mjs",
     "verify:release-stack-gate": "node scripts/verify-release-stack-gate.mjs",
     "verify:stack": "node scripts/verify-stack.mjs",

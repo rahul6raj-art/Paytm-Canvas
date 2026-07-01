@@ -29,8 +29,10 @@ import {
   resolveToolFromKeyboardEvent,
   isPageNameEditActive,
   shouldBlockToolShortcutsForTyping,
+  tryHandleSelectAllShortcut,
 } from "@/lib/editorKeyboardFocus";
 import { pasteCanvasImageFromClipboard } from "@/lib/canvasImagePlace";
+import { noteKeyboardEditorPaste, shouldSuppressDuplicateEditorPaste } from "@/lib/editorPasteDedup";
 import { isVectorEditableShape } from "@/lib/shapes/shapeToPath";
 import { clientToWorld } from "@/lib/canvasCoordinates";
 import { tryDeleteActiveGradientStop } from "@/lib/gradientStopKeyboard";
@@ -461,6 +463,10 @@ export function EditorKeyboardShortcuts() {
       }
 
       if (mod && e.code === "KeyA") {
+        if (tryHandleSelectAllShortcut(e, e.target)) {
+          e.preventDefault();
+          return;
+        }
         e.preventDefault();
         useEditorStore.getState().selectAllEditable();
         return;
@@ -476,47 +482,57 @@ export function EditorKeyboardShortcuts() {
         return;
       }
       if (mod && e.shiftKey && e.code === "KeyV") {
+        const stInPlace = useEditorStore.getState();
+        if (stInPlace.editingTextId || stInPlace.layerRenameId) return;
         e.preventDefault();
-        if (useEditorStore.getState().editorMode === "design") {
-          const st = useEditorStore.getState();
-          if (st.activeSlotEdit) st.pasteIntoActiveSlot();
-          else st.pasteSelection({ inPlace: true });
+        if (stInPlace.editorMode === "design") {
+          if (stInPlace.activeSlotEdit) stInPlace.pasteIntoActiveSlot();
+          else {
+            noteKeyboardEditorPaste();
+            stInPlace.pasteSelection({ inPlace: true });
+          }
         }
         return;
       }
       if (mod && e.code === "KeyC") {
+        const stCopy = useEditorStore.getState();
+        if (stCopy.editingTextId || stCopy.layerRenameId) return;
         e.preventDefault();
-        if (useEditorStore.getState().editorMode === "design") {
-          useEditorStore.getState().copySelection();
+        if (stCopy.editorMode === "design") {
+          stCopy.copySelection();
         }
         return;
       }
       if (mod && e.code === "KeyX") {
+        const stCut = useEditorStore.getState();
+        if (stCut.editingTextId || stCut.layerRenameId) return;
         e.preventDefault();
-        if (useEditorStore.getState().editorMode === "design") {
-          useEditorStore.getState().cutSelection();
+        if (stCut.editorMode === "design") {
+          stCut.cutSelection();
         }
         return;
       }
       if (mod && e.code === "KeyV") {
         if (shouldAllowNativeFieldClipboard(e, e.target)) return;
+        const stPaste = useEditorStore.getState();
+        if (stPaste.editingTextId || stPaste.layerRenameId) return;
         e.preventDefault();
-        if (useEditorStore.getState().editorMode === "design") {
-          const st = useEditorStore.getState();
+        noteKeyboardEditorPaste();
+        if (stPaste.editorMode === "design") {
           const viewport = document.querySelector<HTMLElement>("[data-canvas-viewport]");
           const toWorld = (clientX: number, clientY: number) =>
-            clientToWorld(clientX, clientY, viewport, { pan: st.pan, zoom: st.zoom });
+            clientToWorld(clientX, clientY, viewport, { pan: stPaste.pan, zoom: stPaste.zoom });
           void (async () => {
             const imagePasted = await pasteCanvasImageFromClipboard(
               null,
               toWorld,
               viewport,
-              st.pan,
-              st.zoom,
+              stPaste.pan,
+              stPaste.zoom,
             );
             if (!imagePasted) {
-              if (st.activeSlotEdit) st.pasteIntoActiveSlot();
-              else st.pasteSelection();
+              if (stPaste.activeSlotEdit) stPaste.pasteIntoActiveSlot();
+              else stPaste.pasteSelection();
             }
           })();
         }

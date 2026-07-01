@@ -2,7 +2,7 @@ import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import type { EditorNode } from "@/stores/useEditorStore";
 import type { CodeRoundTripLink } from "@/lib/craftBridge/types";
 import { canvasScreenLabelFromSource } from "@/lib/craftBridge/canvasScreenLabels";
-import { canvasScreenLabelFromPreviewUrl } from "@/lib/craftBridge/previewRouteKey";
+import { canvasScreenLabelFromPreviewUrl, previewCaptureSourcePath } from "@/lib/craftBridge/previewRouteKey";
 
 export type BridgeImportStrategy =
   | { mode: "replace" }
@@ -15,6 +15,15 @@ export function screenLabelFromSourcePath(sourcePath: string): string {
     return canvasScreenLabelFromPreviewUrl(`http://local/${route.replace(/^\//, "")}`);
   }
   return canvasScreenLabelFromSource(sourcePath);
+}
+
+/** Route-level canvas identity — distinct preview steps/tabs on the same .tsx file append side-by-side. */
+export function resolveBridgeCanvasIdentity(
+  link?: Pick<CodeRoundTripLink, "previewUrl" | "sourcePath"> | null,
+): string | undefined {
+  const previewUrl = link?.previewUrl?.trim();
+  if (previewUrl) return previewCaptureSourcePath(previewUrl);
+  return link?.sourcePath?.trim() || undefined;
 }
 
 function normalizeSourcePath(sourcePath: string): string {

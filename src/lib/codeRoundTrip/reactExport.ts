@@ -1,6 +1,6 @@
 import { EDITOR_ROOT_KEY } from "@/lib/editorConstants";
 import type { EditorAsset } from "@/lib/documentPersistence";
-import type { DesignToken } from "@/lib/designTokens";
+import type { DesignToken, CanvasColorMode } from "@/lib/designTokens";
 import type { EditorNode } from "@/stores/useEditorStore";
 import { collectSubtreeForExport } from "./collectSubtree";
 import { ellipseArcJsxAttrs } from "@/lib/shapes/ellipseArcExport";
@@ -82,6 +82,12 @@ export type JsxExportOptions = {
   pcRootId?: string;
   /** When true, nodes with className export appearance via page CSS (no inline style). */
   preferPageCss?: boolean;
+  /** Export dual-mode library tokens as CSS variables in inline styles. */
+  themeSafeColors?: boolean;
+  canvasColorMode?: CanvasColorMode;
+  cssSources?: string[];
+  /** Manual shape synced into a linked app screen (no frame debug borders). */
+  canvasAddition?: boolean;
 };
 
 function jsxTagForNode(node: EditorNode, opts?: JsxExportOptions): string {
@@ -122,6 +128,10 @@ export function nodeToJsx(
     isFrameRoot: opts?.isFrameRoot,
     nodes,
     childOrder,
+    themeSafeColors: opts?.themeSafeColors,
+    canvasColorMode: opts?.canvasColorMode,
+    cssSources: opts?.cssSources,
+    canvasAddition: opts?.canvasAddition,
   });
   const exportStyle =
     opts?.preferPageCss && node.codeClassName?.trim() ? ({} as ReactStyleRecord) : fullStyle;

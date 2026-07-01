@@ -1,5 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { useEditorStore } from "@/stores/useEditorStore";
+import {
+  clearEditorClipboardMemory,
+  setEditorClipboardJson,
+} from "@/lib/editorClipboardBuffer";
 import {
   isCanvasTextEditFieldElement,
   isPageNameEditActive,
@@ -10,6 +15,8 @@ import {
   shouldAllowNativeFieldClipboard,
   shouldBlockDeleteSelectionShortcut,
   shouldBlockToolShortcutsForTyping,
+  selectAllInActiveTextEdit,
+  tryHandleSelectAllShortcut,
   shouldYieldShortcutsToTyping,
   resolveToolFromKeyboardEvent,
   releaseFieldFocusForCanvas,
@@ -274,6 +281,88 @@ describe("editorKeyboardFocus shortcuts", () => {
     assert.equal(shouldAllowNativeFieldClipboard(e, null), false);
   });
 
+  it("routes copy to canvas when layers are selected and inspector input has no text selection", () => {
+    useEditorStore.setState({
+      editorMode: "design",
+      selectedIds: ["rect-1"],
+      nodes: {
+        "rect-1": {
+          id: "rect-1",
+          parentId: null,
+          type: "rectangle",
+          name: "Box",
+          x: 0,
+          y: 0,
+          width: 40,
+          height: 40,
+          rotation: 0,
+          visible: true,
+          locked: false,
+        },
+      },
+    });
+    try {
+      const copy = {
+        key: "c",
+        code: "KeyC",
+        metaKey: true,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+      } as KeyboardEvent;
+      const input = {
+        tagName: "INPUT",
+        value: "12",
+        selectionStart: 2,
+        selectionEnd: 2,
+        isContentEditable: false,
+      } as HTMLInputElement;
+      assert.equal(shouldAllowNativeFieldClipboard(copy, input), false);
+      assert.equal(shouldYieldShortcutsToTyping(copy, input), false);
+    } finally {
+      useEditorStore.setState({ selectedIds: [], nodes: {} });
+    }
+  });
+
+  it("routes paste to canvas when editor clipboard has content", () => {
+    setEditorClipboardJson(
+      JSON.stringify({
+        version: 1,
+        rootIds: ["rect-1"],
+        nodes: {
+          "rect-1": {
+            id: "rect-1",
+            parentId: null,
+            type: "rectangle",
+            name: "Box",
+            x: 0,
+            y: 0,
+            width: 40,
+            height: 40,
+            rotation: 0,
+            visible: true,
+            locked: false,
+          },
+        },
+        childOrder: {},
+      }),
+    );
+    try {
+      const paste = {
+        key: "v",
+        code: "KeyV",
+        metaKey: true,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+      } as KeyboardEvent;
+      const input = fakeInput();
+      assert.equal(shouldAllowNativeFieldClipboard(paste, input), false);
+    } finally {
+      clearEditorClipboardMemory();
+    }
+  });
+
   it("yields arrow keys while a single-line inspector input is focused", () => {
     const e = {
       key: "ArrowDown",
@@ -298,6 +387,126 @@ describe("editorKeyboardFocus shortcuts", () => {
       shiftKey: false,
     } as KeyboardEvent;
     assert.equal(shouldYieldShortcutsToTyping(e, fakeInput()), true);
+  });
+
+  it("yields Cmd+A while canvas text edit is active", () => {
+    useEditorStore.setState({ editingTextId: "t1" });
+    try {
+      const selectAll = {
+        key: "a",
+        code: "KeyA",
+        metaKey: true,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+      } as KeyboardEvent;
+      assert.equal(shouldYieldShortcutsToTyping(selectAll, null), true);
+    } finally {
+      useEditorStore.setState({ editingTextId: null });
+    }
+  });
+
+  it("selectAllInActiveTextEdit selects textarea content and syncs store", () => {
+    if (typeof document === "undefined") return;
+
+    const textarea = document.createElement("textarea");
+    textarea.dataset.textEditor = "t1";
+    textarea.value = "Hello";
+    document.body.appendChild(textarea);
+
+    useEditorStore.setState({
+      editingTextId: "t1",
+      textEditSelection: { anchor: 5, focus: 5 },
+      nodes: {
+        t1: {
+          id: "t1",
+          parentId: null,
+          type: "text",
+          name: "t1",
+          x: 0,
+          y: 0,
+          width: 100,
+          height: 20,
+          rotation: 0,
+          visible: true,
+          locked: false,
+          content: "Hello",
+        },
+      },
+    });
+    try {
+      assert.equal(selectAllInActiveTextEdit(), true);
+      assert.equal(textarea.selectionStart, 0);
+      assert.equal(textarea.selectionEnd, 5);
+      const sel = useEditorStore.getState().textEditSelection;
+      assert.equal(sel?.anchor, 0);
+      assert.equal(sel?.focus, 5);
+    } finally {
+      useEditorStore.setState({ editingTextId: null, textEditSelection: null, nodes: {} });
+      textarea.remove();
+    }
+  });
+
+  it("tryHandleSelectAllShortcut enters text edit with full selection for a single text layer", () => {
+    useEditorStore.setState({
+      editingTextId: null,
+      textEditSelection: null,
+      selectedIds: ["t1"],
+      nodes: {
+        t1: {
+          id: "t1",
+          parentId: null,
+          type: "text",
+          name: "t1",
+          x: 0,
+          y: 0,
+          width: 239,
+          height: 15,
+          rotation: 0,
+          visible: true,
+          locked: false,
+          content: "Full KYC flow from welcome to activation",
+        },
+      },
+    });
+    try {
+      const e = {
+        metaKey: true,
+        ctrlKey: false,
+        code: "KeyA",
+      } as KeyboardEvent;
+      assert.equal(tryHandleSelectAllShortcut(e, null), true);
+      assert.equal(useEditorStore.getState().editingTextId, "t1");
+      const sel = useEditorStore.getState().textEditSelection;
+      assert.equal(sel?.anchor, 0);
+      assert.equal(sel?.focus, "Full KYC flow from welcome to activation".length);
+    } finally {
+      useEditorStore.setState({ editingTextId: null, textEditSelection: null, selectedIds: [], nodes: {} });
+    }
+  });
+
+  it("tryHandleSelectAllShortcut prefers a focused inspector field over canvas text edit", () => {
+    if (typeof document === "undefined") return;
+
+    const textarea = document.createElement("textarea");
+    textarea.value = "Inspector draft";
+    document.body.appendChild(textarea);
+    textarea.focus();
+
+    useEditorStore.setState({ editingTextId: "canvas-text" });
+    try {
+      const e = {
+        metaKey: true,
+        ctrlKey: false,
+        code: "KeyA",
+      } as KeyboardEvent;
+      assert.equal(tryHandleSelectAllShortcut(e, textarea), true);
+      assert.equal(textarea.selectionStart, 0);
+      assert.equal(textarea.selectionEnd, "Inspector draft".length);
+    } finally {
+      textarea.remove();
+      useEditorStore.setState({ editingTextId: null, textEditSelection: null });
+    }
   });
 
   it("yields Cmd+A and arrow keys when activeElement is an inspector input", () => {

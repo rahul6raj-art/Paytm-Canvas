@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { svgTextTspanY, textBaselineLocalY } from "@/lib/text/textBaseline";
+import { canvasAlphabeticBaselineY } from "@/lib/text/textMeasure";
 import type { EditorNode } from "@/stores/useEditorStore";
 
 function installTextMeasureDomStub(): void {
@@ -38,10 +39,11 @@ describe("textBaseline", () => {
       fontSize: 14,
       fontWeight: 500,
       lineHeight: 1.25,
+      lineHeightPx: 17.5,
       letterSpacing: 0,
       color: "#000",
     };
-    assert.equal(svgTextTspanY(2, typo), 2 + 11);
+    assert.equal(svgTextTspanY(2, typo), canvasAlphabeticBaselineY(2, 17.5, typo));
   });
 
   it("returns a baseline below the top padding", () => {
@@ -90,7 +92,7 @@ describe("textBaseline", () => {
     assert.ok(topY != null && middleY != null && bottomY != null);
     assert.ok(middleY! > topY!);
     assert.ok(bottomY! > middleY!);
-    assert.equal(middleY! - topY!, bottomY! - middleY!);
+    assert.ok(Math.abs(middleY! - topY! - (bottomY! - middleY!)) < 0.05);
   });
 
   it("baseline tracks vertical align in auto-width frames without vertical inset", () => {

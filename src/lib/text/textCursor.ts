@@ -70,7 +70,7 @@ export function getCursorPositionFromPoint(
     model.textAlign,
     displayText.length,
     prepared?.canonical.lines,
-    textVerticalPad(model.textResizeMode),
+    textVerticalPad(model.textResizeMode, editorNode ?? undefined),
   );
   return displayIndexToRawIndex(displayIndex, model.text, style);
 }
@@ -190,4 +190,33 @@ export function normalizedRange(
   focus: number,
 ): { start: number; end: number } {
   return anchor <= focus ? { start: anchor, end: focus } : { start: focus, end: anchor };
+}
+
+/**
+ * Map hidden-textarea selection into store anchor/focus.
+ * Textareas always expose selectionStart <= selectionEnd; return null to keep
+ * backward (anchor > focus) selections when the character range is unchanged.
+ */
+export function textareaSelectionForStore(
+  storeAnchor: number,
+  storeFocus: number,
+  textareaStart: number,
+  textareaEnd: number,
+): { anchor: number; focus: number } {
+  if (textareaStart === textareaEnd) {
+    return { anchor: textareaStart, focus: textareaEnd };
+  }
+  const norm = normalizedRange(storeAnchor, storeFocus);
+  if (norm.start === textareaStart && norm.end === textareaEnd) {
+    return { anchor: storeAnchor, focus: storeFocus };
+  }
+  return { anchor: textareaStart, focus: textareaEnd };
+}
+
+/** DOM textarea selection range (always start <= end). */
+export function textareaDomSelectionRange(
+  anchor: number,
+  focus: number,
+): { start: number; end: number } {
+  return normalizedRange(anchor, focus);
 }

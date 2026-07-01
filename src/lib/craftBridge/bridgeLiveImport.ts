@@ -7,6 +7,7 @@ import { mergeStructureMetadataOntoLiveNodes } from "@/lib/codeRoundTrip/reactLi
 import { sanitizeComponentName } from "@/lib/codeRoundTrip/reactStyle";
 import { extractSourceHeader } from "@/lib/codeRoundTrip/reactJsxToGraph";
 import { derivePreviewCaptureUrl } from "@/lib/codeRoundTrip/derivePreviewCaptureUrl";
+import { shouldPreservePreviewCaptureUrl } from "@/lib/codeRoundTrip/previewCaptureRoute";
 import { validateReactPreviewUrl } from "@/lib/codeRoundTrip/reactPreviewUrlValidation";
 import { prepareImportedSliceForCanvas } from "@/lib/prepareImportedSliceForCanvas";
 import { enrichSliceWithProjectColorTokens } from "@/lib/craftBridge/projectTokenCss";
@@ -19,20 +20,30 @@ import { resolveBridgeImportColorTheme } from "@/lib/webImport/captureTheme";
 import { assertPreviewReachable } from "@/lib/webImport/server/assertPreviewReachable";
 import { runImportWebCapture } from "@/lib/webImport/server/playwrightCaptureService";
 import { importWebResponseToPersistSlice } from "@/lib/webImport/webImportToPersistSlice";
-import { PML_PHONE_COLUMN_WIDTH, PML_PHONE_VIEWPORT } from "@/lib/craftBridge/pmlScreenMetrics";
-import type { ImportWebRequest } from "@/lib/webImport/types";
+import { buildBridgeImportWebRequest, enforceBridgeViewportArtboard } from "@/lib/craftBridge/bridgeCaptureViewport";
+import { PML_PHONE_COLUMN_WIDTH } from "@/lib/craftBridge/pmlScreenMetrics";
+import {
+  resolveBridgeCaptureViewport,
+  type BridgeCaptureViewportInput,
+} from "@/lib/craftBridge/resolveBridgeCaptureViewport";
+import { isPhoneShellClassName } from "@/lib/webImport/phoneShellViewport";
 import { finalizeBridgeLiveCapture } from "@/lib/craftBridge/finalizeBridgeLiveCapture";
+import {
+  assertBridgeCaptureFidelity,
+} from "@/lib/craftBridge/bridgeCaptureValidate";
 
 export type BridgeLiveImportInput = {
   previewUrl: string;
   sourceCode?: string;
   fileName?: string;
-  viewport?: { width: number; height: number };
+  viewport?: BridgeCaptureViewportInput;
   /** Raw CSS file contents (page + src/tokens/*.css) for color token library import. */
   cssSources?: string[];
   theme?: "light" | "dark";
   /** Override canvas artboard name (e.g. from preview URL route). */
   screenLabel?: string;
+  /** Unused — bridge push is editable layers only (no screenshot reference). */
+  includeScreenshotReference?: boolean;
 };
 
 export type BridgeLiveImportResult =
@@ -45,26 +56,25 @@ export type BridgeLiveImportResult =
     }
   | { ok: false; error: string };
 
-/** Bridge push: live Playwright capture for pixel-accurate editable layers. */
+/** Bridge push: editable layers at Playwright DOM coordinates — geometry preserved as captured. */
 export async function importBridgeFromLivePreview(
   input: BridgeLiveImportInput,
 ): Promise<BridgeLiveImportResult> {
   const pageLabel =
     input.fileName?.replace(/\.[^.]+$/, "") ??
     input.sourceCode?.match(/export\s+(?:default\s+)?(?:function|const)\s+(\w+)/)?.[1];
-  const captureUrl = derivePreviewCaptureUrl(input.previewUrl, pageLabel);
+
+  const captureUrl = shouldPreservePreviewCaptureUrl(input.previewUrl, pageLabel)
+    ? input.previewUrl.trim()
+    : derivePreviewCaptureUrl(input.previewUrl, pageLabel);
+
   const validated = validateReactPreviewUrl(captureUrl);
   if (!validated.ok) {
     return { ok: false, error: validated.error };
   }
 
-  const viewport = input.viewport ?? PML_PHONE_VIEWPORT;
-  const request: ImportWebRequest = {
-    url: validated.url,
-    mode: "editable",
-    viewport,
-    urlPolicy: "react-preview",
-  };
+  const captureViewport = resolveBridgeCaptureViewport(input.viewport, validated.url);
+  const request = buildBridgeImportWebRequest(validated.url, captureViewport);
 
   try {
     await assertPreviewReachable(validated.url);
@@ -82,23 +92,7 @@ export async function importBridgeFromLivePreview(
 
     const rootIds = slice.childOrder[EDITOR_ROOT_KEY] ?? [];
     let nodes = placeScreenFrameOnCanvas(slice.nodes, rootIds);
-    const phoneColumnWidth =
-      capture.page.width >= 280 && capture.page.width <= 420
-        ? PML_PHONE_COLUMN_WIDTH
-        : null;
-    for (const rootId of rootIds) {
-      const root = nodes[rootId];
-      if (root) {
-        nodes[rootId] = {
-          ...root,
-          parentId: null,
-          clipChildren: true,
-          ...(phoneColumnWidth
-            ? { width: phoneColumnWidth, height: capture.page.height }
-            : {}),
-        };
-      }
-    }
+    enforceBridgeViewportArtboard(nodes, slice.childOrder);
 
     const componentName = sanitizeComponentName(
       input.fileName?.replace(/\.[^.]+$/, "") ??
@@ -133,7 +127,39 @@ export async function importBridgeFromLivePreview(
     });
 
     const finalNodes = { ...finalSlice.nodes };
-    finalizeBridgeLiveCapture(finalNodes, finalSlice.childOrder, PML_PHONE_COLUMN_WIDTH);
+    enforceBridgeViewportArtboard(finalNodes, finalSlice.childOrder);
+
+    const phoneShellCapture = Object.values(finalNodes).some(
+      (n) =>
+        n.parentId === null && isPhoneShellClassName(n.codeClassName),
+    );
+    const phoneCapture = captureViewport.phoneCapture || phoneShellCapture;
+    const columnWidth = phoneCapture ? PML_PHONE_COLUMN_WIDTH : captureViewport.width;
+
+    finalizeBridgeLiveCapture(finalNodes, finalSlice.childOrder, columnWidth, {
+      cssSources: finalSlice.projectCssSources ?? input.cssSources,
+      theme: importTheme,
+    });
+    enforceBridgeViewportArtboard(finalNodes, finalSlice.childOrder);
+
+    try {
+      const fidelity = assertBridgeCaptureFidelity(finalNodes, finalSlice.childOrder, {
+        strict: true,
+        tolerancePx: 1,
+        requireRoundTripMetadata: Boolean(input.sourceCode?.trim()),
+        expectPhoneArtboard: phoneCapture,
+      });
+      if (fidelity.warnings.length > 0) {
+        console.warn(
+          `[bridge-capture] ${fidelity.warnings.length} fidelity warning(s):`,
+          fidelity.warnings.map((w) => w.message).join("; "),
+        );
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Capture fidelity check failed.";
+      return { ok: false, error: msg };
+    }
+
     finalSlice = { ...finalSlice, nodes: finalNodes };
 
     const layerCount = Object.keys(finalSlice.nodes).length;
@@ -142,12 +168,13 @@ export async function importBridgeFromLivePreview(
       tokenCount > 0
         ? ` ${tokenCount} project design token${tokenCount === 1 ? "" : "s"} in library.`
         : "";
+
     return {
       ok: true,
       slice: finalSlice,
       componentName,
       sourceHeader: sourceHeader || undefined,
-      message: `Live capture: ${layerCount} editable layer(s) from ${validated.url}.${tokenNote}`,
+      message: `Editable capture (${layerCount} layers) from ${validated.url} — live DOM positions and sizes preserved.${tokenNote}`,
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Live capture failed.";

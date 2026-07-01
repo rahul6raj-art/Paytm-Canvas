@@ -58,7 +58,7 @@ describe("patchLinkedReactSourceFromCanvas", () => {
       secondaryB: text("secondaryB", "Complete KYC", "li-item__secondary", 340),
     };
 
-    const out = patchLinkedReactSourceFromCanvas(SOURCE, nodes);
+    const out = patchLinkedReactSourceFromCanvas(SOURCE, nodes, { additionsOnly: false });
     assert.match(out, /title="Settings"/);
     assert.match(out, /title="Look & feel"/);
     assert.match(out, /title="Profile"/);
@@ -83,7 +83,10 @@ export const PMLMorePage = () => (
       home: text("home", "Dashboard", "bn__label body-medium", 900),
       more: text("more", "Settings", "bn__label body-medium", 920),
     };
-    const out = patchLinkedReactSourceFromCanvas(source, nodes);
+    const out = patchLinkedReactSourceFromCanvas(source, nodes, {
+      additionsOnly: false,
+      skipGenericTextPatches: false,
+    });
     assert.match(out, />Dashboard</);
     assert.match(out, />Settings</);
   });

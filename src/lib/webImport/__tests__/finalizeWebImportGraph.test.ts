@@ -254,7 +254,7 @@ describe("finalizeWebImportGraph", () => {
         name: "Section title",
         x: 0,
         y: 0,
-        width: 129,
+        width: 90,
         height: 28,
         rotation: 0,
         visible: true,
@@ -269,7 +269,9 @@ describe("finalizeWebImportGraph", () => {
     const childOrder = { [EDITOR_ROOT_KEY]: ["root"], root: ["title"] };
 
     finalizeWebImportGraph(nodes, childOrder, 200, 80);
-    assert.ok((nodes.title?.width ?? 0) > 129);
+    // Captured DOM box (90px) is far narrower than the measured glyph run, so the box must
+    // grow to fit "Appearance" instead of clipping it.
+    assert.ok((nodes.title?.width ?? 0) > 90);
     assert.equal(nodes.title?.textResizeMode, "auto-width");
   });
 
@@ -404,7 +406,7 @@ describe("finalizeWebImportGraph", () => {
         name: "Label",
         x: 40,
         y: 100,
-        width: 28,
+        width: 18,
         height: 16,
         rotation: 0,
         visible: true,
@@ -420,7 +422,8 @@ describe("finalizeWebImportGraph", () => {
     const childOrder = { [EDITOR_ROOT_KEY]: ["root"], root: ["label"] };
 
     finalizeWebImportGraph(nodes, childOrder, 390, 844);
-    assert.ok((nodes.label?.width ?? 0) > 28);
+    // Captured box (18px) is far narrower than "More" — it must expand to fit, not clip.
+    assert.ok((nodes.label?.width ?? 0) > 18);
     assert.equal(nodes.label?.content, "More");
     assert.equal(nodes.label?.x, 40);
   });

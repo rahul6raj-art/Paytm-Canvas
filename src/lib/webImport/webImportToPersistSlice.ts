@@ -45,6 +45,7 @@ function sceneNodeToEditor(
     fontSize: node.fontSize,
     fontWeight: node.fontWeight,
     lineHeight: node.lineHeight,
+    lineHeightUnit: node.lineHeightUnit,
     letterSpacing: node.letterSpacing,
     textDecoration: node.textDecoration as EditorNode["textDecoration"],
     textAlign: node.textAlign,
@@ -82,6 +83,7 @@ function sceneNodeToEditor(
     codeClassName: node.codeClassName,
     codeJsxTag: node.codeJsxTag,
     codeJsxIntrinsic: node.codeJsxIntrinsic,
+    browserTextLayout: node.browserTextLayout,
   };
 
   nodes[id] = editorNode;
@@ -157,6 +159,13 @@ export function importWebResponseToPersistSlice(
     frameId = sceneNodeToEditor(sceneAtOrigin, null, nodes, childOrder);
     childOrder[EDITOR_ROOT_KEY] = [frameId];
 
+    if (opts?.bridgeCapture && nodes[frameId]) {
+      nodes[frameId] = {
+        ...nodes[frameId]!,
+        manualScreenLayout: true,
+      };
+    }
+
     const finalizedNodes = finalizeWebImportGraph(
       nodes,
       childOrder,
@@ -185,8 +194,8 @@ export function importWebResponseToPersistSlice(
       }
       const ref = buildScreenshotReferenceLayer(
         response.screenshot,
-        response.page.width,
-        response.page.height,
+        response.screenshot.width,
+        response.screenshot.height,
         refAssetId,
       );
       const refId = sceneNodeToEditor(ref, frameId, nodes, childOrder);

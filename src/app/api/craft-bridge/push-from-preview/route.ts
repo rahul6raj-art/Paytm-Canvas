@@ -10,6 +10,7 @@ export const maxDuration = 60;
 type PushFromPreviewBody = {
   previewUrl?: string;
   repoRoot?: string;
+  viewport?: { width?: number; height?: number };
 };
 
 export async function OPTIONS(req: Request) {
@@ -57,10 +58,12 @@ export async function POST(req: Request) {
             repoRoot: resolved.repoRoot,
             pagePath: resolved.pagePath,
             previewUrl: resolved.captureUrl,
+            viewport: body.viewport,
           })
         : await runBridgePreviewCapture({
             previewUrl: resolved.captureUrl,
             repoRoot: resolved.repoRoot,
+            viewport: body.viewport,
           });
 
     if (!imported.ok) {

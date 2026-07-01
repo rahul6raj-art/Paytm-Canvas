@@ -26,15 +26,16 @@ describe("resolveCaretDrawRect", () => {
       firstLineDescent: 4,
       paragraphSpacing: 0,
       verticalTrimTop: 0,
+      // Canonical caret stops already carry final box coordinates (padding baked in).
       caretStops: [
-        { index: 0, x: TEXT_BOX_PAD_X, y: TEXT_BOX_PAD_Y },
-        { index: 2, x: TEXT_BOX_PAD_X + 20, y: TEXT_BOX_PAD_Y },
+        { index: 0, x: 7, y: TEXT_BOX_PAD_Y },
+        { index: 2, x: 7 + 20, y: TEXT_BOX_PAD_Y },
       ],
     };
 
     const atStart = resolveCaretDrawRect(0, layout, typo, 100, "left", TEXT_BOX_PAD_X, TEXT_BOX_PAD_Y, 0);
-    assert.equal(atStart.x, TEXT_BOX_PAD_X);
-    assert.notEqual(atStart.x, TEXT_BOX_PAD_X * 2);
+    // Returned as-is from the stop — padX must NOT be added again on top.
+    assert.equal(atStart.x, 7);
     assert.equal(atStart.y, TEXT_BOX_PAD_Y);
     assert.equal(atStart.height, layout.lineHeightPx);
   });
@@ -59,5 +60,22 @@ describe("resolveCaretDrawRect", () => {
     const caret = resolveCaretDrawRect(5, layout, interTypo, 45, "left", 0, 0, 0);
     assert.equal(caret.height, 17);
     assert.equal(caret.y, 0);
+  });
+
+  it("scales caret rect for screen-space text overlay", () => {
+    const layout: TextLayout = {
+      lines: [{ text: "Rahul", startIndex: 0, width: 38, paragraphStart: true }],
+      width: 38,
+      height: 17,
+      lineHeightPx: 17,
+      firstLineAscent: 11,
+      firstLineDescent: 4,
+      paragraphSpacing: 0,
+      verticalTrimTop: 0,
+      caretStops: [{ index: 0, x: 0, y: 0 }],
+    };
+    const caret = resolveCaretDrawRect(0, layout, typo, 38, "left", 0, 0, 0, 2.5);
+    assert.equal(caret.y, 0);
+    assert.equal(caret.height, 42.5);
   });
 });

@@ -4,8 +4,13 @@ import {
   legacyEffectShadowAppend,
   resolveEffectBoxShadow,
   resolveNodeWithDesignTokens,
+  type CanvasColorMode,
   type DesignToken,
 } from "@/lib/designTokens";
+import {
+  bridgeThemeSafeFillExportValue,
+  bridgeThemeSafeTextColorExportValue,
+} from "@/lib/craftBridge/bridgeThemeSafeCssExport";
 import { buildNodeEffectRenderStyle } from "@/lib/nodeEffects";
 import { shouldClipChildren, clipExportCssProperties } from "@/lib/clipChildren";
 import { cornerRadiiMax, cornerRadiiToCss, getNodeCornerRadii } from "@/lib/cornerRadius";
@@ -29,6 +34,12 @@ export type CodeStyleOptions = {
   isFrameRoot?: boolean;
   nodes?: Record<string, EditorNode>;
   childOrder?: Record<string, string[]>;
+  /** Export linked dual-mode color tokens as var(--token) instead of baked hex. */
+  themeSafeColors?: boolean;
+  canvasColorMode?: CanvasColorMode;
+  cssSources?: string[];
+  /** Manual canvas additions injected into a live app screen — no debug frame chrome. */
+  canvasAddition?: boolean;
 };
 
 export function nodeToReactStyle(
@@ -62,7 +73,16 @@ export function nodeToReactStyle(
   if (node.type === "text") {
     const typo = resolveTextTypo(resolved);
     const fontSize = typo.fontSize;
-    style.color = typo.color;
+    const safeTextColor =
+      codeOpts?.themeSafeColors && designTokens
+        ? bridgeThemeSafeTextColorExportValue(
+            node,
+            designTokens,
+            codeOpts.canvasColorMode ?? "light",
+            codeOpts.cssSources ?? [],
+          )
+        : null;
+    style.color = safeTextColor ?? typo.color;
     style.fontFamily = typo.fontFamily;
     style.fontSize = fontSize;
     style.fontWeight = typo.fontWeight;
@@ -88,7 +108,16 @@ export function nodeToReactStyle(
   const compositeGroup = isBooleanGroup(node) || isMaskGroup(node);
 
   if (!compositeGroup) {
-    const bg = fillPaintCss(resolved);
+    const safeFill =
+      codeOpts?.themeSafeColors && designTokens
+        ? bridgeThemeSafeFillExportValue(
+            node,
+            designTokens,
+            codeOpts.canvasColorMode ?? "light",
+            codeOpts.cssSources ?? [],
+          )
+        : null;
+    const bg = safeFill ?? fillPaintCss(resolved);
     if (bg !== "transparent") style.background = bg;
   }
 
@@ -96,7 +125,7 @@ export function nodeToReactStyle(
   const sc = node.strokeColor;
   if (!compositeGroup && sw > 0 && sc && node.strokeEnabled !== false) {
     Object.assign(style, strokeSidesToReactStyle(node));
-  } else if (node.type === "frame") {
+  } else if (node.type === "frame" && !codeOpts?.canvasAddition) {
     style.border = "1px solid #e5e5e5";
   }
 

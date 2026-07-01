@@ -6,9 +6,11 @@ import { bridgeFetch } from "@/lib/craftBridge/bridgeFetch";
 import { buildSemanticBridgeExportBundle } from "@/lib/craftBridge/bridgeRoundTripExport";
 import { hashStringSha256 } from "@/lib/craftBridge/canvasExportHash";
 import { fetchLinkedSourceContent, type ReadSourceResponse } from "@/lib/craftBridge/readLinkedSource";
-import { shouldUseSemanticBridgeSync } from "@/lib/craftBridge/semanticBridgeSync";
+import { shouldUseSemanticBridgeSync, isCorruptedCraftDivExport } from "@/lib/craftBridge/semanticBridgeSync";
+import { pickCodeExportRootIds } from "@/lib/codeExport/frameRelativeExport";
+import { collectSubtreeForExport } from "@/lib/codeRoundTrip/collectSubtree";
 import type { EditorAsset } from "@/lib/documentPersistence";
-import type { DesignToken } from "@/lib/designTokens";
+import type { DesignToken, CanvasColorMode } from "@/lib/designTokens";
 import type { EditorNode } from "@/stores/useEditorStore";
 
 export type SyncSourceInput = {
@@ -20,6 +22,7 @@ export type SyncSourceInput = {
   fileName: string;
   sourceHeader: string | null;
   link: CodeRoundTripLink;
+  canvasColorMode?: CanvasColorMode;
   /** Must be true — canvas never writes source without an explicit user action. */
   explicitUserExport?: boolean;
 };
@@ -39,6 +42,32 @@ export function linkedSourceFormat(sourcePath: string): "react" | "html" {
   const lower = sourcePath.toLowerCase();
   if (lower.endsWith(".html") || lower.endsWith(".htm")) return "html";
   return "react";
+}
+
+/** Target the screen frame the user selected (bridgeSourcePath) instead of a stale global link. */
+export function resolveExportLinkForSelection(
+  link: CodeRoundTripLink,
+  nodes: Record<string, EditorNode>,
+  selectedIds: string[],
+  childOrder: Record<string, string[]>,
+): CodeRoundTripLink {
+  const exportRootIds = pickCodeExportRootIds(selectedIds, nodes, childOrder);
+  const rootId = exportRootIds[0];
+  const bridgeSource = rootId ? nodes[rootId]?.bridgeSourcePath?.trim() : undefined;
+  if (bridgeSource && !bridgeSource.startsWith("preview://")) {
+    return { ...link, sourcePath: bridgeSource.replace(/\\/g, "/") };
+  }
+  return link;
+}
+
+function exportNodesForSelection(input: SyncSourceInput): Record<string, EditorNode> {
+  const exportRootIds = pickCodeExportRootIds(
+    input.selectedIds,
+    input.nodes,
+    input.childOrder,
+  );
+  if (exportRootIds.length === 0) return input.nodes;
+  return collectSubtreeForExport(exportRootIds, input.nodes, input.childOrder).nodes;
 }
 
 export function buildLinkedExportSource(input: SyncSourceInput): string | null {
@@ -129,7 +158,13 @@ export async function computeCanvasExportHash(input: SyncSourceInput): Promise<s
       sourceContent: sourceRead.content,
       cssFiles,
       nodes: input.nodes,
+      childOrder: input.childOrder,
       designTokens: input.designTokens,
+      assets: input.assets,
+      link: input.link,
+      sourceHeader: input.sourceHeader,
+      fileName: input.fileName,
+      canvasColorMode: input.canvasColorMode,
     });
     return bundle.hash;
   }
@@ -159,28 +194,62 @@ export async function syncSourceToLinkedFile(input: SyncSourceInput): Promise<Sy
     };
   }
 
-  const read = await fetchLinkedSourceContent(input.link);
+  const link = resolveExportLinkForSelection(
+    input.link,
+    input.nodes,
+    input.selectedIds,
+    input.childOrder,
+  );
+  const exportNodes = exportNodesForSelection(input);
+  const exportRootIds = pickCodeExportRootIds(
+    input.selectedIds,
+    input.nodes,
+    input.childOrder,
+  );
+  const exportChildOrder =
+    exportRootIds.length > 0
+      ? collectSubtreeForExport(exportRootIds, input.nodes, input.childOrder).childOrder
+      : input.childOrder;
+  const exportInput = { ...input, link, nodes: exportNodes };
+
+  const read = await fetchLinkedSourceContent(link);
   if ("ok" in read && read.ok === false) {
     return { ok: false, error: read.error };
   }
   const sourceRead = read as ReadSourceResponse;
 
+  if (isCorruptedCraftDivExport(sourceRead.content)) {
+    return {
+      ok: false,
+      error:
+        "This screen file was overwritten by a Craft div export (Header/SVG components are missing). " +
+        "Restore the original React source from git, then export again:\n" +
+        `git checkout -- ${link.sourcePath.replace(/\\/g, "/")}`,
+    };
+  }
+
   let exported: string | null = null;
   let semanticBundle: Awaited<ReturnType<typeof buildSemanticBridgeExportBundle>> | null = null;
-  const semanticExport = isSemanticLiveBridgeExport(input.link, sourceRead.content);
+  const semanticExport = isSemanticLiveBridgeExport(link, sourceRead.content);
   if (semanticExport) {
-    const cssFiles = await fetchLinkedCssFiles(input.link);
+    const cssFiles = await fetchLinkedCssFiles(link);
     semanticBundle = await buildSemanticBridgeExportBundle({
-      sourcePath: input.link.sourcePath,
-      cssPaths: input.link.cssPaths ?? [],
+      sourcePath: link.sourcePath,
+      cssPaths: link.cssPaths ?? [],
       sourceContent: sourceRead.content,
       cssFiles,
-      nodes: input.nodes,
+      nodes: exportNodes,
+      childOrder: exportChildOrder,
       designTokens: input.designTokens,
+      assets: input.assets,
+      link,
+      sourceHeader: input.sourceHeader,
+      fileName: input.fileName,
+      canvasColorMode: input.canvasColorMode,
     });
     exported = semanticBundle.tsx;
   } else {
-    exported = buildLinkedExportSource(input);
+    exported = buildLinkedExportSource(exportInput);
   }
 
   if (!exported) {
@@ -194,10 +263,10 @@ export async function syncSourceToLinkedFile(input: SyncSourceInput): Promise<Sy
   }
 
   const tsxResult = await writeLinkedSourceFile({
-    repoRoot: input.link.repoRoot,
-    sourcePath: input.link.sourcePath,
+    repoRoot: link.repoRoot,
+    sourcePath: link.sourcePath,
     content: exported,
-    ifMatchHash: input.link.lastExportedHash,
+    ifMatchHash: link.lastExportedHash,
   });
 
   if (!tsxResult.ok) {
@@ -205,11 +274,11 @@ export async function syncSourceToLinkedFile(input: SyncSourceInput): Promise<Sy
   }
 
   const cssWritten: string[] = [];
-  const cssPaths = (input.link.cssPaths ?? []).filter((p) => p?.trim());
+  const cssPaths = (link.cssPaths ?? []).filter((p) => p?.trim());
   if (semanticExport && semanticBundle && semanticBundle.cssFiles.length > 0) {
     for (const file of semanticBundle.cssFiles) {
       const cssWrite = await writeLinkedSourceFile({
-        repoRoot: input.link.repoRoot,
+        repoRoot: link.repoRoot,
         sourcePath: file.path,
         content: file.content,
       });
@@ -219,9 +288,9 @@ export async function syncSourceToLinkedFile(input: SyncSourceInput): Promise<Sy
       cssWritten.push(file.path);
     }
   } else if (!semanticExport && cssPaths.length > 0) {
-    const originalCss = await fetchLinkedCssFiles(input.link);
+    const originalCss = await fetchLinkedCssFiles(link);
     const updatedCss = exportPageCssFiles({
-      nodes: input.nodes,
+      nodes: exportNodes,
       designTokens: input.designTokens,
       originalCssFiles: originalCss,
     });
@@ -231,7 +300,7 @@ export async function syncSourceToLinkedFile(input: SyncSourceInput): Promise<Sy
       if (original?.content === file.content) continue;
 
       const cssWrite = await writeLinkedSourceFile({
-        repoRoot: input.link.repoRoot,
+        repoRoot: link.repoRoot,
         sourcePath: file.path,
         content: file.content,
       });

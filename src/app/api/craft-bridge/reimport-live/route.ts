@@ -4,7 +4,7 @@ import { importBridgeFromLivePreview } from "@/lib/craftBridge/bridgeLiveImport"
 import { normalizeBridgeImportSlice } from "@/lib/craftBridge/normalizeBridgeImportSlice";
 import { craftBridgeGuard } from "@/lib/craftBridge/apiGuard";
 import { readSourceFile, resolvePageSource, toRepoRelativePaths } from "@paytm-craft/bridge";
-import { defaultCaptureColorTheme } from "@/lib/webImport/captureTheme";
+import { resolveBridgeImportColorTheme } from "@/lib/webImport/captureTheme";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -52,7 +52,7 @@ export async function POST(req: Request) {
       sourceCode: tsxRead.content,
       fileName: path.basename(resolved.tsxPath),
       cssSources: companionCss,
-      theme: defaultCaptureColorTheme(),
+      theme: resolveBridgeImportColorTheme(previewUrl),
     });
     if (!live.ok) {
       return NextResponse.json({ error: live.error }, { status: 503 });

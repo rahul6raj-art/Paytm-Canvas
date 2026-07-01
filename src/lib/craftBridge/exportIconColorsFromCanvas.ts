@@ -1,5 +1,10 @@
 import { fillCss } from "@/lib/color";
-import { resolveNodeWithDesignTokens, type DesignToken } from "@/lib/designTokens";
+import {
+  resolveNodeWithDesignTokens,
+  type CanvasColorMode,
+  type DesignToken,
+} from "@/lib/designTokens";
+import { bridgeIconColorExportValue } from "@/lib/craftBridge/bridgeThemeSafeCssExport";
 import type { EditorNode } from "@/stores/useEditorStore";
 
 /** Class tokens that control Icon/currentColor SVG tint in PML screens. */
@@ -47,6 +52,49 @@ function findIconColorHost(
   return null;
 }
 
+function findBottomNavItemHost(
+  nodeId: string,
+  nodes: Record<string, EditorNode>,
+): EditorNode | null {
+  let cur = nodes[nodeId];
+  while (cur?.parentId) {
+    const parent = nodes[cur.parentId];
+    if (!parent) break;
+    const tokens = (parent.codeClassName ?? "").split(/\s+/).filter(Boolean);
+    if (tokens.some((t) => t === "bn__item" || t === "bn__item--active")) {
+      return parent;
+    }
+    cur = parent;
+  }
+  return null;
+}
+
+function isBottomNavItemActive(item: EditorNode): boolean {
+  return (item.codeClassName ?? "").split(/\s+/).some((t) => t === "bn__item--active");
+}
+
+/** Bottom nav is shared chrome — never patch from a single screen's local CSS export. */
+export function isBottomNavChromeClassName(codeClassName: string): boolean {
+  const tokens = codeClassName.split(/\s+/).filter(Boolean);
+  return tokens.some((t) => t === "bn" || t.startsWith("bn__"));
+}
+
+function iconColorExportSelector(
+  host: EditorNode,
+  nodes: Record<string, EditorNode>,
+): string | null {
+  const hostClass = primaryIconHostClass(host.codeClassName ?? "");
+  if (!hostClass) return null;
+
+  if (hostClass === "bn__icon-wrap") {
+    const item = findBottomNavItemHost(host.id, nodes);
+    if (!item || !isBottomNavItemActive(item)) return null;
+    return ".bn__item--active .bn__icon-wrap";
+  }
+
+  return `.${hostClass}`;
+}
+
 function iconPathColor(
   node: EditorNode,
   designTokens: Record<string, DesignToken>,
@@ -74,6 +122,7 @@ function iconPathColor(
 export function collectIconColorSelectorUpdates(
   nodes: Record<string, EditorNode>,
   designTokens: Record<string, DesignToken>,
+  canvasColorMode: CanvasColorMode = "light",
 ): Map<string, Record<string, string>> {
   const updates = new Map<string, Record<string, string>>();
 
@@ -87,9 +136,14 @@ export function collectIconColorSelectorUpdates(
     const hostClass = primaryIconHostClass(host.codeClassName);
     if (!hostClass) continue;
 
-    const selector = `.${hostClass}`;
+    const selector = iconColorExportSelector(host, nodes);
+    if (!selector) continue;
+
     const prev = updates.get(selector) ?? {};
-    updates.set(selector, { ...prev, color });
+    updates.set(selector, {
+      ...prev,
+      color: bridgeIconColorExportValue(color, node, designTokens, canvasColorMode),
+    });
   }
 
   return updates;

@@ -6,6 +6,7 @@ import {
   buildFontString,
   getTextMeasureContext,
   layoutTextFrameContentHeight,
+  canvasAlphabeticBaselineY,
   measureTypoAscent,
   measureTypoDescent,
   type TextLayout,
@@ -14,13 +15,13 @@ import type { TextResizeMode } from "./textNodeModel";
 
 export { measureTypoAscent, measureTypoDescent } from "./textMeasure";
 
-/** Map canvas line-top y (`textBaseline: top`) to SVG `<tspan y>` with `dominant-baseline: alphabetic`. */
+/** Map line box top to SVG `<tspan y>` with `dominant-baseline: alphabetic` (includes CSS half-leading). */
 export function svgTextTspanY(
-  canvasLineTopY: number,
+  lineBoxTopY: number,
   typo: ResolvedTextTypo,
-  ascent?: number,
+  lineHeightPx: number = typo.lineHeightPx,
 ): number {
-  return canvasLineTopY + (ascent ?? measureTypoAscent(typo));
+  return canvasAlphabeticBaselineY(lineBoxTopY, lineHeightPx, typo);
 }
 
 /** Tight single-line height from font metrics (Figma hug-contents vertical). */
@@ -81,9 +82,13 @@ export function textBaselineLocalY(node: EditorNode): number | null {
   const { textLayoutForEditorNode } = require("./canonicalTextLayout") as typeof import("./canonicalTextLayout");
   const prepared = textLayoutForEditorNode(node);
   if (!prepared) return null;
+  const lineBox = prepared.canonical.lineBoxes[0];
+  if (lineBox && Number.isFinite(lineBox.baseline)) {
+    return lineBox.baseline;
+  }
   const firstLine = prepared.canonical.lines[0];
   if (!firstLine) return null;
-  return svgTextTspanY(firstLine.y, prepared.typo, prepared.layout.firstLineAscent);
+  return canvasAlphabeticBaselineY(firstLine.y, prepared.layout.lineHeightPx, prepared.typo);
 }
 
 /** Baseline segment across the text box width in world coordinates. */

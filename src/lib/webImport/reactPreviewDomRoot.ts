@@ -99,16 +99,31 @@ export function expandScrollContainersInDomTree(node: DomSnapshotNode): DomSnaps
 }
 
 /**
- * Re-root on the phone column and expand to full scrollable page height (all sections).
+ * Re-root on the phone column. Default expands to full scroll height; bridge uses viewportOnly
+ * so the canvas matches what the dev preview shows (no gap between content and bottom nav).
  */
 export function focusDomTreeOnReactScreenRoot(
   root: DomSnapshotNode,
   viewport: { width: number; height: number },
+  opts?: { viewportOnly?: boolean },
 ): DomSnapshotNode {
   const screen = findBestScreenCandidate(root, viewport);
   if (!screen) return root;
 
   const shifted = shiftDomTree(screen, screen.rect.x, screen.rect.y);
+
+  if (opts?.viewportOnly) {
+    return {
+      ...shifted,
+      rect: {
+        x: 0,
+        y: 0,
+        width: Math.round(shifted.rect.width),
+        height: viewport.height,
+      },
+    };
+  }
+
   const contentHeight = Math.round(descendantContentHeight(shifted));
   const focused = {
     ...shifted,

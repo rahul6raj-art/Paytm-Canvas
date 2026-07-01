@@ -49,6 +49,8 @@ export type CraftBridgePendingImport = {
   id: string;
   createdAt: string;
   slice: Record<string, unknown>;
+  /** Playwright viewport used for capture (from live preview push). */
+  captureViewport?: { width?: number; height?: number };
   link?: Pick<
     CodeRoundTripLink,
     | "sourcePath"

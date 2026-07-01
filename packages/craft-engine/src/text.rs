@@ -190,7 +190,13 @@ pub fn tessellate_text_content(
     let inner_h = (node.height - TEXT_BOX_PAD_Y * 2.0).max(1.0);
     let block_y = TEXT_BOX_PAD_Y
         + vertical_content_offset_y(layout.height, inner_h, vertical_align_for(node));
-    let baseline = (layout.line_height_px - font_size) * 0.5;
+    // Center the glyph em-box (ascent + descent) in the line box (half-leading), matching Figma —
+    // not the font_size, which left a gap below the glyphs.
+    let (asc, desc) = match font.horizontal_line_metrics(font_size) {
+        Some(m) => (m.ascent, m.descent),
+        None => (font_size * 0.82, -font_size * 0.22),
+    };
+    let baseline = (layout.line_height_px - (asc + desc.abs())) * 0.5;
 
     let base = parse_color(
         node.text_color.as_ref().or(node.fill.as_ref()),

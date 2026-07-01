@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { EditorNode } from "@/stores/useEditorStore";
 import {
   removeRootSubtree,
+  resolveBridgeCanvasIdentity,
   resolveBridgeImportStrategy,
   screenLabelFromSourcePath,
 } from "../bridgeImportStrategy";
@@ -89,6 +90,70 @@ describe("resolveBridgeImportStrategy", () => {
         "src/screens/PMLMorePage/PMLMorePage.tsx",
       ),
       { mode: "replace-root", rootId: "more", x: 80, y: 80 },
+    );
+  });
+
+  it("appends onboarding steps that share one source file but differ by preview route", () => {
+    const sharedFile = "src/features/onboarding-flow/OnboardingFlow.tsx";
+    const mobilePreview = "preview://?screen=onboarding&step=mobile";
+    const otpPreview = "preview://?screen=onboarding&step=otp";
+    assert.deepEqual(
+      resolveBridgeImportStrategy(
+        {
+          childOrder: { [EDITOR_ROOT_KEY]: ["mobile"] },
+          nodes: {
+            mobile: frame("mobile", {
+              name: "Onboarding — Mobile",
+              bridgeSourcePath: mobilePreview,
+              x: 80,
+              y: 80,
+            }),
+          },
+        },
+        otpPreview,
+      ),
+      { mode: "append" },
+    );
+    assert.deepEqual(
+      resolveBridgeImportStrategy(
+        {
+          childOrder: { [EDITOR_ROOT_KEY]: ["mobile"] },
+          nodes: {
+            mobile: frame("mobile", {
+              name: "Onboarding — Mobile",
+              bridgeSourcePath: mobilePreview,
+              x: 80,
+              y: 80,
+            }),
+          },
+        },
+        mobilePreview,
+      ),
+      { mode: "replace-root", rootId: "mobile", x: 80, y: 80 },
+    );
+    assert.notEqual(mobilePreview, sharedFile);
+  });
+});
+
+describe("resolveBridgeCanvasIdentity", () => {
+  it("prefers preview route over linked file path", () => {
+    assert.equal(
+      resolveBridgeCanvasIdentity({
+        sourcePath: "src/features/onboarding-flow/OnboardingFlow.tsx",
+        previewUrl: "http://localhost:5173/?screen=onboarding&step=mobile&theme=light",
+        repoRoot: "/repo",
+      }),
+      "preview://?screen=onboarding&step=mobile",
+    );
+  });
+
+  it("falls back to file path when previewUrl is missing", () => {
+    assert.equal(
+      resolveBridgeCanvasIdentity({
+        sourcePath: "src/screens/PMLMorePage/PMLMorePage.tsx",
+        repoRoot: "/repo",
+      }),
+      "src/screens/PMLMorePage/PMLMorePage.tsx",
     );
   });
 });

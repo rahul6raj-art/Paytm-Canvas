@@ -175,4 +175,38 @@ describe("focusDomTreeOnReactScreenRoot", () => {
     assert.equal(focused.children[0]?.rect.x, 16);
     assert.equal(focused.children[0]?.rect.y, 120);
   });
+
+  it("viewportOnly keeps phone shell at viewport height without pinning nav to scroll bottom", () => {
+    const root = node({
+      id: "body",
+      tagName: "body",
+      rect: { x: 0, y: 0, width: 390, height: 844 },
+      children: [
+        node({
+          id: "more",
+          tagName: "div",
+          className: "pml-more",
+          rect: { x: 7, y: 0, width: 376, height: 844 },
+          children: [
+            node({
+              id: "card",
+              tagName: "div",
+              className: "card",
+              rect: { x: 16, y: 120, width: 344, height: 96 },
+            }),
+            node({
+              id: "nav",
+              tagName: "div",
+              className: "pml-more__bottom-nav",
+              rect: { x: 0, y: 756, width: 376, height: 88 },
+            }),
+          ],
+        }),
+      ],
+    });
+
+    const focused = focusDomTreeOnReactScreenRoot(root, { width: 390, height: 844 }, { viewportOnly: true });
+    assert.equal(focused.rect.height, 844);
+    assert.equal(focused.children.find((c) => c.className === "pml-more__bottom-nav")?.rect.y, 756);
+  });
 });

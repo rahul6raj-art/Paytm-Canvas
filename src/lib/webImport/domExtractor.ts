@@ -1,7 +1,9 @@
 import type { DomSnapshotNode, DomPseudoElement } from "@/lib/webImport/types";
+import { structuralHairlinesFromStyles } from "@/lib/webImport/bridgeCaptureHairlines";
+import { hasPmlStrokeButtonClassToken } from "@/lib/webImport/pmlButtonClass";
 
 /**
- * Runs inside Playwright page context — must stay self-contained (no imports).
+ * Runs inside Playwright page context — bundled for the browser via `bundle:dom-extractor`.
  * Extracts DOM tree with computed styles, bounds, transforms, and pseudo-elements.
  */
 export function extractDomTreeInBrowser(): DomSnapshotNode {
@@ -118,6 +120,121 @@ export function extractDomTreeInBrowser(): DomSnapshotNode {
     };
   }
 
+  const GLYPH_CAPTURE_LIMIT = 512;
+
+  /** Chromium line + per-char boxes for bridge editable text parity (element-local px). */
+  function captureBrowserTextLayout(el: Element): Raw["browserTextLayout"] | undefined {
+    const textNodes: Text[] = [];
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let tn: Node | null;
+    while ((tn = walker.nextNode())) {
+      const t = tn as Text;
+      if ((t.textContent ?? "").length > 0) textNodes.push(t);
+    }
+    if (!textNodes.length) return undefined;
+
+    const fullText = textNodes.map((t) => t.textContent ?? "").join("");
+    if (!fullText.trim()) return undefined;
+
+    const elRect = el.getBoundingClientRect();
+    if (elRect.width < 0.5 || elRect.height < 0.5) return undefined;
+
+    type CharPos = { node: Text; offset: number };
+    function posAt(index: number): CharPos {
+      let rem = index;
+      for (const t of textNodes) {
+        const len = t.textContent?.length ?? 0;
+        if (rem <= len) return { node: t, offset: rem };
+        rem -= len;
+      }
+      const last = textNodes[textNodes.length - 1]!;
+      return { node: last, offset: last.textContent?.length ?? 0 };
+    }
+
+    const range = document.createRange();
+    const lines: NonNullable<Raw["browserTextLayout"]>["lines"] = [];
+    const glyphs: NonNullable<Raw["browserTextLayout"]>["glyphs"] = [];
+
+    let lineStart = 0;
+    while (lineStart < fullText.length) {
+      while (lineStart < fullText.length && fullText[lineStart] === " ") lineStart++;
+      if (lineStart >= fullText.length) break;
+
+      const startPos = posAt(lineStart);
+      range.setStart(startPos.node, startPos.offset);
+      const probeEnd = posAt(Math.min(lineStart + 1, fullText.length));
+      range.setEnd(probeEnd.node, probeEnd.offset);
+      const lineTop = range.getBoundingClientRect().top;
+
+      let lo = lineStart + 1;
+      let hi = fullText.length;
+      let lineEnd = lo;
+      while (lo <= hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        const endPos = posAt(mid);
+        range.setStart(startPos.node, startPos.offset);
+        range.setEnd(endPos.node, endPos.offset);
+        const rects = Array.from(range.getClientRects());
+        const sameLine =
+          rects.length > 0 && rects.every((r) => Math.abs(r.top - lineTop) <= 1.5);
+        if (sameLine) {
+          lineEnd = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+
+      if (lineEnd <= lineStart) lineEnd = Math.min(lineStart + 1, fullText.length);
+
+      range.setStart(startPos.node, startPos.offset);
+      range.setEnd(posAt(lineEnd).node, posAt(lineEnd).offset);
+      const lineRect = range.getBoundingClientRect();
+      const lineText = fullText.slice(lineStart, lineEnd).replace(/\s+$/, "");
+
+      lines.push({
+        text: lineText,
+        startIndex: lineStart,
+        x: lineRect.left - elRect.left,
+        y: lineRect.top - elRect.top,
+        width: Math.max(1, lineRect.width),
+        height: Math.max(1, lineRect.height),
+        baselineY: lineRect.bottom - elRect.top,
+      });
+
+      if (glyphs.length < GLYPH_CAPTURE_LIMIT) {
+        for (let i = lineStart; i < lineEnd && glyphs.length < GLYPH_CAPTURE_LIMIT; i++) {
+          const ch = fullText[i]!;
+          if (ch === " " || ch === "\n" || ch === "\t") continue;
+          const s = posAt(i);
+          const e = posAt(i + 1);
+          range.setStart(s.node, s.offset);
+          range.setEnd(e.node, e.offset);
+          const gr = range.getBoundingClientRect();
+          if (gr.width < 0.01 || gr.height < 0.01) continue;
+          glyphs.push({
+            index: i,
+            x: gr.left - elRect.left,
+            y: gr.top - elRect.top,
+            width: gr.width,
+            height: gr.height,
+          });
+        }
+      }
+
+      lineStart = lineEnd;
+      if (fullText[lineStart] === "\n") lineStart++;
+    }
+
+    if (!lines.length) return undefined;
+
+    return {
+      content: fullText.replace(/\s+/g, " ").trim(),
+      lines,
+      glyphs: glyphs.length ? glyphs : undefined,
+    };
+  }
+
   function pseudoLayers(el: Element): DomPseudoElement[] | undefined {
     const out: DomPseudoElement[] = [];
     for (const kind of ["before", "after"] as const) {
@@ -129,6 +246,13 @@ export function extractDomTreeInBrowser(): DomSnapshotNode {
         content.startsWith('"') || content.startsWith("'")
           ? content.slice(1, -1)
           : undefined;
+      // Decorative ::before/::after shells (background only) must not paint over real children.
+      if (kind === "before" && el.childElementCount > 0) {
+        const bg = cs.backgroundColor;
+        const hasBg = bg && bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent";
+        const decorative = !text?.trim();
+        if (hasBg && decorative) continue;
+      }
       const rect = rectOf(el);
       out.push({
         kind,
@@ -204,6 +328,25 @@ export function extractDomTreeInBrowser(): DomSnapshotNode {
     if (!bg || bg === "none" || bg.includes("gradient")) return undefined;
     const m = bg.match(/url\(["']?([^"')]+)["']?\)/i);
     return m?.[1];
+  }
+
+  function aggregateBadgeText(el: Element): string | undefined {
+    const cls = (el.className ?? "").toString().toLowerCase();
+    if (!/\bbadge\b|\bchip\b|\btag\b/.test(cls)) return undefined;
+    const t = (el.textContent ?? "").replace(/\s+/g, " ").trim();
+    return t ? t.slice(0, 200) : undefined;
+  }
+
+  function aggregateCalloutText(el: Element): string | undefined {
+    const cls = (el.className ?? "").toString().toLowerCase();
+    if (
+      !/\b(?:callout|alert|notice|info|message|banner|hint|positive|negative|warning)\b/.test(cls) &&
+      !/\bob-flow__(?:message|hint|alert|info|callout)\b/.test(cls)
+    ) {
+      return undefined;
+    }
+    const t = (el.textContent ?? "").replace(/\s+/g, " ").trim();
+    return t ? t.slice(0, 4000) : undefined;
   }
 
   function aggregateControlText(el: Element): string | undefined {
@@ -287,6 +430,13 @@ export function extractDomTreeInBrowser(): DomSnapshotNode {
     return t ? t.slice(0, 4000) : undefined;
   }
 
+  function soleElementText(el: Element): string | undefined {
+    if (el.children.length > 0) return undefined;
+    const t = (el.textContent ?? "").replace(/\s+/g, " ").trim();
+    if (!t) return undefined;
+    return t.slice(0, 4000);
+  }
+
   function leafText(el: Element): string | undefined {
     const tag = el.tagName.toLowerCase();
     if (["input", "textarea", "select"].includes(tag)) return undefined;
@@ -319,6 +469,8 @@ export function extractDomTreeInBrowser(): DomSnapshotNode {
     const tag = el.tagName.toLowerCase();
     // Inner SVG shapes are captured via svgMarkup on the <svg> node.
     if (tag === "svg") return [];
+    const bridgeCapture =
+      document.documentElement.getAttribute("data-craft-bridge-capture") === "1";
     const splitInlineText =
       hasMixedInlineContent(el) &&
       (tag === "p" || tag === "span" || tag === "div" || tag === "label");
@@ -333,6 +485,8 @@ export function extractDomTreeInBrowser(): DomSnapshotNode {
         range.selectNodeContents(child);
         const textRect = range.getBoundingClientRect();
         if (textRect.width < 0.5 && textRect.height < 0.5) continue;
+        const w = Math.max(1, textRect.width);
+        const h = Math.max(1, textRect.height);
         children.push({
           id: nextId(),
           tagName: "span",
@@ -340,10 +494,26 @@ export function extractDomTreeInBrowser(): DomSnapshotNode {
           rect: {
             x: textRect.x + window.scrollX,
             y: textRect.y + window.scrollY,
-            width: Math.max(1, textRect.width),
-            height: Math.max(1, textRect.height),
+            width: w,
+            height: h,
           },
           styles: stylesOf(el),
+          browserTextLayout: bridgeCapture
+            ? {
+                content: trimmed,
+                lines: [
+                  {
+                    text: trimmed,
+                    startIndex: 0,
+                    x: 0,
+                    y: 0,
+                    width: w,
+                    height: h,
+                    baselineY: h,
+                  },
+                ],
+              }
+            : undefined,
           children: [],
         });
         continue;
@@ -374,7 +544,9 @@ export function extractDomTreeInBrowser(): DomSnapshotNode {
       };
     }
 
-    const children = walkChildNodes(el, depth);
+    const styles = stylesOf(el);
+    const bridgeCapture =
+      document.documentElement.getAttribute("data-craft-bridge-capture") === "1";
 
     const rawClass = (el as HTMLElement).className;
     const className =
@@ -382,10 +554,49 @@ export function extractDomTreeInBrowser(): DomSnapshotNode {
         ? rawClass.trim().replace(/\s+/g, " ").slice(0, 512)
         : undefined;
 
-    const styles = stylesOf(el);
+    const children = walkChildNodes(el, depth);
+
+    const outlinedControlCapture = hasPmlStrokeButtonClassToken(className);
+
+    if (bridgeCapture && rect.width >= 1 && rect.height >= 1) {
+      for (const line of structuralHairlinesFromStyles(styles, rect.width, rect.height, {
+        includeFullBoxBorder: outlinedControlCapture,
+      })) {
+        children.push({
+          id: nextId(),
+          tagName: "div",
+          className: `craft-capture-edge-${line.edge}`,
+          rect: {
+            x: rect.x + line.x,
+            y: rect.y + line.y,
+            width: line.width,
+            height: line.height,
+          },
+          styles: {
+            backgroundColor: line.color,
+            width: `${line.width}px`,
+            height: `${line.height}px`,
+          },
+          children: [],
+        });
+      }
+    }
+
     const controlText = aggregateControlText(el);
     const nestedText = aggregateNestedText(el);
-    const text = leafText(el) ?? controlText ?? nestedText;
+    let text =
+      leafText(el) ??
+      aggregateBadgeText(el) ??
+      aggregateCalloutText(el) ??
+      controlText ??
+      nestedText ??
+      soleElementText(el);
+    if (bridgeCapture && tag === "input") {
+      const inputVal = (el as HTMLInputElement).value?.replace(/\s+/g, " ").trim();
+      if (inputVal) text = inputVal;
+    }
+    const browserTextLayout =
+      bridgeCapture && text ? captureBrowserTextLayout(el) : undefined;
     const img =
       tag === "img" ? tryCanvasImgDataUrl(el as HTMLImageElement) : undefined;
     const href = tag === "a" ? (el as HTMLAnchorElement).href : undefined;
@@ -408,6 +619,7 @@ export function extractDomTreeInBrowser(): DomSnapshotNode {
       rect,
       styles,
       pseudoElements: pseudoLayers(el),
+      browserTextLayout,
       children,
     };
   }

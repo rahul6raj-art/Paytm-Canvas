@@ -83,9 +83,15 @@ import { refreshPenHoverPreview, isPenShiftKeyEvent } from "@/lib/penTool/penShi
 import { PenDrawingOverlayHost, penPreviousWorldAnchor } from "@/components/editor/PenDrawingOverlay";
 import { applyPathEditHitSelection } from "@/lib/pathEditSelection";
 import {
-  getPanPreviewSnapshot,
-  PAN_PREVIEW_IDLE,
-  subscribePanPreview,
+  applyPanPreview,
+  applyWheelViewportPreview,
+  clearPanPreview,
+  clearWheelViewportPreview,
+  getEffectiveViewportSnapshot,
+  readPanPreviewDelta,
+  registerCanvasGrid,
+  registerCanvasSceneTransform,
+  subscribeViewportPreview,
 } from "@/lib/canvasEphemeralTransform";
 import { wheelZoomFactor, zoomAtScreenPoint } from "@/lib/canvasZoom";
 import { snapPanToDevicePixels } from "@/lib/crispRender";
@@ -93,13 +99,6 @@ import {
   createRafPointerScheduler,
   forEachCoalescedPointerEvent,
 } from "@/lib/smoothPointer";
-import {
-  applyPanPreview,
-  clearPanPreview,
-  readPanPreviewDelta,
-  registerCanvasGrid,
-  registerCanvasSceneTransform,
-} from "@/lib/canvasEphemeralTransform";
 import {
   activateCanvasForShortcuts,
   focusCanvasViewport,
@@ -111,6 +110,7 @@ import {
 } from "@/lib/editorKeyboardFocus";
 import { enterTextEditModeAtWorldPoint } from "@/lib/text/textEditMode";
 import { hasEditorClipboardContent } from "@/lib/editorClipboardAvailability";
+import { shouldSuppressDuplicateEditorPaste } from "@/lib/editorPasteDedup";
 import {
   clearPostCreationPointerSuppress,
   shouldSuppressCanvasPointer,
@@ -389,19 +389,20 @@ export function Canvas() {
   }, []);
 
   const panPreview = useSyncExternalStore(
-    subscribePanPreview,
-    getPanPreviewSnapshot,
-    () => PAN_PREVIEW_IDLE,
+    subscribeViewportPreview,
+    getEffectiveViewportSnapshot,
+    () => ({ pan: snappedPan, zoom }),
   );
-  const effectivePan = useMemo(
-    () => ({ x: snappedPan.x + panPreview.dx, y: snappedPan.y + panPreview.dy }),
-    [snappedPan.x, snappedPan.y, panPreview.dx, panPreview.dy],
-  );
+  const effectivePan = panPreview.pan;
+  const effectiveZoom = panPreview.zoom;
 
   const toWorld = useCallback(
     (clientX: number, clientY: number) =>
-      clientToWorld(clientX, clientY, viewportRef.current, { pan: effectivePan, zoom }),
-    [effectivePan, zoom],
+      clientToWorld(clientX, clientY, viewportRef.current, {
+        pan: effectivePan,
+        zoom: effectiveZoom,
+      }),
+    [effectivePan.x, effectivePan.y, effectiveZoom],
   );
 
   const onCanvasDragOverCapture = useCallback(
@@ -489,6 +490,7 @@ export function Canvas() {
       }
       if (hasEditorClipboardContent()) {
         e.preventDefault();
+        if (shouldSuppressDuplicateEditorPaste()) return;
         useEditorStore.getState().pasteSelection();
       }
     },
@@ -516,60 +518,92 @@ export function Canvas() {
     [toWorld],
   );
 
-  const wheelPanAccumRef = useRef({ dx: 0, dy: 0, raf: 0 });
-  const wheelZoomAccumRef = useRef({ factor: 1, mx: 0, my: 0, raf: 0 });
+  const wheelAccumRef = useRef({
+    dx: 0,
+    dy: 0,
+    zoomFactor: 1,
+    focusX: 0,
+    focusY: 0,
+    zoomGesture: false,
+    raf: 0,
+    commitTimer: null as ReturnType<typeof setTimeout> | null,
+  });
 
-  const handleViewportWheel = useCallback((e: WheelEvent) => {
-    const el = viewportRef.current;
-    if (!el) return;
+  const commitWheelViewportPreview = useCallback(() => {
+    const accum = wheelAccumRef.current;
+    if (accum.commitTimer) {
+      clearTimeout(accum.commitTimer);
+      accum.commitTimer = null;
+    }
+    const live = getEffectiveViewportSnapshot();
+    useEditorStore.setState({ pan: live.pan, zoom: live.zoom });
+    clearWheelViewportPreview();
+  }, []);
 
-    // Must run from a non-passive listener — React's onWheel is passive, so preventDefault()
-    // is ignored and pinch/ctrl+wheel zooms the whole browser page instead of the canvas.
-    e.preventDefault();
-    e.stopPropagation();
+  const scheduleWheelViewportCommit = useCallback(() => {
+    const accum = wheelAccumRef.current;
+    if (accum.commitTimer) clearTimeout(accum.commitTimer);
+    accum.commitTimer = setTimeout(() => {
+      accum.commitTimer = null;
+      commitWheelViewportPreview();
+    }, 120);
+  }, [commitWheelViewportPreview]);
 
-    if (e.ctrlKey || e.metaKey) {
-      const r = el.getBoundingClientRect();
-      const mx = e.clientX - r.left;
-      const my = e.clientY - r.top;
-      const step = wheelZoomFactor(e.deltaY, e.deltaMode, { pageHeight: el.clientHeight });
-      const accum = wheelZoomAccumRef.current;
-      accum.factor *= step;
-      accum.mx = mx;
-      accum.my = my;
+  const handleViewportWheel = useCallback(
+    (e: WheelEvent) => {
+      const el = viewportRef.current;
+      if (!el) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const accum = wheelAccumRef.current;
+      if (e.ctrlKey || e.metaKey) {
+        const r = el.getBoundingClientRect();
+        accum.zoomGesture = true;
+        accum.focusX = e.clientX - r.left;
+        accum.focusY = e.clientY - r.top;
+        accum.zoomFactor *= wheelZoomFactor(e.deltaY, e.deltaMode, {
+          pageHeight: el.clientHeight,
+        });
+      } else {
+        const scale = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1;
+        accum.dx += -e.deltaX * scale;
+        accum.dy += -e.deltaY * scale;
+      }
+
       if (accum.raf) return;
       accum.raf = requestAnimationFrame(() => {
         accum.raf = 0;
-        const { factor, mx: fx, my: fy } = accum;
-        accum.factor = 1;
-        if (factor === 1) return;
-        const s = useEditorStore.getState();
-        const next = zoomAtScreenPoint({
-          zoom: s.zoom,
-          pan: s.pan,
-          focusX: fx,
-          focusY: fy,
-          factor,
-        });
-        useEditorStore.setState(next);
-      });
-      return;
-    }
+        const base = getEffectiveViewportSnapshot();
+        let nextPan = base.pan;
+        let nextZoom = base.zoom;
 
-    const scale = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1;
-    const accum = wheelPanAccumRef.current;
-    accum.dx += -e.deltaX * scale;
-    accum.dy += -e.deltaY * scale;
-    if (accum.raf) return;
-    accum.raf = requestAnimationFrame(() => {
-      accum.raf = 0;
-      const { dx, dy } = accum;
-      accum.dx = 0;
-      accum.dy = 0;
-      if (dx === 0 && dy === 0) return;
-      useEditorStore.getState().patchPan({ x: dx, y: dy });
-    });
-  }, []);
+        if (accum.zoomGesture && accum.zoomFactor !== 1) {
+          const stepped = zoomAtScreenPoint({
+            zoom: base.zoom,
+            pan: base.pan,
+            focusX: accum.focusX,
+            focusY: accum.focusY,
+            factor: accum.zoomFactor,
+          });
+          nextPan = stepped.pan;
+          nextZoom = stepped.zoom;
+        } else if (accum.dx !== 0 || accum.dy !== 0) {
+          nextPan = { x: base.pan.x + accum.dx, y: base.pan.y + accum.dy };
+        }
+
+        accum.dx = 0;
+        accum.dy = 0;
+        accum.zoomFactor = 1;
+        accum.zoomGesture = false;
+
+        applyWheelViewportPreview(nextPan, nextZoom);
+        scheduleWheelViewportCommit();
+      });
+    },
+    [scheduleWheelViewportCommit],
+  );
 
   useEffect(() => {
     const el = viewportRef.current;
@@ -599,6 +633,7 @@ export function Canvas() {
       registerCanvasSceneTransform(null);
       registerCanvasGrid(null);
       clearPanPreview();
+      clearWheelViewportPreview();
     };
   }, [showGrid]);
 
@@ -631,6 +666,7 @@ export function Canvas() {
 
     if (e.button === 1 || activePanning) {
       e.preventDefault();
+      commitWheelViewportPreview();
       setIsPanning(true);
       panDrag.current = {
         pointerId: e.pointerId,
@@ -1248,7 +1284,7 @@ export function Canvas() {
       data-canvas-viewport
       data-renderer-mode={getRendererMode()}
       tabIndex={0}
-      className="absolute inset-0 overflow-hidden touch-none overscroll-none outline-none"
+      className="absolute inset-0 select-none overflow-hidden touch-none overscroll-none outline-none"
       style={{ cursor, touchAction: "none", backgroundColor: canvasBackgroundColor }}
       onPointerDownCapture={onViewportPointerDownCapture}
       onDragOverCapture={onCanvasDragOverCapture}
@@ -1323,7 +1359,7 @@ export function Canvas() {
       <div
         ref={sceneTransformRef}
         data-canvas-scene-transform
-        className="absolute left-0 top-0 z-[2] h-[6000px] w-[6000px] origin-top-left"
+        className="absolute left-0 top-0 z-[2] h-[6000px] w-[6000px] origin-top-left transform-gpu"
         style={{
           transform: `translate3d(${snappedPan.x}px, ${snappedPan.y}px, 0) scale(${zoom})`,
         }}
@@ -1395,7 +1431,7 @@ export function Canvas() {
       </div>
 
       {!figImportBusy ? (
-        <NativeHitLayer nodes={nodes} childOrder={childOrder} zoom={zoom} />
+        <NativeHitLayer nodes={nodes} childOrder={childOrder} zoom={effectiveZoom} />
       ) : null}
 
       <div

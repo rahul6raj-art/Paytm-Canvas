@@ -77,7 +77,8 @@ import {
   isCanvasSelectTool,
 } from "@/lib/canvasInteractionGuards";
 import { TextCanvasView } from "./TextCanvasView";
-import { enterTextEditModeAtWorldPoint } from "@/lib/text/textEditMode";
+import { isNativeRendererEnabled } from "@/lib/rendererMode";
+import { enterTextEditModeAtWorldPoint, resolveTextEditTargetOnDoubleClick } from "@/lib/text/textEditMode";
 import { PathEditPathOutline } from "./PathEditPathOutline";
 import { ShapeVectorView } from "./ShapeVectorView";
 import { BooleanGroupView, MaskGroupView } from "./BooleanGroupView";
@@ -580,7 +581,8 @@ export function CanvasObject({
 
   let body: React.ReactNode;
   if (node.type === "text") {
-    body = hideZeroDraft ? null : (
+    // Native mode paints text via TextSceneOverlay / TextEditOverlay at screen resolution.
+    body = hideZeroDraft || isNativeRendererEnabled() ? null : (
       <TextCanvasView
         node={node}
         isEditing={isEditingText}
@@ -870,6 +872,20 @@ export function CanvasObject({
 
         const st = useEditorStore.getState();
         const w = clientToWorld(e.clientX, e.clientY);
+
+        const textTarget = resolveTextEditTargetOnDoubleClick(
+          id,
+          w.x,
+          w.y,
+          st.nodes,
+          st.childOrder,
+        );
+        if (textTarget) {
+          e.stopPropagation();
+          enterTextEditModeAtWorldPoint(textTarget, w.x, w.y);
+          return;
+        }
+
         const slotDrill = slotDrillTargetForDoubleClick(
           id,
           w.x,

@@ -140,22 +140,22 @@ export function parseBorder(styles: DomSnapshotStyles): {
   strokeColor?: string;
   strokeWidth?: number;
 } {
-  const widths = [
-    parsePx(styles.borderTopWidth),
-    parsePx(styles.borderRightWidth),
-    parsePx(styles.borderBottomWidth),
-    parsePx(styles.borderLeftWidth),
-  ].filter((n): n is number => n != null && n > 0);
-  const colors = [
-    parseColor(styles.borderTopColor),
-    parseColor(styles.borderRightColor),
-    parseColor(styles.borderBottomColor),
-    parseColor(styles.borderLeftColor),
-  ].filter(Boolean) as string[];
-  if (widths.length > 0) {
+  const sides = [
+    { width: parsePx(styles.borderTopWidth), color: parseColor(styles.borderTopColor) },
+    { width: parsePx(styles.borderRightWidth), color: parseColor(styles.borderRightColor) },
+    { width: parsePx(styles.borderBottomWidth), color: parseColor(styles.borderBottomColor) },
+    { width: parsePx(styles.borderLeftWidth), color: parseColor(styles.borderLeftColor) },
+  ].filter((s): s is { width: number; color?: string } => s.width != null && s.width >= 0.5);
+
+  if (sides.length > 0) {
+    const strongest = sides.reduce((a, b) => (b.width > a.width ? b : a));
+    const color =
+      strongest.color ??
+      sides.find((s) => s.color)?.color ??
+      parseColorFromShorthand(styles.border);
     return {
-      strokeWidth: Math.max(...widths),
-      strokeColor: colors[0] ?? parseColorFromShorthand(styles.border),
+      strokeWidth: strongest.width,
+      strokeColor: color,
     };
   }
   const shorthand = parseBorderShorthand(styles.border);

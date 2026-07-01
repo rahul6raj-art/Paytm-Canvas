@@ -25,6 +25,7 @@ import { useCanvasColorMode } from "@/hooks/useCanvasColorMode";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { isRotateGeometryLockActive, rotateGeomSnapshotForNode } from "@/lib/rotation/rotateGeometryLock";
 import { useResolvedTextPaintNode } from "./TextNodeCanvasShell";
+import { withBridgeDomTextBox } from "@/lib/craftBridge/bridgeTextLayoutSemantics";
 
 type TextCanvasViewProps = {
   node: EditorNode;
@@ -52,9 +53,11 @@ export function TextCanvasView({
   const zoom = useEditorStore((s) => s.zoom);
   const canvasColorMode = useCanvasColorMode();
   const assets = useEditorStore((s) => s.assets);
+  const nodes = useEditorStore((s) => s.nodes);
   const textLayoutEpoch = useSyncExternalStore(subscribeTextLayoutEpoch, getTextLayoutEpoch, () => 0);
   const paintNode = useResolvedTextPaintNode(node);
-  const model = toTextNodeModel(paintNode, isEditing);
+  const layoutNode = withBridgeDomTextBox(paintNode, nodes);
+  const model = toTextNodeModel(layoutNode, isEditing);
   const caretIndex = selection?.focus ?? 0;
 
   useEffect(() => {
@@ -82,7 +85,7 @@ export function TextCanvasView({
 
     const paint = (mediaFill: Awaited<ReturnType<typeof loadTextMediaFill>>) => {
       if (!alive || !canvasRef.current) return;
-      const prepared = screenSized ? null : textLayoutForEditorNode(paintNode);
+      const prepared = textLayoutForEditorNode(layoutNode, { nodes });
       renderTextToCanvas(canvasRef.current, {
         typo: renderTypo,
         text: model.text,
@@ -90,7 +93,7 @@ export function TextCanvasView({
         height: renderHeight,
         textAlign: model.textAlign,
         verticalAlign: model.verticalAlign,
-        opacity: paintNode.opacity ?? 1,
+        opacity: layoutNode.opacity ?? 1,
         wrapWidth: renderWrapWidth,
         zoom: screenSized ? 1 : zoom,
         layoutScale: screenSized ? scaleX : undefined,
@@ -100,8 +103,8 @@ export function TextCanvasView({
         selection: isEditing ? selection : null,
         caretIndex: isEditing ? caretIndex : null,
         caretVisible: isEditing && caretVisible,
-        style: textAdvancedStyleFromNode(paintNode),
-        gradientNode: paintNode,
+        style: textAdvancedStyleFromNode(layoutNode),
+        gradientNode: layoutNode,
         mediaFill,
         prepared,
         textResizeMode: model.textResizeMode,
@@ -112,6 +115,21 @@ export function TextCanvasView({
         isRotateGeometryLockActive(rotateSt) &&
         rotateGeomSnapshotForNode(rotateSt, paintNode.id) != null;
       if (fresh?.type === "text" && !rotateLocked && !screenSized) {
+        if (layoutNode.bridgeDomTextBox && prepared && !isEditing) {
+          const lineHeightPx = prepared.layout.lineHeightPx;
+          const maxBottom = prepared.canonical.lines.reduce(
+            (max, line) => Math.max(max, line.y + lineHeightPx),
+            0,
+          );
+          const needH = Math.ceil(maxBottom);
+          if (needH > (fresh.height ?? 0) + 1) {
+            useEditorStore.getState().updateNodeStyle(
+              layoutNode.id,
+              { height: needH, bridgeDomTextBox: true, verticalAlign: "top" },
+              { skipHistory: true },
+            );
+          }
+        }
         const layoutPatch = textLayoutPatchForNode(fresh, fresh.content ?? "");
         if (
           layoutPatch &&
@@ -139,7 +157,8 @@ export function TextCanvasView({
     caretIndex,
     caretVisible,
     zoom,
-    paintNode,
+    layoutNode,
+    nodes,
     canvasColorMode,
     assets,
     textLayoutEpoch,

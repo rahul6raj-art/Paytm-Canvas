@@ -102,6 +102,18 @@ export function measureTypoDescent(typo: ResolvedTextTypo): number {
   );
 }
 
+/** Alphabetic baseline Y inside a line box — browser metrics + CSS half-leading (Figma). */
+export function canvasAlphabeticBaselineY(
+  lineTop: number,
+  lineHeight: number,
+  typo: ResolvedTextTypo,
+): number {
+  const ascent = measureTypoAscent(typo);
+  const descent = measureTypoDescent(typo);
+  const halfLeading = (lineHeight - (ascent + descent)) / 2;
+  return lineTop + halfLeading + ascent;
+}
+
 /** Resolved line height in px for layout — always from typography, never glyph bbox metrics. */
 export function resolveLayoutLineHeightPx(typo: ResolvedTextTypo): number {
   return typo.lineHeightPx;
@@ -302,7 +314,16 @@ export function layoutText(
 
 /** Baseline Y for a line index: firstBaseline + lineIndex × resolvedLineHeight (+ paragraph gaps). */
 export function lineBaselineY(layout: TextLayout, lineIndex: number): number {
-  let y = layout.verticalTrimTop + layout.firstLineAscent;
+  // Browsers and Figma render text in a line-height box that centers the glyph's em box
+  // (ascent + descent) vertically, distributing the leftover "leading" half above and half
+  // below (CSS half-leading). Without this offset, glyphs hug the TOP of every line box and
+  // leave the leading as a gap *below* the text — the "text sits at the top of the frame"
+  // mismatch vs Figma. Skip it only when cap-height trim is active (verticalTrimTop > 0),
+  // which intentionally removes that leading.
+  const emHeight = layout.firstLineAscent + layout.firstLineDescent;
+  const halfLeading =
+    layout.verticalTrimTop === 0 ? (layout.lineHeightPx - emHeight) / 2 : 0;
+  let y = layout.verticalTrimTop + halfLeading + layout.firstLineAscent;
   for (let i = 1; i <= lineIndex; i++) {
     y += layout.lineHeightPx;
     if (layout.lines[i]?.paragraphStart) y += layout.paragraphSpacing;
@@ -417,14 +438,20 @@ export function resolveCaretDrawRect(
   padX: number,
   padY: number,
   blockOffsetY: number,
+  layoutScale = 1,
 ): { x: number; y: number; height: number } {
   const caret = getCaretRect(index, layout, typo, innerW, align);
-  if (layout.caretStops?.length) {
-    return { x: caret.x, y: caret.y, height: layout.lineHeightPx };
-  }
+  const rect = layout.caretStops?.length
+    ? { x: caret.x, y: caret.y, height: layout.lineHeightPx }
+    : {
+        x: caret.x + padX,
+        y: caret.y + padY + blockOffsetY,
+        height: layout.lineHeightPx,
+      };
+  if (layoutScale === 1) return rect;
   return {
-    x: caret.x + padX,
-    y: caret.y + padY + blockOffsetY,
-    height: layout.lineHeightPx,
+    x: rect.x * layoutScale,
+    y: rect.y * layoutScale,
+    height: rect.height * layoutScale,
   };
 }

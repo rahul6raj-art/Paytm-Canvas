@@ -20,6 +20,7 @@ import { inlineDomImageSources } from "@/lib/webImport/server/inlineDomImageSour
 import { launchImportBrowser } from "@/lib/webImport/server/launchPlaywrightBrowser";
 import { loadPageForImport } from "@/lib/webImport/server/pageLoad";
 import { loadDomExtractorBundle } from "@/lib/webImport/server/bundleDomExtractor";
+import { captureReactPreviewScreenshot } from "@/lib/webImport/server/captureReactPreviewScreenshot";
 import {
   applyCaptureThemeToUrl,
   resolveBridgeImportColorTheme,
@@ -138,7 +139,10 @@ export async function runImportWebCapture(
     page.setDefaultTimeout(IMPORT_WEB_LIMITS.navigationTimeoutMs);
 
     if (targetUrl) {
-      await loadPageForImport(page, { url: targetUrl });
+      await loadPageForImport(page, {
+        url: targetUrl,
+        viewportOnlyCapture: body.bridgeViewportCapture === true,
+      });
     } else {
       await loadPageForImport(page, { html: body.html! });
     }
@@ -154,11 +158,22 @@ export async function runImportWebCapture(
             }
             document.documentElement.classList.toggle("dark", theme === "dark");
             document.documentElement.setAttribute("data-theme", theme);
+            document.documentElement.setAttribute("data-craft-bridge-capture", "1");
           },
           { storageKey: PML_THEME_STORAGE_KEY, theme: captureTheme },
         )
         .catch(() => undefined);
       await page.waitForTimeout(150);
+    }
+
+    if (isLocalBridgeCapturePolicy(body.urlPolicy)) {
+      await page
+        .evaluate(`() => {
+          const active = document.activeElement;
+          if (active instanceof HTMLElement) active.blur();
+        }`)
+        .catch(() => undefined);
+      await page.waitForTimeout(120);
     }
 
     const title = await page.title();
@@ -168,20 +183,33 @@ export async function runImportWebCapture(
 
     let screenshot: ImportWebScreenshot | null = null;
     if (body.mode === "screenshot" || body.mode === "editable_with_reference") {
-      const buf = await page.screenshot({
-        type: "png",
-        fullPage: true,
-        animations: "disabled",
-      });
+      let buf: Buffer;
+      if (body.urlPolicy === "react-preview") {
+        const captured = await captureReactPreviewScreenshot(page, viewport);
+        buf = captured.buffer;
+        screenshot = captured.meta;
+      } else {
+        buf = await page.screenshot({
+          type: "png",
+          fullPage: true,
+          animations: "disabled",
+        });
+        screenshot = {
+          dataUrl: `data:image/png;base64,${Buffer.from(buf).toString("base64")}`,
+          width: viewport.width,
+          height: Math.min(scrollHeight, IMPORT_WEB_LIMITS.maxPageHeight),
+        };
+      }
       if (buf.byteLength > IMPORT_WEB_LIMITS.maxScreenshotBytes) {
         throw new Error("Screenshot exceeds maximum allowed size.");
       }
-      const dataUrl = `data:image/png;base64,${Buffer.from(buf).toString("base64")}`;
-      screenshot = {
-        dataUrl,
-        width: viewport.width,
-        height: Math.min(scrollHeight, IMPORT_WEB_LIMITS.maxPageHeight),
-      };
+      if (!screenshot) {
+        screenshot = {
+          dataUrl: `data:image/png;base64,${Buffer.from(buf).toString("base64")}`,
+          width: viewport.width,
+          height: Math.min(scrollHeight, IMPORT_WEB_LIMITS.maxPageHeight),
+        };
+      }
     }
 
     if (body.mode === "screenshot") {
@@ -219,7 +247,9 @@ export async function runImportWebCapture(
     if (body.urlPolicy === "storybook-iframe") {
       tree = focusDomTreeOnStorybookStoryRoot(tree);
     } else if (body.urlPolicy === "react-preview") {
-      tree = focusDomTreeOnReactScreenRoot(tree, viewport);
+      tree = focusDomTreeOnReactScreenRoot(tree, viewport, {
+        viewportOnly: body.bridgeViewportCapture === true,
+      });
     }
     tree = annotateSectionHints(tree);
     tree = annotateComponentHints(tree);
@@ -230,8 +260,13 @@ export async function runImportWebCapture(
     const pageMeta: ImportWebPageMeta = {
       title: title || "Imported page",
       url: targetUrl,
-      width: Math.round(tree.rect.width),
-      height: Math.min(Math.round(tree.rect.height), IMPORT_WEB_LIMITS.maxPageHeight),
+      width: body.bridgeViewportCapture
+        ? viewport.width
+        : Math.round(tree.rect.width),
+      height: body.bridgeViewportCapture
+        ? viewport.height
+        : Math.min(Math.round(tree.rect.height), IMPORT_WEB_LIMITS.maxPageHeight),
+      bridgeCapture: body.bridgeViewportCapture === true,
     };
 
     const sections = detectSections(tree);

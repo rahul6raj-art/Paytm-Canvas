@@ -12,9 +12,10 @@ import {
   pagePathExists,
 } from "@/lib/craftBridge/discoverPreviewPage";
 import { previewScreenId, readCraftLinkManifest } from "@/lib/craftBridge/resolvePreviewPushLink";
-import { applyCaptureThemeToUrl, defaultCaptureColorTheme } from "@/lib/webImport/captureTheme";
+import { syncCaptureThemeToUrl } from "@/lib/webImport/captureTheme";
 import type { CraftBridgePendingImport } from "@/lib/craftBridge/types";
-import type { RunBridgePageImportResult } from "@/lib/craftBridge/runBridgePageImport";
+import type { BridgeCaptureViewportInput } from "@/lib/craftBridge/resolveBridgeCaptureViewport";
+import { parseCaptureViewportInput } from "@/lib/craftBridge/bridgeCaptureContext";
 
 function collectManifestCss(repoRoot: string): string[] {
   const manifest = readCraftLinkManifest(repoRoot);
@@ -85,6 +86,7 @@ export type RunBridgePreviewCaptureInput = {
   pagePath?: string;
   sourceCode?: string;
   cssPaths?: string[];
+  viewport?: BridgeCaptureViewportInput;
 };
 
 /** Live-capture the current preview URL — works for main pages and internal routes. */
@@ -97,7 +99,7 @@ export async function runBridgePreviewCapture(
     return { ok: false, error: "previewUrl and repoRoot are required.", status: 400 };
   }
 
-  const captureUrl = applyCaptureThemeToUrl(previewUrl, defaultCaptureColorTheme());
+  const { url: captureUrl, theme: captureTheme } = syncCaptureThemeToUrl(previewUrl);
   const routeKey = previewRouteKey(previewUrl);
   const virtualSource = previewCaptureSourcePath(previewUrl);
 
@@ -108,8 +110,9 @@ export async function runBridgePreviewCapture(
     sourceCode: sourceCode || undefined,
     fileName: pagePath ? path.basename(pagePath) : undefined,
     cssSources: companionCss,
-    theme: defaultCaptureColorTheme(),
+    theme: captureTheme,
     screenLabel: canvasScreenLabelFromPreviewUrl(previewUrl),
+    viewport: input.viewport,
   });
 
   if (!live.ok) {
@@ -131,6 +134,7 @@ export async function runBridgePreviewCapture(
     slice: live.slice,
     sourceHeader: live.sourceHeader,
     message: `${live.message} Route: ${routeKey}.`,
+    captureViewport: parseCaptureViewportInput(input.viewport),
     link,
   };
 

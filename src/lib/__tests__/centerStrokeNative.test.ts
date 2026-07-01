@@ -87,6 +87,24 @@ describe("center stroke uses native SVG on all shapes", () => {
     );
   });
 
+  it("still renders frame stroke when svgScene passes strokeWidthOverride", () => {
+    const node = baseNode({
+      type: "frame",
+      cornerRadius: 26,
+      strokeWidth: 1,
+      strokeColor: "#34a34d",
+      strokePosition: "inside",
+      fill: "#ffffff",
+    });
+    const markup = svgRectLike(node, {
+      nodeId: node.id,
+      strokeOverride: "#34a34d",
+      strokeWidthOverride: 1,
+    });
+    assert.match(markup, /fill="rgba\(52,163,77,1\)"/);
+    assert.doesNotMatch(markup, /stroke="none" \/>$/);
+  });
+
   it("exports center gradient stroke on rounded rect as native SVG stroke", () => {
     const defs: string[] = [];
     const node = baseNode({

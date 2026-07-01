@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { bridgeFetch } from "@/lib/craftBridge/bridgeFetch";
 import { applyBridgePendingImport } from "@/lib/craftBridge/applyBridgePendingImport";
+import { isWritableLinkedSourcePath } from "@/lib/craftBridge/bridgeCaptureContext";
 import { normalizeCodeRoundTripLink } from "@/lib/craftBridge/normalizeLink";
 import type { CraftBridgePendingImport } from "@/lib/craftBridge/types";
 
@@ -84,9 +85,9 @@ export function CraftBridgeImportListener() {
         }
 
         try {
-          if (pending.link?.sourcePath && pending.link.repoRoot) {
+          if (pending.link?.repoRoot) {
             const nextLink = normalizeCodeRoundTripLink({
-              sourcePath: pending.link.sourcePath,
+              sourcePath: pending.link.sourcePath ?? "",
               repoRoot: pending.link.repoRoot,
               cssPaths: pending.link.cssPaths,
               previewUrl: pending.link.previewUrl,
@@ -95,18 +96,20 @@ export function CraftBridgeImportListener() {
             })!;
             setCodeRoundTripLink(nextLink);
 
-            const params = new URLSearchParams({
-              repoRoot: nextLink.repoRoot,
-              sourcePath: nextLink.sourcePath,
-            });
-            const readRes = await bridgeFetch(`/api/craft-bridge/read-source?${params}`);
-            if (readRes.ok) {
-              const read = (await readRes.json()) as { hash?: string };
-              if (read.hash) {
-                updateCodeRoundTripLink({
-                  lastImportedHash: read.hash,
-                  lastExportedHash: read.hash,
-                });
+            if (isWritableLinkedSourcePath(nextLink.sourcePath)) {
+              const params = new URLSearchParams({
+                repoRoot: nextLink.repoRoot,
+                sourcePath: nextLink.sourcePath,
+              });
+              const readRes = await bridgeFetch(`/api/craft-bridge/read-source?${params}`);
+              if (readRes.ok) {
+                const read = (await readRes.json()) as { hash?: string };
+                if (read.hash) {
+                  updateCodeRoundTripLink({
+                    lastImportedHash: read.hash,
+                    lastExportedHash: read.hash,
+                  });
+                }
               }
             }
           }
@@ -151,12 +154,10 @@ export function CraftBridgeImportListener() {
           router.replace(qs ? `/editor?${qs}` : "/editor");
         }
       } catch (e) {
-        if (source === "route") {
-          setCraftBridgeSyncStatus(
-            "error",
-            e instanceof Error ? e.message : "Bridge import failed.",
-          );
-        }
+        setCraftBridgeSyncStatus(
+          "error",
+          e instanceof Error ? e.message : "Bridge import failed.",
+        );
       } finally {
         consumingRef.current = false;
         window.setTimeout(() => setCraftBridgeInboundActive(false), 2500);

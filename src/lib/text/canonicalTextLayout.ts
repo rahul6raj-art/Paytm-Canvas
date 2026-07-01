@@ -1,6 +1,7 @@
 import type { EditorNode } from "@/stores/useEditorStore";
 import { getActiveCraftEngine } from "@/engine/craftEngineRegistry";
 import { readCraftEngine } from "@/engine/craftEngineMutation";
+import { withBridgeDomTextBox } from "@/lib/craftBridge/bridgeTextLayoutSemantics";
 import {
   prepareTextForDisplay,
   textAdvancedStyleFromNode,
@@ -14,6 +15,7 @@ import {
   measureStringWidthForTypo,
   measureTypoAscent,
   measureTypoDescent,
+  canvasAlphabeticBaselineY,
   type TextLayout,
   type TextLine,
 } from "./textMeasure";
@@ -34,6 +36,11 @@ import type { ResolvedTextTypo } from "@/lib/textTypography";
 import { textBlockContentHeight } from "./textBaseline";
 import { verticalContentOffsetY } from "./textVerticalAlign";
 import { recordFontResolution } from "./textFontManager";
+import {
+  browserCaptureMatchesNodeContent,
+  canonicalFromBrowserCapture,
+  hasBrowserTextLayout,
+} from "@/lib/craftBridge/browserCaptureTextLayout";
 
 export type CanonicalLineSegment = {
   text: string;
@@ -72,6 +79,8 @@ export type FontResolutionInfo = {
 
 export type CanonicalTextLayout = {
   source: "wasm" | "fallback";
+  /** Paint using browser-captured glyph positions (bridge push parity). */
+  browserPaint?: boolean;
   lines: Array<{
     text: string;
     startIndex: number;
@@ -281,7 +290,7 @@ function fallbackLayout(
   const layout = layoutText(displayText, effectiveWrap, typo, style);
   const mode = normalizeTextResizeMode(node.textResizeMode, node.autoResize);
   const contentHeight = textBlockContentHeight(layout, typo, mode);
-  const padY = textVerticalPad(mode);
+  const padY = textVerticalPad(mode, node);
   const blockOffsetY = verticalContentOffsetY(contentHeight, innerH, node.verticalAlign);
   const lines = layout.lines.map((line, i) => {
     const y = lineTopYFromLayout(layout, i) + padY + blockOffsetY;
@@ -316,7 +325,7 @@ function fallbackLayout(
       : model?.width ?? node.width;
   const nodeHeight =
     mode === "auto-width" || mode === "auto-height"
-      ? Math.max(MIN_TEXT_BOX, contentHeight + textVerticalPad(mode) * 2)
+      ? Math.max(MIN_TEXT_BOX, contentHeight + textVerticalPad(mode, node) * 2)
       : model?.height ?? node.height;
 
   return {
@@ -395,12 +404,10 @@ function buildFallbackLineBoxes(
   lines: CanonicalTextLayout["lines"],
   typo: ResolvedTextTypo,
 ): CanonicalLineBox[] {
-  const { ascent } = fallbackTypoMetrics(typo);
-  const baselineOffset = (layout.lineHeightPx - typo.fontSize) * 0.5;
   return lines.map((line) => ({
     top: line.y,
     height: layout.lineHeightPx,
-    baseline: line.y + baselineOffset + ascent,
+    baseline: canvasAlphabeticBaselineY(line.y, layout.lineHeightPx, typo),
     width: line.width,
   }));
 }
@@ -451,8 +458,8 @@ function alignCanonicalBlockOffset(
   const mode = normalizeTextResizeMode(node.textResizeMode, node.autoResize);
   const model = toTextNodeModel(nodeForTextLayout(node), false);
   const innerW = model ? textInnerWidth(model.width) : canonical.innerW;
-  const innerH = model ? textInnerHeight(model.height, mode) : canonical.innerH;
-  const padY = textVerticalPad(mode);
+  const innerH = model ? textInnerHeight(model.height, mode, node) : canonical.innerH;
+  const padY = textVerticalPad(mode, node);
   const contentHeight = textBlockContentHeight(layout, typo, mode);
   const blockOffsetY = verticalContentOffsetY(contentHeight, innerH, node.verticalAlign);
 
@@ -503,7 +510,7 @@ function alignCanonicalBlockOffset(
         : model?.width ?? canonical.nodeWidth,
     nodeHeight:
       mode === "auto-width" || mode === "auto-height"
-        ? Math.max(MIN_TEXT_BOX, contentHeight + textVerticalPad(mode) * 2)
+        ? Math.max(MIN_TEXT_BOX, contentHeight + textVerticalPad(mode, node) * 2)
         : model?.height ?? canonical.nodeHeight,
     lineBoxes: buildFallbackLineBoxes(layout, lines, typo),
     caretStops,
@@ -525,7 +532,7 @@ export function layoutTextCanonical(
   const displayText = prepareTextForDisplay(model.text, style);
   const mode = normalizeTextResizeMode(layoutNode.textResizeMode, layoutNode.autoResize);
   const innerW = textInnerWidth(model.width);
-  const innerH = textInnerHeight(model.height, mode);
+  const innerH = textInnerHeight(model.height, mode, layoutNode);
   const wrapWidth = availableWrapWidthForNode(layoutNode);
   const effectiveWrap =
     wrapWidth === Number.POSITIVE_INFINITY
@@ -537,6 +544,24 @@ export function layoutTextCanonical(
     const cached = layoutCache.get(cacheKey);
     if (cached && cacheHitIsValid(layoutNode, cached, cacheKey)) return cached;
     if (cached) layoutCache.delete(cacheKey);
+  }
+
+  if (
+    hasBrowserTextLayout(layoutNode) &&
+    browserCaptureMatchesNodeContent(layoutNode, layoutNode.browserTextLayout, style)
+  ) {
+    const browserCanonical = canonicalFromBrowserCapture(
+      layoutNode,
+      layoutNode.browserTextLayout,
+      typo,
+      style,
+    );
+    if (browserCanonical) {
+      recordFontResolution(layoutNode.id, browserCanonical.font);
+      layoutCache.set(cacheKey, browserCanonical);
+      pruneLayoutCache();
+      return browserCanonical;
+    }
   }
 
   const wasm = (opts?.forceWasm || shouldUseWasmCanonicalLayout(layoutNode))
@@ -563,8 +588,11 @@ export function clearCanonicalTextLayoutCache(nodeId?: string): void {
 }
 
 /** Shared layout pipeline for SVG display, canvas editing, caret, and selection. */
-export function textLayoutForEditorNode(node: EditorNode): TextLayoutForRender | null {
-  const layoutNode = nodeForTextLayout(node);
+export function textLayoutForEditorNode(
+  node: EditorNode,
+  opts?: { nodes?: Record<string, EditorNode> },
+): TextLayoutForRender | null {
+  const layoutNode = nodeForTextLayout(withBridgeDomTextBox(node, opts?.nodes));
   const model = toTextNodeModel(layoutNode, false);
   if (!model) return null;
 

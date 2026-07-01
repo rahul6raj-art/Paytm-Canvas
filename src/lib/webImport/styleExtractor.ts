@@ -109,6 +109,34 @@ function mapObjectFit(v: string | undefined): EditorImageFit | undefined {
   return undefined;
 }
 
+function parseInsetSpreadRingLayer(layer: string): {
+  strokeWidth: number;
+  strokeColor: string;
+} | null {
+  const trimmed = layer.trim();
+  if (!/\binset\b/i.test(trimmed)) return null;
+
+  const insetFirst = trimmed.match(
+    /^inset\s+0px?\s+0px?\s+0px?\s+([\d.]+)px\s+(rgba?\([^)]+\)|#[0-9a-fA-F]{3,8})/i,
+  );
+  if (insetFirst) {
+    const width = parseFloat(insetFirst[1]!);
+    const color = parseColor(insetFirst[2]) ?? insetFirst[2]!;
+    return width >= 0.5 ? { strokeWidth: width, strokeColor: color } : null;
+  }
+
+  const colorFirst = trimmed.match(
+    /^(rgba?\([^)]+\)|#[0-9a-fA-F]{3,8})\s+0px?\s+0px?\s+0px?\s+([\d.]+)px(?:\s+inset)?\s*$/i,
+  );
+  if (colorFirst) {
+    const width = parseFloat(colorFirst[2]!);
+    const color = parseColor(colorFirst[1]) ?? colorFirst[1]!;
+    return width >= 0.5 ? { strokeWidth: width, strokeColor: color } : null;
+  }
+
+  return null;
+}
+
 function parseRingOrOutlineStroke(styles: DomSnapshotStyles): {
   strokeColor?: string;
   strokeWidth?: number;
@@ -122,6 +150,8 @@ function parseRingOrOutlineStroke(styles: DomSnapshotStyles): {
   if (!shadow || shadow === "none") return {};
   const layers = shadow.split(/,(?![^(]*\))/).map((s) => s.trim());
   for (const layer of layers) {
+    const insetRing = parseInsetSpreadRingLayer(layer);
+    if (insetRing) return insetRing;
     const trailingColor = layer.match(
       /0px?\s+0px?\s+0px?\s+([\d.]+)px\s+(rgba?\([^)]+\)|#[0-9a-fA-F]{3,8})/i,
     );
@@ -259,6 +289,7 @@ function parseBoxShadowEffects(boxShadow: string | undefined): NodeEffect[] {
   if (!boxShadow || boxShadow === "none") return [];
   const effects: NodeEffect[] = [];
   for (const layer of splitBoxShadowLayers(boxShadow)) {
+    if (parseInsetSpreadRingLayer(layer)) continue;
     const inner = layer.trim().startsWith("inset");
     const cleaned = inner ? layer.replace(/^inset\s+/i, "").trim() : layer.trim();
     const rgba = cleaned.match(/(rgba?\([^)]+\))/);

@@ -20,14 +20,21 @@ type PanPreviewState = {
   dy: number;
 };
 
+type WheelViewportPreviewState = {
+  pan: { x: number; y: number };
+  zoom: number;
+};
+
 let sceneTransformEl: HTMLElement | null = null;
 let gridEl: HTMLElement | null = null;
 let gridBasePosition: { x: number; y: number } | null = null;
 let panPreview: PanPreviewState | null = null;
+let wheelViewportPreview: WheelViewportPreviewState | null = null;
 let dragPreview: DragPreviewState | null = null;
 
 const dragListeners = new Set<() => void>();
 const panListeners = new Set<() => void>();
+const wheelViewportListeners = new Set<() => void>();
 const resizeListeners = new Set<() => void>();
 
 let resizePreviewEpoch = 0;
@@ -42,9 +49,33 @@ function notifyPanListeners(): void {
   panListeners.forEach((fn) => fn());
 }
 
+function notifyWheelViewportListeners(): void {
+  wheelViewportListeners.forEach((fn) => fn());
+}
+
+function notifyViewportPreviewListeners(): void {
+  notifyPanListeners();
+  notifyWheelViewportListeners();
+}
+
 export function subscribePanPreview(listener: () => void): () => void {
   panListeners.add(listener);
   return () => panListeners.delete(listener);
+}
+
+export function subscribeWheelViewportPreview(listener: () => void): () => void {
+  wheelViewportListeners.add(listener);
+  return () => wheelViewportListeners.delete(listener);
+}
+
+/** Pan drag, wheel pan, and wheel zoom previews (overlays + hit testing). */
+export function subscribeViewportPreview(listener: () => void): () => void {
+  const u1 = subscribePanPreview(listener);
+  const u2 = subscribeWheelViewportPreview(listener);
+  return () => {
+    u1();
+    u2();
+  };
 }
 
 /** Stable idle snapshot for useSyncExternalStore (must not allocate per read). */
@@ -128,6 +159,68 @@ function sceneTransformString(panX: number, panY: number, zoom: number): string 
   return `translate3d(${x}px, ${y}px, 0) scale(${zoom})`;
 }
 
+function paintSceneViewport(pan: { x: number; y: number }, zoom: number): void {
+  if (sceneTransformEl) {
+    sceneTransformEl.style.willChange = "transform";
+    sceneTransformEl.style.transform = sceneTransformString(pan.x, pan.y, zoom);
+  }
+  if (gridEl) {
+    gridEl.style.backgroundSize = `${8 * zoom}px ${8 * zoom}px`;
+    gridEl.style.backgroundPosition = `${pan.x}px ${pan.y}px`;
+  }
+}
+
+function clearSceneViewportPaint(): void {
+  if (sceneTransformEl) {
+    sceneTransformEl.style.removeProperty("transform");
+    sceneTransformEl.style.removeProperty("will-change");
+  }
+  if (gridEl) {
+    gridEl.style.removeProperty("background-position");
+    gridEl.style.removeProperty("background-size");
+  }
+}
+
+export function isViewportPreviewActive(): boolean {
+  return panPreview != null || wheelViewportPreview != null;
+}
+
+export function resolveEffectiveViewport(
+  storePan: { x: number; y: number },
+  storeZoom: number,
+): { pan: { x: number; y: number }; zoom: number } {
+  if (wheelViewportPreview) {
+    return { pan: { ...wheelViewportPreview.pan }, zoom: wheelViewportPreview.zoom };
+  }
+  if (panPreview) {
+    return {
+      pan: {
+        x: panPreview.basePan.x + panPreview.dx,
+        y: panPreview.basePan.y + panPreview.dy,
+      },
+      zoom: panPreview.zoom,
+    };
+  }
+  return { pan: { x: storePan.x, y: storePan.y }, zoom: storeZoom };
+}
+
+let cachedEffectiveViewportKey = "";
+let cachedEffectiveViewport: { pan: { x: number; y: number }; zoom: number } = {
+  pan: { x: 0, y: 0 },
+  zoom: 1,
+};
+
+/** Effective pan/zoom for overlays and hit testing during imperative viewport preview. */
+export function getEffectiveViewportSnapshot(): { pan: { x: number; y: number }; zoom: number } {
+  const s = useEditorStore.getState();
+  const next = resolveEffectiveViewport(s.pan, s.zoom);
+  const key = `${next.pan.x},${next.pan.y},${next.zoom}`;
+  if (key === cachedEffectiveViewportKey) return cachedEffectiveViewport;
+  cachedEffectiveViewportKey = key;
+  cachedEffectiveViewport = next;
+  return cachedEffectiveViewport;
+}
+
 export function applyPanPreview(
   basePan: { x: number; y: number },
   zoom: number,
@@ -135,34 +228,42 @@ export function applyPanPreview(
   dy: number,
 ): void {
   panPreview = { basePan, zoom, dx, dy };
-  if (sceneTransformEl) {
-    sceneTransformEl.style.willChange = "transform";
-    sceneTransformEl.style.transform = sceneTransformString(
-      basePan.x + dx,
-      basePan.y + dy,
-      zoom,
-    );
+  if (!gridBasePosition) {
+    gridBasePosition = { ...basePan };
   }
-  if (gridEl) {
-    if (!gridBasePosition) {
-      gridBasePosition = { ...basePan };
-    }
-    gridEl.style.backgroundPosition = `${basePan.x + dx}px ${basePan.y + dy}px`;
-  }
-  notifyPanListeners();
+  paintSceneViewport({ x: basePan.x + dx, y: basePan.y + dy }, zoom);
+  notifyViewportPreviewListeners();
 }
 
 export function clearPanPreview(): void {
   panPreview = null;
   gridBasePosition = null;
-  if (sceneTransformEl) {
-    sceneTransformEl.style.removeProperty("transform");
-    sceneTransformEl.style.removeProperty("will-change");
+  if (!wheelViewportPreview) {
+    clearSceneViewportPaint();
   }
-  if (gridEl) {
-    gridEl.style.removeProperty("background-position");
+  cachedEffectiveViewportKey = "";
+  notifyViewportPreviewListeners();
+}
+
+/** Wheel pan/zoom — GPU transform only; commit to store after gesture ends. */
+export function applyWheelViewportPreview(pan: { x: number; y: number }, zoom: number): void {
+  wheelViewportPreview = { pan: { ...pan }, zoom };
+  paintSceneViewport(pan, zoom);
+  cachedEffectiveViewportKey = "";
+  notifyWheelViewportListeners();
+}
+
+export function clearWheelViewportPreview(): void {
+  wheelViewportPreview = null;
+  if (!panPreview) {
+    clearSceneViewportPaint();
   }
-  notifyPanListeners();
+  cachedEffectiveViewportKey = "";
+  notifyWheelViewportListeners();
+}
+
+export function readWheelViewportPreview(): WheelViewportPreviewState | null {
+  return wheelViewportPreview;
 }
 
 export function readPanPreviewDelta(): { dx: number; dy: number } {

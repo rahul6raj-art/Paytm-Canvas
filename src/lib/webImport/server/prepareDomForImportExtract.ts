@@ -5,11 +5,35 @@ async function waitForLazyIcons(page: Page): Promise<void> {
   await page
     .waitForFunction(
       `() => {
-        const wraps = document.querySelectorAll("[class*='__icon-wrap']");
-        if (wraps.length === 0) return true;
-        return Array.from(wraps).every((w) =>
-          w.querySelector("svg path, svg line, svg polyline, svg rect, svg circle"),
-        );
+        const paint = "svg path, svg line, svg polyline, svg rect, svg circle, svg polygon";
+
+        function hostHasSvg(host) {
+          const svg = host.querySelector("svg");
+          return svg && svg.querySelector(paint);
+        }
+
+        const asyncHosts = [
+          ...document.querySelectorAll(".checkbox__indicator"),
+          ...document.querySelectorAll(".radio__indicator"),
+          ...document.querySelectorAll(".header__icon-btn, .header__back-btn"),
+          ...document.querySelectorAll("[class*='__assurance-icon']"),
+          ...document.querySelectorAll("[class*='__icon-wrap']"),
+          ...document.querySelectorAll(".bn, .bn__tabs, .bn__bar, .bn__tab"),
+          ...document.querySelectorAll(".badge"),
+        ];
+
+        if (asyncHosts.length > 0) {
+          return asyncHosts.every(hostHasSvg);
+        }
+
+        const checkboxes = document.querySelectorAll(".checkbox");
+        if (checkboxes.length > 0) {
+          return Array.from(checkboxes).every((cb) =>
+            hostHasSvg(cb.querySelector(".checkbox__indicator") ?? cb),
+          );
+        }
+
+        return true;
       }`,
       { timeout: 12_000 },
     )
@@ -135,11 +159,31 @@ async function expandScrollRegionsForCapture(page: Page): Promise<void> {
   }`);
 }
 
+/** Blur focused inputs so caret bars are not captured as vertical layers in OTP/PIN cells. */
+async function hideInputCaretsForCapture(page: Page): Promise<void> {
+  await page.evaluate(`() => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    for (const el of document.querySelectorAll("input, textarea")) {
+      if (el instanceof HTMLElement) {
+        el.style.caretColor = "transparent";
+      }
+    }
+  }`);
+}
+
 /** Expand scroll regions before DOM extract so the full page is captured, not just the viewport. */
-export async function prepareDomForImportExtract(page: Page): Promise<void> {
+export async function prepareDomForImportExtract(
+  page: Page,
+  opts?: { viewportOnly?: boolean },
+): Promise<void> {
   await runWithNavigationRetry(page, async () => {
     await waitForLazyIcons(page);
-    await expandScrollRegionsForCapture(page);
+    if (!opts?.viewportOnly) {
+      await expandScrollRegionsForCapture(page);
+    }
+    await hideInputCaretsForCapture(page);
     await prepareSvgGraphics(page);
   });
 }

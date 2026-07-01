@@ -22,6 +22,10 @@ import {
   wrapSvgNodeFilter,
 } from "@/lib/svgMarkupCore";
 import { shouldClipChildren } from "@/lib/clipChildren";
+import {
+  shouldRenderCanvasNode,
+  type ViewportCullContext,
+} from "@/lib/canvasViewportCull";
 import { normalizeTextResizeMode } from "@/lib/text/textNodeModel";
 import {
   compositeEditModeForDrag,
@@ -75,6 +79,8 @@ export type SvgSceneBuildInput = {
   colorMode?: CanvasColorMode;
   /** Linked page + token CSS for class→var color binding. */
   cssSources?: string[];
+  /** When set, skip nodes outside the visible canvas viewport. */
+  viewportCull?: ViewportCullContext;
 };
 
 function collectMovingSubtreeIds(
@@ -133,6 +139,8 @@ type BuildCtx = {
   selectedIds?: readonly string[];
   colorMode: CanvasColorMode;
   cssSources?: string[];
+  viewportCull?: ViewportCullContext;
+  skipViewportCull?: boolean;
 };
 
 function maxEffectBleedInSubtree(nodeId: string, ctx: BuildCtx): number {
@@ -177,12 +185,17 @@ function frameHasVisibleChildren(parentId: string, ctx: BuildCtx): boolean {
 }
 
 function renderChildren(parentId: string, ctx: BuildCtx): string {
+  const parent = ctx.nodes[parentId];
+  const childCtx =
+    parent && shouldClipChildren(parent) && ctx.viewportCull?.enabled
+      ? { ...ctx, skipViewportCull: true }
+      : ctx;
   const kids = layerPanelChildIds(parentId, ctx.nodes, ctx.childOrder);
   let out = "";
   for (const cid of kids) {
     const c = ctx.nodes[cid];
     if (!c?.visible) continue;
-    const inner = renderNode(cid, ctx);
+    const inner = renderNode(cid, childCtx);
     if (inner) {
       const blend = svgBlendAttrForNode(cid, c, ctx);
       out += `<g transform="${composeSvgTransform(c)}"${blend}>${inner}</g>`;
@@ -195,6 +208,13 @@ function renderNode(nodeId: string, ctx: BuildCtx): string {
   if (ctx.excludeNodeIds?.has(nodeId)) return "";
   const node = ctx.nodes[nodeId];
   if (!node?.visible) return "";
+  if (
+    ctx.viewportCull?.enabled &&
+    !ctx.skipViewportCull &&
+    !shouldRenderCanvasNode(nodeId, ctx.nodes, ctx.childOrder, ctx.viewportCull)
+  ) {
+    return "";
+  }
   if (!SUPPORTED_TYPES.has(node.type)) {
     ctx.warnings.push(`skipped:${node.type}:${nodeId}`);
     return "";
@@ -429,6 +449,7 @@ export function buildSvgScene(input: SvgSceneBuildInput): SvgSceneBuildResult {
     selectedIds: input.selectedIds,
     colorMode: input.colorMode ?? "light",
     cssSources: input.cssSources,
+    viewportCull: input.viewportCull,
   };
 
   const bodyParts: string[] = [];

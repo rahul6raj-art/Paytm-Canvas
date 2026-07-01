@@ -11,7 +11,11 @@ import {
   canCanvasObjectDrag,
   isCanvasSelectTool,
 } from "@/lib/canvasInteractionGuards";
-import { screenPxToOverlay, worldPointToOverlay } from "@/lib/canvasOverlaySpace";
+import {
+  screenPxToOverlay,
+  worldLengthToOverlay,
+  worldPointToOverlay,
+} from "@/lib/canvasOverlaySpace";
 import { EditorHintWrap } from "@/components/editor/EditorHoverHint";
 import {
   CANVAS_FRAME_LABEL_FONT_SCREEN_PX,
@@ -105,6 +109,7 @@ export function RootFrameLabels({ rootIds }: RootFrameLabelsProps) {
           origin.y + dragOffset.dy,
           overlay,
         );
+        const labelMaxWidth = worldLengthToOverlay(node.width, overlay);
 
         return (
           <FrameLabel
@@ -114,6 +119,7 @@ export function RootFrameLabels({ rootIds }: RootFrameLabelsProps) {
             isComponent={Boolean(node.isComponent)}
             left={labelPos.x}
             top={labelPos.y - labelOffset}
+            maxWidth={labelMaxWidth}
             fontSize={labelFontSize}
             selected={selected}
             locked={node.locked}
@@ -138,6 +144,7 @@ function FrameLabel({
   isComponent,
   left,
   top,
+  maxWidth,
   fontSize,
   selected,
   locked,
@@ -152,6 +159,7 @@ function FrameLabel({
   isComponent: boolean;
   left: number;
   top: number;
+  maxWidth: number;
   fontSize: number;
   selected: boolean;
   locked: boolean;
@@ -283,8 +291,8 @@ function FrameLabel({
 
   return (
     <div
-      className="pointer-events-auto absolute z-[8] max-w-[320px]"
-      style={{ left, top }}
+      className="pointer-events-auto absolute z-[8] min-w-0 overflow-hidden"
+      style={{ left, top, maxWidth }}
       data-frame-label={frameId}
       onDoubleClick={(e) => e.stopPropagation()}
     >
@@ -294,9 +302,10 @@ function FrameLabel({
           type="text"
           value={draft}
           aria-label="Frame name"
-          className="m-0 w-full min-w-[80px] max-w-[320px] rounded border px-1 py-0.5 font-medium leading-none shadow-sm outline-none ring-1"
+          className="m-0 w-full min-w-0 rounded border px-1 py-0.5 font-medium leading-none shadow-sm outline-none ring-1"
           style={{
             fontSize,
+            maxWidth,
             backgroundColor: chrome.renameInputBg,
             color: isComponent ? chrome.componentFrameLabelSelected : chrome.renameInputText,
             borderColor: isComponent ? "rgba(139, 92, 246, 0.65)" : chrome.renameInputBorder,
@@ -324,7 +333,7 @@ function FrameLabel({
               ? name
               : `${name} — drag to move, double-click to rename`
           }
-          anchorClassName="contents block max-w-full"
+          anchorClassName="block w-full min-w-0 max-w-full overflow-hidden"
         >
           <span
             role="button"
@@ -343,7 +352,7 @@ function FrameLabel({
               }
             }}
             className={cn(
-              "inline-flex max-w-full items-center gap-1 truncate font-medium leading-none select-none",
+              "flex w-full min-w-0 max-w-full items-center gap-1 truncate font-medium leading-none select-none",
               locked
                 ? "cursor-default"
                 : tool === "move" || tool === "frame"

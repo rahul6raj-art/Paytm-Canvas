@@ -40,6 +40,7 @@ import {
   getTextMeasureContext,
   layoutText,
   layoutTextContentHeight,
+  canvasAlphabeticBaselineY,
   lineOffsetX,
   lineTopY,
   measureStringWidth,
@@ -80,6 +81,10 @@ export type TextCanvasRenderOptions = {
 
 const MAX_TEXT_BITMAP_EDGE = 8192;
 
+function scaleLayoutCoord(value: number, layoutScale: number): number {
+  return value * layoutScale;
+}
+
 export type { TextLayoutForRender } from "./canonicalTextLayout";
 export { textLayoutForEditorNode } from "./canonicalTextLayout";
 
@@ -117,7 +122,7 @@ export function paintTextLayoutToContext(
   const h = Math.max(1, opts.height);
   const layoutScale = opts.layoutScale ?? 1;
   const padX = TEXT_BOX_PAD_X * layoutScale;
-  const padY = textVerticalPad(opts.textResizeMode) * layoutScale;
+  const padY = textVerticalPad(opts.textResizeMode, opts.gradientNode) * layoutScale;
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, 0, w, h);
@@ -169,11 +174,12 @@ export function paintTextLayoutToContext(
       opts.textAlign,
       innerW,
       padX,
-      padY + blockOffsetY,
+      padY + blockOffsetY * layoutScale,
       displayStart,
       displayEnd,
       opts.prepared?.canonical,
       opts.prepared?.canonical.lines,
+      layoutScale,
     );
   }
 
@@ -212,9 +218,10 @@ export function paintTextLayoutToContext(
       opts.typo,
       innerW,
       opts.textAlign,
-      padX,
-      padY,
+      TEXT_BOX_PAD_X,
+      textVerticalPad(opts.textResizeMode, opts.gradientNode),
       blockOffsetY,
+      layoutScale,
     );
     const caretWidth = textCaretLayoutWidth({
       zoom: opts.zoom,
@@ -269,20 +276,48 @@ function paintTextGlyphs(
 ): void {
   const canonical = opts.prepared?.canonical;
   const smallCaps = style.textCase === "small-caps";
+  const layoutScale = opts.layoutScale ?? 1;
 
   for (let i = 0; i < layout.lines.length; i++) {
     const line = layout.lines[i]!;
     const canonicalLine = canonical?.lines[i];
 
     if (canonicalLine) {
+      const lineBox = canonical?.lineBoxes?.[i];
+      const lineTopDoc = lineBox?.top ?? canonicalLine.y;
+      const lineHeightDoc = lineBox?.height ?? layout.lineHeightPx;
+      // Layout is in document px; renderTypo is already scaled when layoutScale > 1 —
+      // scale the line box to match so half-leading math stays in one coordinate space.
+      const lineTop = scaleLayoutCoord(lineTopDoc, layoutScale);
+      const lineHeight = scaleLayoutCoord(lineHeightDoc, layoutScale);
+      const prevBaseline = ctx.textBaseline;
+      const useBrowserPaint = canonical?.browserPaint === true;
+      ctx.textBaseline = useBrowserPaint ? "top" : "alphabetic";
+      const baselineY = useBrowserPaint
+        ? 0
+        : lineBox && Number.isFinite(lineBox.baseline)
+          ? scaleLayoutCoord(lineBox.baseline, layoutScale)
+          : canvasAlphabeticBaselineY(lineTop, lineHeight, opts.typo);
       for (const segment of canonicalLine.segments) {
-        drawTextAt(ctx, segment.text, segment.x, segment.y, opts.typo, smallCaps, mode);
+        drawTextAt(
+          ctx,
+          segment.text,
+          scaleLayoutCoord(segment.x, layoutScale),
+          useBrowserPaint
+            ? scaleLayoutCoord(segment.y, layoutScale)
+            : baselineY,
+          opts.typo,
+          smallCaps,
+          mode,
+        );
       }
+      ctx.textBaseline = prevBaseline;
       continue;
     }
 
     const isLast = i === layout.lines.length - 1;
-    const y = lineTopY(layout, i) + padY + blockOffsetY;
+    const y =
+      scaleLayoutCoord(lineTopY(layout, i) + blockOffsetY, layoutScale) + padY;
     const x =
       lineOffsetX(line.width, innerW, opts.textAlign, {
         isLastLine: isLast,
@@ -310,19 +345,28 @@ function paintTextDecorations(
 ): void {
   if (style.textDecoration === "none") return;
   const canonical = opts.prepared?.canonical;
+  const layoutScale = opts.layoutScale ?? 1;
   for (let i = 0; i < layout.lines.length; i++) {
     const line = layout.lines[i]!;
     if (!line.text) continue;
     const canonicalLine = canonical?.lines[i];
-    const y = canonicalLine?.y ?? lineTopY(layout, i) + padY + blockOffsetY;
+    const lineBox = canonical?.lineBoxes?.[i];
+    const lineTopDoc = canonicalLine?.y ?? lineTopY(layout, i) + blockOffsetY;
+    const lineHeightDoc = lineBox?.height ?? layout.lineHeightPx;
+    const y = canvasAlphabeticBaselineY(
+      scaleLayoutCoord(lineTopDoc, layoutScale),
+      scaleLayoutCoord(lineHeightDoc, layoutScale),
+      opts.typo,
+    );
     const x =
-      canonicalLine?.x ??
-      lineOffsetX(line.width, innerW, opts.textAlign, {
-        isLastLine: i === layout.lines.length - 1,
-        fullLineText: line.text,
-        letterSpacing: opts.typo.letterSpacing,
-      }) + padX;
-    const width = canonicalLine?.width ?? line.width;
+      (canonicalLine?.x != null
+        ? scaleLayoutCoord(canonicalLine.x, layoutScale)
+        : lineOffsetX(line.width, innerW * layoutScale, opts.textAlign, {
+            isLastLine: i === layout.lines.length - 1,
+            fullLineText: line.text,
+            letterSpacing: opts.typo.letterSpacing,
+          }) + padX);
+    const width = scaleLayoutCoord(canonicalLine?.width ?? line.width, layoutScale);
     drawLineDecorations(ctx, x, y, width, opts.typo, style.textDecoration);
   }
 }
@@ -551,6 +595,7 @@ function drawSelection(
   end: number,
   canonical?: CanonicalTextLayout,
   canonicalLines?: Array<{ x: number; y: number; text: string; startIndex: number; width: number }>,
+  layoutScale = 1,
 ): void {
   ctx.fillStyle = "rgba(24, 160, 251, 0.35)";
 
@@ -563,23 +608,30 @@ function drawSelection(
 
     const selStart = Math.max(start, lineStart) - lineStart;
     const selEnd = Math.min(end, lineEnd) - lineStart;
-    const y = canonicalLine?.y ?? lineTopY(layout, i) + padY;
+    const lineBox = canonical?.lineBoxes?.[i];
+    const lineTopDoc = canonicalLine?.y ?? lineTopY(layout, i);
+    const lineHeightDoc = lineBox?.height ?? layout.lineHeightPx;
+    const useBrowserPaint = canonical?.browserPaint === true;
+    const y =
+      scaleLayoutCoord(lineTopDoc, layoutScale) + (useBrowserPaint ? 0 : padY);
+    const selH = scaleLayoutCoord(lineHeightDoc, layoutScale);
 
     if (canonical?.caretStops.length) {
-      const x0 = caretXAtIndex(canonical.caretStops, lineStart + selStart);
-      const x1 = caretXAtIndex(canonical.caretStops, lineStart + selEnd);
-      ctx.fillRect(x0, y, Math.max(1, x1 - x0), layout.lineHeightPx);
+      const x0 = scaleLayoutCoord(caretXAtIndex(canonical.caretStops, lineStart + selStart), layoutScale);
+      const x1 = scaleLayoutCoord(caretXAtIndex(canonical.caretStops, lineStart + selEnd), layoutScale);
+      ctx.fillRect(x0, y, Math.max(1, x1 - x0), selH);
       continue;
     }
 
     const before = line.text.slice(0, selStart);
     const selected = line.text.slice(selStart, selEnd);
     const lineX =
-      canonicalLine?.x ??
-      lineOffsetX(line.width, innerWidth, align) + padX;
+      canonicalLine?.x != null
+        ? scaleLayoutCoord(canonicalLine.x, layoutScale)
+        : lineOffsetX(line.width, innerWidth * layoutScale, align) + padX;
     const x0 =
       lineX + measureStringWidth(getTextMeasureContext(), before, typo.letterSpacing);
     const selW = measureStringWidth(getTextMeasureContext(), selected, typo.letterSpacing);
-    ctx.fillRect(x0, y, Math.max(1, selW), layout.lineHeightPx);
+    ctx.fillRect(x0, y, Math.max(1, selW), selH);
   }
 }

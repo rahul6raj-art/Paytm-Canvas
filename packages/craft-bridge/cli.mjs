@@ -22,6 +22,61 @@ const SCREEN_ROUTE_BY_COMPONENT = {
 const DEFAULT_PREVIEW_BASE_URL =
   process.env.CRAFT_BRIDGE_PREVIEW_URL?.trim() || "http://localhost:5173";
 
+const MULTI_ROUTE_SCREENS_BY_COMPONENT = {
+  PMLHomePage: ["home", "mf", "fno"],
+};
+
+function shouldPreservePreviewScreenParam(pageLabel, existingScreen) {
+  const label = String(pageLabel ?? "")
+    .replace(/\.[^.]+$/, "")
+    .split("/")
+    .pop();
+  if (!label) return false;
+  const routes = MULTI_ROUTE_SCREENS_BY_COMPONENT[label];
+  return routes?.includes(existingScreen) ?? false;
+}
+
+function isRouteSpecificPreviewUrl(url) {
+  const trimmed = String(url ?? "").trim();
+  if (!trimmed) return false;
+  try {
+    const parsed = new URL(trimmed.includes("://") ? trimmed : `http://${trimmed}`);
+    if (parsed.pathname !== "/" && parsed.pathname !== "") return true;
+    for (const key of ["step", "homeTab", "tab"]) {
+      if (parsed.searchParams.has(key)) return true;
+    }
+    const screen = parsed.searchParams.get("screen")?.trim();
+    return !!screen && screen !== "home";
+  } catch {
+    return false;
+  }
+}
+
+function shouldPreservePreviewCaptureUrl(url, pageLabel) {
+  const trimmed = String(url ?? "").trim();
+  if (!trimmed) return false;
+  try {
+    const parsed = new URL(trimmed.includes("://") ? trimmed : `http://${trimmed}`);
+    for (const key of ["step", "homeTab", "tab"]) {
+      if (parsed.searchParams.has(key)) return true;
+    }
+    if (parsed.pathname !== "/" && parsed.pathname !== "") return true;
+    const existingScreen = parsed.searchParams.get("screen")?.trim() ?? "";
+    if (!existingScreen) return false;
+    if (shouldPreservePreviewScreenParam(pageLabel, existingScreen)) return true;
+    const label = String(pageLabel ?? "")
+      .replace(/\.[^.]+$/, "")
+      .split("/")
+      .pop();
+    const mappedScreen = label ? SCREEN_ROUTE_BY_COMPONENT[label] : undefined;
+    if (mappedScreen && existingScreen === mappedScreen) return true;
+    if (!String(pageLabel ?? "").trim()) return existingScreen !== "home";
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 function derivePreviewCaptureUrl(previewUrl, pageLabel) {
   const trimmed = String(previewUrl ?? "").trim();
   if (!trimmed) return trimmed;
@@ -35,16 +90,34 @@ function derivePreviewCaptureUrl(previewUrl, pageLabel) {
   } catch {
     return trimmed;
   }
-  if (!parsed.searchParams.has("screen") && parsed.pathname === "/") {
-    const label = String(pageLabel ?? "")
-      .replace(/\.[^.]+$/, "")
-      .split("/")
-      .pop();
-    const screen = label ? SCREEN_ROUTE_BY_COMPONENT[label] : undefined;
-    if (screen && screen !== "home") {
-      parsed.searchParams.set("screen", screen);
-    }
+
+  if (shouldPreservePreviewCaptureUrl(parsed.toString(), pageLabel)) {
+    parsed.searchParams.set("theme", theme);
+    return parsed.toString();
   }
+
+  const existingScreen = parsed.searchParams.get("screen")?.trim() ?? "";
+  const label = String(pageLabel ?? "")
+    .replace(/\.[^.]+$/, "")
+    .split("/")
+    .pop();
+  const screenFromPage = label ? SCREEN_ROUTE_BY_COMPONENT[label] : undefined;
+
+  if (screenFromPage && existingScreen && shouldPreservePreviewScreenParam(pageLabel, existingScreen)) {
+    parsed.searchParams.set("theme", theme);
+    return parsed.toString();
+  }
+
+  if (screenFromPage) {
+    if (screenFromPage === "home") {
+      parsed.searchParams.delete("screen");
+    } else {
+      parsed.searchParams.set("screen", screenFromPage);
+    }
+    parsed.searchParams.set("theme", theme);
+    return parsed.toString();
+  }
+
   parsed.searchParams.set("theme", theme);
   return parsed.toString();
 }
@@ -216,7 +289,13 @@ function installCursorHooks(cwd = process.cwd()) {
 const PREVIEW_MENU_MARKER = "craft-bridge/preview-menu.js";
 
 function findPreviewIndexHtml(cwd) {
-  for (const rel of ["index.html", "public/index.html", "apps/web/index.html"]) {
+  for (const rel of [
+    "index.html",
+    "public/index.html",
+    "apps/web/index.html",
+    ".storybook/preview-head.html",
+    ".storybook/preview-body.html",
+  ]) {
     const abs = path.join(cwd, rel);
     if (existsSync(abs)) return abs;
   }
@@ -238,7 +317,7 @@ function installPreviewMenu(cwd = process.cwd()) {
   const token = bridgeToken() || manifest.bridgeToken || "";
 
   let html = readFileSync(indexPath, "utf8");
-  html = html.replace(/^\s*<script[^>]*craft-bridge\/preview-menu\.js[^>]*>\s*<\/script>\s*$/gim, "");
+  html = html.replace(/<script\b[^>]*craft-bridge\/preview-menu\.js[^>]*>\s*<\/script>\s*/gi, "");
 
   const attrs = [
     `src="${craftBase}/craft-bridge/preview-menu.js"`,
@@ -248,11 +327,15 @@ function installPreviewMenu(cwd = process.cwd()) {
   if (token) attrs.push(`data-bridge-token="${token.replace(/"/g, "&quot;")}"`);
 
   const tag = `    <script ${attrs.join(" ")} defer></script>`;
-  html = html.replace(/<\/body>/i, `${tag}\n  </body>`);
+  if (/<\/body>/i.test(html)) {
+    html = html.replace(/<\/body>/i, `${tag}\n  </body>`);
+  } else {
+    html = `${html.trim()}\n${tag}\n`;
+  }
   writeFileSync(indexPath, html, "utf8");
 
   console.log(`Preview menu installed → ${path.relative(cwd, indexPath)}`);
-  console.log("  Right-click anywhere on the live app preview → Push to Craft canvas");
+  console.log("  Right-click or use the Push to Craft button → capture any visible screen");
   console.log(`  Script: ${craftBase}/craft-bridge/preview-menu.js`);
 }
 
@@ -314,7 +397,7 @@ async function cmdSetup(sourcePath, flags) {
   }
   await cmdPush(sourcePath, { ...flags, open: flags.open !== false });
 
-  console.log("\n✓ Ready. Right-click the live preview screen → Push to Craft canvas.");
+  console.log("\n✓ Ready. Push any visible preview screen (button, right-click, or Alt+Shift+P).");
   console.log("  Edit on canvas, then Send to code when done.");
 }
 
@@ -534,6 +617,28 @@ function collectCssFromSource(sourcePath, format) {
   return cssPaths;
 }
 
+function resolvePushViewport(previewUrl) {
+  const env = process.env.CRAFT_BRIDGE_CAPTURE_VIEWPORT?.trim();
+  if (env) {
+    const match = env.match(/^(\d+)\s*x\s*(\d+)$/i);
+    if (match) {
+      return { width: parseInt(match[1], 10), height: parseInt(match[2], 10) };
+    }
+  }
+  const trimmed = String(previewUrl ?? "").trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed = new URL(trimmed.includes("://") ? trimmed : `http://${trimmed}`);
+    if (parsed.searchParams.has("screen")) return undefined;
+    if (/iframe\.html$/i.test(parsed.pathname)) return { width: 1280, height: 800 };
+    if (parsed.searchParams.has("path")) return { width: 1280, height: 800 };
+    if (parsed.pathname && parsed.pathname !== "/") return { width: 1280, height: 800 };
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
 async function cmdPush(sourcePath, flags) {
   if (!sourcePath) throw new Error("push requires <sourcePath>");
   const cwd = process.cwd();
@@ -586,6 +691,7 @@ async function cmdPush(sourcePath, flags) {
     link.previewUrl ?? flags.preview ?? manifestPreview,
     resolved.pageLabel,
   );
+  const pushViewport = resolvePushViewport(previewForPush);
 
   const result = await fetchJson(`${craftBase}/api/craft-bridge/import-source`, {
     method: "POST",
@@ -594,6 +700,7 @@ async function cmdPush(sourcePath, flags) {
       companionCss,
       format,
       fileName: path.basename(resolved.tsxPath),
+      viewport: pushViewport,
       link: {
         sourcePath: link.sourcePath ?? linkRel,
         repoRoot,

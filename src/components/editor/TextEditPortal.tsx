@@ -4,8 +4,14 @@ import { useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { mergeInstanceOverrides } from "@/lib/componentModel";
 import { resolveNodeWithDesignTokens } from "@/lib/designTokens";
-import { getCursorPositionFromPoint, moveCaretWithArrow } from "@/lib/text/textCursor";
+import {
+  getCursorPositionFromPoint,
+  moveCaretWithArrow,
+  textareaDomSelectionRange,
+  textareaSelectionForStore,
+} from "@/lib/text/textCursor";
 import { applyTextEditDelete } from "@/lib/text/textEditDelete";
+import { bridgeTextfieldTextLayoutPatchForContent } from "@/lib/craftBridge/bridgeTextfieldTextLayout";
 import { textLayoutPatchForNode } from "@/lib/text/textLayout";
 import { textAdvancedStyleFromNode } from "@/lib/text/textAdvancedStyle";
 import { textLayoutForEditorNode } from "@/lib/text/canonicalTextLayout";
@@ -44,8 +50,9 @@ export function TextEditPortal({ nodeId }: TextEditPortalProps) {
     (anchor: number, focus: number) => {
       const el = textareaRef.current;
       if (!el) return;
-      if (el.selectionStart === anchor && el.selectionEnd === focus) return;
-      el.setSelectionRange(anchor, focus);
+      const { start, end } = textareaDomSelectionRange(anchor, focus);
+      if (el.selectionStart === start && el.selectionEnd === end) return;
+      el.setSelectionRange(start, end);
     },
     [],
   );
@@ -53,8 +60,12 @@ export function TextEditPortal({ nodeId }: TextEditPortalProps) {
   const applyContent = useCallback(
     (content: string, anchor: number, focus: number) => {
       if (!nodeRaw || nodeRaw.type !== "text") return;
-      const mergedForLayout = mergeInstanceOverrides(nodeRaw, useEditorStore.getState().nodes);
-      const layoutPatch = textLayoutPatchForNode({ ...mergedForLayout, content }, content);
+      const nodes = useEditorStore.getState().nodes;
+      const mergedForLayout = mergeInstanceOverrides(nodeRaw, nodes);
+      const withContent = { ...mergedForLayout, content };
+      const layoutPatch =
+        bridgeTextfieldTextLayoutPatchForContent(withContent, content, nodes) ??
+        textLayoutPatchForNode(withContent, content);
       // Selection before content so store subscribers never see stale caret after a re-render.
       setTextEditSelection(anchor, focus);
       updateNodeStyle(nodeId, { content, ...layoutPatch }, { skipHistory: true });
@@ -187,13 +198,25 @@ export function TextEditPortal({ nodeId }: TextEditPortalProps) {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (useEditorStore.getState().editingTextId !== nodeId) return;
-      if (e.code !== "Backspace" && e.code !== "Delete") return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (document.activeElement === textareaRef.current) return;
+      if (e.code !== "Backspace" && e.code !== "Delete" && e.code !== "KeyA") return;
+      if (e.code !== "KeyA" && (e.metaKey || e.ctrlKey || e.altKey)) return;
 
       const st = useEditorStore.getState();
       const textNode = st.nodes[nodeId];
       if (textNode?.type !== "text") return;
+
+      if (e.code === "KeyA" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        e.stopPropagation();
+        const merged = mergeInstanceOverrides(textNode, st.nodes);
+        const len = (merged.content ?? "").length;
+        setTextEditSelection(0, len);
+        syncTextareaSelection(0, len);
+        focusActiveTextEditField(nodeId);
+        return;
+      }
+
+      if (document.activeElement === textareaRef.current) return;
 
       const text = mergeInstanceOverrides(textNode, st.nodes).content ?? "";
       const anchor = st.textEditSelection?.anchor ?? text.length;
@@ -212,7 +235,7 @@ export function TextEditPortal({ nodeId }: TextEditPortalProps) {
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [nodeId, applyContent]);
+  }, [nodeId, applyContent, setTextEditSelection, syncTextareaSelection]);
 
   if (!node || nodeRaw?.type !== "text") return null;
 
@@ -234,13 +257,21 @@ export function TextEditPortal({ nodeId }: TextEditPortalProps) {
         }}
         onSelect={(ev) => {
           const t = ev.target as HTMLTextAreaElement;
-          setTextEditSelection(t.selectionStart, t.selectionEnd);
+          const current = useEditorStore.getState().textEditSelection;
+          const next = textareaSelectionForStore(
+            current?.anchor ?? t.selectionStart,
+            current?.focus ?? t.selectionEnd,
+            t.selectionStart,
+            t.selectionEnd,
+          );
+          setTextEditSelection(next.anchor, next.focus);
         }}
         onKeyDown={(ev) => {
           ev.stopPropagation();
           const text = textareaText();
-          const anchor = selection?.anchor ?? text.length;
-          const focus = selection?.focus ?? text.length;
+          const sel = useEditorStore.getState().textEditSelection;
+          const anchor = sel?.anchor ?? text.length;
+          const focus = sel?.focus ?? text.length;
 
           if (ev.key === "Escape") {
             ev.preventDefault();

@@ -44,6 +44,7 @@ export function isImportableTextContent(
   if (!text) return false;
   const trimmed = text.trim();
   if (trimmed.length < 1) return false;
+  if (trimmed.length === 1 && /[\d₹$€£A-Za-z]/.test(trimmed)) return true;
   if (isTailwindUtilityText(trimmed)) return false;
   if (isGenericComponentLabel(trimmed, opts?.role)) return false;
   if (opts?.className) {
